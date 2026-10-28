@@ -16,6 +16,7 @@ use lpa_studio_core::{NodeUiOp, ProjectEditorOp, ProjectEditorTarget, UiAction};
 mod clock_face;
 mod fixture_face;
 mod fixture_shape_moment;
+mod lamp_strip;
 mod node_card_drawers;
 mod node_card_section;
 mod node_face_body;

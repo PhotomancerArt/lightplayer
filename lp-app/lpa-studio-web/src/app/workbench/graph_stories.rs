@@ -1,13 +1,21 @@
 //! The Graph view's stories: the mapping lab's canvas on real catalog
-//! projects (their own files, opened by `lab-mapping-files` as core opens
-//! them), with the lab's tree and inspector beside it. No board is
+//! projects, with the lab's tree and inspector beside it. No board is
 //! attached in a story, so the lab's simulated board stands in for the
 //! board's frames.
+//!
+//! The projects are the lab's format-11 copies (`lab/mapping/fixtures-v11`):
+//! the catalog itself is at project format 12 (map2d format 6), which the
+//! lab behind today's Graph does not read, so in the app the Graph shows
+//! its new-format sentence there (`graph_new_mapping_format`) until M4's
+//! Graph replaces these stories.
 
 use dioxus::prelude::*;
-use lab_mapping_files::{MemFiles, Opened};
+use lab_mapping_files::Opened;
+use lab_mapping_files::embedded::{CHOKER, Embedded, FIBER_HEADBAND, PLASMA};
 use lab_mapping_model::{Editor, GraphInput, LayoutKind, NodeId, Target, Vec2};
-use lpa_studio_core::app::graph::{GraphHandle, UiGraphFrame, UiGraphState, UiGraphView};
+use lpa_studio_core::app::graph::{
+    GraphHandle, NEW_MAPPING_FORMAT_SENTENCE, UiGraphFrame, UiGraphState, UiGraphView,
+};
 use lpa_studio_web_story_macros::story;
 
 use super::graph_view::{GraphCenter, GraphPropsPanel, GraphTreePanel, use_graph_page_with};
@@ -48,10 +56,17 @@ fn graph_point_list_box() -> Element {
 }
 
 #[story(
-    description = "A project the Graph can't open at all: the reason, small, under the way forward, which opens the project in Map (docs/ux P7, no dead ends)."
+    description = "A project the Graph can't open at all: the headline, and the reason, small, under it."
 )]
 fn graph_refused() -> Element {
     rsx! { GraphStory { example: "catalog/playful-choker", setup: Setup::Refused } }
+}
+
+#[story(
+    description = "A project whose fixture mapping is the new format (map2d format 6, project format 12): one plain sentence, centred, with no button and nothing that saves — the new mapping's editor is coming."
+)]
+fn graph_new_mapping_format() -> Element {
+    rsx! { GraphStory { example: "catalog/playful-choker", setup: Setup::NewMappingFormat } }
 }
 
 #[story(
@@ -68,8 +83,10 @@ enum Setup {
     Fixture,
     FirstPath,
     Stack,
-    /// The project refused whole (the state a broken patch gives).
+    /// The project refused whole.
     Refused,
+    /// A fixture's mapping is map2d format 6.
+    NewMappingFormat,
 }
 
 #[component]
@@ -81,7 +98,11 @@ fn GraphStory(example: &'static str, setup: Setup) -> Element {
         UiGraphView {
             state: match setup {
                 Setup::Refused => UiGraphState::Refused {
-                    why: "row 3 of fixture.patch.json: no output is named \"porch\"".to_string(),
+                    why: "fixture.json: the mapping names a file that isn't in the project"
+                        .to_string(),
+                },
+                Setup::NewMappingFormat => UiGraphState::NewMappingFormat {
+                    sentence: NEW_MAPPING_FORMAT_SENTENCE.to_string(),
                 },
                 _ => UiGraphState::Open { live: true },
             },
@@ -99,7 +120,6 @@ fn GraphStory(example: &'static str, setup: Setup) -> Element {
                 GraphCenter {
                     page: page.clone(),
                     state: Some(view.state.clone()),
-                    map_href: Some("#".to_string()),
                     on_action: move |_| {},
                 }
             }
@@ -111,7 +131,8 @@ fn GraphStory(example: &'static str, setup: Setup) -> Element {
 }
 
 /// A handle on an editor holding the embedded example, with its layout
-/// pinned and the story's selection.
+/// pinned and the story's selection. A story about a project the Graph
+/// does not open gets an empty editor, as core leaves it.
 ///
 /// Every story chooses its layout: the canvas, or the stack for the one
 /// that is about it. Left unchosen, the layout follows the size class the
@@ -119,11 +140,10 @@ fn GraphStory(example: &'static str, setup: Setup) -> Element {
 /// depends on whether that report lands before the shot. A chosen layout
 /// is never undone by a size report (`Editor::layout`).
 fn story_handle(example: &str, setup: Setup) -> GraphHandle {
-    let example = lpa_studio_core::app::home::embedded_example(example).expect("embedded");
-    let files = MemFiles::new(example.files.iter().filter_map(|(path, bytes)| {
-        Some((path.to_string(), String::from_utf8(bytes.to_vec()).ok()?))
-    }));
-    let opened = Opened::open(&files).expect("the example opens on the Graph");
+    if matches!(setup, Setup::Refused | Setup::NewMappingFormat) {
+        return GraphHandle::default();
+    }
+    let opened = Opened::open(&lab_copy(example).files()).expect("the example opens on the Graph");
     let handle = GraphHandle::default();
     {
         let mut e = handle.editor().borrow_mut();
@@ -155,7 +175,17 @@ fn story_handle(example: &str, setup: Setup) -> GraphHandle {
                 handle.input(GraphInput::Select(vec![Target::Component(id)]));
             }
         }
-        Setup::Stack | Setup::Refused => {}
+        Setup::Stack | Setup::Refused | Setup::NewMappingFormat => {}
     }
     handle
+}
+
+/// The lab's format-11 copy of a catalog example.
+fn lab_copy(example: &str) -> &'static Embedded {
+    match example {
+        "catalog/playful-choker" => &CHOKER,
+        "catalog/plasma" => &PLASMA,
+        "catalog/fiber-headband" => &FIBER_HEADBAND,
+        other => panic!("no format-11 copy of {other} in lab/mapping/fixtures-v11"),
+    }
 }

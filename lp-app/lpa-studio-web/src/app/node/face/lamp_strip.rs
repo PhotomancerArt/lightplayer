@@ -10,10 +10,11 @@
 //! the strip becomes the one-texel-per-lamp pixelated presentation the patch
 //! bay's cells have always used.
 //!
-//! Generalized out of the patch bay's `PatchCellStrip` (D34a) so the panel's
-//! strips and the bay's cells are one code path. The bay pins itself to
-//! [`StripMode::Gradient`]: a cell is a picture of discrete lamps at cell
-//! scale and has always drawn that way, and the reactive rule is a
+//! Generalized out of the patch bay's `PatchCellStrip` (D34a) so the Patch
+//! tab's panel strips and the bay's cells were one code path; the bay (on
+//! the node card) is its user now that the Patch tab is gone. The bay pins
+//! itself to [`StripMode::Gradient`]: a cell is a picture of discrete lamps
+//! at cell scale and has always drawn that way, and the reactive rule is a
 //! PANEL-scale decision.
 //!
 //! **What the strip does not do.** It has no opinion about where its colours

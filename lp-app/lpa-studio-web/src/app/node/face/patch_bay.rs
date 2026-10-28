@@ -31,9 +31,9 @@
 use dioxus::prelude::*;
 use lpa_studio_core::{UiControlProductPreview, UiFixturePatch, UiPatchBay, UiPatchCell};
 
+use super::lamp_strip::{LampStrip, StripMode};
 use crate::app::node::face::NodeCardSection;
 use crate::app::node::lamp_view::{UNLIT_RGB, control_rgb_at_sample};
-use crate::app::patch::lamp_strip::{LampStrip, StripMode};
 
 /// The cell whose twin is currently lit, shared across cards.
 ///

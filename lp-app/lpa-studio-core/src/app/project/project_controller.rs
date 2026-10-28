@@ -154,17 +154,11 @@ pub struct ProjectController {
     /// `ProjectEditorOp::NodeUi`, overlaid onto the editor DTOs at view
     /// build, pruned with the loaded project.
     node_card_ui: BTreeMap<String, NodeCardUiState>,
-    /// The patch surface's session-local undo/redo stacks (D42): one step
-    /// per verb gesture, each a set of (artifact, prior bytes) snapshots
-    /// stamped with `(edit_seq, node, mode)` (unified-editor P2). Bounded
-    /// like the map editor's (UNDO_CAP idiom); cleared with the
-    /// controller, never persisted.
-    patch_undo: Vec<EditStep>,
-    patch_redo: Vec<EditStep>,
     /// The Arrange canvas's session-local undo/redo stacks over
-    /// `editor.json` bytes — a SEPARATE stack because ⌘Z is mode-scoped
-    /// (ratified v1): arrange gestures never pop patch verbs and vice
-    /// versa. Same step shape, same stamps.
+    /// `editor.json` bytes, one step per gesture, each a set of (artifact,
+    /// prior bytes) snapshots stamped with `(edit_seq, node, mode)`
+    /// (unified-editor P2). Bounded like the map editor's (UNDO_CAP idiom);
+    /// cleared with the controller, never persisted.
     arrange_undo: Vec<EditStep>,
     arrange_redo: Vec<EditStep>,
     /// The undo-correlation substrate: the session-global `edit_seq`
@@ -481,8 +475,6 @@ impl ProjectController {
             root_shape_ids: BTreeMap::new(),
             node_card_ui: BTreeMap::new(),
             patch_selection: crate::UiSelection::empty(),
-            patch_undo: Vec::new(),
-            patch_redo: Vec::new(),
             arrange_undo: Vec::new(),
             arrange_redo: Vec::new(),
             edit_journal: EditJournal::default(),
@@ -2626,18 +2618,8 @@ impl ProjectController {
         // onto the faces (bays + fixture rows) plus each fixture's own
         // map2d body — built here so the two can never disagree.
         let surface = self.build_patch_surface(&nodes);
-        // The surface's verbs (M6b) publish off the surface they write
-        // through, so a subject or a port is an option exactly when the
-        // surface lists it; the history's only while it has a step.
+        // The arrange canvas's commits (M6e) publish off the surface.
         if let Some(surface) = &surface {
-            super::patch_verb_offers::publish_patch_verb_offers(
-                offers,
-                surface,
-                self.patch_selection.single(),
-                !self.patch_undo.is_empty(),
-                !self.patch_redo.is_empty(),
-            );
-            // The arrange canvas's commits (M6e), off the same surface.
             super::arrange_offers::publish_arrange_offers(
                 offers,
                 surface,
@@ -4401,21 +4383,6 @@ impl ProjectController {
                     .and_then(|editor| editor.content.as_ref())
                     .and_then(|content| content.text());
                 let mapping_loaded = body.is_some();
-                let patch_body = fixture
-                    .patch_editor
-                    .as_ref()
-                    .and_then(|editor| editor.content.as_ref())
-                    .and_then(|content| content.text());
-                let patch_loaded = fixture
-                    .patch_editor
-                    .as_ref()
-                    .is_some_and(|editor| editor.content.is_some());
-                // The flow flag off the same bytes the verbs transform (P5b).
-                // A body that has not landed — or one this build cannot read
-                // — is AUTO: manual is a claim a document makes.
-                let manual_flow = patch_body
-                    .and_then(|text| lpc_mapping::PatchDoc::from_json(text).ok())
-                    .is_some_and(|doc| doc.flow == lpc_mapping::PatchFlow::Manual);
                 let mut instances = body
                     .map(super::ui_patch_surface::instances_from_map2d)
                     .unwrap_or_default();
@@ -4436,13 +4403,7 @@ impl ProjectController {
                         .mapping_editor
                         .as_ref()
                         .map(|editor| editor.artifact.clone()),
-                    patch_artifact: fixture
-                        .patch_editor
-                        .as_ref()
-                        .map(|editor| editor.artifact.clone()),
                     mapping_loaded,
-                    patch_loaded,
-                    manual_flow,
                     instances,
                     arrange: None,
                     module: None,
@@ -8595,307 +8556,6 @@ impl ProjectController {
 
     /// Execute an [`AssetEditOp`] against the loaded project's overlay — the
     /// asset counterpart of [`Self::apply_slot_edit`].
-    /// Apply one patch-surface verb (D42): load the cached documents,
-    /// transform, kernel-validate, snapshot for undo, write. See
-    /// [`crate::PatchVerbOp`] for the contract; failures return an honest
-    /// notice and write nothing.
-    pub async fn apply_patch_verb(
-        &mut self,
-        server: &mut StudioServerClient,
-        op: crate::app::project::patch_verb_op::PatchVerbOp,
-    ) -> Result<ProjectEditRun, UiError> {
-        use super::patch_verbs::{self, PatchSubject, PatchVerbContext, PortWindow};
-        use crate::app::project::patch_verb_op::PatchVerbKind;
-
-        let blocked = |reason: String| {
-            Ok(ProjectEditRun::notice(UiNotice::warning(format!(
-                "Patch edit blocked: {reason}"
-            ))))
-        };
-
-        // Undo / redo replay the snapshot stacks and need nothing else.
-        match &op.verb {
-            PatchVerbKind::Undo => {
-                let Some(step) = self.patch_undo.pop() else {
-                    return blocked("nothing to undo".into());
-                };
-                for (artifact, before, _) in &step.writes {
-                    self.apply_asset_body(server, artifact.clone(), before.clone())
-                        .await?;
-                }
-                self.record_edit(step.node, crate::UiEditorMode::Patching);
-                self.patch_redo.push(step);
-                return Ok(ProjectEditRun {
-                    notices: UiNotices::new(),
-                    logs: Vec::new(),
-                });
-            }
-            PatchVerbKind::Redo => {
-                let Some(step) = self.patch_redo.pop() else {
-                    return blocked("nothing to redo".into());
-                };
-                for (artifact, _, after) in &step.writes {
-                    self.apply_asset_body(server, artifact.clone(), after.clone())
-                        .await?;
-                }
-                self.record_edit(step.node, crate::UiEditorMode::Patching);
-                self.patch_undo.push(step);
-                return Ok(ProjectEditRun {
-                    notices: UiNotices::new(),
-                    logs: Vec::new(),
-                });
-            }
-            _ => {}
-        }
-
-        // The subject, in kernel terms.
-        let subject = if let Some(path) = &op.subject.path {
-            match lpc_mapping::MapObjectPath::parse(path) {
-                Ok(path) => PatchSubject::Path(path),
-                Err(error) => return blocked(error),
-            }
-        } else if let Some((start, count)) = op.subject.range {
-            PatchSubject::Range { start, count }
-        } else {
-            PatchSubject::Fixture
-        };
-
-        // Per-fixture cached facts: patch doc + span table. A body the
-        // cache has not resolved yet blocks honestly (the surface prefetches
-        // both artifacts, so this is a race, not a state).
-        let load =
-            |controller: &Self, fixture: &crate::app::project::patch_verb_op::PatchVerbFixture| {
-                let text = controller
-                    .asset_content_cached(&fixture.patch_artifact)
-                    .and_then(|content| content.text().map(|text| text.to_string()))
-                    .ok_or_else(|| "the patch document is still loading".to_string())?;
-                let doc = lpc_mapping::PatchDoc::from_json(&text).map_err(|e| e.to_string())?;
-                let spans = fixture
-                    .mapping_artifact
-                    .as_ref()
-                    .and_then(|artifact| controller.asset_content_cached(artifact))
-                    .and_then(|content| content.text().map(|text| text.to_string()))
-                    .and_then(|text| {
-                        let doc = lpc_mapping::Map2dDoc::from_json(&text).ok()?;
-                        let resolved = lpc_mapping::resolve(&doc).ok()?;
-                        Some(lpc_mapping::object_instance_spans(&doc, &resolved))
-                    })
-                    .unwrap_or_default();
-                Ok::<_, String>((doc, spans))
-            };
-
-        // EnsureIds is the one MAPPING write: transform the map2d doc.
-        if matches!(op.verb, PatchVerbKind::EnsureIds) {
-            let Some(fixture) = op
-                .fixtures
-                .iter()
-                .find(|fixture| Some(fixture.node) == op.subject_fixture)
-            else {
-                return blocked("select a fixture to assign ids".into());
-            };
-            let Some(mapping) = fixture.mapping_artifact.clone() else {
-                return blocked("this fixture has no map2d document".into());
-            };
-            let Some(text) = self
-                .asset_content_cached(&mapping)
-                .and_then(|content| content.text().map(|text| text.to_string()))
-            else {
-                return blocked("the mapping document is still loading".into());
-            };
-            let mut doc = match lpc_mapping::Map2dDoc::from_json(&text) {
-                Ok(doc) => doc,
-                Err(error) => return blocked(error.to_string()),
-            };
-            if !lpc_mapping::ensure_object_ids(&mut doc) {
-                return Ok(ProjectEditRun {
-                    notices: UiNotices::new(),
-                    logs: Vec::new(),
-                });
-            }
-            doc.normalize_format();
-            let bytes = format!("{}\n", doc.to_json_pretty()).into_bytes();
-            let seq = self.record_edit(op.subject_fixture, crate::UiEditorMode::Patching);
-            self.patch_undo.push(EditStep {
-                seq,
-                node: op.subject_fixture,
-                mode: crate::UiEditorMode::Patching,
-                writes: vec![(mapping.clone(), text.into_bytes(), bytes.clone())],
-            });
-            self.patch_redo.clear();
-            return self.apply_asset_body(server, mapping, bytes).await;
-        }
-
-        // The write set: subject verbs touch one fixture; port verbs sweep
-        // every fixture with entries in the windows.
-        let mut writes: Vec<(ArtifactLocation, String, String)> = Vec::new(); // (artifact, before, after)
-        match &op.verb {
-            PatchVerbKind::SwapPorts { a, b } => {
-                let a = PortWindow {
-                    output: a.output_name.clone(),
-                    start: a.start,
-                    lamps: a.lamps,
-                };
-                let b = PortWindow {
-                    output: b.output_name.clone(),
-                    start: b.start,
-                    lamps: b.lamps,
-                };
-                for fixture in &op.fixtures {
-                    let (doc, spans) = match load(self, fixture) {
-                        Ok(loaded) => loaded,
-                        Err(reason) => return blocked(reason),
-                    };
-                    let ctx = PatchVerbContext {
-                        fixture_lamp_count: fixture.lamp_count,
-                        object_spans: &spans,
-                    };
-                    match patch_verbs::swap_ports(&ctx, &doc, &a, &b) {
-                        Ok(next) if next != doc => writes.push((
-                            fixture.patch_artifact.clone(),
-                            doc.to_json_pretty(),
-                            next.to_json_pretty(),
-                        )),
-                        Ok(_) => {}
-                        Err(error) => return blocked(error.0),
-                    }
-                }
-            }
-            PatchVerbKind::ShiftPort { window, delta } => {
-                let window = PortWindow {
-                    output: window.output_name.clone(),
-                    start: window.start,
-                    lamps: window.lamps,
-                };
-                for fixture in &op.fixtures {
-                    let (doc, spans) = match load(self, fixture) {
-                        Ok(loaded) => loaded,
-                        Err(reason) => return blocked(reason),
-                    };
-                    let ctx = PatchVerbContext {
-                        fixture_lamp_count: fixture.lamp_count,
-                        object_spans: &spans,
-                    };
-                    match patch_verbs::shift_port(&ctx, &doc, &window, *delta) {
-                        Ok(next) if next != doc => writes.push((
-                            fixture.patch_artifact.clone(),
-                            doc.to_json_pretty(),
-                            next.to_json_pretty(),
-                        )),
-                        Ok(_) => {}
-                        Err(error) => return blocked(error.0),
-                    }
-                }
-            }
-            verb => {
-                let Some(fixture) = op
-                    .fixtures
-                    .iter()
-                    .find(|fixture| Some(fixture.node) == op.subject_fixture)
-                else {
-                    return blocked("the selection names no fixture on the surface".into());
-                };
-                let (doc, spans) = match load(self, fixture) {
-                    Ok(loaded) => loaded,
-                    Err(reason) => return blocked(reason),
-                };
-                let ctx = PatchVerbContext {
-                    fixture_lamp_count: fixture.lamp_count,
-                    object_spans: &spans,
-                };
-                let result = match verb {
-                    PatchVerbKind::Assign { output_name, lamp } => {
-                        patch_verbs::assign(&ctx, &doc, &subject, output_name.clone(), *lamp)
-                    }
-                    PatchVerbKind::ReAnchor { lamp } => {
-                        patch_verbs::re_anchor(&ctx, &doc, &subject, *lamp)
-                    }
-                    PatchVerbKind::Reverse => patch_verbs::reverse(&ctx, &doc, &subject),
-                    PatchVerbKind::Rotate { steps, stride } => {
-                        patch_verbs::rotate(&ctx, &doc, &subject, *steps, *stride)
-                    }
-                    PatchVerbKind::Clear => patch_verbs::clear(&ctx, &doc, &subject),
-                    // Fixture-grain verbs: the selection picked the fixture,
-                    // not the thing inside it.
-                    PatchVerbKind::SetFlow { manual } => patch_verbs::set_flow(&ctx, &doc, *manual),
-                    PatchVerbKind::UnmapAll => patch_verbs::unmap_all(&ctx, &doc),
-                    _ => unreachable!("port/undo verbs handled above"),
-                };
-                match result {
-                    Ok(next) if next != doc => writes.push((
-                        fixture.patch_artifact.clone(),
-                        doc.to_json_pretty(),
-                        next.to_json_pretty(),
-                    )),
-                    Ok(_) => {
-                        return Ok(ProjectEditRun {
-                            notices: UiNotices::new(),
-                            logs: Vec::new(),
-                        });
-                    }
-                    Err(error) => return blocked(error.0),
-                }
-            }
-        }
-        if writes.is_empty() {
-            return Ok(ProjectEditRun {
-                notices: UiNotices::new(),
-                logs: Vec::new(),
-            });
-        }
-
-        // One undo step for the whole gesture, across every doc it touched
-        // (plus the name auto-assign's slot edit riding alongside — the
-        // slot edit is NOT snapshotted: names are additive and renaming is
-        // its own affordance).
-        let seq = self.record_edit(op.subject_fixture, crate::UiEditorMode::Patching);
-        self.patch_undo.push(EditStep {
-            seq,
-            node: op.subject_fixture,
-            mode: crate::UiEditorMode::Patching,
-            writes: writes
-                .iter()
-                .map(|(artifact, before, after)| {
-                    (
-                        artifact.clone(),
-                        format!("{before}\n").into_bytes(),
-                        format!("{after}\n").into_bytes(),
-                    )
-                })
-                .collect(),
-        });
-        self.patch_redo.clear();
-
-        if let Some((address, name)) = op.assign_output_name.clone() {
-            self.apply_slot_edit(
-                server,
-                SlotEditOp::EnsurePresent {
-                    address: address.clone(),
-                },
-            )
-            .await?;
-            self.apply_slot_edit(
-                server,
-                SlotEditOp::SetValue {
-                    address,
-                    value: lpc_model::LpValue::String(name),
-                },
-            )
-            .await?;
-        }
-        let mut last = ProjectEditRun {
-            notices: UiNotices::new(),
-            logs: Vec::new(),
-        };
-        for (artifact, _, after) in writes {
-            // Files end with a newline: the written bytes must be the ones
-            // a hand editor would save, byte for byte (the G1 diff).
-            last = self
-                .apply_asset_body(server, artifact, format!("{after}\n").into_bytes())
-                .await?;
-        }
-        Ok(last)
-    }
-
     pub async fn apply_asset_edit(
         &mut self,
         server: &mut StudioServerClient,
@@ -9025,10 +8685,11 @@ impl ProjectController {
     ) -> Option<lpc_mapping::EditorFootprint> {
         let text_content = self.asset_content_cached(mapping_artifact?)?;
         let text = text_content.text()?;
-        let doc = lpc_mapping::Map2dDoc::from_json(text).ok()?;
-        let resolved = lpc_mapping::resolve(&doc).ok()?;
-        let points: Vec<[f32; 2]> = resolved.lamps.iter().map(|lamp| lamp.pos).collect();
-        let bounds = lpc_mapping::bounds_of_points(&points)?;
+        // Map2d format 6: the footprint is the rendered lamps' box.
+        let mapping = lpc_mapping::map2d6::read(text).ok()?;
+        let tree = lpc_mapping::part::render(&mapping).ok()?;
+        let points = tree.positions();
+        let bounds = lpc_mapping::bounds_of_points(points)?;
         Some(lpc_mapping::EditorFootprint {
             bbox: [
                 f64::from(bounds.min_x),
@@ -9036,7 +8697,7 @@ impl ProjectController {
                 f64::from(bounds.width),
                 f64::from(bounds.height),
             ],
-            lamps: resolved.lamps.len() as u32,
+            lamps: points.len() as u32,
         })
     }
 

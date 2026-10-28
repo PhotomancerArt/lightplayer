@@ -4,7 +4,7 @@
 //! An IntelliJ-shaped frame on the project editor routes: ONE chrome
 //! band under the site header, then a full-height `[dock][center][dock]`
 //! row. The **shell owns the docks**; the band carries the **view tabs**
-//! (Nodes · Map) centered between the docks' tab segments; the **user
+//! (Nodes · Graph) centered between the docks' tab segments; the **user
 //! owns visibility** through those persistent tab rows. Nothing
 //! rearranges itself:
 //!
@@ -37,12 +37,15 @@
 //! ([`crate::app::editor_shell::EditorShellCenter`]); the Tree's Mapping
 //! body and the Outputs panel are that editor's rails, grown in place.
 
+pub(crate) mod free_port_runs;
 #[cfg(feature = "stories")]
 pub(crate) mod graph_stories;
 pub mod graph_view;
 pub mod panels;
 #[cfg(feature = "stories")]
 pub(crate) mod workbench_stories;
+#[cfg(feature = "stories")]
+pub(crate) mod workbench_story_surfaces;
 
 use dioxus::prelude::*;
 use lpa_mapping_editor::MapEditorSession;
@@ -54,7 +57,7 @@ use lpa_studio_core::{
 use crate::app::{ProjectNodeWorkspace, ProjectPane};
 use crate::core::PaneView;
 use graph_view::{GraphCenter, GraphPage, GraphPropsPanel, GraphTreePanel, use_graph_page};
-use panels::{FixturesPanel, OutputsPanel, TreeGrain};
+use panels::{FixturesPanel, OutputsPanel};
 
 /// Which center the workbench renders — the route's view suffix
 /// ([`crate::router::ProjectView`]), narrowed to the views the workbench
@@ -63,11 +66,10 @@ use panels::{FixturesPanel, OutputsPanel, TreeGrain};
 pub enum WorkbenchView {
     #[default]
     Nodes,
+    /// The Map view: hidden (no [`VIEWS`] row) until M4's Graph replaces
+    /// it — project format 12 moved every fixture's mapping to map2d format
+    /// 6, which its editor does not read. Its code stays until then.
     Mapping,
-    /// The patching activity: resolved instances against outputs
-    /// (grain-follows-activity — the Mapping view shows the authored
-    /// tree, this view the resolved one).
-    Patching,
     /// The mapping lab's canvas on the project (`graph_view.rs`): every
     /// node a card, fixtures drawn in place, coloured by the board.
     Graph,
@@ -93,22 +95,9 @@ pub const VIEWS: &[ViewSpec] = &[
         label: "Nodes",
         route_view: crate::router::ProjectView::Workspace,
     },
-    ViewSpec {
-        view: WorkbenchView::Mapping,
-        // "Map" (D9): a deliberate override of the round-2 gerund
-        // ruling — the sibling-views posture reads best as short nouns.
-        // Route strings are UNCHANGED (`/mapping`).
-        label: "Map",
-        route_view: crate::router::ProjectView::Mapping,
-    },
-    ViewSpec {
-        view: WorkbenchView::Patching,
-        // Short-noun posture like "Map" — RULED at the patching-view G1
-        // ("/patch. keep it short and simple"); `/patching` stays a
-        // parse alias.
-        label: "Patch",
-        route_view: crate::router::ProjectView::Patch,
-    },
+    // No "Map" row: the Map view is hidden until M4's Graph replaces it
+    // (its code stays), so no tab shows it and `/mapping` lands on the
+    // default view.
     ViewSpec {
         view: WorkbenchView::Graph,
         // A working name (plan D4), revisited when it is the only view.
@@ -150,8 +139,8 @@ impl WorkbenchHrefs {
     /// The app's targets on a lens route: every view's same-session
     /// suffix on the current lens address, plain links like the play
     /// toggle. Every lens (project, example, device) addresses every
-    /// view — `/device/<uid>/mapping` and `/device/<uid>/patch` arrived
-    /// with the device route — so no tab hides. `None` off a lens.
+    /// view — `/device/<uid>/graph` arrived with the device route — so no
+    /// tab hides. `None` off a lens.
     pub(crate) fn for_lens(route: &crate::router::StudioRoute) -> Option<Self> {
         route.is_lens().then(|| {
             Self::from_entries(
@@ -253,11 +242,6 @@ pub fn roster(view: WorkbenchView, side: DockSide) -> &'static [PanelId] {
         (DockSide::Right, WorkbenchView::Mapping) => {
             &[PanelId::Props, PanelId::Outputs, PanelId::Device]
         }
-        // Patching leads with the wire side: Outputs first (its default),
-        // Props for the selected patch target, Device in reach.
-        (DockSide::Right, WorkbenchView::Patching) => {
-            &[PanelId::Outputs, PanelId::Props, PanelId::Device]
-        }
         // The Graph's outputs are cards on its canvas: Props (the lab's
         // inspector) and the board.
         (DockSide::Right, WorkbenchView::Graph) => &[PanelId::Props, PanelId::Device],
@@ -277,12 +261,6 @@ pub fn defaults(view: WorkbenchView) -> DockState {
         WorkbenchView::Mapping => DockState {
             left: Some(PanelId::Tree),
             right: Some(PanelId::Props),
-        },
-        // Patching opens against the outputs (Q3): the resolved tree on
-        // the left, the wire on the right.
-        WorkbenchView::Patching => DockState {
-            left: Some(PanelId::Tree),
-            right: Some(PanelId::Outputs),
         },
         // The Graph opens as the lab does: the tree, the canvas, the
         // inspector.
@@ -397,28 +375,16 @@ pub fn WorkbenchFrame(
     // across the dock boundary; the session host applies on change).
     // The DERIVED dive (unified-selection P4): the entered fixture IS the
     // selection's scope — no independent dive state to drift. Rendering
-    // the scope as a dive is MAPPING's activity (grain follows activity):
-    // Patching reads the same selection with no dive, so an object picked
-    // there simply arrives already-entered when the view switches here.
+    // the scope as a dive is MAPPING's activity (grain follows activity).
     let dive_focused = matches!(view, WorkbenchView::Mapping)
         .then(|| project_editor.patch_selection.entered())
         .flatten();
     let dive_session = use_signal(|| MapEditorSession::new(lpc_mapping::Map2dDoc::new()));
     let dive_commits = use_signal(|| 0u64);
-    // ONE auto-pack slot store for BOTH canvas-bearing views (G1 round 1):
-    // per-center signals computed at different mount times diverged — the
-    // peach's body packed differently in Map and Patch. One conceptual
-    // space means one slot truth.
+    // The Map canvas's auto-pack slots, frame-owned so they outlive a
+    // center remount (G1 round 1: slots computed at different mount times
+    // diverged).
     let pack_slots = use_signal(crate::app::editor_shell::arrange::PackSlots::new);
-    // The patching activity's cross-dock state: verbs arm in the center
-    // (`a` / `s`) and complete on a counterpart click in the Outputs or
-    // Tree dock — frame scope, like the dive signals, so every side reads
-    // ONE arm (and one segment-size override).
-    let patching_ui = use_context_provider(|| crate::app::editor_shell::patching::PatchingUi {
-        armed: Signal::new(None),
-        segment_size: Signal::new(None),
-        summon_outputs: Signal::new(false),
-    });
     // The Fixtures/Outputs panels' slice of the editor view (#409 DTOs)
     // and the surface's one shared selection.
     let surface = project_editor.patch_surface.clone();
@@ -431,21 +397,8 @@ pub fn WorkbenchFrame(
     // is display-gated to the fold, so widening the window simply
     // reveals the desktop docks again.
     let mut summoned = use_signal(move || initial_summoned);
-    // The panel's summon request (mobile object-first invitation): the
-    // counterpart to click lives in the Outputs panel, so it comes up.
-    // Desktop sets it too — harmlessly, the overlay is display-gated.
-    {
-        let mut request = patching_ui.summon_outputs;
-        use_effect(move || {
-            if *request.read() {
-                request.set(false);
-                summoned.set(Some(PanelId::Outputs));
-            }
-        });
-    }
     // A summoned panel is a full-screen pick surface: once a pick happens
-    // — the selection moved, or a patch write landed (an armed completion
-    // keeps the selection, so the write is its own signal) — it dismisses
+    // — the selection moved, or the placed lamps changed — it dismisses
     // itself (G1 round 3, #6: "I expect it to go away once I do the only
     // thing I can, which is select something").
     {
@@ -547,23 +500,10 @@ pub fn WorkbenchFrame(
                                 on_action,
                             }
                         },
-                        WorkbenchView::Patching => rsx! {
-                            // The patching shell (R5): same canvas,
-                            // patching furniture — verb toolbar + keys,
-                            // selection pulse, no dive.
-                            crate::app::editor_shell::patching::PatchingShellCenter {
-                                surface: surface.clone(),
-                                selection: patch_selection.clone(),
-                                pack_slots,
-                                project_editor,
-                                on_action,
-                            }
-                        },
                         WorkbenchView::Graph => rsx! {
                             GraphCenter {
                                 page: graph.clone(),
                                 state: graph_state.clone(),
-                                map_href: hrefs.href(WorkbenchView::Mapping),
                                 on_action,
                             }
                         },
@@ -793,7 +733,7 @@ fn WorkbenchBand(
 /// 2px underline against the panel tabs' quiet small-caps — so the
 /// hierarchy reads view tabs > panel tabs at a glance (R4-1). Plain
 /// links: the route listener turns a click into a same-session view
-/// swap, exactly like the play/patch toggles.
+/// swap, exactly like the play toggle.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn ViewTab(label: &'static str, href: String, active: bool) -> Element {
@@ -998,15 +938,12 @@ fn PanelBody(
         (PanelId::Tree, WorkbenchView::Mapping) => rsx! {
             div { class: "tw:grid tw:content-start tw:gap-2.5",
                 TreePanelActions { panes: panes.clone(), on_action }
-                // The AUTHORED tree, uniformly (grain-follows-activity,
-                // R5): objects and repeat interiors for every fixture —
-                // the dived one through the live session, the rest from
-                // their loaded bodies. Wire chips live in the Patching
-                // view now.
+                // The AUTHORED tree: objects and repeat interiors for
+                // every fixture — the dived one through the live session,
+                // the rest from their loaded bodies.
                 FixturesPanel {
                     surface,
                     selection: patch_selection,
-                    grain: TreeGrain::Authored,
                     bodies: std::rc::Rc::new(
                         panes
                             .iter()
@@ -1019,24 +956,6 @@ fn PanelBody(
                             .unwrap_or_default(),
                     ),
                     dive: dive_focused.map(|node| (node, dive_session)),
-                    on_action,
-                }
-            }
-        },
-        (PanelId::Tree, WorkbenchView::Patching) => rsx! {
-            div { class: "tw:grid tw:content-start tw:gap-2.5",
-                TreePanelActions { panes: panes.clone(), on_action }
-                // The RESOLVED tree: instances/ranges with their wire
-                // chips, never dive-driven — Patching reads effective
-                // grain regardless of any dive left armed in Mapping
-                // (grain follows activity).
-                FixturesPanel {
-                    surface,
-                    selection: patch_selection,
-                    grain: TreeGrain::Resolved,
-                    dive: None,
-                    // An armed assign completes on an object row here.
-                    patch_verbs: true,
                     on_action,
                 }
             }
@@ -1060,16 +979,6 @@ fn PanelBody(
                 dive_session,
                 dive_commits,
                 workspace_href,
-                on_action,
-            }
-        },
-        (PanelId::Outputs, WorkbenchView::Patching) => rsx! {
-            // The Patching view's port clicks carry the walk-up grammar
-            // (armed swap completes, a fixture-side selection assigns).
-            OutputsPanel {
-                surface,
-                selection: patch_selection,
-                patch_verbs: true,
                 on_action,
             }
         },
@@ -1141,10 +1050,6 @@ mod tests {
             roster(WorkbenchView::Mapping, DockSide::Right),
             &[PanelId::Props, PanelId::Outputs, PanelId::Device]
         );
-        assert_eq!(
-            roster(WorkbenchView::Patching, DockSide::Right),
-            &[PanelId::Outputs, PanelId::Props, PanelId::Device]
-        );
     }
 
     #[test]
@@ -1173,13 +1078,6 @@ mod tests {
             DockState {
                 left: Some(PanelId::Tree),
                 right: Some(PanelId::Props),
-            }
-        );
-        assert_eq!(
-            defaults(WorkbenchView::Patching),
-            DockState {
-                left: Some(PanelId::Tree),
-                right: Some(PanelId::Outputs),
             }
         );
     }
@@ -1223,21 +1121,31 @@ mod tests {
         for spec in VIEWS {
             assert_eq!(view_for_route(spec.route_view), spec.view);
         }
-        // Patch is a claimed workbench view now (R5); only play still
-        // short-circuits before the workbench, so it stays unclaimed and
-        // falls back to the default view.
-        assert_eq!(
-            view_for_route(crate::router::ProjectView::Patch),
-            WorkbenchView::Patching
-        );
+        // Play short-circuits before the workbench, so it stays
+        // unclaimed and falls back to the default view.
         assert_eq!(
             view_for_route(crate::router::ProjectView::Play),
             WorkbenchView::default()
         );
     }
 
-    /// The device lens addresses every view: the Map and Patch tabs
-    /// were hidden there by a pre-`/device/<uid>` carve-out once.
+    /// The Map view is hidden until M4's Graph replaces it: no tab names
+    /// it, and its route lands on the default view.
+    #[test]
+    fn the_map_view_is_hidden() {
+        assert_eq!(
+            VIEWS.iter().map(|spec| spec.label).collect::<Vec<_>>(),
+            ["Nodes", "Graph"]
+        );
+        assert!(VIEWS.iter().all(|spec| spec.view != WorkbenchView::Mapping));
+        assert_eq!(
+            view_for_route(crate::router::ProjectView::Mapping),
+            WorkbenchView::default()
+        );
+    }
+
+    /// The device lens addresses every view: tabs were hidden there by a
+    /// pre-`/device/<uid>` carve-out once.
     #[test]
     fn device_lens_addresses_every_view() {
         let hrefs = WorkbenchHrefs::for_lens(&crate::router::StudioRoute::parse("/device/devx"))
@@ -1247,12 +1155,8 @@ mod tests {
             Some("/device/devx")
         );
         assert_eq!(
-            hrefs.href(WorkbenchView::Mapping).as_deref(),
-            Some("/device/devx/mapping")
-        );
-        assert_eq!(
-            hrefs.href(WorkbenchView::Patching).as_deref(),
-            Some("/device/devx/patch")
+            hrefs.href(WorkbenchView::Graph).as_deref(),
+            Some("/device/devx/graph")
         );
     }
 

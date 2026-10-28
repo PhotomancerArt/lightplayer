@@ -29,4 +29,4 @@ pub use graph_handle::GraphHandle;
 pub use graph_note::GraphNote;
 pub use graph_offers::{GRAPH_GROUP, graph_verb_path, publish_graph_offers};
 pub use graph_op::GraphOp;
-pub use ui_graph_view::{UiGraphFrame, UiGraphState, UiGraphView};
+pub use ui_graph_view::{NEW_MAPPING_FORMAT_SENTENCE, UiGraphFrame, UiGraphState, UiGraphView};

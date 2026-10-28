@@ -116,7 +116,6 @@ fn project_view(view: ProjectView) -> UiProjectView {
     match view {
         ProjectView::Workspace => UiProjectView::Nodes,
         ProjectView::Play => UiProjectView::Play,
-        ProjectView::Patch => UiProjectView::Patch,
         ProjectView::Mapping => UiProjectView::Mapping,
         ProjectView::Graph => UiProjectView::Graph,
     }
@@ -133,10 +132,10 @@ mod tests {
             assert_eq!(page_of(&StudioRoute::parse(alias)), UiPage::Home, "{alias}");
         }
         assert_eq!(
-            page_of(&StudioRoute::parse("/device/dev123/patch")),
+            page_of(&StudioRoute::parse("/device/dev123/graph")),
             UiPage::Device {
                 uid: "dev123".to_string(),
-                view: UiProjectView::Patch,
+                view: UiProjectView::Graph,
             }
         );
         assert_eq!(

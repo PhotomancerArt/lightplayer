@@ -2255,11 +2255,13 @@ const PROJECT_DIR: &str = "/projects/face-e2e";
 const FACE_SHADER: &str = "layout(binding = 0) uniform float speed;\n\nvec4 render_2d(vec2 pos) {\n    return vec4(pos.x * speed, pos.y, 0.5, 1.0);\n}\n";
 
 /// The face fixture's mapping document — 16 lamps on a 4×4 grid, the
-/// smallest shape that exercises spans, centers, and radii together.
+/// smallest shape that exercises spans, centers, and radii together; map2d
+/// format 6, starting on the output named "1".
 const FACE_MAP2D: &str = r#"{
-  "format": 1,
-  "objects": [
-    { "name": "panel", "shape": { "grid": { "origin": [0, 0], "cols": 4, "rows": 4, "pitch": 10 } } }
+  "format": 6,
+  "start": { "output": { "set": "1" }, "port": { "set": 0 }, "channel": { "set": { "lamps": 0 } } },
+  "parts": [
+    { "id": "panel", "name": "panel", "kind": { "grid": { "origin": [0, 0], "cols": 4, "rows": 4, "pitch": 10 } } }
   ]
 }"#;
 
@@ -2339,6 +2341,7 @@ fn face_e2e_server() -> LpServer {
 }"#;
     let output_json = r#"{
   "kind": "Output",
+  "name": "1",
   "ports": {
     "0": {
       "endpoint": "ws281x:local:D10"
@@ -2449,6 +2452,7 @@ fn single_product_e2e_server(visual_only: bool) -> LpServer {
     let output_json = format!(
         r#"{{
   "kind": "Output",
+  "name": "1",
   "ports": {{
     "0": {{ "endpoint": "ws281x:local:D10" }}
   }},
@@ -3082,6 +3086,7 @@ fn playlist_e2e_server(idle_entry: u32) -> LpServer {
 }"#;
     let output_json = r#"{
   "kind": "Output",
+  "name": "1",
   "ports": {
     "0": {
       "endpoint": "ws281x:local:D10"
@@ -3170,13 +3175,15 @@ fn output_face_e2e_server() -> LpServer {
   }
 }"#;
     let map2d_json = r#"{
-  "format": 1,
-  "objects": [
-    { "name": "panel", "shape": { "grid": { "origin": [0, 0], "cols": 4, "rows": 4, "pitch": 10 } } }
+  "format": 6,
+  "start": { "output": { "set": "1" }, "port": { "set": 0 }, "channel": { "set": { "lamps": 0 } } },
+  "parts": [
+    { "id": "panel", "name": "panel", "kind": { "grid": { "origin": [0, 0], "cols": 4, "rows": 4, "pitch": 10 } } }
   ]
 }"#;
     let output_json = r#"{
   "kind": "Output",
+  "name": "1",
   "ports": {
     "0": { "endpoint": "ws281x:local:IO18", "count": 6 },
     "1": { "endpoint": "ws281x:local:IO16", "count": 4 },
@@ -3673,15 +3680,12 @@ fn no_gallery_example_opens_onto_a_warning_badge() {
     }
 }
 
-/// The patch surface (D36, slice 2), end to end at BOTH grains: on
-/// small-dome (instance grain: two named outputs, panels + door,
-/// instance chips with strides) and on peach-1d (range grain: one unnamed
-/// output, NO instances — the surface must not invent an address grain
-/// the format cannot store). Selection round-trips through
-/// `ProjectEditorOp::PatchSelect` — the core-owned state the P6 verbs
-/// read.
+/// The patch surface (D36, slice 2), end to end, on format-6 mappings:
+/// small-dome (two named outputs, a row per panel copy and the door) and
+/// peach-1d (one output, a row per part). Selection round-trips through
+/// `ProjectEditorOp::PatchSelect`, the core-owned state the panels read.
 #[test]
-fn the_patch_surface_derives_both_grains_and_selection_round_trips() {
+fn the_patch_surface_lists_every_segment_and_selection_round_trips() {
     use crate::UiPatchTarget;
 
     for (id, expect_instances) in [("catalog/small-dome", true), ("catalog/peach-1d", false)] {
@@ -3741,9 +3745,8 @@ fn the_patch_surface_derives_both_grains_and_selection_round_trips() {
             .unwrap_or_else(|| panic!("{id}: the editor carries no patch surface"));
 
         if expect_instances {
-            // The small-dome: two named outputs, both fixtures at instance
-            // grain with the archetype's authored strides (panel 40 — one
-            // side of a 119-lamp wrap; door 180 — one leg).
+            // The small-dome: two named outputs, one row per segment of
+            // each fixture's format-6 mapping, named by its node id.
             assert_eq!(surface.outputs.len(), 2, "{id}");
             let names: Vec<&str> = surface
                 .outputs
@@ -3759,41 +3762,40 @@ fn the_patch_surface_derives_both_grains_and_selection_round_trips() {
                 .iter()
                 .find(|fixture| fixture.label.to_lowercase().contains("dome"))
                 .unwrap_or_else(|| panic!("{id}: no dome fixture on the surface"));
-            assert_eq!(dome.instances.len(), 50, "{id}: fifty panel instances");
-            assert_eq!(dome.instances[2].path, "/rim-a/2");
-            // 119 lamps over three sides has no intrinsic per-side stride
-            // (119 % 3 != 0), so the panels carry an authored override:
-            // one side, 40 lamps.
-            assert_eq!(dome.instances[2].stride, 40);
+            assert_eq!(dome.instances.len(), 50, "{id}: fifty panel segments");
+            assert_eq!(dome.instances[2].path, "rim-a@2");
+            assert_eq!(
+                (dome.instances[2].start, dome.instances[2].lamps),
+                (2 * 119, 119),
+                "{id}: in lamp order"
+            );
             let doors = surface
                 .fixtures
                 .iter()
                 .find(|fixture| fixture.label.to_lowercase().contains("door"))
                 .unwrap_or_else(|| panic!("{id}: no doors fixture on the surface"));
             assert_eq!(doors.instances.len(), 1, "{id}: one door");
-            assert_eq!(
-                doors.instances[0].stride, 180,
-                "{id}: the door rotates a leg at a time (authored stride)"
-            );
+            assert_eq!(doors.instances[0].path, "door");
         } else {
-            // The peach: one unnamed output; fixtures patch at range grain.
+            // The peach: one output, named "1" by the format-12 upgrade (its
+            // fixtures' mappings start on it); every part is a row.
             assert_eq!(surface.outputs.len(), 1, "{id}");
-            assert_eq!(surface.outputs[0].name, None, "{id}: unnamed output");
-            // Id-less documents still DISPLAY their effective expansion
-            // (grain robustness, G1 R2) — but with EMPTY paths: no address
-            // grain is invented that the patch format cannot store, so the
-            // fixtures keep patching at range grain.
+            assert_eq!(
+                surface.outputs[0].name.as_deref(),
+                Some("1"),
+                "{id}: the output the mappings name"
+            );
             assert!(
                 surface
                     .fixtures
                     .iter()
                     .flat_map(|fixture| &fixture.instances)
-                    .all(|instance| instance.path.is_empty()),
-                "{id}: no ids, no path addresses — range grain holds"
+                    .all(|instance| !instance.path.is_empty()),
+                "{id}: every segment has a node id"
             );
             assert!(
                 !surface.fixtures.is_empty(),
-                "{id}: the range-grain fixtures still show their runs"
+                "{id}: the fixtures still show their runs"
             );
         }
 
@@ -3865,575 +3867,6 @@ fn the_patch_surface_derives_both_grains_and_selection_round_trips() {
             "{id}: the selection is core state, not view-local"
         );
     }
-}
-
-/// The G1 acceptance run, headless: author the small-dome's as-built
-/// install LIVE through the verb ops — clear both fixtures, then replay
-/// every row of the shipped patch documents (fifty panel assigns plus the
-/// door, the reversed panel, the rotations stepped by their authored
-/// strides) — and the written documents equal the shipped generated files
-/// **byte for byte**. At 51 rows the replay is data-driven from the
-/// shipped bytes; that stays an honest claim because it proves every
-/// shipped row is REACHABLE through the verb surface and that the verb
-/// writer and the generator agree on canonical bytes. Then undo walks the
-/// whole thing back one gesture at a time.
-#[test]
-fn verbs_author_the_small_dome_install_byte_identically() {
-    use crate::{
-        PATCH_ASSIGN_VERB, PATCH_CLEAR_VERB, PATCH_LAMP_PARAM, PATCH_OUTPUT_PARAM, PATCH_REDO_VERB,
-        PATCH_REVERSE_VERB, PATCH_ROTATE_VERB, PATCH_STEPS_PARAM, PATCH_SUBJECT_PARAM,
-        PATCH_UNDO_VERB, PATCH_WHOLE_FIXTURE, patch_history_path,
-    };
-
-    let example =
-        crate::app::home::embedded_example("catalog/small-dome").expect("small-dome embedded");
-    let shipped: std::collections::BTreeMap<&str, &[u8]> = example
-        .files
-        .iter()
-        .map(|(path, bytes)| (*path, *bytes))
-        .collect();
-    let server = Rc::new(RefCell::new(example_e2e_server(&example)));
-    let io = InProcessServerIo {
-        server: Rc::clone(&server),
-        inbox: Rc::new(RefCell::new(VecDeque::new())),
-        sent: Rc::new(RefCell::new(Vec::new())),
-    };
-    let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
-    let controller = StudioController::connected_with_client_for_test(client);
-    let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
-    let mut view = handle.view;
-
-    connect_running_project(&handle.tx);
-    drive(actor.run_one_batch_for_test());
-    let _ = view.try_recv().expect("connect emits a snapshot");
-    let mut snapshot = None;
-    for _ in 0..4 {
-        handle.tx.send(project_action(ProjectOp::RefreshProject));
-        drive(actor.run_one_batch_for_test());
-        if let Some(next) = view.try_recv() {
-            snapshot = Some(next);
-        }
-    }
-    let snapshot = snapshot.expect("a refresh emits a snapshot");
-
-    // Fetch every fixture's patch + map2d bodies (what the page does).
-    let surface = project_editor(&snapshot)
-        .patch_surface
-        .clone()
-        .expect("surface");
-    let (dome, doors) = {
-        let by_label = |needle: &str| {
-            surface
-                .fixtures
-                .iter()
-                .find(|fixture| fixture.label.to_lowercase().contains(needle))
-                .unwrap_or_else(|| panic!("no {needle} fixture"))
-                .clone()
-        };
-        (by_label("dome"), by_label("door"))
-    };
-    // Fetch exactly what the page's mount prefetch would: bodies whose
-    // loaded flag is still false. If the DTO flags ever lie (claim loaded
-    // while the cache is cold), the verbs below block and this test fails —
-    // the live-surface contract, not a test-only shortcut.
-    for fixture in [&dome, &doors] {
-        let wanted = [
-            (fixture.patch_loaded, fixture.patch_artifact.clone()),
-            (fixture.mapping_loaded, fixture.mapping_artifact.clone()),
-        ];
-        for artifact in wanted
-            .into_iter()
-            .filter_map(|(loaded, artifact)| (!loaded).then_some(artifact))
-            .flatten()
-        {
-            handle
-                .tx
-                .send(StudioCommand::Action(crate::UiAction::from_op(
-                    ProjectController::NODE_ID,
-                    crate::AssetContentFetchOp { artifact },
-                )));
-            drive(actor.run_one_batch_for_test());
-        }
-    }
-
-    // Every verb is pressed by its path, the way the panel's buttons, the
-    // arm's second click and the agent press it: `project/<fixture>/patch/
-    // <verb>` with the picks as args.
-    macro_rules! verb {
-        ($fixture:expr, $verb:expr, $args:expr) => {{
-            let path = surface
-                .patch_verbs_of($fixture.node)
-                .expect("the fixture's patch verbs")
-                .child($verb);
-            actor_clicks(&mut actor, &handle.tx).press(path, $args);
-        }};
-    }
-    let subject = |path: &str| OfferArgs::new().with(PATCH_SUBJECT_PARAM, path);
-    // A patch entry names its output by NAME; the assign's `output` choice
-    // names the output node.
-    let output_value = |name: &str| {
-        surface
-            .outputs
-            .iter()
-            .find(|output| output.name.as_deref() == Some(name))
-            .and_then(|output| output.patch_output_value())
-            .unwrap_or_else(|| panic!("no output named {name}"))
-    };
-
-    // Clear both docs, then replay the shipped rows in document order:
-    // assign, then reverse and stride-stepped rotation where the row
-    // carries them (panel stride 40 — one side; door stride 180 — one
-    // leg, both authored in the mapping documents, and what the rotate
-    // offer steps by).
-    verb!(dome, PATCH_CLEAR_VERB, subject(PATCH_WHOLE_FIXTURE));
-    verb!(doors, PATCH_CLEAR_VERB, subject(PATCH_WHOLE_FIXTURE));
-    let rows_of = |file: &str| -> Vec<(String, String, u32, bool, u32)> {
-        let doc = lpc_mapping::PatchDoc::from_json(
-            std::str::from_utf8(shipped[file]).expect("utf8 patch doc"),
-        )
-        .expect("shipped patch parses");
-        doc.entries
-            .iter()
-            .map(|entry| {
-                let lpc_mapping::PatchSource::Path { path, range } = &entry.source else {
-                    panic!("shipped rows address by path");
-                };
-                assert!(range.is_none(), "shipped rows are whole instances");
-                (
-                    path.to_text(),
-                    entry.output.clone().expect("shipped rows name outputs"),
-                    entry.lamp,
-                    entry.reversed,
-                    entry.offset,
-                )
-            })
-            .collect()
-    };
-    for (fixture, file, stride) in [
-        (&dome, "dome/dome.patch.json", 40u32),
-        (&doors, "doors/doors.patch.json", 180),
-    ] {
-        for (path, output, lamp, reversed, offset) in rows_of(file) {
-            verb!(
-                fixture,
-                PATCH_ASSIGN_VERB,
-                subject(&path)
-                    .with(PATCH_OUTPUT_PARAM, output_value(&output))
-                    .with(PATCH_LAMP_PARAM, lamp.to_string())
-            );
-            if reversed {
-                verb!(fixture, PATCH_REVERSE_VERB, subject(&path));
-            }
-            if offset > 0 {
-                assert_eq!(offset % stride, 0, "rotation steps by the stride");
-                verb!(
-                    fixture,
-                    PATCH_ROTATE_VERB,
-                    subject(&path).with(PATCH_STEPS_PARAM, (offset / stride).to_string())
-                );
-            }
-        }
-    }
-
-    // Persist the overlay so the authored bytes are on disk (the same
-    // save the user presses), then read them back.
-    actor_clicks(&mut actor, &handle.tx).press("project/save", OfferArgs::new());
-    handle.tx.send(project_action(ProjectOp::RefreshProject));
-    drive(actor.run_one_batch_for_test());
-    while view.try_recv().is_some() {}
-
-    // The authored bytes ARE the shipped bytes.
-    let project_dir = format!("/projects/{}", example.id.replace('/', "-"));
-    let body_of = |artifact: &lpc_model::ArtifactLocation| {
-        let path = format!(
-            "{project_dir}/{}",
-            artifact.file_path().as_str().trim_start_matches('/')
-        );
-        let bytes = server
-            .borrow()
-            .base_fs()
-            .read_file(path.as_str().as_path())
-            .unwrap_or_else(|_| panic!("no body at {path}"));
-        String::from_utf8(bytes).expect("utf8 patch doc")
-    };
-    assert_eq!(
-        body_of(dome.patch_artifact.as_ref().unwrap()),
-        String::from_utf8_lossy(shipped["dome/dome.patch.json"]).to_string(),
-        "the dome's authored patch equals the hand-authored truth"
-    );
-    assert_eq!(
-        body_of(doors.patch_artifact.as_ref().unwrap()),
-        String::from_utf8_lossy(shipped["doors/doors.patch.json"]).to_string(),
-        "the doors' authored patch equals the hand-authored truth"
-    );
-
-    // Undo restores the exact prior bytes, one gesture at a time.
-    let before_undo = body_of(doors.patch_artifact.as_ref().unwrap());
-    actor_clicks(&mut actor, &handle.tx)
-        .press(patch_history_path(PATCH_UNDO_VERB), OfferArgs::new());
-    actor_clicks(&mut actor, &handle.tx).press("project/save", OfferArgs::new());
-    while view.try_recv().is_some() {}
-    let after_undo = body_of(doors.patch_artifact.as_ref().unwrap());
-    assert_ne!(before_undo, after_undo, "undo moved the document back");
-    assert!(
-        after_undo.ends_with('\n'),
-        "undo restores the same newline-terminated bytes a forward write produces"
-    );
-    actor_clicks(&mut actor, &handle.tx)
-        .press(patch_history_path(PATCH_REDO_VERB), OfferArgs::new());
-    actor_clicks(&mut actor, &handle.tx).press("project/save", OfferArgs::new());
-    while view.try_recv().is_some() {}
-    assert_eq!(
-        body_of(doors.patch_artifact.as_ref().unwrap()),
-        before_undo,
-        "redo restores the undone gesture byte-for-byte"
-    );
-}
-
-/// The flow flag and the real unmap (P5b), through the live verb path: the
-/// doors go MANUAL, `unmap all` empties the document in ONE write, the
-/// surface reports every door unmapped, and undo walks both gestures back
-/// one step each. The flag reaches the DTO from the written bytes, which is
-/// what the panel reads.
-#[test]
-fn the_flow_flag_and_unmap_all_are_one_undo_step_each() {
-    use crate::{
-        PATCH_FLOW_MANUAL, PATCH_FLOW_PARAM, PATCH_SET_FLOW_VERB, PATCH_UNDO_VERB,
-        PATCH_UNMAP_ALL_VERB, patch_history_path,
-    };
-
-    let example =
-        crate::app::home::embedded_example("catalog/small-dome").expect("small-dome embedded");
-    let server = Rc::new(RefCell::new(example_e2e_server(&example)));
-    let io = InProcessServerIo {
-        server: Rc::clone(&server),
-        inbox: Rc::new(RefCell::new(VecDeque::new())),
-        sent: Rc::new(RefCell::new(Vec::new())),
-    };
-    let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
-    let controller = StudioController::connected_with_client_for_test(client);
-    let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
-    let mut view = handle.view;
-
-    connect_running_project(&handle.tx);
-    drive(actor.run_one_batch_for_test());
-    let _ = view.try_recv().expect("connect emits a snapshot");
-    let mut snapshot = None;
-    for _ in 0..4 {
-        handle.tx.send(project_action(ProjectOp::RefreshProject));
-        drive(actor.run_one_batch_for_test());
-        if let Some(next) = view.try_recv() {
-            snapshot = Some(next);
-        }
-    }
-    let snapshot = snapshot.expect("a refresh emits a snapshot");
-
-    let (doors, doors_verbs) = {
-        let editor = project_editor(&snapshot);
-        let surface = editor.patch_surface.as_ref().expect("surface");
-        let doors = surface
-            .fixtures
-            .iter()
-            .find(|fixture| fixture.label.to_lowercase().contains("door"))
-            .expect("no doors fixture")
-            .clone();
-        let verbs = surface
-            .patch_verbs_of(doors.node)
-            .expect("the doors' patch verbs");
-        (doors, verbs)
-    };
-    assert!(
-        !doors.manual_flow,
-        "the shipped doors document declares no flow — that reads as auto"
-    );
-    // What the page's mount prefetch does, and what it keeps doing: a
-    // fetch's response lands on a LATER batch, and a save drops the cached
-    // bodies, so this is re-run before every verb. A verb ahead of its body
-    // blocks honestly rather than writing.
-    macro_rules! prefetch {
-        () => {{
-            for _ in 0..3 {
-                for artifact in [doors.patch_artifact.clone(), doors.mapping_artifact.clone()]
-                    .into_iter()
-                    .flatten()
-                {
-                    handle
-                        .tx
-                        .send(StudioCommand::Action(crate::UiAction::from_op(
-                            ProjectController::NODE_ID,
-                            crate::AssetContentFetchOp { artifact },
-                        )));
-                    drive(actor.run_one_batch_for_test());
-                }
-            }
-        }};
-    }
-    prefetch!();
-
-    // The verbs are pressed by path: the panel's flow cards and its
-    // "unmap all" press these same offers.
-    macro_rules! verb {
-        ($path:expr, $args:expr) => {{
-            actor_clicks(&mut actor, &handle.tx).press($path, $args);
-        }};
-    }
-    let undo = patch_history_path(PATCH_UNDO_VERB);
-
-    let project_dir = format!("/projects/{}", example.id.replace('/', "-"));
-    let patch_path = format!(
-        "{project_dir}/{}",
-        doors
-            .patch_artifact
-            .as_ref()
-            .unwrap()
-            .file_path()
-            .as_str()
-            .trim_start_matches('/')
-    );
-    let body = || {
-        let bytes = server
-            .borrow()
-            .base_fs()
-            .read_file(patch_path.as_str().as_path())
-            .unwrap_or_else(|_| panic!("no body at {patch_path}"));
-        String::from_utf8(bytes).expect("utf8 patch doc")
-    };
-    macro_rules! save {
-        () => {{
-            actor_clicks(&mut actor, &handle.tx).press("project/save", OfferArgs::new());
-        }};
-    }
-    // The shipped bytes, straight off disk — no save needed, and a save
-    // here would be a batch the fetches above still need.
-    let shipped = body();
-
-    // Auto → manual: the flag moves, the entries do not.
-    verb!(
-        doors_verbs.clone().child(PATCH_SET_FLOW_VERB),
-        OfferArgs::new().with(PATCH_FLOW_PARAM, PATCH_FLOW_MANUAL)
-    );
-    save!();
-    let manual = body();
-    assert!(manual.contains("\"flow\": \"manual\""), "{manual}");
-    assert!(manual.contains("\"format\": 3"), "{manual}");
-    assert!(manual.contains("/door"), "no entry moved: {manual}");
-
-    // Unmap all: ONE write that empties the document, flag intact.
-    prefetch!();
-    // The prefetch is also what lets the offer see the flag: it reads the
-    // flow off the cached bytes, and unmap-all waits for a manual fixture.
-    verb!(
-        doors_verbs.clone().child(PATCH_UNMAP_ALL_VERB),
-        OfferArgs::new()
-    );
-    save!();
-    let unmapped = body();
-    assert!(unmapped.contains("\"entries\": []"), "{unmapped}");
-    assert!(unmapped.contains("\"flow\": \"manual\""), "{unmapped}");
-
-    // The surface says so: the fixture is manual and every door is
-    // unmapped. Prefetched first — the flag is read from the BODY, and a
-    // save drops the cached bodies (the same window in which the verbs
-    // block with "still loading").
-    prefetch!();
-    handle.tx.send(project_action(ProjectOp::RefreshProject));
-    drive(actor.run_one_batch_for_test());
-    let mut latest = None;
-    while let Some(next) = view.try_recv() {
-        latest = Some(next);
-    }
-    let snapshot = latest.expect("the refresh emits a snapshot");
-    let surface = project_editor(&snapshot)
-        .patch_surface
-        .as_ref()
-        .expect("the patch surface");
-    let fixture = surface
-        .fixtures
-        .iter()
-        .find(|fixture| fixture.node == doors.node)
-        .expect("an unmapped fixture STAYS on the surface — its objects are the ones to click");
-    assert!(fixture.manual_flow, "the DTO carries the written flag");
-    assert!(
-        !fixture.instances.is_empty(),
-        "the object table survives having no runs"
-    );
-    assert!(
-        fixture.instances.iter().all(|instance| !instance.placed),
-        "an entry-less object in a manual fixture is UNMAPPED, not reflowed"
-    );
-    assert!(
-        fixture.patch.cells.is_empty() && fixture.patch.lamps > 0,
-        "no wire chip, but the row still knows how many lamps it is offering"
-    );
-
-    // One undo per gesture, in order: the entries come back, then the flag.
-    // Trimmed because the undo path replays the snapshot bytes verbatim
-    // while the write path appends a trailing newline — a pre-existing
-    // cosmetic asymmetry in the verb stack, not a P5b claim.
-    verb!(undo.clone(), OfferArgs::new());
-    save!();
-    assert_eq!(
-        body().trim_end(),
-        manual.trim_end(),
-        "one step undid the whole unmap-all"
-    );
-    prefetch!();
-    verb!(undo.clone(), OfferArgs::new());
-    save!();
-    assert_eq!(
-        body().trim_end(),
-        shipped.trim_end(),
-        "and one more undid the flag alone"
-    );
-}
-
-/// The app agent and the patch verbs (M6b): with the doors selected in the
-/// Patching view, the readout lists the doors' patch verbs in full — the
-/// focused patch target's, M7's focus-first — with what each takes; the
-/// agent presses one by its path (`act`, the tool's own route), a bad pick
-/// is refused naming the choices, and the press lands as one patch-history
-/// step, so Undo is offered next.
-#[test]
-fn the_agent_reads_and_presses_the_selected_fixtures_patch_verbs() {
-    use crate::{
-        PATCH_CLEAR_VERB, PATCH_FLOW_PARAM, PATCH_SET_FLOW_VERB, PATCH_SUBJECT_PARAM,
-        PATCH_UNDO_VERB, UiPatchTarget, patch_history_path,
-    };
-
-    let example =
-        crate::app::home::embedded_example("catalog/small-dome").expect("small-dome embedded");
-    let server = Rc::new(RefCell::new(example_e2e_server(&example)));
-    let io = InProcessServerIo {
-        server: Rc::clone(&server),
-        inbox: Rc::new(RefCell::new(VecDeque::new())),
-        sent: Rc::new(RefCell::new(Vec::new())),
-    };
-    let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
-    let controller = StudioController::connected_with_client_for_test(client);
-    let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
-    let mut view = handle.view;
-
-    connect_running_project(&handle.tx);
-    drive(actor.run_one_batch_for_test());
-    let _ = view.try_recv().expect("connect emits a snapshot");
-    let mut snapshot = None;
-    for _ in 0..4 {
-        handle.tx.send(project_action(ProjectOp::RefreshProject));
-        drive(actor.run_one_batch_for_test());
-        if let Some(next) = view.try_recv() {
-            snapshot = Some(next);
-        }
-    }
-    let snapshot = snapshot.expect("a refresh emits a snapshot");
-    let surface = project_editor(&snapshot)
-        .patch_surface
-        .clone()
-        .expect("surface");
-    let doors = surface
-        .fixtures
-        .iter()
-        .find(|fixture| fixture.label.to_lowercase().contains("door"))
-        .expect("no doors fixture")
-        .clone();
-    let verbs = surface
-        .patch_verbs_of(doors.node)
-        .expect("the doors' patch verbs");
-    for artifact in [doors.patch_artifact.clone(), doors.mapping_artifact.clone()]
-        .into_iter()
-        .flatten()
-    {
-        handle
-            .tx
-            .send(StudioCommand::Action(crate::UiAction::from_op(
-                ProjectController::NODE_ID,
-                crate::AssetContentFetchOp { artifact },
-            )));
-        drive(actor.run_one_batch_for_test());
-    }
-
-    // The user is on the Patching view with the doors selected.
-    actor
-        .controller_mut_for_test()
-        .set_place(crate::UiPlace::new(crate::UiPage::Example {
-            slug: example.id.to_string(),
-            view: crate::UiProjectView::Patch,
-        }));
-    handle
-        .tx
-        .send(StudioCommand::Action(crate::UiAction::from_op(
-            crate::ProjectEditorTarget::NodeTree.node_id(),
-            crate::ProjectEditorOp::PatchSelect {
-                selection: crate::UiSelection::one(UiPatchTarget::Fixture { node: doors.node }),
-            },
-        )));
-    drive(actor.run_one_batch_for_test());
-
-    let readout = actor
-        .controller_mut_for_test()
-        .app_agent_readout_for_test()
-        .render();
-    let listed = readout
-        .split("more actions, counted")
-        .next()
-        .expect("the listed part");
-    let set_flow = verbs.clone().child(PATCH_SET_FLOW_VERB);
-    let clear = verbs.clone().child(PATCH_CLEAR_VERB);
-    assert!(
-        listed.contains(&format!("- {set_flow}: Set flow [choose a flow in args]")),
-        "the selected fixture's patch verbs are listed in full: {readout}"
-    );
-    assert!(
-        listed.contains("takes flow: one of auto (auto-mapped), manual (manual)"),
-        "{readout}"
-    );
-    assert!(
-        listed.contains(&format!("- {clear}: Unmap the whole fixture [undoable]")),
-        "the selection is the default subject, and Unmap says it is undoable: {readout}"
-    );
-    assert!(
-        !listed.contains("/out_"),
-        "an output's patch verbs are not the selection's: {readout}"
-    );
-
-    let act = |actor: &mut StudioActor<_>, action: &str, args: &[(&str, &str)]| {
-        let input: lpa_agent::ActInput = serde_json::from_value(serde_json::json!({
-            "action": action,
-            "args": args
-                .iter()
-                .map(|(name, value)| (name.to_string(), serde_json::json!(value)))
-                .collect::<serde_json::Map<_, _>>(),
-            "why": "the test asked",
-        }))
-        .expect("an act input");
-        drive(
-            actor
-                .controller_mut_for_test()
-                .app_agent_act_for_test(input),
-        )
-    };
-    let refused = act(
-        &mut actor,
-        &clear.to_string(),
-        &[(PATCH_SUBJECT_PARAM, "/no-such-door")],
-    );
-    assert!(
-        matches!(&refused, lpa_agent::ActOutcome::Refused { reason, .. }
-            if reason.contains("`subject` must be one of all, ")),
-        "a bad pick is refused with the choices: {refused:?}"
-    );
-
-    let outcome = act(
-        &mut actor,
-        &set_flow.to_string(),
-        &[(PATCH_FLOW_PARAM, "manual")],
-    );
-    assert!(
-        matches!(outcome, lpa_agent::ActOutcome::Done { .. }),
-        "{outcome:?}"
-    );
-    actor
-        .controller_mut_for_test()
-        .offered(patch_history_path(PATCH_UNDO_VERB));
 }
 
 /// The Arrange substrate end-to-end (unified-editor P2): the editor.json
@@ -4770,162 +4203,6 @@ fn editor_meta_arranges_a_fixture_with_byte_stable_undo() {
     );
 }
 
-/// The one sequence spans every stack (unified-editor P2): patch verbs,
-/// arrange ops, and shell-dispatched switch events interleave into ONE
-/// strictly increasing `edit_seq`, each stamped with its own mode.
-#[test]
-fn edit_seq_interleaves_verbs_meta_ops_and_switch_events() {
-    use crate::{
-        ARRANGE_SET_VERB, ARRANGE_X_PARAM, ARRANGE_Y_PARAM, PATCH_REVERSE_VERB,
-        PATCH_SUBJECT_PARAM, PATCH_UNDO_VERB, UiEditJournalEvent, UiEditorMode, patch_history_path,
-    };
-
-    let example =
-        crate::app::home::embedded_example("catalog/small-dome").expect("small-dome embedded");
-    let server = Rc::new(RefCell::new(example_e2e_server(&example)));
-    let io = InProcessServerIo {
-        server: Rc::clone(&server),
-        inbox: Rc::new(RefCell::new(VecDeque::new())),
-        sent: Rc::new(RefCell::new(Vec::new())),
-    };
-    let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
-    let controller = StudioController::connected_with_client_for_test(client);
-    let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
-    let mut view = handle.view;
-
-    connect_running_project(&handle.tx);
-    drive(actor.run_one_batch_for_test());
-    let _ = view.try_recv().expect("connect emits a snapshot");
-    let mut snapshot = None;
-    for _ in 0..4 {
-        handle.tx.send(project_action(ProjectOp::RefreshProject));
-        drive(actor.run_one_batch_for_test());
-        if let Some(next) = view.try_recv() {
-            snapshot = Some(next);
-        }
-    }
-    let snapshot = snapshot.expect("a refresh emits a snapshot");
-
-    let (dome, dome_verbs, editor_artifact) = {
-        let editor = project_editor(&snapshot);
-        let surface = editor.patch_surface.as_ref().expect("surface");
-        let dome = surface
-            .fixtures
-            .iter()
-            .find(|fixture| fixture.label.to_lowercase().contains("dome"))
-            .expect("dome")
-            .clone();
-        let verbs = surface.patch_verbs_of(dome.node).expect("the dome's verbs");
-        (
-            dome,
-            verbs,
-            surface.editor_meta_artifact.clone().expect("artifact"),
-        )
-    };
-    let dome_arrange = project_editor(&snapshot)
-        .patch_surface
-        .as_ref()
-        .and_then(|surface| surface.arrange_verbs_of(dome.node))
-        .expect("the dome's arrange verbs")
-        .child(ARRANGE_SET_VERB);
-
-    // Prefetch what the ops need: dome bodies + editor.json presence.
-    for artifact in [dome.patch_artifact.clone(), dome.mapping_artifact.clone()]
-        .into_iter()
-        .flatten()
-    {
-        handle
-            .tx
-            .send(StudioCommand::Action(crate::UiAction::from_op(
-                ProjectController::NODE_ID,
-                crate::AssetContentFetchOp { artifact },
-            )));
-        drive(actor.run_one_batch_for_test());
-    }
-    handle
-        .tx
-        .send(StudioCommand::Action(crate::UiAction::from_op(
-            ProjectController::NODE_ID,
-            crate::EditorMetaFetchOp {
-                artifact: editor_artifact.clone(),
-            },
-        )));
-    drive(actor.run_one_batch_for_test());
-
-    // Interleave: verb → mode switch → arrange set → node switch → verb undo.
-    actor_clicks(&mut actor, &handle.tx).press(
-        dome_verbs.child(PATCH_REVERSE_VERB),
-        OfferArgs::new().with(PATCH_SUBJECT_PARAM, "/rim-a/1"),
-    );
-    handle
-        .tx
-        .send(StudioCommand::Action(crate::UiAction::from_op(
-            crate::ProjectEditorTarget::NodeTree.node_id(),
-            ProjectEditorOp::EditorJournal {
-                event: UiEditJournalEvent::ModeSwitch,
-                node: None,
-                mode: UiEditorMode::Arrange,
-            },
-        )));
-    drive(actor.run_one_batch_for_test());
-    actor_clicks(&mut actor, &handle.tx).press(
-        &dome_arrange,
-        OfferArgs::new()
-            .with(ARRANGE_X_PARAM, "10")
-            .with(ARRANGE_Y_PARAM, "10"),
-    );
-    handle
-        .tx
-        .send(StudioCommand::Action(crate::UiAction::from_op(
-            crate::ProjectEditorTarget::NodeTree.node_id(),
-            ProjectEditorOp::EditorJournal {
-                event: UiEditJournalEvent::NodeSwitch,
-                node: Some(dome.node),
-                mode: UiEditorMode::Mapping,
-            },
-        )));
-    drive(actor.run_one_batch_for_test());
-    actor_clicks(&mut actor, &handle.tx)
-        .press(patch_history_path(PATCH_UNDO_VERB), OfferArgs::new());
-
-    handle.tx.send(project_action(ProjectOp::RefreshProject));
-    drive(actor.run_one_batch_for_test());
-    let mut latest = None;
-    while let Some(next) = view.try_recv() {
-        latest = Some(next);
-    }
-    let snapshot = latest.expect("snapshot");
-    let journal = &project_editor(&snapshot).edit_journal;
-    assert_eq!(journal.len(), 5, "{journal:?}");
-    assert!(
-        journal.windows(2).all(|pair| pair[0].seq < pair[1].seq),
-        "one strictly increasing sequence across every stack: {journal:?}"
-    );
-    let modes: Vec<UiEditorMode> = journal.iter().map(|entry| entry.mode).collect();
-    assert_eq!(
-        modes,
-        vec![
-            UiEditorMode::Patching,
-            UiEditorMode::Arrange,
-            UiEditorMode::Arrange,
-            UiEditorMode::Mapping,
-            UiEditorMode::Patching,
-        ],
-        "each event carries its own mode"
-    );
-    let events: Vec<UiEditJournalEvent> = journal.iter().map(|entry| entry.event).collect();
-    assert_eq!(
-        events,
-        vec![
-            UiEditJournalEvent::Edit,
-            UiEditJournalEvent::ModeSwitch,
-            UiEditJournalEvent::Edit,
-            UiEditJournalEvent::NodeSwitch,
-            UiEditJournalEvent::Edit,
-        ],
-    );
-}
-
 /// Every selection arm round-trips through core state (the port and range
 /// arms are pass-2 substrate: stored and echoed even before any UI reads
 /// them).
@@ -4994,169 +4271,6 @@ fn every_patch_target_arm_round_trips_through_selection() {
             project_editor(&snapshot).patch_selection,
             crate::UiSelection::one(target),
             "the arm echoes through core state"
-        );
-    }
-}
-
-/// The fully unmapped project (the G1 walk's own starting point): EVERY
-/// fixture manual with every object taken off the wire. Nothing publishes a
-/// run, so nothing published a wire — and the surface must still be the
-/// whole project: both outputs, their ports at the geometry the output DEF
-/// declares, zero cells, and every fixture listed with its objects unmapped.
-///
-/// This is the state walk-up assignment exists FOR: with no output on the
-/// surface there is no free port space to click, and the flow is dead
-/// exactly where it is needed most.
-#[test]
-fn a_fully_unmapped_project_keeps_its_outputs_and_their_free_ports() {
-    use crate::{PATCH_FLOW_MANUAL, PATCH_FLOW_PARAM, PATCH_SET_FLOW_VERB, PATCH_UNMAP_ALL_VERB};
-
-    let example =
-        crate::app::home::embedded_example("catalog/small-dome").expect("small-dome embedded");
-    let server = Rc::new(RefCell::new(example_e2e_server(&example)));
-    let io = InProcessServerIo {
-        server: Rc::clone(&server),
-        inbox: Rc::new(RefCell::new(VecDeque::new())),
-        sent: Rc::new(RefCell::new(Vec::new())),
-    };
-    let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
-    let controller = StudioController::connected_with_client_for_test(client);
-    let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
-    let mut view = handle.view;
-
-    connect_running_project(&handle.tx);
-    drive(actor.run_one_batch_for_test());
-    let _ = view.try_recv().expect("connect emits a snapshot");
-    let mut snapshot = None;
-    for _ in 0..4 {
-        handle.tx.send(project_action(ProjectOp::RefreshProject));
-        drive(actor.run_one_batch_for_test());
-        if let Some(next) = view.try_recv() {
-            snapshot = Some(next);
-        }
-    }
-    let snapshot = snapshot.expect("a refresh emits a snapshot");
-
-    let surface = project_editor(&snapshot)
-        .patch_surface
-        .clone()
-        .expect("surface");
-    let all: Vec<crate::UiPatchSurfaceFixture> = surface.fixtures.clone();
-    assert_eq!(all.len(), 2, "the small-dome patches two fixtures");
-    // The page's mount prefetch, re-run before every verb: a save drops the
-    // cached bodies, and a verb ahead of its body blocks rather than writes.
-    macro_rules! prefetch {
-        () => {{
-            for _ in 0..3 {
-                for artifact in all
-                    .iter()
-                    .flat_map(|fixture| {
-                        [
-                            fixture.patch_artifact.clone(),
-                            fixture.mapping_artifact.clone(),
-                        ]
-                    })
-                    .flatten()
-                {
-                    handle
-                        .tx
-                        .send(StudioCommand::Action(crate::UiAction::from_op(
-                            ProjectController::NODE_ID,
-                            crate::AssetContentFetchOp { artifact },
-                        )));
-                    drive(actor.run_one_batch_for_test());
-                }
-            }
-        }};
-    }
-    // Each verb pressed by its path, then saved.
-    macro_rules! verb {
-        ($node:expr, $verb:expr, $args:expr) => {{
-            let path = surface
-                .patch_verbs_of($node)
-                .expect("the fixture's patch verbs")
-                .child($verb);
-            actor_clicks(&mut actor, &handle.tx).press(path, $args);
-            actor_clicks(&mut actor, &handle.tx).press("project/save", OfferArgs::new());
-        }};
-    }
-    // Both fixtures manual, both emptied — the walk's own opening gesture.
-    for fixture in &all {
-        prefetch!();
-        verb!(
-            fixture.node,
-            PATCH_SET_FLOW_VERB,
-            OfferArgs::new().with(PATCH_FLOW_PARAM, PATCH_FLOW_MANUAL)
-        );
-        prefetch!();
-        verb!(fixture.node, PATCH_UNMAP_ALL_VERB, OfferArgs::new());
-    }
-
-    prefetch!();
-    handle.tx.send(project_action(ProjectOp::RefreshProject));
-    drive(actor.run_one_batch_for_test());
-    let mut latest = None;
-    while let Some(next) = view.try_recv() {
-        latest = Some(next);
-    }
-    let snapshot = latest.expect("the refresh emits a snapshot");
-    let surface = project_editor(&snapshot)
-        .patch_surface
-        .as_ref()
-        .expect("a project with outputs ALWAYS has a patch surface — free ports are the point")
-        .clone();
-
-    // Both outputs, at the geometry their defs declare (each box 13
-    // ports: twelve of 238 — two chained panels — and a tail, box 1's
-    // widened by the 360-lamp door), with nothing on them.
-    assert_eq!(surface.outputs.len(), 2, "both boxes stay on the surface");
-    let port_spans = |name: &str| -> Vec<(u32, u32, u32)> {
-        surface
-            .outputs
-            .iter()
-            .find(|output| output.display_name() == name)
-            .unwrap_or_else(|| panic!("output {name} left the surface"))
-            .bay
-            .ports
-            .iter()
-            .map(|port| (port.key, port.start, port.lamps))
-            .collect()
-    };
-    let box_ports = |tail: u32| -> Vec<(u32, u32, u32)> {
-        (0..13)
-            .map(|port| (port, port * 238, if port == 12 { tail } else { 238 }))
-            .collect()
-    };
-    assert_eq!(
-        port_spans("1"),
-        box_ports(119 + 360),
-        "the def's ports are the geometry when no wire was published"
-    );
-    assert_eq!(port_spans("Box 2"), box_ports(119));
-    assert!(
-        surface
-            .outputs
-            .iter()
-            .flat_map(|output| &output.bay.ports)
-            .all(|port| port.cells.is_empty()),
-        "nothing is patched, so no port carries a cell"
-    );
-
-    // Both fixtures still listed, every object unmapped and still offering
-    // its lamps — the counterparts the walk-up flow clicks.
-    assert_eq!(surface.fixtures.len(), 2, "both fixtures stay listed");
-    for fixture in &surface.fixtures {
-        assert!(fixture.manual_flow, "{}: the written flag", fixture.label);
-        assert!(
-            !fixture.instances.is_empty()
-                && fixture.instances.iter().all(|instance| !instance.placed),
-            "{}: every object is unmapped",
-            fixture.label
-        );
-        assert!(
-            fixture.patch.cells.is_empty() && fixture.patch.lamps > 0,
-            "{}: no run, but the row still offers its lamps",
-            fixture.label
         );
     }
 }

@@ -239,8 +239,8 @@ pub(crate) enum StudioRoute {
         /// into the address bar by `web_app.rs` (D10). `None` for a bare
         /// `/p/prj…`.
         slug: Option<String>,
-        /// Which surface the route renders — the `/play`, `/patch`, and
-        /// `/mapping` suffixes. Same-session zooms/views, never a
+        /// Which surface the route renders — the `/play`, `/mapping` and
+        /// `/graph` suffixes. Same-session zooms/views, never a
         /// different document (`same_session` ignores it).
         view: ProjectView,
         /// The `?on=` device hint (D35/D43): which device this project
@@ -299,19 +299,20 @@ pub(crate) enum StudioRoute {
 }
 
 /// Which surface a [`StudioRoute::Project`] renders. The workbench's view
-/// tabs (Nodes · Mapping · Patch) and the play zoom are all suffixes on the
-/// ONE project address — mutually exclusive, and never a session boundary.
+/// tabs (Nodes · Graph) and the play zoom are all suffixes on the ONE
+/// project address — mutually exclusive, and never a session boundary.
 ///
 /// `Workspace` is the suffix-less default: the Nodes view (today's node
-/// workspace). `Mapping`, `Patch` and `Graph` are workbench views
-/// (`/mapping`, `/patch`, `/graph`; `/map` and `/patching` parse as
-/// aliases). `Play` is the full-page zoom.
+/// workspace). `Mapping` and `Graph` are workbench views (`/mapping`,
+/// `/graph`; `/map` parses as an alias) — the Map view's tab is hidden
+/// until M4, so the workbench shows the default view at `/mapping`. The
+/// Patch tab and its `/patch` suffix are gone (project format 12): it is
+/// an unknown suffix now, like any other. `Play` is the full-page zoom.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ProjectView {
     #[default]
     Workspace,
     Play,
-    Patch,
     Mapping,
     /// The mapping lab's canvas on the project (`app/workbench/graph_view.rs`).
     Graph,
@@ -358,9 +359,6 @@ impl StudioRoute {
             Some("device") => match (segments.next(), segments.next(), segments.next()) {
                 (Some(uid), None, _) => device_route(uid, ProjectView::Workspace),
                 (Some(uid), Some("play"), None) => device_route(uid, ProjectView::Play),
-                (Some(uid), Some("patch" | "patching"), None) => {
-                    device_route(uid, ProjectView::Patch)
-                }
                 (Some(uid), Some("mapping" | "map"), None) => {
                     device_route(uid, ProjectView::Mapping)
                 }
@@ -378,12 +376,7 @@ impl StudioRoute {
                 (Some(link), None, _) => project_route(link, ProjectView::Workspace, on),
                 (Some(link), Some("play"), None) => project_route(link, ProjectView::Play, on),
                 // Both spellings parse; `path()` emits the canonical one
-                // (`patch`, `mapping` — RULED at the patching-view G1:
-                // "keep it short and simple") and navigation heals an
-                // aliased address.
-                (Some(link), Some("patch" | "patching"), None) => {
-                    project_route(link, ProjectView::Patch, on)
-                }
+                // (`mapping`) and navigation heals an aliased address.
                 (Some(link), Some("mapping" | "map"), None) => {
                     project_route(link, ProjectView::Mapping, on)
                 }
@@ -653,7 +646,6 @@ fn with_view_suffix(path: &str, view: ProjectView) -> String {
     match view {
         ProjectView::Workspace => path.to_string(),
         ProjectView::Play => format!("{path}/play"),
-        ProjectView::Patch => format!("{path}/patch"),
         ProjectView::Mapping => format!("{path}/mapping"),
         ProjectView::Graph => format!("{path}/graph"),
     }
@@ -1809,13 +1801,12 @@ mod tests {
             device(ProjectView::Play)
         );
         assert_eq!(
-            StudioRoute::parse("/device/devx/patch"),
-            device(ProjectView::Patch)
-        );
-        assert_eq!(
             StudioRoute::parse("/device/devx/mapping"),
             device(ProjectView::Mapping)
         );
+        // The Patch tab is gone: `/patch` is an unknown suffix, which
+        // lands on Home like any other.
+        assert_eq!(StudioRoute::parse("/device/devx/patch"), StudioRoute::Home);
         assert_eq!(device(ProjectView::Workspace).path(), "/device/devx");
         assert_eq!(device(ProjectView::Play).path(), "/device/devx/play");
         for path in [
@@ -1977,8 +1968,8 @@ mod tests {
         assert_eq!(StudioRoute::parse("/p/play"), StudioRoute::Home);
     }
 
-    /// The workbench's Mapping view is a route suffix like play/patch:
-    /// it parses, re-emits, and never reads as a different session.
+    /// The workbench's Mapping view is a route suffix like play: it
+    /// parses, re-emits, and never reads as a different session.
     #[test]
     fn the_mapping_segment_parses_and_round_trips() {
         let route = StudioRoute::parse(&format!("/p/zook-dome-{SHARE_UID}/mapping"));
@@ -1992,7 +1983,7 @@ mod tests {
             }
         );
         assert_eq!(route.path(), format!("/p/zook-dome-{SHARE_UID}/mapping"));
-        // a same-session view, exactly like the play/patch zooms
+        // a same-session view, exactly like the play zoom
         assert!(route.same_session(&route.with_view(ProjectView::Workspace)));
         assert!(!route.is_play());
         // the views are mutually exclusive suffixes on one address
@@ -2007,10 +1998,8 @@ mod tests {
         assert_eq!(StudioRoute::parse("/mapping"), StudioRoute::Home);
     }
 
-    /// Both view-suffix spellings parse — `/map` for `/mapping`, `/patching`
-    /// for `/patch` — and heal to the canonical emission on the next
-    /// `path()`. The canonical naming call is open (patching-view plan G1);
-    /// only the emit side moves when it's ruled.
+    /// Both view-suffix spellings parse — `/map` for `/mapping` — and heal
+    /// to the canonical emission on the next `path()`.
     #[test]
     fn view_suffix_aliases_parse_and_heal_to_canonical() {
         let map_alias = StudioRoute::parse(&format!("/p/zook-dome-{SHARE_UID}/map"));
@@ -2021,16 +2010,32 @@ mod tests {
             "aliased address heals to the canonical spelling"
         );
 
-        let patching_alias = StudioRoute::parse(&format!("/p/zook-dome-{SHARE_UID}/patching"));
-        assert_eq!(patching_alias.project_view(), ProjectView::Patch);
-        assert_eq!(
-            patching_alias.path(),
-            format!("/p/zook-dome-{SHARE_UID}/patch")
-        );
-
         // Aliases are view suffixes only — never standalone routes.
         assert_eq!(StudioRoute::parse("/map"), StudioRoute::Home);
-        assert_eq!(StudioRoute::parse("/patching"), StudioRoute::Home);
+    }
+
+    /// The Patch tab went with project format 12: its suffixes are unknown
+    /// now, and an unknown suffix lands on Home like any other path the
+    /// router does not know — never a guess at a view.
+    #[test]
+    fn the_patch_suffixes_are_unknown() {
+        for suffix in ["patch", "patching"] {
+            assert_eq!(
+                StudioRoute::parse(&format!("/p/zook-dome-{SHARE_UID}/{suffix}")),
+                StudioRoute::Home,
+                "/p/…/{suffix}"
+            );
+            assert_eq!(
+                StudioRoute::parse(&format!("/device/devx/{suffix}")),
+                StudioRoute::Home,
+                "/device/…/{suffix}"
+            );
+            assert_eq!(
+                StudioRoute::parse(&format!("/p/zook-dome-{SHARE_UID}/{suffix}")),
+                StudioRoute::parse(&format!("/p/zook-dome-{SHARE_UID}/nonsense")),
+                "the same as any unknown suffix"
+            );
+        }
     }
 
     // -----------------------------------------------------------------
@@ -2731,8 +2736,9 @@ mod tests {
         let bound = lens_route(&board_view(Some(SHARE_UID)));
         for (path, healed) in [
             ("/device/dev000000daqf6dvvqz", ""),
-            ("/device/dev000000daqf6dvvqz/patch", "/patch"),
+            ("/device/dev000000daqf6dvvqz/play", "/play"),
             ("/device/dev000000daqf6dvvqz/mapping", "/mapping"),
+            ("/device/dev000000daqf6dvvqz/graph", "/graph"),
         ] {
             let lens_move = lens_sync_target(
                 &StudioRoute::parse(path),
@@ -2764,7 +2770,7 @@ mod tests {
         for path in [
             format!("/p/{SHARE_UID}/play"),
             format!("/p/{SHARE_UID}"),
-            format!("/p/old-name-{SHARE_UID}/patch?on=sim"),
+            format!("/p/old-name-{SHARE_UID}/graph?on=sim"),
         ] {
             assert_eq!(
                 lens_sync_target(

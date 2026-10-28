@@ -67,7 +67,7 @@ pub(crate) fn instance_targets_for_object(
                 .next()
                 .is_some_and(|first| first == id.as_str())
         })
-        .map(|instance| crate::app::patch::verb_ui::instance_target(node, instance))
+        .map(|instance| crate::app::editor_shell::instance_target::instance_target(node, instance))
         .collect()
 }
 

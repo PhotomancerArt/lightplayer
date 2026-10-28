@@ -5026,10 +5026,6 @@ impl StudioController {
                 let op = action.into_op::<AssetContentFetchOp>()?;
                 return self.execute_asset_content_fetch(op).await;
             }
-            if action.op_as::<crate::PatchVerbOp>().is_some() {
-                let op = action.into_op::<crate::PatchVerbOp>()?;
-                return self.execute_patch_verb_op(op).await;
-            }
             if action.op_as::<crate::EditorMetaOp>().is_some() {
                 let op = action.into_op::<crate::EditorMetaOp>()?;
                 return self.execute_editor_meta_op(op).await;
@@ -8403,19 +8399,8 @@ impl StudioController {
         self.record_project_edit_run(run)
     }
 
-    /// One patch-surface verb (D42): kernel-validated document transforms
-    /// through the normal ApplyBody path, with the session-local undo
-    /// stack. Routed like asset edits — the verb writes assets.
-    async fn execute_patch_verb_op(&mut self, op: crate::PatchVerbOp) -> UiResult {
-        let run = {
-            let server = self.pool.lens_session_mut()?.client_mut()?;
-            self.project.apply_patch_verb(server, op).await
-        };
-        self.record_project_edit_run(run)
-    }
-
     /// One Arrange gesture over `editor.json` (unified-editor P2): routed
-    /// like the patch verbs — the op writes an asset.
+    /// like an asset edit — the op writes an asset.
     async fn execute_editor_meta_op(&mut self, op: crate::EditorMetaOp) -> UiResult {
         let run = {
             let server = self.pool.lens_session_mut()?.client_mut()?;

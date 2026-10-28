@@ -1,8 +1,9 @@
 //! Editor-shell stories on the one project canvas: the fixture view at
 //! its three honesty levels (loaded geometry, placeholder blocks, peach
 //! strips), the IN-PLACE dive, and the morphing toolbar's two states.
-//! Real small-dome map2d bytes from the embedded example feed the loaded
-//! fixtures — the same resolver the device runs.
+//! Real small-dome map2d bytes feed the loaded fixtures, as they were
+//! before map2d format 6 ([`super::map_canvas_sample_documents`]: the Map
+//! canvas reads no later format, and the Map tab is hidden until M4).
 
 use std::collections::BTreeMap;
 
@@ -11,34 +12,26 @@ use lpa_mapping_editor::{Map2dDoc, MapEditorSession, MapTool, ShapePath};
 use lpa_studio_web_story_macros::story;
 
 use super::arrange::{DiveHost, ProjectCanvasHost};
+use super::map_canvas_sample_documents::{
+    PEACH_BODY, PEACH_LEAF, SMALL_DOME_DOME, SMALL_DOME_DOORS,
+};
 use super::toolbar::ToolbarStrip;
-use crate::app::patch::patch_story_fixtures::{peach_surface, small_dome_surface};
+use crate::app::workbench::workbench_story_surfaces::{peach_surface, small_dome_surface};
 use lpa_studio_core::{
     ArtifactLocation, NodeId, UiArrangeFootprint, UiArrangeMeta, UiArrangeTransform,
     UiPatchSurface, UiPatchTarget, UiSelection,
 };
 
 /// The small-dome surface with real map2d bodies attached: fixture
-/// artifacts stamped, bodies pulled from the embedded example, both
-/// fixtures ARRANGED (dome at origin, doors beside it, tilted).
+/// artifacts stamped, the sample bodies, both fixtures ARRANGED (dome at
+/// origin, doors beside it, tilted).
 fn dome_canvas_inputs() -> (UiPatchSurface, BTreeMap<ArtifactLocation, String>) {
-    let example = lpa_studio_core::app::home::embedded_example("catalog/small-dome")
-        .expect("small-dome embedded");
-    let body = |name: &str| {
-        let bytes = example
-            .files
-            .iter()
-            .find(|(path, _)| *path == name)
-            .map(|(_, bytes)| *bytes)
-            .expect("example file");
-        String::from_utf8(bytes.to_vec()).expect("utf8 map2d")
-    };
     let mut surface = small_dome_surface(false);
     let mut bodies = BTreeMap::new();
     let dome_artifact = ArtifactLocation::file("/dome/dome.map2d.json");
     let doors_artifact = ArtifactLocation::file("/doors/doors.map2d.json");
-    bodies.insert(dome_artifact.clone(), body("dome/dome.map2d.json"));
-    bodies.insert(doors_artifact.clone(), body("doors/doors.map2d.json"));
+    bodies.insert(dome_artifact.clone(), SMALL_DOME_DOME.to_string());
+    bodies.insert(doors_artifact.clone(), SMALL_DOME_DOORS.to_string());
     surface.fixtures[0].mapping_artifact = Some(dome_artifact);
     surface.fixtures[0].arrange = Some(UiArrangeMeta {
         arranged: true,
@@ -85,7 +78,7 @@ fn arrange_canvas_small_dome() -> Element {
 }
 
 #[story(
-    description = "Fixture MULTI-SELECT on the Mapping canvas (unified-selection P3): both small-dome fixtures shift-set into one sibling selection — each sprite wears its own ring, and ONE shared dashed box spans the set with corner scale handles (`transform_handles`, the Mapping view's transform furniture; Patching multi-selects without it). A corner drag scales the whole set about the opposite corner as one `SetMany` undo step; this capture pins the resting furniture."
+    description = "Fixture MULTI-SELECT on the Mapping canvas (unified-selection P3): both small-dome fixtures shift-set into one sibling selection — each sprite wears its own ring, and ONE shared dashed box spans the set with corner scale handles (`transform_handles`, the Mapping view's transform furniture). A corner drag scales the whole set about the opposite corner as one `SetMany` undo step; this capture pins the resting furniture."
 )]
 fn arrange_canvas_multi_select() -> Element {
     let (surface, bodies) = dome_canvas_inputs();
@@ -242,16 +235,8 @@ fn peach_canvas_inputs() -> (UiPatchSurface, BTreeMap<ArtifactLocation, String>)
     let mut bodies = BTreeMap::new();
     let body_artifact = ArtifactLocation::file("/body/peach_body.map2d.json");
     let leaf_artifact = ArtifactLocation::file("/leaf/peach_leaf.map2d.json");
-    bodies.insert(
-        body_artifact.clone(),
-        include_str!("../../../../../catalog/projects/peach-2d/body/peach_body.map2d.json")
-            .to_string(),
-    );
-    bodies.insert(
-        leaf_artifact.clone(),
-        include_str!("../../../../../catalog/projects/peach-2d/leaf/peach_leaf.map2d.json")
-            .to_string(),
-    );
+    bodies.insert(body_artifact.clone(), PEACH_BODY.to_string());
+    bodies.insert(leaf_artifact.clone(), PEACH_LEAF.to_string());
     surface.fixtures[0].mapping_artifact = Some(body_artifact);
     surface.fixtures[1].mapping_artifact = Some(leaf_artifact);
     // The peach docs are id-less (format 1): the real surface builder still

@@ -2274,41 +2274,6 @@ label:has(> input:not(:disabled)) {
     stroke: #4c9ffe;
 }
 
-/* The ARM's attention language (patching round 3, #5): the armed button
-   PULSES instead of changing its text, and the COUNTERPART surface — the
-   place the next click belongs — wears a breathing ring. Both classes are
-   applied only while engine frames are flowing, so story captures (no
-   frames) render the settled state. */
-@keyframes ux-arm-pulse {
-    0%,
-    100% {
-        box-shadow: 0 0 0 0 rgba(76, 159, 254, 0.55);
-    }
-    70% {
-        box-shadow: 0 0 0 5px rgba(76, 159, 254, 0);
-    }
-}
-
-.ux-arm-pulse {
-    animation: ux-arm-pulse 1.2s ease-out infinite;
-}
-
-@keyframes ux-arm-attention {
-    0%,
-    100% {
-        outline-color: rgba(76, 159, 254, 0.85);
-    }
-    50% {
-        outline-color: rgba(76, 159, 254, 0.3);
-    }
-}
-
-.ux-arm-attention {
-    outline: 2px solid rgba(76, 159, 254, 0.85);
-    outline-offset: -2px;
-    animation: ux-arm-attention 1.6s ease-in-out infinite;
-}
-
 .lpme-fit-rect {
     fill: rgba(90, 169, 230, 0.05);
     stroke: rgba(90, 169, 230, 0.75);

@@ -27,8 +27,9 @@
 //!   wire`).
 //! - **Matrix** — no map, a square render area, strip order NOT
 //!   meaningful: `{2D}` from authored intent, wire order is plumbing.
-//! - **Mapped shape** — the map is the shape: opens the in-place mapping
-//!   editor (the output section's edit mode — no new mapping UI). The D3
+//! - **Mapped shape** — the map is the shape: the tile keeps it and
+//!   resolves the moment. It opens no editor: the face offers no mapping
+//!   edit (project format 12's map2d format 6 has its editor in M4). The D3
 //!   strip-order follow-up question is NOT asked here (dropped at the
 //!   strip-order unification: the bit is the dimensionality dropdown's
 //!   first choice, one drawer below).
@@ -47,6 +48,9 @@ const SHAPE_PROMPT: &str = "What shape is this fixture?";
 const SHAPE_PROMPT_SUB: &str = "Effects are matched to the fixture's shape.";
 /// The dismiss affordance: the moment is an offer, never a gate.
 const SHAPE_SKIP: &str = "Skip and keep it as it is";
+/// The Mapped-shape tile's title when the fixture has a map: the map is
+/// kept as the shape, and nothing opens.
+const MAPPED_SHAPE_KEEP_TITLE: &str = "Keep the mapping as the shape";
 
 /// One preset tile of the Shape moment (Q7's proposed set).
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -93,9 +97,8 @@ const MATRIX_RENDER_SIZE: (u32, u32) = (16, 16);
 /// the module doc and [`UiShapePresets`]). Every op is one the generic
 /// rows already send; the batch ends with the card-UI clear so the
 /// section collapses back to its compact form. `MappedShape` writes no
-/// slots (the map already is the shape — the caller opens the mapping
-/// editor); `ThreeD` is unreachable (disabled tile) and dispatches
-/// nothing.
+/// slots (the map already is the shape); `ThreeD` is unreachable
+/// (disabled tile) and dispatches nothing.
 pub(crate) fn shape_preset_actions(
     preset: ShapePreset,
     node: &str,
@@ -167,14 +170,11 @@ pub fn FixtureShapeMoment(
     /// Absent (stories) renders the tiles inert.
     #[props(default = None)]
     node: Option<String>,
-    /// Opens the in-place mapping editor (the output section's edit
-    /// mode) — the Mapped-shape tile's landing. The caller owns the
-    /// editor's disclosure signal.
-    #[props(default = None)]
-    on_open_mapping: Option<EventHandler<()>>,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
-    let mappable = presets.has_map2d && on_open_mapping.is_some();
+    // The Mapped-shape tile keeps a map the fixture already has; it opens
+    // no editor (the face offers no mapping edit).
+    let mappable = presets.has_map2d;
     let dispatch_preset = {
         let presets = presets.clone();
         let node = node.clone();
@@ -223,7 +223,7 @@ pub fn FixtureShapeMoment(
                     class: shape_tile_class(mappable),
                     r#type: "button",
                     disabled: !mappable,
-                    title: if mappable { "Open the mapping editor to draw the shape" } else { "Needs a 2D mapping first. Add one in the advanced drawer." },
+                    title: if mappable { MAPPED_SHAPE_KEEP_TITLE } else { "Needs a 2D mapping first. Add one in the advanced drawer." },
                     onclick: {
                         let dispatch_preset = dispatch_preset.clone();
                         move |event: MouseEvent| {
@@ -232,9 +232,6 @@ pub fn FixtureShapeMoment(
                                 return;
                             }
                             dispatch_preset(ShapePreset::MappedShape);
-                            if let Some(open) = on_open_mapping {
-                                open.call(());
-                            }
                         }
                     },
                     span { class: "tw:block tw:h-10 tw:w-full tw:overflow-hidden tw:rounded-xs tw:bg-page",
@@ -406,7 +403,7 @@ mod tests {
         assert_eq!(
             shape_preset_actions(ShapePreset::MappedShape, node, &presets()).len(),
             1,
-            "no slot writes — the mapping editor is the landing"
+            "no slot writes — the map already is the shape"
         );
         assert!(shape_preset_actions(ShapePreset::ThreeD, node, &presets()).is_empty());
     }
@@ -423,6 +420,30 @@ mod tests {
         };
         let actions = shape_preset_actions(ShapePreset::Strip, "/demo.module/halo.fixture", &bare);
         assert_eq!(actions.len(), 1, "only the guided-bit clear remains");
+    }
+
+    /// The face offers no mapping edit (project format 12: map2d format
+    /// 6's editor is M4's): with a map in hand, the Mapped-shape tile keeps
+    /// it and resolves the moment, and nothing on the moment opens or
+    /// names a mapping editor.
+    #[test]
+    fn the_shape_moment_offers_no_mapping_edit() {
+        let html = crate::app::board_card::card_test_fixtures::render(
+            FixtureShapeMoment,
+            FixtureShapeMomentProps {
+                presets: presets(),
+                node: Some("/demo.module/halo.fixture".to_string()),
+                on_action: None,
+            },
+        );
+        assert!(
+            html.contains(MAPPED_SHAPE_KEEP_TITLE),
+            "the Mapped-shape tile keeps the map: {html}"
+        );
+        let lower = html.to_lowercase();
+        for word in ["mapping editor", "edit the mapping", "edit mapping"] {
+            assert!(!lower.contains(word), "the moment names `{word}`: {html}");
+        }
     }
 
     /// The declared areas: a strip is ONE row (the engine's

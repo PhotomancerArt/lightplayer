@@ -39,7 +39,9 @@ use crate::app::graph::graph_canvas_meta::{EDITOR_JSON, apply_pins, with_pins};
 use crate::app::graph::graph_frame;
 use crate::app::graph::graph_pictures;
 use crate::app::graph::graph_source::{GraphSource, location};
-use crate::app::graph::{GraphHandle, UiGraphFrame, UiGraphState, UiGraphView};
+use crate::app::graph::{
+    GraphHandle, NEW_MAPPING_FORMAT_SENTENCE, UiGraphFrame, UiGraphState, UiGraphView,
+};
 use crate::app::project::ProjectController;
 
 /// How many rounds of "open, fetch what it asked for" an open may take: a
@@ -406,8 +408,14 @@ impl GraphController {
                 }
                 Err(why) => {
                     self.opened = None;
-                    self.state = Some(UiGraphState::Refused {
-                        why: why.to_string(),
+                    self.state = Some(if holds_a_format_6_mapping(&read) {
+                        UiGraphState::NewMappingFormat {
+                            sentence: NEW_MAPPING_FORMAT_SENTENCE.to_string(),
+                        }
+                    } else {
+                        UiGraphState::Refused {
+                            why: why.to_string(),
+                        }
                     });
                 }
             }
@@ -513,3 +521,29 @@ fn address_of(
 ) -> Option<String> {
     project.graph_node_address(*nodes.get(id)?)
 }
+
+/// Whether what the Graph read is in the new mapping format: a project at
+/// project format 12 or later (every fixture's mapping is map2d format 6
+/// there; the engine refuses older ones), or any mapping document at map2d
+/// format 6. The lab's reader behind today's Graph reads neither; the new
+/// Graph (M4) will.
+fn holds_a_format_6_mapping(read: &BTreeMap<String, Option<String>>) -> bool {
+    read.iter().any(|(path, text)| {
+        let Some(text) = text.as_deref() else {
+            return false;
+        };
+        if path.ends_with(".map2d.json") {
+            return lpc_mapping::map2d6::peek_format(text)
+                == Ok(lpc_mapping::map2d6::MAP2D6_FORMAT);
+        }
+        path.trim_start_matches('/') == "project.json"
+            && lpc_model::ProjectManifest::read_json(text).is_ok_and(|manifest| {
+                manifest
+                    .format
+                    .is_some_and(|format| format >= FIRST_FORMAT_6_PROJECT_FORMAT)
+            })
+    })
+}
+
+/// The project format whose mappings are all map2d format 6.
+const FIRST_FORMAT_6_PROJECT_FORMAT: u32 = 12;

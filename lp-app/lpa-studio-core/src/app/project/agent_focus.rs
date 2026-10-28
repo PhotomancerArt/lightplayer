@@ -27,14 +27,12 @@ pub(crate) struct AgentNodeFocus {
 
 impl ProjectController {
     /// The node the user is looking at in `view`: the focused card in the
-    /// node workspace, the selection's node in the patch and mapping
+    /// node workspace, the selection's node in the mapping and graph
     /// views, and none in play mode (it shows a panel, not a node).
     pub(crate) fn looked_at_node(&self, view: UiProjectView) -> Option<&NodeController> {
         match view {
             UiProjectView::Nodes => self.focused_node(),
-            UiProjectView::Patch | UiProjectView::Mapping | UiProjectView::Graph => {
-                self.selected_node()
-            }
+            UiProjectView::Mapping | UiProjectView::Graph => self.selected_node(),
             UiProjectView::Play => None,
         }
     }

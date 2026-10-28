@@ -33,9 +33,6 @@
 //!   brand word yields; <560 the phone bar's gaps tighten. What never
 //!   folds: the control, Save, Play, settings, the account slot, and ⋯ —
 //!   the phone bar is the session, the one action on it, and the doors.
-//!   (Patch stopped being a chrome mode in R5 — the workbench band tab
-//!   and the ≤820px summon strip carry the Patching view at every width,
-//!   so the ladder has no Patch rungs.)
 //! - **One session per tab, and the tab IS the session** (single-session
 //!   web policy): opening a project or connecting a device tears the
 //!   other kind of session down first, so there is never a strip or a
@@ -68,9 +65,7 @@ use crate::core::menu_item_action_class;
 
 /// The lens routes' mode toggle (Play): the target of the plain hash link
 /// and whether the mode is currently on. A prop rather than a child so
-/// the chrome's narrow ladder can reason about it. (Patch's toggle is
-/// gone — R5 made patching a workbench view, carried by the band tab and
-/// the summon strip at every width.)
+/// the chrome's narrow ladder can reason about it.
 #[derive(Clone, PartialEq)]
 pub struct ChromeModeToggle {
     /// The mode's variant of the CURRENT route (same session, other zoom).
@@ -305,8 +300,8 @@ fn ChromeOverflowMenu(
                 }
                 span { class: GROUP_HEADER_CLASS, "Tools" }
                 // (The standalone mapping-editor card is gone: bare
-                // `/mapping` died with the standalone page — mapping and
-                // patching live in the project workbench's view tabs now.)
+                // `/mapping` died with the standalone page — mapping
+                // lives in the project workbench's view tabs now.)
                 ToolCard {
                     icon: StudioIconName::NodeKind(crate::base::NodeKindIcon::Compute),
                     title: "Board editor",

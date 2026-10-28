@@ -16,15 +16,20 @@
 //! coordinator ([`selection`]) bridges the core selection and the
 //! session's positional paths; the toolbar morphs between the fixture
 //! and mapping item lists; esc ascends the ladder and, at its end, the
-//! selection itself. The Patching view mounts the same canvas with
-//! different furniture.
+//! selection itself.
+//!
+//! The Map tab is hidden until M4's Graph replaces it (project format 12
+//! moved every fixture's mapping to map2d format 6, which this editor does
+//! not read); its code stays until then.
 
 pub(crate) mod arrange;
 #[cfg(feature = "stories")]
 pub(crate) mod editor_shell_stories;
 pub(crate) mod hotkeys;
+pub(crate) mod instance_target;
+#[cfg(any(test, feature = "stories"))]
+pub(crate) mod map_canvas_sample_documents;
 pub(crate) mod mapping_session;
-pub(crate) mod patching;
 pub(crate) mod selection;
 pub(crate) mod toolbar;
 
@@ -69,9 +74,8 @@ pub fn EditorShellCenter(
     dive_focused: Option<NodeId>,
     dive_session: Signal<lpa_mapping_editor::MapEditorSession>,
     dive_commits: Signal<u64>,
-    /// The workbench-owned auto-pack slots, SHARED with the Patching
-    /// center (G1 round 1: per-center slots computed at different mount
-    /// times diverged — one conceptual space, one slot truth).
+    /// The workbench-owned auto-pack slots (G1 round 1: per-center slots
+    /// computed at different mount times diverged).
     pack_slots: Signal<PackSlots>,
     on_action: EventHandler<UiAction>,
 ) -> Element {
@@ -144,7 +148,7 @@ pub fn EditorShellCenter(
     };
     // The entered-transition tracker: ONE journal home for every way the
     // scope can change (double-click, tree row, toolbar, esc, empty-click
-    // ascend, even a selection carried over from the Patching view). It
+    // ascend, even a selection carried over from another view). It
     // also seeds the SESSION's own selection from the core selection on
     // entry — the enter gesture names the object, the session speaks
     // paths (one-way for now; the P5 coordinator generalizes).
@@ -867,7 +871,7 @@ pub(crate) fn enter_dive(
         .iter()
         .find(|fixture| fixture.node == node)
         .and_then(|fixture| fixture.instances.first())
-        .map(|instance| crate::app::patch::verb_ui::instance_target(node, instance));
+        .map(|instance| instance_target::instance_target(node, instance));
     let mut next = lpa_studio_core::UiSelection::empty();
     match first {
         Some(target) => next.select_one(target),

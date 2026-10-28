@@ -34,8 +34,8 @@ pub fn StudioShell(
     /// surface.
     #[props(default = false)]
     play: bool,
-    /// Which project view the route addresses (the `/patch` and
-    /// `/mapping` suffixes; `Workspace` is the suffix-less Nodes view).
+    /// Which project view the route addresses (the `/mapping` and
+    /// `/graph` suffixes; `Workspace` is the suffix-less Nodes view).
     /// Play arrives through the separate `play` flag because a DEVICE
     /// lens has a play zoom too but no project-view suffixes.
     #[props(default)]
@@ -137,8 +137,6 @@ pub fn StudioShell(
     // card — so it deliberately short-circuits the whole editor layout
     // below. `PlayModeSurface` wraps its own controls, which is what makes
     // the same mount usable on a phone.
-    // (Patch no longer short-circuits: it is a workbench view — the R5
-    // patching pass. The interim full-page surface is retired.)
     if play && let Some(face) = play_mode_face(project_editor.as_ref()) {
         return rsx! {
             ReconnectingCurtain {

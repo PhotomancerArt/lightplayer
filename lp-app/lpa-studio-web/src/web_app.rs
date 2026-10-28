@@ -1481,7 +1481,7 @@ pub fn App() -> Element {
         .is_lens()
         .then(|| current_route.with_play(!play).path());
     // The workbench view tabs' targets: same-session view suffixes on the
-    // current lens address, plain links like the play/patch toggles — one
+    // current lens address, plain links like the play toggle — one
     // slot per view-table row, every slot filled on every lens.
     let workbench_hrefs = workbench::WorkbenchHrefs::for_lens(&current_route);
     // Workbench routes trade the scrolling-document page for a
@@ -1492,8 +1492,7 @@ pub fn App() -> Element {
         .panes
         .iter()
         .any(|pane| matches!(&pane.body, lpa_studio_core::UiViewContent::ProjectEditor(_)));
-    // Patch is a workbench view (R5), so it gets the app frame too; only
-    // play still zooms out of the workbench.
+    // Only play zooms out of the workbench.
     let workbench_route = current_route.is_lens() && !play && editor_open;
 
     // Sharing administers THE project in the address bar (D1 — the address
@@ -1653,9 +1652,7 @@ pub fn App() -> Element {
                 project_menu,
                 session_control,
                 // The play zoom, a plain hash link (the route listener sees
-                // no new document). Patch is a workbench VIEW now (R5) —
-                // the band tab carries it, so the chrome has no patch
-                // toggle to fold.
+                // no new document).
                 play_toggle: play_toggle
                     .map(|href| ChromeModeToggle { href, active: play }),
                 tight: workbench_route,
@@ -3174,7 +3171,7 @@ mod tests {
         );
     }
 
-    /// A session moves freely INSIDE the studio: play, patch and mapping
+    /// A session moves freely INSIDE the studio: play and the workbench views
     /// are zooms on the same session, and refusing them would lock the
     /// user out of watching their own project run.
     #[test]
@@ -3182,7 +3179,7 @@ mod tests {
         for target in [
             project_route(),
             project_route().with_play(true),
-            project_route().with_view(router::ProjectView::Patch),
+            project_route().with_view(router::ProjectView::Graph),
         ] {
             assert!(
                 matches!(

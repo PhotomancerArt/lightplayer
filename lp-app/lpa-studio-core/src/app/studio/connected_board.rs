@@ -145,7 +145,6 @@ mod tests {
         for view in [
             UiProjectView::Nodes,
             UiProjectView::Play,
-            UiProjectView::Patch,
             UiProjectView::Mapping,
         ] {
             let project = place(UiPage::Project {

@@ -1,14 +1,10 @@
 //! The Tree (fixtures) and Outputs panels — derived slices over the
 //! patch-surface DTOs, sharing the surface's ONE core-owned selection
-//! (`ProjectEditorOp::PatchSelect`). The Tree's grain follows the VIEW
-//! ([`TreeGrain`]): authored in Mapping, resolved in Patching.
+//! (`ProjectEditorOp::PatchSelect`). The Tree shows the AUTHORED tree (the
+//! Map view's; the Patch tab's resolved tree went with the tab).
 //!
 //! Rows, cells and free port space SELECT, everywhere and always — plain
-//! clicks never write (D7). In the Patching view both panels are also
-//! where an ARMED verb completes: a port click finishes a swap or lands
-//! the armed assign, an object row finishes an assign the wire side
-//! started (see `patch_verbs` on each panel, and
-//! [`crate::app::editor_shell::patching::ArmedVerb`]).
+//! clicks never write (D7).
 //!
 //! Density rules (spike §3, ratified): the Fixtures panel is
 //! fixture → instance rows with text channel chips (port identity is
@@ -27,17 +23,12 @@ use lpa_mapping_editor::{
 };
 use lpa_studio_core::{
     NodeId, ProjectController, ProjectEditorOp, UiAction, UiArrangeTransform, UiPatchCell,
-    UiPatchInstance, UiPatchSurface, UiPatchSurfaceFixture, UiPatchSurfaceModule,
-    UiPatchSurfaceOutput, UiPatchTarget, UiSelection,
+    UiPatchSurface, UiPatchSurfaceFixture, UiPatchSurfaceModule, UiPatchSurfaceOutput,
+    UiPatchTarget, UiSelection,
 };
 use lpc_mapping::{Map2dDoc, Map2dShape};
 
-use crate::app::editor_shell::patching::{
-    ArmedVerb, PatchingUi, complete_assign_on_object, is_armable,
-};
-use crate::app::patch::verb_ui::{
-    free_runs, instance_target, port_next_free, press_assign, press_swap, segment_at_free_run,
-};
+use super::free_port_runs::{free_runs, segment_at_free_run};
 use crate::core::use_offers;
 
 /// The editor-canvas object palette (OBJECT_COLORS), indexed per fixture:
@@ -48,18 +39,6 @@ const OBJECT_COLORS: [&str; 6] = [
 
 fn object_color(index: usize) -> &'static str {
     OBJECT_COLORS[index % OBJECT_COLORS.len()]
-}
-
-/// Which tree the Fixtures panel shows — **grain follows activity,
-/// never dive state** (the `_features/patching.md` ruling, R5): the
-/// Mapping view reads the AUTHORED tree (objects, repeat interiors —
-/// what mapping edits), the Patching view the RESOLVED one (instances /
-/// ranges with their wire chips — what patching assigns). The naming
-/// pair matches `lpc_mapping::resolve`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum TreeGrain {
-    Authored,
-    Resolved,
 }
 
 /// Dispatch a selection change to the core — the same op the patch
@@ -77,10 +56,9 @@ fn is_selected(selection: &UiSelection, target: &UiPatchTarget) -> bool {
     selection.contains(target)
 }
 
-/// Fetch-on-demand: resolve unfetched map2d/patch bodies (a no-op once
-/// cached). The demand signal is a panel being OPEN — or the Patching
-/// center being mounted, whose verbs transform the patch bodies — the
-/// lazy-loading principle, not an eager sweep.
+/// Fetch-on-demand: resolve unfetched map2d bodies (a no-op once cached).
+/// The demand signal is a panel being OPEN — the lazy-loading principle,
+/// not an eager sweep.
 pub(crate) fn prefetch_bodies(on_action: &EventHandler<UiAction>, surface: &UiPatchSurface) {
     for fixture in &surface.fixtures {
         if !fixture.mapping_loaded
@@ -91,35 +69,10 @@ pub(crate) fn prefetch_bodies(on_action: &EventHandler<UiAction>, surface: &UiPa
                 lpa_studio_core::AssetContentFetchOp { artifact },
             ));
         }
-        if !fixture.patch_loaded
-            && let Some(artifact) = fixture.patch_artifact.clone()
-        {
-            on_action.call(UiAction::from_op(
-                ProjectController::NODE_ID,
-                lpa_studio_core::AssetContentFetchOp { artifact },
-            ));
-        }
     }
 }
 
-/// The cells covering one instance's slice of the fixture's channel
-/// space — the instance's wire windows, chip material.
-fn instance_cells<'a>(
-    fixture: &'a UiPatchSurfaceFixture,
-    instance: &UiPatchInstance,
-) -> Vec<&'a UiPatchCell> {
-    fixture
-        .patch
-        .cells
-        .iter()
-        .filter(|cell| {
-            cell.source_start < instance.start + instance.lamps
-                && cell.source_start + cell.lamps > instance.start
-        })
-        .collect()
-}
-
-/// One channel chip's text: port-named wire window (`IO18:1-30`),
+/// One wire window's text: port-named (`IO18:1-30`),
 /// 1-based like the spike; the output label backstops an unnamed pin,
 /// and a cell with neither still shows its honest wire range.
 fn chip_text(cell: &UiPatchCell) -> String {
@@ -136,7 +89,6 @@ fn chip_text(cell: &UiPatchCell) -> String {
     }
 }
 
-const CHIP: &str = "tw:whitespace-nowrap tw:rounded tw:border tw:border-border-strong tw:bg-card-muted tw:px-1 tw:font-mono tw:text-[9.5px] tw:text-subtle-foreground";
 /// `ux-row-edge` is the dense-row interaction light (see
 /// [`row_edge_class`](crate::base::row_edge_class)): a spectrum left edge
 /// and bloom on hover, not the full ring the buttons wear. It rides the
@@ -199,17 +151,14 @@ fn ModuleRow(
     }
 }
 
-/// The Fixtures panel: fixture → instance rows with mapped-state dots
-/// and text channel chips. Selection routes through the shared patch
-/// selection; the Outputs panel and the interim page light up in step.
+/// The Fixtures panel: fixture rows with their authored object trees.
+/// Selection routes through the shared patch selection; the Outputs
+/// panel lights up in step.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn FixturesPanel(
     surface: Option<UiPatchSurface>,
     selection: UiSelection,
-    /// Which tree this view reads (grain follows activity): the Mapping
-    /// view passes `Authored`, the Patching view `Resolved`.
-    grain: TreeGrain,
     /// Fixture map2d bodies by artifact — the authored grain's source for
     /// UNDIVED fixtures (a fixture whose body hasn't loaded shows its
     /// flat row until the panel's fetch-on-open lands it).
@@ -220,20 +169,8 @@ pub fn FixturesPanel(
     /// wiring-order rail, unified here; one tree, one selection).
     #[props(default)]
     dive: Option<(NodeId, Signal<MapEditorSession>)>,
-    /// The Patching view passes true: an object row is a COUNTERPART an
-    /// armed assign can complete against (§3's fixture-side completion).
-    /// Unarmed — and everywhere else — a row click only selects.
-    #[props(default)]
-    patch_verbs: bool,
     on_action: EventHandler<UiAction>,
 ) -> Element {
-    // The frame-scoped arm (armed in the Patching center, completed here or
-    // in the Outputs dock); absent outside the workbench frame — panel
-    // stories then simply have no arm to complete.
-    let patching_ui = use_hook(try_consume_context::<PatchingUi>);
-    // Core's offer tree: a row that completes an armed assign presses the
-    // fixture's `assign` offer.
-    let offers = use_offers();
     let Some(surface) = surface else {
         return rsx! {
             p { class: "tw:mt-3 tw:px-2 tw:text-center tw:text-xs tw:text-dim-foreground",
@@ -274,32 +211,10 @@ pub fn FixturesPanel(
             (module.clone(), members)
         })
         .collect();
-    // The object-click grammar for every row below: an armed assign
-    // completes against an UNMAPPED object (the segment-first flow's second
-    // click), and the row selects either way — mapped things always
-    // plain-reselect (the ruling).
-    let on_object = {
-        let surface = surface.clone();
-        let selection = selection.clone();
-        let on_action = on_action;
-        EventHandler::new(move |target: UiPatchTarget| {
-            if patch_verbs {
-                // The arm completes against a SINGLE selected end — a
-                // multi-selection is not armable, and `single()` is how
-                // that rule reads here.
-                let single = selection.single().cloned();
-                complete_assign_on_object(
-                    &on_action,
-                    &offers.peek(),
-                    &surface,
-                    &single,
-                    patching_ui,
-                    &target,
-                );
-            }
-            select(&on_action, Some(target));
-        })
-    };
+    // A row click selects (plain clicks never write).
+    let on_object = EventHandler::new(move |target: UiPatchTarget| {
+        select(&on_action, Some(target));
+    });
     rsx! {
         // The old top summary line is now the dock's Finder-style footer
         // (D12) — see `panel_footer` in the workbench module.
@@ -310,7 +225,6 @@ pub fn FixturesPanel(
                     dive_session: dive
                         .filter(|(node, _)| *node == fixture.node)
                         .map(|(_, session)| session),
-                    grain,
                     body: fixture
                         .mapping_artifact
                         .as_ref()
@@ -336,7 +250,6 @@ pub fn FixturesPanel(
                         dive_session: dive
                             .filter(|(node, _)| *node == fixture.node)
                             .map(|(_, session)| session),
-                        grain,
                         body: fixture
                             .mapping_artifact
                             .as_ref()
@@ -448,7 +361,7 @@ pub(crate) fn authored_object_for_instance_path(
         .position(|object| object.id.as_ref().is_some_and(|id| id.as_str() == first))
 }
 
-/// One fixture's row plus its instance (or range-grain) children.
+/// One fixture's row plus its authored object tree.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn FixtureRows(
@@ -457,9 +370,6 @@ fn FixtureRows(
     /// Tree level under the module rows (0 = no enclosing module).
     indent: usize,
     selection: UiSelection,
-    /// Which tree this fixture's children render (grain follows
-    /// activity — see [`TreeGrain`]).
-    grain: TreeGrain,
     /// The fixture's map2d body, when loaded — the authored grain's
     /// undived source.
     #[props(default)]
@@ -468,8 +378,7 @@ fn FixtureRows(
     /// from (and selects through) the shared session.
     #[props(default)]
     dive_session: Option<Signal<MapEditorSession>>,
-    /// An object row's click — the panel's grammar (select, and in the
-    /// Patching view an armed assign's fixture-side completion).
+    /// An object row's click — the panel's grammar (select).
     on_object: EventHandler<UiPatchTarget>,
     on_action: EventHandler<UiAction>,
 ) -> Element {
@@ -485,7 +394,8 @@ fn FixtureRows(
     // a fixture with no loaded body keeps its flat row until the panel's
     // fetch-on-open lands it. Component memoization (props PartialEq)
     // bounds the re-parse to actual body changes.
-    let authored_doc = (grain == TreeGrain::Authored && dive_session.is_none())
+    let authored_doc = dive_session
+        .is_none()
         .then(|| {
             body.as_deref()
                 .and_then(|text| Map2dDoc::from_json(text).ok())
@@ -508,7 +418,7 @@ fn FixtureRows(
                 "{fixture.patch.lamps} · {kind}"
             }
         }
-        if grain == TreeGrain::Authored && let Some(mut session) = dive_session {
+        if let Some(mut session) = dive_session {
             // The DIVE's object tree (one tree, one selection): the edited
             // document's FULL shape tree in wiring order — objects, and
             // inside each the structural descent (a repeat's inner item at
@@ -552,7 +462,7 @@ fn FixtureRows(
                     }
                 }
             }
-        } else if grain == TreeGrain::Authored {
+        } else if let Some(doc) = authored_doc {
             // The UNDIVED authored tree (Mapping grain), CLICKABLE
             // (unified-selection P5 — tree parity): a row click selects
             // the object's instance targets through the ONE selection,
@@ -560,7 +470,7 @@ fn FixtureRows(
             // alternate way in, no double-click needed. An id-less object
             // is not addressable (A1) and selects its fixture instead.
             // The highlight is the same D46 bridge, run backward.
-            if let Some(doc) = authored_doc {
+            {
                 {
                     let highlighted: std::collections::BTreeSet<usize> = selection
                         .targets()
@@ -633,101 +543,6 @@ fn FixtureRows(
                     }
                 }
             }
-        } else if range_grain {
-            // The peach case (Resolved grain): no instance grain — one
-            // honest row for the fixture's whole channel range, chips from
-            // its cells.
-            div {
-                class: "tw:flex tw:flex-wrap tw:items-center tw:gap-1 tw:px-1.5 tw:py-0.5",
-                style: indent_style(indent + 1),
-                span { class: "tw:font-mono tw:text-[10.5px] tw:text-subtle-foreground",
-                    "0..{fixture.patch.lamps}"
-                }
-                for cell in fixture.patch.cells.clone() {
-                    span { class: "{CHIP} tw:text-status-attention-foreground", "{chip_text(&cell)}" }
-                }
-            }
-        } else {
-            for instance in fixture.instances.clone() {
-                InstanceRow {
-                    // Keyed by START, not path: id-less display rows all
-                    // carry the empty path, and start is unique per strand.
-                    key: "{fixture.node.0}-{instance.start}",
-                    cells: instance_cells(&fixture, &instance)
-                        .into_iter()
-                        .cloned()
-                        .collect::<Vec<_>>(),
-                    node: fixture.node,
-                    instance,
-                    indent: indent + 1,
-                    selection: selection.clone(),
-                    on_object,
-                    on_action,
-                }
-            }
-        }
-    }
-}
-
-/// One instance row: mapped dot · label · channel chips.
-#[component]
-#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn InstanceRow(
-    node: lpa_studio_core::NodeId,
-    instance: UiPatchInstance,
-    cells: Vec<UiPatchCell>,
-    /// Tree level under the fixture row.
-    indent: usize,
-    selection: UiSelection,
-    /// An object row's click — see [`FixtureRows`].
-    on_object: EventHandler<UiPatchTarget>,
-    on_action: EventHandler<UiAction>,
-) -> Element {
-    // An id-less display row (empty path — the doc hasn't been through
-    // ensure-ids) selects at RANGE grain: same lamps, same pulse, honest
-    // about not being path-addressable (grain-robustness ruling, G1 R2).
-    let target = instance_target(node, &instance);
-    let row_class = if is_selected(&selection, &target) {
-        ROW_SELECTED
-    } else {
-        ROW_IDLE
-    };
-    // The DTO's derived fact (P2), not a chip-list inference — the two
-    // agree today, but `placed` is the one the core owns.
-    let mapped = instance.placed;
-    let dot = if mapped {
-        "tw:h-1.5 tw:w-1.5 tw:flex-none tw:rounded-full tw:bg-status-good-foreground"
-    } else {
-        "tw:h-1.5 tw:w-1.5 tw:flex-none tw:rounded-full tw:border tw:border-dim-foreground"
-    };
-    let title = format!(
-        "{} · lamps {}–{} · stride {}",
-        instance.path,
-        instance.start,
-        instance.start + instance.lamps.saturating_sub(1),
-        instance.stride,
-    );
-    rsx! {
-        div {
-            class: "{row_class} tw:py-0.5",
-            style: indent_style(indent),
-            title: "{title}",
-            onclick: {
-                let target = target.clone();
-                move |_| on_object.call(target.clone())
-            },
-            span { class: "{dot}" }
-            span { class: "tw:truncate tw:text-[12px] tw:text-muted-foreground", "{instance.label}" }
-            span { class: "tw:ml-auto tw:flex tw:flex-none tw:gap-0.5",
-                for cell in cells {
-                    span { class: "{CHIP}",
-                        "{chip_text(&cell)}"
-                        if cell.reversed {
-                            span { class: "tw:text-status-warning-foreground", " ‹rev" }
-                        }
-                    }
-                }
-            }
         }
     }
 }
@@ -751,24 +566,12 @@ pub(crate) struct PortClick {
 pub fn OutputsPanel(
     surface: Option<UiPatchSurface>,
     selection: UiSelection,
-    /// The Patching view passes true: a port click carries the walk-up
-    /// grammar (an ARMED verb completes on it). Everywhere else — and
-    /// unarmed here — a port click only ever selects: plain clicks never
-    /// write (D7, the ruling).
-    #[props(default)]
-    patch_verbs: bool,
     on_action: EventHandler<UiAction>,
 ) -> Element {
     // The CLOSED boxes, by output node id — closed is the exception, so
     // an output the panel has never seen reads as open by default and no
     // seeding pass is needed when the surface grows.
     let mut collapsed = use_signal(std::collections::BTreeSet::<lpa_studio_core::NodeId>::new);
-    // The frame-scoped arm (armed in the Patching center, completed here) —
-    // absent when the panel renders outside the workbench frame (its own
-    // stories), which simply means there is no arm to complete.
-    let patching_ui = use_hook(try_consume_context::<PatchingUi>);
-    // Core's offer tree: the arm's second click presses its offer.
-    let offers = use_offers();
     let Some(surface) = surface else {
         return rsx! {
             p { class: "tw:mt-3 tw:px-2 tw:text-center tw:text-xs tw:text-dim-foreground",
@@ -777,136 +580,23 @@ pub fn OutputsPanel(
         };
     };
     prefetch_bodies(&on_action, &surface);
-    // The single-target view of the one selection: the arm grammar and
-    // the verb dispatches below are single-subject by ruling (a
-    // multi-selection is not an armable end).
-    let single = selection.single().cloned();
-    // The counterpart glow (round 3, #5): while an assign is armed on a
-    // fixture-side selection, the FREE RUNS are where the next click
-    // belongs — they wear the attention ring. Animation only while frames
-    // flow (story determinism, same gate as the panel).
-    let free_attention = patch_verbs
-        && patching_ui.is_some_and(|ui| {
-            matches!(
-                *ui.armed.read(),
-                Some(crate::app::editor_shell::patching::ArmedVerb::Assign)
-            )
-        })
-        && single
-            .as_ref()
-            .is_some_and(|target| is_armable(&surface, target))
-        && !matches!(single, Some(UiPatchTarget::Segment { .. }))
-        && crate::app::patch::patch_panel::surface_is_live(&surface);
-    // The port-click grammar (P3's arm grammar): an ARMED verb completes
-    // here — swap against the clicked port, assign the fixture-side
-    // selection onto it — and everything else is selection. The #436
-    // plain-click auto-assign is GONE (D7): looking is free in both
-    // directions, and nothing writes without an arm.
-    let on_port_click = {
-        let surface = surface.clone();
-        let selection = single.clone();
-        let on_action = on_action;
-        move |click: PortClick| {
-            let PortClick {
+    // The port-click grammar: a click selects, always (D7 — looking is
+    // free, nothing writes). Free space names the SEGMENT of its run; the
+    // row names its port.
+    let on_port_click = move |click: PortClick| {
+        let PortClick {
+            node,
+            port: port_key,
+            free_run,
+        } = click;
+        let target = match free_run {
+            Some(run) => segment_at_free_run(node, port_key, run),
+            None => UiPatchTarget::Port {
                 node,
                 port: port_key,
-                free_run,
-            } = click;
-            let Some(output) = surface.outputs.iter().find(|output| output.node == node) else {
-                return;
-            };
-            if patch_verbs && let Some(ui) = patching_ui {
-                let mut armed = ui.armed;
-                let mut segment_size = ui.segment_size;
-                let current = armed.peek().clone();
-                match current {
-                    // An armed swap completes on the next port click: the
-                    // armed output's `swap-ports`, pressed with both ports.
-                    Some(ArmedVerb::Swap {
-                        output: armed_output,
-                        port: armed_port,
-                    }) => {
-                        armed.set(None);
-                        press_swap(
-                            &on_action,
-                            &offers.peek(),
-                            &surface,
-                            (armed_output, armed_port),
-                            output,
-                            port_key,
-                        );
-                        return;
-                    }
-                    // An armed assign over a fixture-side selection: the
-                    // clicked port (or the free run inside it) is the
-                    // counterpart. The selection stays on the object —
-                    // it is what the user is verifying.
-                    Some(ArmedVerb::Assign) => {
-                        armed.set(None);
-                        // Still an armable end? (A selection that went
-                        // mapped under the arm, or a wire-side one, is a
-                        // nonsense pair — see below.)
-                        if let Some(target) = selection
-                            .as_ref()
-                            .filter(|target| is_armable(&surface, target))
-                        {
-                            let lamp = match free_run {
-                                Some((start, _)) => Some(start),
-                                None => port_next_free(output, port_key),
-                            };
-                            // A whole-fixture selection means its next
-                            // object still waiting for a wire — the same
-                            // narrowing the sprite click does (P5b).
-                            let subject = crate::app::editor_shell::patching::assign_subject_target(
-                                &surface, target,
-                            );
-                            if let Some(lamp) = lamp
-                                && press_assign(
-                                    &on_action,
-                                    &offers.peek(),
-                                    &surface,
-                                    &subject,
-                                    output,
-                                    lamp,
-                                )
-                            {
-                                // The override was fine-tuning for the
-                                // segment the write just spent: the next
-                                // one sizes itself off the next object
-                                // again (the walk-up doc's improvement on
-                                // lp2014's fixed chunk number).
-                                segment_size.set(None);
-                                return;
-                            }
-                        }
-                        // A nonsense pair — a wire-side selection (segment
-                        // meets port: both ends are the same side), or an
-                        // object already on a wire — refuses: disarmed
-                        // above, and the click falls through to plain
-                        // selection. No tentative lane, no guessing.
-                    }
-                    None => {}
-                }
-            }
-            // Plain click = select, always. Free space names a SEGMENT
-            // auto-sized to the next unmapped object; the row names its
-            // port.
-            let target = match free_run {
-                Some(run) => {
-                    // A fresh click is a fresh window: the nudged size
-                    // override belongs to the segment it was nudged on.
-                    if let Some(mut size) = patching_ui.map(|ui| ui.segment_size) {
-                        size.set(None);
-                    }
-                    segment_at_free_run(&surface, node, port_key, run, None)
-                }
-                None => UiPatchTarget::Port {
-                    node,
-                    port: port_key,
-                },
-            };
-            select(&on_action, Some(target));
-        }
+            },
+        };
+        select(&on_action, Some(target));
     };
     // Same module grouping as the Fixtures panel: the tree above the
     // outputs is context worth a slim row, never an empty header.
@@ -948,12 +638,8 @@ pub fn OutputsPanel(
                     output,
                     indent: 0,
                     selection: selection.clone(),
-                    free_attention,
                     on_toggle,
-                    on_port_click: {
-                        let on_port_click = on_port_click.clone();
-                        move |args| on_port_click(args)
-                    },
+                    on_port_click,
                     on_action,
                 }
             }
@@ -971,12 +657,8 @@ pub fn OutputsPanel(
                         output,
                         indent: module.depth + 1,
                         selection: selection.clone(),
-                        free_attention,
                         on_toggle,
-                        on_port_click: {
-                            let on_port_click = on_port_click.clone();
-                            move |args| on_port_click(args)
-                        },
+                        on_port_click,
                         on_action,
                     }
                 }
@@ -995,13 +677,10 @@ fn OutputBox(
     expanded: bool,
     /// Tree level under the module rows (0 = no enclosing module).
     indent: usize,
-    /// Round 3: armed assign + fixture-side selection = the free runs glow.
-    #[props(default)]
-    free_attention: bool,
     selection: UiSelection,
     on_toggle: EventHandler<lpa_studio_core::NodeId>,
     /// A click on a port row or on free space in its bar — the panel
-    /// supplies the grammar (select, or the Patching view's armed verbs).
+    /// supplies the grammar (select).
     on_port_click: EventHandler<PortClick>,
     on_action: EventHandler<UiAction>,
 ) -> Element {
@@ -1066,7 +745,6 @@ fn OutputBox(
                 div { class: "tw:ml-2.5 tw:grid tw:gap-1 tw:border-l tw:border-border-subtle tw:py-1 tw:pl-2",
                     for port in output.bay.ports.clone() {
                         PortRow {
-                        free_attention,
                             key: "{output.node.0}-{port.key}",
                             node: output.node,
                             port,
@@ -1087,9 +765,6 @@ fn OutputBox(
 fn PortRow(
     node: lpa_studio_core::NodeId,
     port: lpa_studio_core::UiPatchPort,
-    /// Round 3: the attention ring on this port's free runs.
-    #[props(default)]
-    free_attention: bool,
     selection: UiSelection,
     on_port_click: EventHandler<PortClick>,
     on_action: EventHandler<UiAction>,
@@ -1152,7 +827,7 @@ fn PortRow(
                 for (start , span) in runs {
                     div {
                         key: "free-{start}",
-                        class: if free_attention { "tw:absolute tw:top-0 tw:h-full tw:cursor-pointer tw:rounded-[3px] tw:hover:bg-selection-bg ux-arm-attention" } else { "tw:absolute tw:top-0 tw:h-full tw:cursor-pointer tw:rounded-[3px] tw:hover:bg-selection-bg" },
+                        class: "tw:absolute tw:top-0 tw:h-full tw:cursor-pointer tw:rounded-[3px] tw:hover:bg-selection-bg",
                         style: span_style(start, span),
                         title: "free — click to take a segment here",
                         onclick: {
@@ -1178,9 +853,7 @@ fn PortRow(
                         on_action,
                     }
                 }
-                // The selected free segment: the window the arm completes
-                // against, drawn over everything so the nudge keys have
-                // something to move.
+                // The selected free segment, drawn over everything.
                 if let Some((start , span)) = selected_segment {
                     div {
                         class: "tw:pointer-events-none tw:absolute tw:top-0 tw:h-full tw:rounded-[3px] ux-sel-ring ux-sel-ring-cool tw:border tw:border-transparent tw:bg-selection-bg",
@@ -1341,7 +1014,7 @@ pub fn PropsPanel(
             ModuleContextStrip { chain, workspace_href }
         };
     }
-    // WIRE-side selections (the Patching view's leaves): readout cards in
+    // WIRE-side selections (the Outputs panel's leaves): readout cards in
     // the same stack family, deepest first (B′) — the selected level is
     // the top card, its wire ancestors unwind beneath, the module chain
     // stays the muted strip. Cards are READOUTS in v1: the verbs act on

@@ -142,6 +142,10 @@ const OLD_MAPPING_DOCUMENTS: &[(&str, &str)] = &[
         "lp-core/lpc-mapping/src/corpus/",
         "the old reader's corpus, which the Map tab and its stories read until M4 deletes them",
     ),
+    (
+        "lab/mapping/fixtures-v11/",
+        "the mapping lab's frozen format-11 copies, which it reads until M4 retires it",
+    ),
 ];
 
 /// Directories the walk never enters: build output, dependencies, and VCS.

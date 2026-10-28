@@ -1,8 +1,7 @@
 //! The editor's ONE toolbar row, data-driven (D1): activities describe
 //! themselves as [`ToolbarGroup`]s of [`ToolbarItem`]s and the strip
 //! renders whatever it is given, dispatching clicks by id — the fixture ↔
-//! mapping morph is a data swap, and the patching view (R5) adds its verbs
-//! as another list, never another strip.
+//! mapping morph is a data swap, never another strip.
 
 use dioxus::prelude::*;
 use dioxus_icons::lucide::{
@@ -84,15 +83,14 @@ pub(crate) enum ToolbarItem {
         active: bool,
         enabled: bool,
     },
-    /// Inert text: activity labels, counts, save state.
+    /// Inert text: counts, save state, notices.
     Status { text: String, kind: StatusKind },
 }
 
-/// How inert text reads: an activity LABEL (uppercase tracking), a MONO
-/// readout (counts, save state), or an ATTENTION notice (apply failures).
+/// How inert text reads: a MONO readout (counts, save state), or an
+/// ATTENTION notice (apply failures).
 #[derive(Clone, Copy, PartialEq)]
 pub(crate) enum StatusKind {
-    Label,
     Mono,
     Attention,
 }
@@ -170,7 +168,6 @@ fn render_item(
             span {
                 key: "{group_id}-{index}",
                 class: match kind {
-                    StatusKind::Label => "tw:text-[10px] tw:font-semibold tw:uppercase tw:tracking-[0.13em] tw:text-muted-foreground",
                     StatusKind::Mono => "tw:font-mono tw:text-[10px] tw:text-dim-foreground",
                     StatusKind::Attention => "tw:font-mono tw:text-[10px] tw:text-status-attention-foreground",
                 },

@@ -28,8 +28,6 @@ pub const EDIT_JOURNAL_CAP: usize = 256;
 pub enum UiEditorMode {
     /// The focused fixture's `MapEditorSession` (geometry edits).
     Mapping,
-    /// The patch-verb byte stack (wiring edits).
-    Patching,
     /// The `editor.json` byte stack (canvas placement edits).
     Arrange,
 }
@@ -117,7 +115,7 @@ mod tests {
     #[test]
     fn the_sequence_is_strictly_monotonic_across_modes() {
         let mut journal = EditJournal::default();
-        let a = journal.record(UiEditJournalEvent::Edit, None, UiEditorMode::Patching);
+        let a = journal.record(UiEditJournalEvent::Edit, None, UiEditorMode::Mapping);
         let b = journal.record(UiEditJournalEvent::ModeSwitch, None, UiEditorMode::Arrange);
         let c = journal.record(
             UiEditJournalEvent::Edit,

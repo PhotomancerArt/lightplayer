@@ -25,8 +25,8 @@ use lpa_studio_core::{
 };
 use lpc_mapping::{Bounds2d, Map2dDoc, Map2dShape, PathAlign, ResolvedMap2d};
 
-use crate::app::node::lamp_view::{UNLIT_RGB, fixture_live_colors};
-use crate::app::patch::patch_panel::srgb8;
+use super::instance_target::instance_target;
+use crate::app::node::lamp_view::fixture_live_colors;
 
 /// Display cap: a fixture with more lamps than this renders every k-th
 /// lamp (display subsampling only — dome-scale fixtures must not melt the
@@ -187,29 +187,15 @@ pub(crate) fn ProjectCanvasHost(
     /// (stories).
     #[props(default)]
     on_focus: Option<EventHandler<NodeId>>,
-    /// Live colors on ALL fixture sprites, default-on (the Patching
-    /// view's guide invariant: patched objects glow with product data,
-    /// unpatched stay palette). The Mapping view omits it — its live
-    /// display is the dived feed behind the L toggle.
-    #[props(default)]
-    live_sprites: bool,
-    /// The Patching view passes true: a sprite is a COUNTERPART an armed
-    /// assign can complete against, exactly like its tree row. Selection
-    /// is unchanged either way — plain clicks never write.
-    #[props(default)]
-    patch_verbs: bool,
     /// The Mapping view passes true: the fixture selection box wears
     /// corner scale handles (transform furniture is that view's
-    /// activity; Patching multi-selects without it).
+    /// activity).
     #[props(default)]
     transform_handles: bool,
     on_action: EventHandler<UiAction>,
 ) -> Element {
-    // The frame-scoped arm; absent outside the workbench frame (stories).
-    let patching_ui =
-        use_hook(try_consume_context::<crate::app::editor_shell::patching::PatchingUi>);
-    // Core's offer tree: a sprite click that completes an armed assign
-    // presses the fixture's `assign` offer.
+    // Core's offer tree: a committed move presses each moved fixture's
+    // `arrange/set` offer.
     let offers = crate::core::use_offers();
     // Geometry is derived per (surface, bodies, pack, selection) change —
     // resolver runs are cheap at fixture grain and the memo keeps drag
@@ -337,53 +323,6 @@ pub(crate) fn ProjectCanvasHost(
         }
     }
 
-    // The SPRITE live feed (live_sprites hosts — the Patching view): one
-    // color vec per fixture key, decoded from each fixture's published
-    // frame per snapshot tick. Keep-last-good PER FIXTURE across apply
-    // gaps (same reasoning as the dived feed); compare-then-set so a
-    // quiet frame re-renders nothing.
-    let mut sprite_live = use_signal(BTreeMap::<String, Vec<[u8; 3]>>::new);
-    if live_sprites {
-        let previous = sprite_live.peek().clone();
-        let mut feeds = BTreeMap::new();
-        for (key, node) in &nodes {
-            let Some(fixture) = surface
-                .fixtures
-                .iter()
-                .find(|fixture| fixture.node == *node)
-            else {
-                continue;
-            };
-            let mut colors = fixture_live_colors(&surface, fixture);
-            // Keep-last-good across an apply gap — but only while the
-            // fixture still HAS a run. A fixture with nothing on a wire
-            // publishes no frame at all, and keeping its last good colors
-            // then would leave the light it used to make painted on lamps
-            // that are now dark: exactly the second opinion Q9 exists to
-            // remove. Unmapped means unlit, and the selected object's chase
-            // arrives from the controller below.
-            if colors.is_empty()
-                && !fixture.patch.cells.is_empty()
-                && let Some(kept) = previous.get(key)
-            {
-                colors = kept.clone();
-            }
-            // THE unmapped chase (Q9), from the controller: the selected
-            // object has no wire, so no published frame can carry its
-            // colors — but the panel strip is showing them, and a sprite
-            // that stayed dark would be a second opinion about one object.
-            // The very same `chase_preview` paints both.
-            let colors = with_chase_preview(&surface, *node, colors, fixture.patch.lamps);
-            if colors.is_empty() {
-                continue;
-            }
-            feeds.insert(key.clone(), colors);
-        }
-        if previous != feeds {
-            sprite_live.set(feeds);
-        }
-    }
-
     // Fit runs at render, guarded: armed at mount and by the zoom float /
     // `0` key, waiting for a real viewport measurement and real bounds.
     // Dived, fit frames the FOCUSED fixture's placed bounds (the optional
@@ -495,8 +434,6 @@ pub(crate) fn ProjectCanvasHost(
         let nodes = nodes.clone();
         let grammar_surface = surface.clone();
         let full_selection = selection.clone();
-        // The arm completes against a SINGLE end (multi is not armable).
-        let grammar_selection = selection.single().cloned();
         move |event: FixtureEvent| match event {
             FixtureEvent::Select {
                 pick: Some(pick),
@@ -514,28 +451,9 @@ pub(crate) fn ProjectCanvasHost(
                         dispatch_selection(&on_action, next);
                         return;
                     }
-                    // The PICK GRAIN is view policy (grain follows
-                    // activity): Patching names the OBJECT under the
-                    // cursor (Q10 — the walk-up loop taps physical
-                    // pieces); Mapping selects the FIXTURE (D4 — click
+                    // A plain click selects the FIXTURE (D4 — click
                     // selects at scope level, double-click descends).
-                    let target = plain_click_target(patch_verbs, &grammar_surface, *node, &pick);
-                    // The same fixture-side completion the tree's rows
-                    // carry: armed assign + a free segment → the clicked
-                    // OBJECT takes it (stronger than the old next-unmapped
-                    // resolution — a click says WHICH). Unarmed, this is a
-                    // plain select.
-                    if patch_verbs {
-                        crate::app::editor_shell::patching::complete_assign_on_object(
-                            &on_action,
-                            &offers.peek(),
-                            &grammar_surface,
-                            &grammar_selection,
-                            patching_ui,
-                            &target,
-                        );
-                    }
-                    select(Some(target));
+                    select(Some(UiPatchTarget::Fixture { node: *node }));
                 }
             }
             FixtureEvent::Select { pick: None, .. } => {
@@ -632,9 +550,7 @@ pub(crate) fn ProjectCanvasHost(
                             .iter()
                             .find(|fixture| fixture.node == *node)
                             .and_then(|fixture| fixture.instances.first())
-                            .map(|instance| {
-                                crate::app::patch::verb_ui::instance_target(*node, instance)
-                            })
+                            .map(|instance| instance_target(*node, instance))
                     });
                     let mut next = UiSelection::empty();
                     match first {
@@ -685,7 +601,6 @@ pub(crate) fn ProjectCanvasHost(
                 viewport,
                 drag: arrange_drag,
                 live_feed: arrange_live,
-                sprite_live_feed: live_sprites.then_some(sprite_live),
                 on_committed: committed,
                 placement: dive_placement,
                 fixtures: sprites,
@@ -704,65 +619,8 @@ pub(crate) fn ProjectCanvasHost(
     }
 }
 
-/// Lay the controller's unmapped-chase preview (Q9) over one fixture's
-/// sprite colors, in the fixture's own lamp numbering.
-///
-/// The preview is the SAME data the panel strip paints, converted through
-/// the same linear → sRGB transfer a published frame sample takes — so the
-/// strip and the sprites cannot disagree, and both advance and freeze on
-/// the controller's one frame clock.
-///
-/// An unmapped object usually has no live colors at all behind it (nothing
-/// published its lamps), so the base may be empty: it is grown to the
-/// fixture's lamp count with the unlit neutral first, which reads as
-/// geometry rather than as black lamps. A fixture the preview does not name
-/// is returned untouched.
-fn with_chase_preview(
-    surface: &UiPatchSurface,
-    node: NodeId,
-    base: Vec<[u8; 3]>,
-    lamps: u32,
-) -> Vec<[u8; 3]> {
-    let Some(preview) = surface
-        .chase_preview
-        .as_ref()
-        .filter(|preview| preview.node == node)
-    else {
-        return base;
-    };
-    let end = preview.start as usize + preview.colors.len();
-    let mut colors = base;
-    if colors.len() < end.max(lamps as usize) {
-        colors.resize(end.max(lamps as usize), UNLIT_RGB);
-    }
-    for (offset, rgb) in preview.colors.iter().enumerate() {
-        if let Some(slot) = colors.get_mut(preview.start as usize + offset) {
-            *slot = srgb8(*rgb);
-        }
-    }
-    colors
-}
-
-/// The plain-click pick grain, per view policy (unified-selection D4 /
-/// walk-up Q10): patch-verb hosts (Patching) resolve the OBJECT under the
-/// cursor — the walk-up loop taps physical pieces and "a click says
-/// WHICH"; everything else (Mapping, stories) selects the FIXTURE — click
-/// selects at scope level, and descent is the double-click's job.
-fn plain_click_target(
-    pick_objects: bool,
-    surface: &UiPatchSurface,
-    node: NodeId,
-    pick: &lpa_mapping_editor::FixturePick,
-) -> UiPatchTarget {
-    if pick_objects {
-        sprite_target(surface, node, pick.object, pick.lamp)
-    } else {
-        UiPatchTarget::Fixture { node }
-    }
-}
-
-/// What a sprite click selects (Q10): the OBJECT owning the clicked lamp,
-/// or the whole fixture when nothing finer can be named.
+/// What a sprite double-click descends to (Q10): the OBJECT owning the
+/// clicked lamp, or the whole fixture when nothing finer can be named.
 ///
 /// The lamp arrives in the fixture's OWN numbering (the canvas corrects for
 /// display subsampling before it leaves), which is the space instance spans
@@ -789,7 +647,7 @@ fn sprite_target(
     if let Some(index) = object
         && let Some(instance) = entry.instances.get(index)
     {
-        return crate::app::patch::verb_ui::instance_target(node, instance);
+        return instance_target(node, instance);
     }
     let Some(lamp) = lamp else {
         return fixture;
@@ -799,7 +657,7 @@ fn sprite_target(
         .iter()
         .find(|instance| lamp >= instance.start && lamp < instance.start + instance.lamps)
     {
-        Some(instance) => crate::app::patch::verb_ui::instance_target(node, instance),
+        Some(instance) => instance_target(node, instance),
         // Under a display stride the clicked lamp can fall in a gap between
         // spans; the fixture is the honest answer rather than a guess.
         None => fixture,
@@ -1572,8 +1430,7 @@ mod tests {
         assert!(bounds.min_x + bounds.width >= 90.0, "{bounds:?}");
     }
 
-    /// A three-instance fixture with nothing on a wire — the shape a
-    /// walk-up user clicks at.
+    /// A three-instance fixture with nothing on a wire.
     fn dome_surface() -> UiPatchSurface {
         use lpa_studio_core::{UiFixturePatch, UiPatchInstance, UiPatchSurfaceFixture};
 
@@ -1589,7 +1446,6 @@ mod tests {
             fixtures: vec![UiPatchSurfaceFixture {
                 node: NodeId::new(2),
                 label: "dome".to_string(),
-                manual_flow: true,
                 patch: UiFixturePatch {
                     lamps: 90,
                     ..Default::default()
@@ -1603,35 +1459,6 @@ mod tests {
             }],
             ..Default::default()
         }
-    }
-
-    /// The pick grain is VIEW POLICY (the one grammar, two activities):
-    /// Patching (`patch_verbs`) resolves the object under the cursor —
-    /// Q10's "a click says WHICH" — while Mapping selects the fixture,
-    /// because at root scope a click selects at scope level (D4) and
-    /// descent belongs to the double-click.
-    #[test]
-    fn plain_click_grain_follows_the_view() {
-        let surface = dome_surface();
-        let node = NodeId::new(2);
-        let pick = lpa_mapping_editor::FixturePick {
-            key: "k".into(),
-            lamp: Some(35),
-            object: None,
-        };
-        assert_eq!(
-            plain_click_target(true, &surface, node, &pick),
-            UiPatchTarget::Instance {
-                node,
-                path: "/sector/1".to_string(),
-            },
-            "Patching: the object under the cursor"
-        );
-        assert_eq!(
-            plain_click_target(false, &surface, node, &pick),
-            UiPatchTarget::Fixture { node },
-            "Mapping: click selects at scope level"
-        );
     }
 
     /// Q10: a sprite click names the OBJECT the clicked lamp belongs to.
@@ -1693,75 +1520,6 @@ mod tests {
                 start: 30,
                 count: Some(30),
             }
-        );
-    }
-
-    /// Q9's canvas half: the sprites paint the CONTROLLER's chase, at the
-    /// controller's phase — the very colors the panel strip is showing.
-    #[test]
-    fn the_sprite_feed_paints_the_core_computed_chase() {
-        use lpa_studio_core::UiPatchChasePreview;
-
-        let mut surface = dome_surface();
-        let node = NodeId::new(2);
-        // No preview: the sprites are whatever the wire published (here,
-        // nothing) — the canvas invents no chase of its own.
-        assert!(with_chase_preview(&surface, node, Vec::new(), 90).is_empty());
-
-        surface.chase_preview = Some(UiPatchChasePreview {
-            node,
-            start: 30,
-            colors: vec![[65535, 0, 0]; 30],
-            phase: 0.25,
-        });
-        let colors = with_chase_preview(&surface, node, Vec::new(), 90);
-        assert_eq!(colors.len(), 90, "the fixture's whole lamp field");
-        assert_eq!(colors[0], UNLIT_RGB, "lamps outside the object stay unlit");
-        assert_eq!(colors[30], srgb8([65535, 0, 0]));
-        assert_eq!(colors[59], srgb8([65535, 0, 0]));
-        assert_eq!(colors[60], UNLIT_RGB);
-
-        // A live base keeps its own lamps and takes the chase over the
-        // object's — one fixture, two honest sources.
-        let base = vec![[9, 9, 9]; 90];
-        let colors = with_chase_preview(&surface, node, base, 90);
-        assert_eq!(colors[0], [9, 9, 9]);
-        assert_eq!(colors[30], srgb8([65535, 0, 0]));
-
-        // Another fixture's sprites are untouched.
-        assert!(with_chase_preview(&surface, NodeId::new(7), Vec::new(), 90).is_empty());
-    }
-
-    /// A fixture with NO run publishes no frame, so its live colors are
-    /// empty — and keeping the last good ones would leave the light it used
-    /// to make painted on lamps that are now dark. Unmapping must actually
-    /// go dark (and then only the SELECTED object chases, from the
-    /// controller). The keep-last-good exists for apply gaps on a fixture
-    /// that still has a run, and that case still keeps.
-    #[test]
-    fn keep_last_good_does_not_outlive_a_fixtures_runs() {
-        use lpa_studio_core::UiPatchCell;
-
-        let surface = dome_surface();
-        let fixture = &surface.fixtures[0];
-        assert!(fixture.patch.cells.is_empty(), "nothing on a wire");
-        assert!(
-            fixture_live_colors(&surface, fixture).is_empty(),
-            "and so no frame, and so no colors to feed"
-        );
-
-        let mut mapped = dome_surface();
-        mapped.fixtures[0].patch.cells.push(UiPatchCell {
-            id: "2:0".to_string(),
-            source_start: 0,
-            lamps: 30,
-            wire_start: 0,
-            ..Default::default()
-        });
-        assert!(
-            !mapped.fixtures[0].patch.cells.is_empty(),
-            "a fixture that still has a run keeps its last good frame across \
-             an apply gap — the condition the feed guards on",
         );
     }
 
@@ -1899,21 +1657,16 @@ mod tests {
         assert!(objects[0].cells.is_empty(), "dots stay dots");
     }
 
-    /// The whole seam on REAL bytes: the small-dome's own document through
-    /// resolve → strand facts → sprite bodies. Each of its fifty panels is
-    /// a repeat instance of one closed 119-lamp polygon, so each must come
-    /// out as one body of one lit loop wearing a cell per drawn lamp.
+    /// The whole seam on REAL bytes: the small-dome's own document (as it
+    /// was before map2d format 6 — the Map canvas reads no later one)
+    /// through resolve → strand facts → sprite bodies. Each of its fifty
+    /// panels is a repeat instance of one closed 119-lamp polygon, so each
+    /// must come out as one body of one lit loop wearing a cell per drawn
+    /// lamp.
     #[test]
     fn the_small_dome_panels_draw_as_closed_runs_of_cells() {
-        let example = lpa_studio_core::app::home::embedded_example("catalog/small-dome")
-            .expect("the small-dome example is embedded");
-        let text = example
-            .files
-            .iter()
-            .find(|(file, _)| *file == "dome/dome.map2d.json")
-            .map(|(_, bytes)| std::str::from_utf8(bytes).expect("utf8"))
-            .expect("the dome document");
-        let doc = Map2dDoc::from_json(text).expect("the dome parses");
+        let doc = Map2dDoc::from_json(super::super::map_canvas_sample_documents::SMALL_DOME_DOME)
+            .expect("the dome parses");
         let resolved = lpc_mapping::resolve(&doc).expect("the dome resolves");
         let points: Vec<[f32; 2]> = resolved.lamps.iter().map(|lamp| lamp.pos).collect();
         let total = points.len() as u32;
