@@ -68,8 +68,8 @@ impl Editor {
         let Some(from) = self.selected_end() else {
             self.notice = Some(Notice::refused(
                 "Nothing to patch",
-                "a patch is made from one object, or from a run of pixels on one port",
-                "select an object, a port or its pixels, then press A",
+                "a patch is made from one segment, or from a run of pixels on one port",
+                "select a segment, a port or its pixels, then press A",
             ));
             return;
         };
@@ -89,8 +89,8 @@ impl Editor {
         let Some(object) = self.selected_object() else {
             self.notice = Some(Notice::refused(
                 "Nothing to swap",
-                "a swap trades the places of two objects",
-                "select one object on the wire, press S, then pick the other",
+                "a swap trades the places of two segments",
+                "select one segment on the wire, press S, then pick the other",
             ));
             return;
         };
@@ -179,7 +179,7 @@ impl Editor {
         }
         if self.candidates().is_empty() {
             let why = match self.armed.as_ref().map(|a| &a.from) {
-                Some(PairEnd::Segment { .. }) => "every object is already on the wire",
+                Some(PairEnd::Segment { .. }) => "every segment is already on the wire",
                 _ => "no port has a free pixel",
             };
             self.notice = Some(Notice::info(format!("Nothing to pair with: {why}")));
@@ -410,8 +410,8 @@ impl Editor {
         if objects.is_empty() {
             self.notice = Some(Notice::refused(
                 "Nothing to unpatch",
-                "U takes objects off the wire",
-                "select the objects to take off",
+                "U takes segments off the wire",
+                "select the segments to take off",
             ));
             return;
         }
@@ -435,7 +435,7 @@ impl Editor {
         self.notice = Some(Notice::info(match n {
             0 => "Nothing was on the wire".to_string(),
             1 => format!("{} unpatched", self.segment_words(&objects[0])),
-            n => format!("{n} objects unpatched"),
+            n => format!("{n} segments unpatched"),
         }));
     }
 
@@ -473,8 +473,8 @@ impl Editor {
         if objects.is_empty() {
             self.notice = Some(Notice::refused(
                 format!("Nothing to be {did}"),
-                "wiring keys act on objects on the wire",
-                "select an object; A patches one that isn't on the wire",
+                "wiring keys act on segments on the wire",
+                "select a segment; A patches one that isn't on the wire",
             ));
             return;
         }
@@ -517,7 +517,7 @@ impl Editor {
         self.after_edit();
         let what = match objects.as_slice() {
             [o] => self.segment_words(o),
-            many => format!("{} objects", many.len()),
+            many => format!("{} segments", many.len()),
         };
         self.notice = Some(Notice::info(format!(
             "{what}: {did}{}",
@@ -533,7 +533,7 @@ impl Editor {
         let Some(fixture) = self.selected_fixture() else {
             self.notice = Some(Notice::refused(
                 "No fixture to unpatch",
-                "⇧U takes every object of one fixture off the wire",
+                "⇧U takes every segment of one fixture off the wire",
                 "select a fixture, or anything in one",
             ));
             return;
@@ -891,7 +891,7 @@ impl Editor {
                     self.segment_words(other),
                     x.pixels.len()
                 ),
-                format!("two objects share those pixels; the board shows {shows}"),
+                format!("two segments share those pixels; the board shows {shows}"),
                 "shift one ([ ]) or patch it elsewhere (A)",
             ));
         }
@@ -921,7 +921,7 @@ impl Project {
 fn pinned_words(edit: PatchEdit) -> String {
     match edit.pinned {
         0 => String::new(),
-        1 => " · pinned 1 other object where it was".into(),
-        n => format!(" · pinned {n} other objects where they were"),
+        1 => " · pinned 1 other segment where it was".into(),
+        n => format!(" · pinned {n} other segments where they were"),
     }
 }

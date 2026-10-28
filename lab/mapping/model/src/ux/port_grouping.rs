@@ -26,7 +26,7 @@ impl PortGrouping {
     /// The word on the switch; groups say their size.
     pub fn words(self, size: u32) -> String {
         match self {
-            PortGrouping::Objects => "objects".into(),
+            PortGrouping::Objects => "segments".into(),
             PortGrouping::Groups => format!("groups of {size}"),
             PortGrouping::Pixels => "pixels".into(),
         }

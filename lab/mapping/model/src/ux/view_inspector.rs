@@ -644,7 +644,7 @@ impl Editor {
                     .collect();
                 let mut items = vec![UiItem::Fact(format!("Free · {pixels} of {port}"))];
                 if options.is_empty() {
-                    items.push(UiItem::Hint("Every object is on the wire.".into()));
+                    items.push(UiItem::Hint("Every segment is on the wire.".into()));
                 } else {
                     items.push(UiItem::PatchHere { options });
                 }

@@ -8,9 +8,21 @@ planning workspace: `lp2025/2026-10-10-1853-mapping-design-lab/vision.md`.
 just lab-mapping        # serves the canvas; the printed URL is the source of truth
 cargo test -p lab-mapping-model        # the statements
 cargo test -p lab-layout -p lab-arrows # the layout's and the arrows' statements
-cargo test -p lab-mapping-files        # opening and saving real projects
+cargo test -p lab-mapping-files        # opening real projects (format 12, map2d 6)
 cargo run -p lab-mapping-radiance-gen  # regenerates projects/radiance-dome
 ```
+
+> **Mapping rebuild M4 P03 (2026-10-28):** a fixture's mapping is now
+> `lpc-mapping`'s own model — an `lpc_mapping::part::Mapping` rendered by
+> `part::render` and patched by `patching::patch_mapping`, the engine's
+> patcher, against port tables the host hands over (Studio: the engine's
+> `output_port_slices`). The lab's components, objects, walker, cursor ops,
+> rules and overrides are gone (`domain/part_ref.rs`, `drawn_segment.rs`,
+> `patch.rs`, `walked.rs`, `port_tables.rs` replace them), the files crate
+> reads map2d format 6 with `lpc-mapping`'s reader and saves nothing until
+> P05, and the model no longer stands behind a fence. Sections below that
+> describe components, objects and the walker are the spike's design, kept
+> until M4 P10 folds this README into the crates' own.
 
 ## The crates
 
@@ -54,11 +66,10 @@ cargo run -p lab-mapping-radiance-gen  # regenerates projects/radiance-dome
   through untouched, writes only the files it owns and
   only when what they say changed, so saving an unedited project writes
   nothing. It also bakes the three test projects in for the page.
-- **`fixtures-v11/`**: the format-11 copies the lab, its tests and Studio's
-  Graph stories open. Project format 12 (mapping rebuild M3) moved every
-  repo project to map2d format 6, which the lab does not read (it refuses
-  a format-12 project by name); its README lists where each copy came
-  from. `fit-tests/` (`lab-mapping-fit-tests`), the proof against the
+- **`fixtures-v11/`**: format-11 copies the lab read between project
+  format 12 (mapping rebuild M3) and M4 P03; since P03 nothing reads them
+  (the lab, its tests and Studio's Graph stories open the repo's own
+  format-12 projects), and they go with the lab (M4 P10). `fit-tests/` (`lab-mapping-fit-tests`), the proof against the
   product's old patch path, was deleted with project format 12: its oracle
   was that path, and the upgrade's landing goldens
   (`lpc-engine/tests/upgrade_landing.rs`) superseded it.

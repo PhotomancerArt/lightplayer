@@ -477,7 +477,7 @@ fn DebugMenu(ed: GraphEditor, pinning: bool, forced: Option<SizeClass>) -> Eleme
                     button {
                         class: "tool",
                         tabindex: "-1",
-                        title: "Wire the hardware as a real install often is: the first output's objects shuffled across its ports, each a random way round, entering at a random lamp (seeded)",
+                        title: "Wire the hardware as a real install often is: the first output's segments shuffled across its ports, each a random way round, entering at a random lamp (seeded)",
                         onmousedown: move |evt| evt.prevent_default(),
                         onclick: {
                             let ed = ed.clone();

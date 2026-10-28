@@ -243,7 +243,7 @@ fn InspectorItem(ed: GraphEditor, item: UiItem) -> Element {
                             ed.input(GraphInput::Patch(PatchInput::PatchHere { option }));
                         }
                     },
-                    option { value: "", selected: true, disabled: true, "Choose an object…" }
+                    option { value: "", selected: true, disabled: true, "Choose a segment…" }
                     for (i, word) in options.iter().enumerate() {
                         option { value: "{i}", "{word}" }
                     }
