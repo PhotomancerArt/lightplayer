@@ -270,13 +270,18 @@ fn plan_r(polar_deg: f32) -> f32 {
     polar_deg / 90.0 * R_EQUATOR
 }
 
+// The generator's trigonometry is `libm`'s, never std's: std's `sin`,
+// `atan2` and `hypot` are the platform's C library, which differs by an ulp
+// between macOS and glibc, and the committed catalog must be what this
+// writes on every host CI runs (see `plan_boxes`).
+
 fn pt(r: f32, phi_deg: f32) -> [f32; 2] {
     let a = phi_deg.to_radians();
-    [CENTER[0] + r * a.cos(), CENTER[1] + r * a.sin()]
+    [CENTER[0] + r * libm::cosf(a), CENTER[1] + r * libm::sinf(a)]
 }
 
 fn dist(a: [f32; 2], b: [f32; 2]) -> f32 {
-    (a[0] - b[0]).hypot(a[1] - b[1])
+    libm::hypotf(a[0] - b[0], a[1] - b[1])
 }
 
 fn round1(v: f32) -> f32 {
@@ -568,30 +573,94 @@ fn plan_boxes(instances: &[PanelInstance]) -> (Vec<usize>, Vec<usize>) {
 
     // Wire order within a box: sweep by azimuth away from the box's own
     // side (box 1 sits at phi 0, box 2 at phi 180), inner rings after
-    // outer at equal sweep so chains run ground-up.
+    // outer at equal sweep so chains run ground-up, and of two panels at
+    // the same sweep and ring, the one on the low-y half of the plan first.
+    //
+    // The five-fold copies put panels at mirrored azimuths (rim a's copies 1
+    // and 4 at +-72 degrees from box 1), whose computed sweeps differ only
+    // in their last bit or two. Compared raw, that last bit chose the wire
+    // order, and it was the C library's: macOS and glibc ordered such a pair
+    // differently, so the catalog written on a Mac failed CI on Linux. So
+    // two sweeps (or rings) closer than `SWEEP_SAME` (`RING_SAME`) are the
+    // same, a tolerance far above that noise and below any real difference
+    // between two panels (band a's copies sit 4e-4 degrees off their
+    // mirror), the tie is broken by a stated rule, and the trigonometry is
+    // `libm`'s, the same on every host. `sweep_keys` refuses a pair in the
+    // band between, where the tolerance itself would be the coin toss.
     let sweep = |list: &[usize], box_phi: f32| -> Vec<usize> {
-        let mut sorted = list.to_vec();
-        sorted.sort_by(|a, b| {
-            let key = |index: usize| {
-                let c = instances[index].centroid;
-                let phi = (c[1] - CENTER[1]).atan2(c[0] - CENTER[0]).to_degrees();
-                let mut delta = phi - box_phi;
-                while delta < -180.0 {
-                    delta += 360.0;
+        let keys = sweep_keys(instances, list, box_phi);
+        let mut sorted: Vec<usize> = (0..list.len()).collect();
+        sorted.sort_by(|&a, &b| {
+            let (ka, kb) = (keys[a], keys[b]);
+            let by = |x: f32, y: f32, same: f32| {
+                if (x - y).abs() < same {
+                    core::cmp::Ordering::Equal
+                } else {
+                    x.total_cmp(&y)
                 }
-                while delta >= 180.0 {
-                    delta -= 360.0;
-                }
-                (delta.abs(), -dist(c, CENTER))
             };
-            let (ka, kb) = (key(*a), key(*b));
-            ka.0.total_cmp(&kb.0)
-                .then(ka.1.total_cmp(&kb.1))
-                .then(a.cmp(b))
+            by(ka.sweep, kb.sweep, SWEEP_SAME)
+                .then(by(kb.ring, ka.ring, RING_SAME))
+                .then(ka.high_y.cmp(&kb.high_y))
+                .then(list[a].cmp(&list[b]))
         });
-        sorted
+        sorted.into_iter().map(|position| list[position]).collect()
     };
     (sweep(right, 0.0), sweep(left, 180.0))
+}
+
+/// Two panels' sweeps (degrees) closer than this are the same sweep.
+const SWEEP_SAME: f32 = 1e-4;
+/// Two panels' rings (canvas units from the center) closer than this are
+/// the same ring.
+const RING_SAME: f32 = 1e-3;
+
+/// A panel's place in its box's sweep.
+#[derive(Clone, Copy)]
+struct SweepKey {
+    /// Degrees from the box's own side, either way.
+    sweep: f32,
+    /// Distance from the plan's center (outer first).
+    ring: f32,
+    /// On the high-y half of the plan (the low-y half first).
+    high_y: bool,
+}
+
+/// The sweep keys of `list`'s panels, refusing any two whose sweeps or rings
+/// are neither clearly the same (within a third of the tolerance) nor
+/// clearly apart (beyond twice it).
+fn sweep_keys(instances: &[PanelInstance], list: &[usize], box_phi: f32) -> Vec<SweepKey> {
+    let keys: Vec<SweepKey> = list
+        .iter()
+        .map(|&index| {
+            let c = instances[index].centroid;
+            let phi = libm::atan2f(c[1] - CENTER[1], c[0] - CENTER[0]).to_degrees();
+            let mut delta = phi - box_phi;
+            while delta < -180.0 {
+                delta += 360.0;
+            }
+            while delta >= 180.0 {
+                delta -= 360.0;
+            }
+            SweepKey {
+                sweep: delta.abs(),
+                ring: dist(c, CENTER),
+                high_y: c[1] >= CENTER[1],
+            }
+        })
+        .collect();
+    for a in &keys {
+        for b in &keys {
+            for (x, y, same) in [(a.sweep, b.sweep, SWEEP_SAME), (a.ring, b.ring, RING_SAME)] {
+                let gap = (x - y).abs();
+                assert!(
+                    gap < same / 3.0 || gap > same * 2.0,
+                    "two panels {gap} apart are neither the same place nor clearly apart"
+                );
+            }
+        }
+    }
+    keys
 }
 
 /// One output's port table: `(endpoint token, lamp count)` per port.

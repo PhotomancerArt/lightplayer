@@ -7280,6 +7280,7 @@ dependencies = [
 name = "lpt-geodome"
 version = "40.0.0"
 dependencies = [
+ "libm",
  "lpc-mapping",
 ]
 
