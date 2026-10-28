@@ -4,17 +4,18 @@ The LED fixture mapping domain, shared by the engine, the device and Studio:
 **mapping = layout + patching**. A fixture's mapping says where each lamp is
 and where on the hardware its data goes.
 
-The crate holds two generations side by side until M3 (project format 12)
-of the mapping rebuild (planning `lp2025/2026-10-27-0114-mapping-rebuild`;
+The mapping rebuild (planning `lp2025/2026-10-27-0114-mapping-rebuild`;
 ADR `docs/adr/2026-10-27-mapping-model-parts-segments-patcher.md`):
 
 - **The mapping model and map2d format 6** (`part`, `patching`, `map2d6`):
-  parts, segments and the patcher, in one file. Built in M1. Since M2 the
-  engine runs it for every fixture whose map2d is format 6 (the test
-  projects `projects/test/*-6`), beside today's path for formats 1–5;
-  every project moves onto it in M3, Studio's Graph in M4.
-- **Today's documents** (map2d formats 1–5, the patch document): what the
-  engine, the device and Studio run until M3 retires them (below).
+  parts, segments and the patcher, in one file. Built in M1; since M3
+  (project format 12) the engine runs it for every fixture, and its patching
+  is the engine's one patching path. Studio's Graph moves onto it in M4.
+- **The older map2d document** (formats 1–5, `Map2dDoc`): its resolver is
+  also the new model's geometry, and Studio's Map tab reads it until M4. The
+  engine no longer reads it, and the patch document beside it is gone
+  (upgraded into format 6 by `lpa-upgrade`, which keeps its own frozen
+  readers).
 
 ## The mapping model
 
@@ -117,7 +118,6 @@ circular display as soldered:
 | `patching/` | Starts, flows, overrides, the cursor, `patch_mapping`, `patch_mapping_placed` (no walk record: the engine's), spans, problems |
 | `map2d6/` | Format 6: its document structs, path data, `read`, `write` |
 | `map2d_doc`, `map2d_resolve`, `map2d_fit`, `map2d_object_id` | Today's document and resolver; the resolver is also the new model's geometry |
-| `patch` | Today's patch document (until M3) |
 | `editor_meta` | Studio's `editor.json` |
 | `import/` | SVG import into today's document |
 | `corpus` | Shared test scenes |
@@ -234,42 +234,6 @@ not a runtime source of truth. CLI form:
 ```sh
 cargo run -p lpc-mapping --example svg_to_map2d -- path/to/mapping.svg > fixture.map2d.json
 ```
-
-## The patch document (until M3)
-
-Format 6 retires it: its rows become starts and overrides in the map2d file
-(M3). Until then: mapping says where a lamp *is*; **patching** says which physical jack the
-strand ended up in. A fixture is mapped once and re-patched on every install,
-so the patch is its own document (`fixture.patch.json`) beside the mapping —
-clearing a patch never disturbs a lamp position.
-
-```json
-{
-  "format": 1,
-  "entries": [
-    { "range": { "start": 0,  "count": 22 }, "at": { "channel": 0 } },
-    { "range": { "start": 22, "count": 22 }, "at": { "channel": 34 },
-      "reversed": true }
-  ]
-}
-```
-
-`range` is fixture-relative — lamp indices in the wiring order above — and
-`at.channel` is the lamp offset on the output's wire. Omitting `count` means
-"to the end of the fixture", so a patched tail survives the fixture growing.
-`reversed` lays a run down end-first (the strand fed from its far end); it is
-a placement bit, unrelated to a fixture's own `wire_reversed` sampling.
-
-Patches are **sparse**: `resolve_patch` anchors the entries and reflows every
-unclaimed lamp after the highest anchored end, in fixture order. So no patch,
-an empty patch, and a patch that anchors nothing all resolve to what auto-flow
-would have produced — clearing restores the default rather than going dark, and
-partial patching is the ordinary case. Two entries of one fixture claiming the
-same lamp, or the same wire channel, are a document error (two *different*
-fixtures colliding on one output is a runtime condition the engine degrades and
-reports). Format 2 added rows by object path (`/id/k`), outputs by name and
-a rotation offset; format 3 a `flow` (`auto` or `manual`); `PatchDoc`'s
-module doc holds the full form.
 
 ## Boundary
 
