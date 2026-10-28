@@ -66,6 +66,14 @@ pub fn graph_verb_path(verb: GraphVerb) -> OfferPath {
 
 /// Publish every verb the editor has on offer.
 pub fn publish_graph_offers(offers: &mut UiOfferTree, editor: &Editor) {
+    publish_key_offers(offers, editor);
+    for offer in value_offers(editor) {
+        offers.publish(offer);
+    }
+}
+
+/// The key verbs on offer now (cheap: the hint bar's).
+pub(crate) fn publish_key_offers(offers: &mut UiOfferTree, editor: &Editor) {
     for verb in editor.verbs() {
         // Delete's key acts on the selection; its offer takes a subject.
         if verb.takes_values() {
@@ -74,13 +82,21 @@ pub fn publish_graph_offers(offers: &mut UiOfferTree, editor: &Editor) {
         let action = level(verb, GraphOp::action(verb));
         offers.publish(UiOffer::new(graph_verb_path(verb), icon(verb), action));
     }
-    for verb in GraphVerb::WITH_VALUES {
-        // On offer while it has something to act on.
-        let subjects = editor.subjects(verb);
-        if !subjects.is_empty() {
-            offers.publish(value_offer(editor, verb, subjects));
-        }
-    }
+}
+
+/// The verbs that take values, each with its parameters, while it has
+/// something to act on. Their lists are the costly part on a big project
+/// (the radiance dome's run to thousands of options); they change only
+/// with the project, its port tables and the selection, so the controller
+/// keeps them between views (`GraphController::publish_offers`).
+pub(crate) fn value_offers(editor: &Editor) -> Vec<UiOffer> {
+    GraphVerb::WITH_VALUES
+        .into_iter()
+        .filter_map(|verb| {
+            let subjects = editor.subjects(verb);
+            (!subjects.is_empty()).then(|| value_offer(editor, verb, subjects))
+        })
+        .collect()
 }
 
 /// A patching verb's offer, with its parameters.

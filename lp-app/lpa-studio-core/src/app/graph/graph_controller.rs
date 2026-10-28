@@ -53,6 +53,7 @@ use lab_mapping_model::{BoardFrame, Editor, NodeId};
 use crate::StudioServerClient;
 use crate::app::graph::graph_canvas_meta::{EDITOR_JSON, apply_pins, with_pins};
 use crate::app::graph::graph_frame;
+use crate::app::graph::graph_offers;
 use crate::app::graph::graph_pictures;
 use crate::app::graph::graph_port_tables::port_tables;
 use crate::app::graph::graph_source::{GraphSource, location};
@@ -84,6 +85,11 @@ pub struct GraphController {
     deleted: BTreeMap<NodeId, Vec<(String, String)>>,
     /// The selection the board last breathed, while it breathes one.
     pulsed: Option<Vec<lab_mapping_model::Target>>,
+    /// The verbs that take values as last published, and what they were
+    /// worked out from: the project's revision, the generation (port
+    /// tables handed over move it) and the selection (which preselects
+    /// subjects). A view rebuilt while none of those moved reuses them.
+    value_offers: RefCell<Option<(OffersKey, Vec<crate::UiOffer>)>>,
     /// The render sources whose pictures the Graph shows, with their
     /// visual products (`graph_pictures.rs`, plan D11).
     pictures: Vec<(NodeId, crate::UiProductRef)>,
@@ -98,6 +104,14 @@ struct GraphOpened {
     read: BTreeMap<String, Option<String>>,
     /// The lab's nodes, as Studio's.
     nodes: BTreeMap<NodeId, lpc_model::NodeId>,
+}
+
+/// What the Graph's verbs that take values were worked out from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct OffersKey {
+    revision: u64,
+    generation: u64,
+    selection: Vec<lab_mapping_model::Target>,
 }
 
 /// What the board's frame was built from: the board's frame count, the
@@ -224,8 +238,22 @@ impl GraphController {
 
     /// Publish the Graph's verbs (`project/graph/…`), once it is open.
     pub fn publish_offers(&self, offers: &mut crate::UiOfferTree) {
-        if matches!(self.state, Some(UiGraphState::Open { .. })) {
-            crate::app::graph::publish_graph_offers(offers, &self.handle.editor().borrow());
+        if !matches!(self.state, Some(UiGraphState::Open { .. })) {
+            return;
+        }
+        let editor = self.handle.editor().borrow();
+        graph_offers::publish_key_offers(offers, &editor);
+        let key = OffersKey {
+            revision: editor.project.revision(),
+            generation: self.generation,
+            selection: editor.selection.clone(),
+        };
+        let mut kept = self.value_offers.borrow_mut();
+        if kept.as_ref().is_none_or(|(k, _)| *k != key) {
+            *kept = Some((key, graph_offers::value_offers(&editor)));
+        }
+        for offer in kept.iter().flat_map(|(_, o)| o) {
+            offers.publish(offer.clone());
         }
     }
 

@@ -384,7 +384,25 @@ A 2D canvas with selection, and the start of the whole node graph on it
   wiring keys are re-expressed on them (a turn is `set-offset`, U is
   `back-to-the-flow`, ⇧U is `back-to-the-flow` and `turn-off` on every
   segment), and Studio offers each with typed parameters, so a key, a row
-  and the app agent make the same edit by the same function.
+  and the app agent make the same edit by the same function. Choosing a
+  port (or an output) with no name names it, with the lowest free number,
+  in the same undo step (lean Q96, `output_naming.rs`).
+- **Layout verbs that take values** (`graph_layout_edit.rs`,
+  `layout_verb_choices.rs`): `rename`, `repeat`, `unrepeat`, `expand`,
+  `set-count` (a repeat's copies, a path's, a polygon's or a ring's lamps),
+  `add-ring`, `add-centre-lamp`, `remove-ring`, `set-split` (one segment,
+  or one per subpath or ring), `set-drawn-from` (a circle's outside or
+  inside, a path's first or last point) and `delete` (a node, a part or a
+  ring; ⌫ deletes the selection through the same function). Each mutation
+  is `lpc_mapping::edit`'s, so a rename's and an expand's references are
+  rewritten by the model's rules (D6), and what an edit leaves kept and
+  gone is said ("1 override on repeat1's copies is kept; it shows as a
+  problem"). The Lamps, Copies, Rings and Inner ring first rows and the
+  `r` key on a path or a ring press them; a radius, a grid's or a filled
+  polygon's numbers, a circle's way round and a fixture's box still set
+  their field. A verb is offered whenever something can take it; the
+  selection only preselects its subject (ruling DD37). Drawing stays a
+  gesture; one click of the path tool is a single lamp (Q94).
 - **A hint bar** that says what every key does in the current state, each
   action in a word or two ("select", "go in", "delete"), never naming what
   it acts on — the breadcrumb says what's selected. A hint comes and goes

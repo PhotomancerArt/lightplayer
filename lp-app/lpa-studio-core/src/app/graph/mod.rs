@@ -20,7 +20,9 @@ pub(crate) mod graph_highlight;
 #[cfg(test)]
 mod graph_landing_tests;
 mod graph_note;
-mod graph_offers;
+#[cfg(test)]
+mod graph_offer_cost_tests;
+pub(crate) mod graph_offers;
 mod graph_op;
 mod graph_pictures;
 mod graph_port_tables;

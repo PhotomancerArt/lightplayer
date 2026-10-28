@@ -64,8 +64,10 @@ lpa-studio-web, future CLI, future desktop, tests, and agents
   can't wait behind a device read and a whole-view rebuild; what an input
   changes for the rest of Studio reaches the actor as a
   `StudioCommand::Graph` note. Every verb is an offer at
-  `project/graph/<verb>`, the patching verbs with typed parameters (a
-  `subject` choice, a port, lamps…; `graph_offers.rs`); edits save through
+  `project/graph/<verb>`, the patching and layout verbs with typed
+  parameters (a `subject` choice, a port, lamps, a count…;
+  `graph_offers.rs`), each offered whenever something can take it; edits
+  save through
   the ordinary asset edit (`apply_asset_body`) in map2d format 6, a deleted
   node's files are deleted the same way (`apply_asset_delete`), pins go in `editor.json`'s per-node `canvas` surface, and the
   selection breathes or chases on the board through the Patch view's
