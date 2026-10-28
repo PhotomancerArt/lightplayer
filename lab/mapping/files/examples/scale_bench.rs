@@ -35,9 +35,9 @@ fn bench(key: &str, files: &lab_mapping_files::MemFiles, runs: usize) {
     });
     let project = Opened::open(files).unwrap().project;
     println!(
-        "\n== {key}: {} lamps, {} objects, {} nodes ({runs} runs, median ms)",
+        "\n== {key}: {} lamps, {} segments, {} nodes ({runs} runs, median ms)",
         project.lamp_count(),
-        project.objects().len(),
+        project.placed_segments().len(),
         project.all_nodes().len()
     );
     row("open (parse + build)", open);
@@ -61,7 +61,7 @@ fn bench(key: &str, files: &lab_mapping_files::MemFiles, runs: usize) {
         let input = Editor::new(p.clone()).layout_input();
         let _ = lab_layout::canvas_layout(&input);
     });
-    both("placed objects", &|p| {
+    both("placed segments", &|p| {
         let _ = p.placed_segments();
     });
     both("effective patch", &|p| {
@@ -70,11 +70,11 @@ fn bench(key: &str, files: &lab_mapping_files::MemFiles, runs: usize) {
     both("device frame (nothing selected)", &|p| {
         let _ = p.board_frame(&[], 1.0);
     });
-    let first_component = project
-        .objects()
+    let first_part = project
+        .placed_segments()
         .first()
-        .map(|o| Target::Part(o.id.component.clone()));
-    if let Some(t) = &first_component {
+        .map(|(_, s)| Target::Part(s.id.part()));
+    if let Some(t) = &first_part {
         let sel = vec![t.clone()];
         both("device frame (a repeat selected)", &|p| {
             let _ = p.board_frame(&sel, 1.0);
@@ -95,10 +95,10 @@ fn bench(key: &str, files: &lab_mapping_files::MemFiles, runs: usize) {
     e.set_placement(&lab_layout::canvas_layout(&e.layout_input()));
     e.resize(Vec2::new(1200.0, 800.0));
     e.fit();
-    let lamp = project
-        .objects()
-        .get(project.objects().len() / 2)
-        .and_then(|o| o.lamps.first().map(|l| l.pos))
+    let segments = project.placed_segments();
+    let lamp = segments
+        .get(segments.len() / 2)
+        .and_then(|(_, s)| s.lamps.first().map(|l| l.pos))
         .unwrap_or_default();
     for (view, zoom) in [("whole", 1.0), ("zoomed ×8", 8.0)] {
         let mut ed = e.clone();

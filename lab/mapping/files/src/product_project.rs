@@ -68,6 +68,9 @@ pub struct NodeFile {
     /// Its name in its module (the key in `nodes`).
     pub name: String,
     pub value: Value,
+    /// The file as it was read: what a product reader (Studio's port
+    /// tables read an output's def from it) reads, in its own key order.
+    pub text: String,
     /// A fixture's mapping file.
     pub map: Option<MapFile>,
 }
@@ -159,7 +162,9 @@ impl Reader<'_> {
                 )
             })?;
             let node_path = join(path, file_ref);
-            let node_value = read_json(self.src, &node_path)?;
+            let node_text = read_text(self.src, &node_path)?;
+            let node_value: Value = serde_json::from_str(&node_text)
+                .map_err(|e| FilesError::new(&node_path, e.to_string()))?;
             let id = self.node_id(name, parent);
             self.taken_nodes.insert(id.clone());
             let kind = node_value
@@ -171,6 +176,7 @@ impl Reader<'_> {
                 path: node_path.clone(),
                 name: name.clone(),
                 value: node_value.clone(),
+                text: node_text,
                 map: None,
             };
             let kind = match kind.as_str() {
@@ -258,13 +264,22 @@ impl Reader<'_> {
         let text = read_text(self.src, &map_path)?;
         match map2d6::peek_format(&text) {
             Ok(MAP2D6_FORMAT) => {}
-            Ok(older) => {
+            Ok(older) if older < MAP2D6_FORMAT => {
                 return Err(FilesError::new(
                     &map_path,
                     format!(
                         "this mapping is map2d format {older}, from an older LightPlayer; the \
                          Graph reads map2d format {MAP2D6_FORMAT} (Studio upgrades a project \
                          when it opens it)"
+                    ),
+                ));
+            }
+            Ok(newer) => {
+                return Err(FilesError::new(
+                    &map_path,
+                    format!(
+                        "this mapping is map2d format {newer}, from a newer LightPlayer; the \
+                         Graph reads map2d format {MAP2D6_FORMAT}"
                     ),
                 ));
             }

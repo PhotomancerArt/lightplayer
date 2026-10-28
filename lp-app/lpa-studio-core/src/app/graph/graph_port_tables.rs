@@ -17,7 +17,6 @@ use lab_mapping_files::ProductProject;
 use lab_mapping_model::{NodeId, Project};
 use lpc_engine::node::output_port_slices;
 use lpc_mapping::patching::{OutputName, OutputPorts, Port, PortKey};
-use serde_json::Value;
 
 /// Every fixture's port tables, by fixture.
 pub(crate) fn port_tables(
@@ -30,10 +29,7 @@ pub(crate) fn port_tables(
         .map(|n| {
             let mut tables: Vec<OutputPorts> = Vec::new();
             for output in files.reachable_outputs(project, &n.id) {
-                let Some(table) = files
-                    .nodes
-                    .get(&output)
-                    .and_then(|f| output_ports(&f.value))
+                let Some(table) = files.nodes.get(&output).and_then(|f| output_ports(&f.text))
                 else {
                     continue;
                 };
@@ -46,9 +42,11 @@ pub(crate) fn port_tables(
         .collect()
 }
 
-/// One output's table from its node file, when it is a named output.
-fn output_ports(value: &Value) -> Option<OutputPorts> {
-    let def = lpc_model::NodeDef::from_json_str(&value.to_string()).ok()?;
+/// One output's table from its node file's text (as authored: the slot
+/// reader streams, so the file's own key order, `kind` first, is what it
+/// reads), when it is a named output.
+fn output_ports(text: &str) -> Option<OutputPorts> {
+    let def = lpc_model::NodeDef::from_json_str(text).ok()?;
     let def = def.as_output()?;
     let name = def.output_name()?;
     let slices: Vec<_> = output_port_slices(def).map(|(_, slice)| slice).collect();
@@ -75,22 +73,21 @@ fn output_ports(value: &Value) -> Option<OutputPorts> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
 
     /// An output's table is its authored ports in key order, each a count
     /// of lamps times three channels, and a last port with no count takes
     /// the rest.
     #[test]
     fn a_named_outputs_ports_are_its_authored_slices() {
-        let value = json!({
-            "kind": "Output",
-            "name": "main",
-            "ports": {
-                "1": { "endpoint": "ws281x:local:D1" },
-                "0": { "endpoint": "ws281x:local:D0", "count": 64 }
-            }
-        });
-        let table = output_ports(&value).expect("a named output");
+        let text = r#"{
+  "kind": "Output",
+  "name": "main",
+  "ports": {
+    "1": { "endpoint": "ws281x:local:D1" },
+    "0": { "endpoint": "ws281x:local:D0", "count": 64 }
+  }
+}"#;
+        let table = output_ports(text).expect("a named output");
         assert_eq!(table.output, OutputName::new("main"));
         assert_eq!(
             table.ports,
@@ -107,14 +104,36 @@ mod tests {
         );
     }
 
+    /// A repo output file, `bindings` and all, reads as its table: the
+    /// file is read as authored (a reordered copy, `bindings` before
+    /// `kind`, is refused by the slot reader).
+    #[test]
+    fn an_output_with_bindings_reads_as_its_table() {
+        let text = r#"{
+  "kind": "Output",
+  "name": "1",
+  "ports": { "0": { "endpoint": "ws281x:local:D10" } },
+  "bindings": { "input": { "source": "bus:control.out" } }
+}"#;
+        let table = output_ports(text).expect("a named output");
+        assert_eq!(table.output, OutputName::new("1"));
+        assert_eq!(
+            table.ports,
+            vec![Port {
+                key: PortKey(0),
+                channels: None
+            }]
+        );
+    }
+
     /// An output with no name can't be named by a start, so it has no
     /// table.
     #[test]
     fn an_unnamed_output_has_no_table() {
-        let value = json!({
-            "kind": "Output",
-            "ports": { "0": { "endpoint": "ws281x:local:D0", "count": 8 } }
-        });
-        assert_eq!(output_ports(&value), None);
+        let text = r#"{
+  "kind": "Output",
+  "ports": { "0": { "endpoint": "ws281x:local:D0", "count": 8 } }
+}"#;
+        assert_eq!(output_ports(text), None);
     }
 }

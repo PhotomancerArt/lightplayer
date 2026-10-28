@@ -17,6 +17,8 @@ mod graph_files_key;
 mod graph_frame;
 mod graph_handle;
 pub(crate) mod graph_highlight;
+#[cfg(test)]
+mod graph_landing_tests;
 mod graph_note;
 mod graph_offers;
 mod graph_op;

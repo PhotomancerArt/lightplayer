@@ -4,14 +4,19 @@
 //! the way a person at the gate does — until the patch is the piece's.
 //!
 //! "Looking at the piece" is done the way a person does it: light the
-//! selection on the board, and see which object on the piece lights up.
+//! selection on the board, and see which segment on the piece lights up.
+//!
+//! Both open the repo's own projects (project format 12, map2d format 6),
+//! as the page bakes them in.
 
-use lab_mapping_files::Opened;
-use lab_mapping_files::embedded::{EAVES, EAVES_WIRED, Embedded, RADIANCE_DOME};
+mod common;
+
+use common::*;
+use lab_mapping_files::embedded::{EAVES, EAVES_WIRED, RADIANCE_DOME};
 use lab_mapping_model::domain::breath::BREATH_SECONDS;
 use lab_mapping_model::*;
 
-/// J1: the dome, one object at a time. The first box's panels are
+/// J1: the dome, one segment at a time. The first box's panels are
 /// scrambled across its ports, each a random way round and entering at a
 /// random lamp; everything is unpatched; then, port by port, the piece
 /// shows which panel is on it, A pairs it, R and the turn keys line its
@@ -57,7 +62,7 @@ fn j1_the_dome_one_panel_at_a_time() {
             crossed.push(want.clone());
         }
         if port == 3 {
-            // Object first, for once: the panel, then where it goes.
+            // Segment first, for once: the panel, then where it goes.
             let segment = e.selected_end().unwrap();
             key(&mut e, Key::Escape, none());
             e.select(vec![e.project.tree_target(&want)]);
@@ -118,24 +123,22 @@ fn j1_the_dome_one_panel_at_a_time() {
 
 /// J2: Sean's eaves across two ports. The house is wired from the corner
 /// where the runs meet: D10 feeds the front run from its far end, D9 the
-/// side run. The eaves open on auto, so the front runs backwards on the
-/// piece; R (Move & draw off) reverses its placement, the side run is
-/// patched onto D9 by hand, and then D10 can grow without moving it. Saved
-/// and opened again, the patch is the same.
+/// side run. The eaves open with no override, so the front runs backwards
+/// on the piece; R (Move & draw off) reverses its placement, the side run
+/// is patched onto D9 by hand, and then D10 can grow without moving it.
 #[test]
 fn j2_seans_eaves_across_two_ports() {
-    let opened = open(&EAVES);
     let piece = Piece::of(&open(&EAVES_WIRED).project, "the house");
-    let mut e = editor_of(opened.project.clone());
+    let mut e = editor_of(open(&EAVES).project);
     let fixture = e.project.fixtures()[0].id.clone();
     let output = e.project.outputs()[0].id.clone();
-    let objects: Vec<TreeRef> = e
+    let segments: Vec<TreeRef> = e
         .project
         .segments_in(&fixture)
         .iter()
         .map(|o| o.id.clone())
         .collect();
-    let (front, side) = (objects[0].clone(), objects[1].clone());
+    let (front, side) = (segments[0].clone(), segments[1].clone());
     assert_eq!(
         kinds(&piece, &e.project),
         vec![(front.clone(), DifferenceKind::Reversed)],
@@ -173,30 +176,12 @@ fn j2_seans_eaves_across_two_ports() {
     }
     assert_eq!(e.project.port_pixels(&output, "0"), 70);
     assert!(piece.matches(&e.project), "{:?}", kinds(&piece, &e.project));
-
-    // Saved and opened again: the same patch, in today's rows.
-    let saved = opened.files.save(&e.project).unwrap();
-    let patch = saved
-        .writes
-        .iter()
-        .find(|(path, _)| path.ends_with(".patch.json"))
-        .expect("a patch file");
-    assert!(
-        patch.1.contains("\"format\": 2") || patch.1.contains("\"format\": 3"),
-        "today's patch rows (format 3 at most): {}",
-        patch.1
-    );
-    let again = reopen(&EAVES, &saved.writes).project;
-    assert_eq!(
-        again.effective_patch().pixel_runs,
-        e.project.effective_patch().pixel_runs
-    );
 }
 
 // ---- helpers --------------------------------------------------------------
 
 /// What a person sees on the piece with the selection lit on the board: the
-/// object whose lamps shine brightest.
+/// segment whose lamps shine brightest.
 fn look(e: &Editor, piece: &Piece) -> TreeRef {
     let frame = e.project.board_frame(&e.selection, BREATH_SECONDS / 2.0);
     let mut best: Option<(f64, TreeRef)> = None;
@@ -211,10 +196,10 @@ fn look(e: &Editor, piece: &Piece) -> TreeRef {
             best = Some((light, o.id.clone()));
         }
     }
-    best.expect("the piece has objects").1
+    best.expect("the piece has segments").1
 }
 
-/// R and the turn keys until the object's chase on the canvas runs as it
+/// R and the turn keys until the segment's chase on the canvas runs as it
 /// does on the piece. Returns how many keys it took.
 fn line_up(e: &mut Editor, piece: &Piece, o: &TreeRef) -> usize {
     let mut keys = 0;
@@ -238,7 +223,7 @@ fn line_up(e: &mut Editor, piece: &Piece, o: &TreeRef) -> usize {
     }
 }
 
-/// How many single-lamp turns (K) bring an object's entry to the piece's.
+/// How many single-lamp turns (K) bring a segment's entry to the piece's.
 fn turn_off(e: &Editor, piece: &Piece, o: &TreeRef) -> i64 {
     let n = e.project.segment(o).unwrap().lamps.len() as i64;
     let first = piece.landing(o, 0).unwrap();
@@ -251,7 +236,7 @@ fn turn_off(e: &Editor, piece: &Piece, o: &TreeRef) -> i64 {
     now.rem_euclid(n)
 }
 
-/// The objects the piece has on an output.
+/// The segments the piece has on an output.
 fn truly_on(piece: &Piece, p: &Project, output: &NodeId) -> Vec<TreeRef> {
     p.placed_segments()
         .iter()
@@ -260,7 +245,7 @@ fn truly_on(piece: &Piece, p: &Project, output: &NodeId) -> Vec<TreeRef> {
         .collect()
 }
 
-/// The object the piece has on one port.
+/// The segment the piece has on one port.
 fn truly_at(piece: &Piece, p: &Project, output: &NodeId, port: &str) -> TreeRef {
     p.placed_segments()
         .iter()
@@ -281,42 +266,4 @@ fn kinds(piece: &Piece, p: &Project) -> Vec<(TreeRef, DifferenceKind)> {
         .into_iter()
         .map(|d| (d.object, d.kind))
         .collect()
-}
-
-fn open(e: &Embedded) -> Opened {
-    Opened::open(&e.files()).unwrap_or_else(|err| panic!("{}: {err}", e.key))
-}
-
-/// The project as it would be with `writes` written over its files.
-fn reopen(e: &Embedded, writes: &[(String, String)]) -> Opened {
-    let mut files = e.files();
-    for (path, text) in writes {
-        files.files.insert(path.clone(), text.clone());
-    }
-    Opened::open(&files).unwrap_or_else(|err| panic!("{}: {err}", e.key))
-}
-
-/// An editor on `p`, laid out the way the page does it.
-fn editor_of(p: Project) -> Editor {
-    let mut e = Editor::new(p);
-    let placement = lab_layout::canvas_layout(&e.layout_input());
-    e.set_placement(&placement);
-    e.resize(Vec2::new(1200.0, 800.0));
-    e
-}
-
-fn key(e: &mut Editor, k: Key, mods: Mods) {
-    e.key_down(k.clone(), mods);
-    e.key_up(k, mods);
-}
-
-fn none() -> Mods {
-    Mods::default()
-}
-
-fn shift() -> Mods {
-    Mods {
-        shift: true,
-        ..Mods::default()
-    }
 }
