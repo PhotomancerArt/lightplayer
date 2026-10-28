@@ -5,8 +5,8 @@
 //! shows), with no values: it acts on the selection, as its key does.
 //!
 //! **Patching verbs that take values** (lean Q77, mapping rebuild M4 P06).
-//! One offer for each verb with something to act on
-//! (`Editor::verbs_with_values`), with typed parameters drawn from the
+//! One offer for each verb with something to act on (its
+//! `Editor::subjects` not empty), with typed parameters drawn from the
 //! editor's own lists, in its words (`graph_verb_choices.rs`):
 //!
 //! - `subject`, a choice of what it acts on (a node, `<fixture>:<tree
@@ -57,19 +57,19 @@ pub fn publish_graph_offers(offers: &mut UiOfferTree, editor: &Editor) {
         let action = level(verb, GraphOp::action(verb));
         offers.publish(UiOffer::new(graph_verb_path(verb), icon(verb), action));
     }
-    for verb in editor.verbs_with_values() {
-        offers.publish(value_offer(editor, verb));
+    for verb in GraphVerb::WITH_VALUES {
+        // On offer while it has something to act on.
+        let subjects = editor.subjects(verb);
+        if !subjects.is_empty() {
+            offers.publish(value_offer(editor, verb, subjects));
+        }
     }
 }
 
 /// A patching verb's offer, with its parameters.
-fn value_offer(editor: &Editor, verb: GraphVerb) -> UiOffer {
-    let subject = OfferParam::choice(
-        "subject",
-        subject_label(verb),
-        options(editor.subjects(verb)),
-        editor.selected_subject(verb),
-    );
+fn value_offer(editor: &Editor, verb: GraphVerb, subjects: Vec<VerbChoice>) -> UiOffer {
+    let preselect = editor.selected_subject(verb, &subjects);
+    let subject = OfferParam::choice("subject", subject_label(verb), options(subjects), preselect);
     let lamps = || OfferParam::text("lamps", "lamps", "a whole number of lamps");
     let mut params = vec![subject];
     match verb {

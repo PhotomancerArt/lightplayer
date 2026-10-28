@@ -128,9 +128,9 @@ impl Editor {
         }
     }
 
-    /// The subject the selection is for `verb`, when it is one of its
-    /// subjects: what its offer preselects.
-    pub fn selected_subject(&self, verb: GraphVerb) -> Option<String> {
+    /// The subject the selection is for `verb`, when it is one of
+    /// `subjects` (its [`Editor::subjects`]): what its offer preselects.
+    pub fn selected_subject(&self, verb: GraphVerb, subjects: &[VerbChoice]) -> Option<String> {
         let [t] = self.selection.as_slice() else {
             return None;
         };
@@ -157,10 +157,7 @@ impl Editor {
                 node_value(&node)
             }
         };
-        self.subjects(verb)
-            .iter()
-            .any(|s| s.value == value)
-            .then_some(value)
+        subjects.iter().any(|s| s.value == value).then_some(value)
     }
 
     /// The ports `verb` can be given: every port of every named output
