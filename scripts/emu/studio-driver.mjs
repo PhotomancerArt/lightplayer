@@ -989,9 +989,9 @@ export class StudioDriver {
   /// record. The board's own state (its backing's registry) is the caller's
   /// to check.
   ///
-  /// `expectChip`: the board's terminal must say the install identified
-  /// that chip (`identified: esp32c6 · …`) — the chip the bootloader named,
-  /// not one a boot banner may never have printed
+  /// `expectChip`: the card must know that chip once the install is done —
+  /// the chip the bootloader session named, not one a boot banner may never
+  /// have printed
   /// (docs/defects/2026-10-25-a-blank-board-opened-mid-boot-loop-offered-every-board.md).
   async flashBlank(
     model,
@@ -1009,7 +1009,12 @@ export class StudioDriver {
       { timeoutMs: flashTimeoutMs, what: "the flash to finish" },
     );
     if (expectChip) {
-      await this.boardSaid(new RegExp(`identified: ${expectChip}\\b`), { board, timeoutMs });
+      // The Hardware row's Chip is the one the install's bootloader session
+      // named (its terminal line can scroll out behind esptool's log).
+      const words = { esp32c6: "ESP32-C6", esp32s3: "ESP32-S3", esp32: "ESP32" }[expectChip] ?? expectChip;
+      const chip = await this.detailsFact("hardware", "Chip", { board, timeoutMs });
+      await this.closeDetails({ board });
+      if (chip !== words) throw new Error(`the install identified ${JSON.stringify(chip)}, not ${words}`);
     }
     const hardware = (await this.barText("hardware", { board })) || "";
     if (!/which board\?/.test(hardware)) return "recognised";
