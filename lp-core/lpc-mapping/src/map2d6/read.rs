@@ -20,7 +20,6 @@
 //! would misread does.
 
 use alloc::boxed::Box;
-use alloc::collections::BTreeSet;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
@@ -34,6 +33,7 @@ use crate::part::{
     Circle, IdCounters, Mapping, PART_KIND_WORDS, Part, PartId, PartKind, Path, Repeat, Ring,
     SegmentKey, Shape,
 };
+use crate::sorted_set::insert_sorted;
 
 /// The format this reader reads and the writer writes.
 pub const MAP2D6_FORMAT: u32 = 6;
@@ -65,7 +65,7 @@ pub fn read(json: &str) -> Result<Mapping, Map2d6Error> {
     }
     let doc: DocText = whole(json, read_doc)?;
 
-    let mut ids = BTreeSet::new();
+    let mut ids = Vec::new();
     let parts = doc
         .parts
         .into_iter()
@@ -107,9 +107,9 @@ pub fn read(json: &str) -> Result<Mapping, Map2d6Error> {
     })
 }
 
-fn read_part(doc: PartText, ids: &mut BTreeSet<String>) -> Result<Part, Map2d6Error> {
+fn read_part(doc: PartText, ids: &mut Vec<String>) -> Result<Part, Map2d6Error> {
     let id = read_part_id(&doc.id)?;
-    if !ids.insert(doc.id.clone()) {
+    if !insert_sorted(ids, doc.id.clone()) {
         return Err(Map2d6Error::DuplicatePartId { id: doc.id });
     }
     let kind = match doc.kind {
@@ -185,7 +185,7 @@ fn read_part_id(id: &str) -> Result<PartId, Map2d6Error> {
 }
 
 fn read_circle(part: &str, doc: CircleText) -> Result<Circle, Map2d6Error> {
-    let mut keys = BTreeSet::new();
+    let mut keys = Vec::with_capacity(doc.rings.len());
     let mut rings = Vec::with_capacity(doc.rings.len());
     for ring in &doc.rings {
         let refuse = |reason: &str| Map2d6Error::InvalidRingKey {
@@ -194,7 +194,7 @@ fn read_circle(part: &str, doc: CircleText) -> Result<Circle, Map2d6Error> {
             reason: reason.to_string(),
         };
         let key = SegmentKey::new(&ring.key).map_err(|reason| refuse(&reason))?;
-        if !keys.insert(ring.key.as_str()) {
+        if !insert_sorted(&mut keys, ring.key.as_str()) {
             return Err(refuse("two rings have this key"));
         }
         if let Some(n) = minted_ring_number(&ring.key) {

@@ -16,7 +16,6 @@
 //! inlines it into today's resolver, and the firmware image must stay
 //! byte-identical while nothing in it uses this module.
 
-use alloc::collections::BTreeSet;
 use alloc::string::ToString;
 use alloc::vec::Vec;
 
@@ -41,13 +40,14 @@ use crate::part::subpath_runs::subpath_runs;
 use crate::part::tree::Tree;
 use crate::part::tree_id::TreeId;
 use crate::part::tree_node::TreeNode;
+use crate::sorted_set::insert_sorted;
 
 /// Render a mapping: its parts as one tree, its segments' lamps in one
 /// buffer of exactly the size they need.
 pub fn render(mapping: &Mapping) -> Result<Tree, RenderError> {
-    let mut seen = BTreeSet::new();
+    let mut seen = Vec::new();
     for part in mapping.all_parts() {
-        if !seen.insert(part.id.as_str()) {
+        if !insert_sorted(&mut seen, part.id.as_str()) {
             return Err(RenderError::DuplicateId(part.id.clone()));
         }
     }

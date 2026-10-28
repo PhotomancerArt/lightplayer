@@ -43,6 +43,7 @@ mod map2d_object_id;
 mod map2d_resolve;
 pub mod part;
 pub mod patching;
+mod sorted_set;
 
 pub use editor_meta::{
     EDITOR_META_FORMAT, EditorFootprint, EditorMetaDoc, EditorMetaError, EditorNodeMeta,
