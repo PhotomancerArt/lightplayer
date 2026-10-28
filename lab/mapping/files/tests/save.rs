@@ -279,7 +279,8 @@ fn resizing_a_fixture_writes_its_canvas() {
 }
 
 /// Deleting the choker's shader removes it from the module and reports its
-/// file as no longer used; no mapping is written.
+/// files — its node file and its GLSL — as no longer used (Studio deletes
+/// them, DD36); no mapping is written.
 #[test]
 fn deleting_a_node_drops_it_from_its_module() {
     let o = common::open(&CHOKER);
@@ -287,7 +288,7 @@ fn deleting_a_node_drops_it_from_its_module() {
     p.remove_node(&NodeId::new("shader"));
     let saved = o.files.save(&p).unwrap();
     assert_eq!(paths(&saved), ["module.json"]);
-    assert_eq!(saved.removed, ["shader.json"]);
+    assert_eq!(saved.removed, ["shader.glsl", "shader.json"]);
 }
 
 /// A port count edited on an output writes the output's file, and only it.
