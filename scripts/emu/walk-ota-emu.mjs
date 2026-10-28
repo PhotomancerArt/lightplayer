@@ -2434,7 +2434,9 @@ async function main() {
           await openDoor(name, [`${board}=${olderChip},kind=rom-up,${mac}`]);
           await step(name, "a board already on Y holding format-11 projects: connected, its projects are upgraded with no click and no update", async () => {
             await nameThisBoard();
-            const refused = await waitBoard(board, /Boot: auto-load failed for \/projects\/eaves[^\n]*/, "Y refusing its format-11 eaves at boot", JOIN_MS);
+            // The board's boot words before a host takes its port are not
+            // kept, so its refusal is read after: the boot's line if the
+            // console has it, else the hello's `startupRefused`.
             await connect(board);
             const order = await watchCard(
               async (snap) => Boolean(snap.board?.offers.edit?.enabled) && snap.board.firmware?.work !== "running",
@@ -2450,6 +2452,9 @@ async function main() {
             if (!journal.length) throw new Error(`Studio's terminal never said what it upgraded: ${JSON.stringify(rows.slice(-12))}`);
             const offered = boardWords(board).includes("[OTA] offer ");
             if (offered) throw new Error("an update ran: the board was offered a build");
+            await new Promise((resolve) => setTimeout(resolve, 2_500));
+            const refused = boardWords(board).match(/Boot: auto-load failed for \/projects\/eaves[^\n]*|"startupRefused":\{[^}]*\}/)?.[0]
+              ?? "(its boot words were said before the port was taken)";
             return {
               summary: `Y said "${refused.replace(/: Core error.*/, "")}", then "${loaded}" with no press; card ${order.map((e) => e.kind).join(" → ") || "(no update lines)"}; Studio: ${journal.join(" / ")}`,
               card: order, board: { refused, loaded }, journal,
