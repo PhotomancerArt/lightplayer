@@ -306,8 +306,9 @@ pub(crate) enum StudioRoute {
 /// workspace). `Mapping` and `Graph` are workbench views (`/mapping`,
 /// `/graph`; `/map` parses as an alias) — the Map view's tab is hidden
 /// until M4, so the workbench shows the default view at `/mapping`. The
-/// Patch tab and its `/patch` suffix are gone (project format 12): it is
-/// an unknown suffix now, like any other. `Play` is the full-page zoom.
+/// Patch tab went with project format 12, and the Graph is where patching
+/// lives now, so its `/patch` and `/patching` suffixes parse as aliases of
+/// `/graph` (Q88). `Play` is the full-page zoom.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ProjectView {
     #[default]
@@ -362,7 +363,9 @@ impl StudioRoute {
                 (Some(uid), Some("mapping" | "map"), None) => {
                     device_route(uid, ProjectView::Mapping)
                 }
-                (Some(uid), Some("graph"), None) => device_route(uid, ProjectView::Graph),
+                (Some(uid), Some("graph" | "patch" | "patching"), None) => {
+                    device_route(uid, ProjectView::Graph)
+                }
                 _ => StudioRoute::Home,
             },
             // The project route. Exactly one link segment, optionally
@@ -380,7 +383,11 @@ impl StudioRoute {
                 (Some(link), Some("mapping" | "map"), None) => {
                     project_route(link, ProjectView::Mapping, on)
                 }
-                (Some(link), Some("graph"), None) => project_route(link, ProjectView::Graph, on),
+                // The Patch tab's old suffixes land on the Graph, where
+                // patching lives now (Q88); `path()` emits `graph`.
+                (Some(link), Some("graph" | "patch" | "patching"), None) => {
+                    project_route(link, ProjectView::Graph, on)
+                }
                 _ => StudioRoute::Home,
             },
             // The kept aliases of the root: `/home`, and the Devices and
@@ -1804,9 +1811,11 @@ mod tests {
             StudioRoute::parse("/device/devx/mapping"),
             device(ProjectView::Mapping)
         );
-        // The Patch tab is gone: `/patch` is an unknown suffix, which
-        // lands on Home like any other.
-        assert_eq!(StudioRoute::parse("/device/devx/patch"), StudioRoute::Home);
+        // The Patch tab is gone: `/patch` lands on the Graph (Q88).
+        assert_eq!(
+            StudioRoute::parse("/device/devx/patch"),
+            device(ProjectView::Graph)
+        );
         assert_eq!(device(ProjectView::Workspace).path(), "/device/devx");
         assert_eq!(device(ProjectView::Play).path(), "/device/devx/play");
         for path in [
@@ -2014,27 +2023,34 @@ mod tests {
         assert_eq!(StudioRoute::parse("/map"), StudioRoute::Home);
     }
 
-    /// The Patch tab went with project format 12: its suffixes are unknown
-    /// now, and an unknown suffix lands on Home like any other path the
-    /// router does not know — never a guess at a view.
+    /// The Patch tab went with project format 12 and patching lives on the
+    /// Graph now, so an old `/patch` or `/patching` link opens the Graph of
+    /// the same project (Q88), and the address heals to `/graph`. Only as a
+    /// view suffix: a bare `/patch` is an unknown path, Home.
     #[test]
-    fn the_patch_suffixes_are_unknown() {
+    fn the_patch_suffixes_land_on_the_graph() {
         for suffix in ["patch", "patching"] {
+            let project = StudioRoute::parse(&format!("/p/zook-dome-{SHARE_UID}/{suffix}"));
             assert_eq!(
-                StudioRoute::parse(&format!("/p/zook-dome-{SHARE_UID}/{suffix}")),
-                StudioRoute::Home,
+                project,
+                StudioRoute::parse(&format!("/p/zook-dome-{SHARE_UID}/graph")),
                 "/p/…/{suffix}"
+            );
+            assert_eq!(project.project_view(), ProjectView::Graph);
+            assert_eq!(
+                project.path(),
+                format!("/p/zook-dome-{SHARE_UID}/graph"),
+                "/p/…/{suffix} heals to the Graph's own address"
             );
             assert_eq!(
                 StudioRoute::parse(&format!("/device/devx/{suffix}")),
-                StudioRoute::Home,
+                StudioRoute::Device {
+                    uid: "devx".to_string(),
+                    view: ProjectView::Graph,
+                },
                 "/device/…/{suffix}"
             );
-            assert_eq!(
-                StudioRoute::parse(&format!("/p/zook-dome-{SHARE_UID}/{suffix}")),
-                StudioRoute::parse(&format!("/p/zook-dome-{SHARE_UID}/nonsense")),
-                "the same as any unknown suffix"
-            );
+            assert_eq!(StudioRoute::parse(&format!("/{suffix}")), StudioRoute::Home);
         }
     }
 
