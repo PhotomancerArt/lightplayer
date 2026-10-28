@@ -92,7 +92,7 @@ pub fn build_rig(
     let (fixture, rig_fixture) = rig_fixture_def(pattern.fixture.as_ref())?;
     write("/fixture.json", &to_bytes(&fixture))?;
     write("/swatch.map2d.json", swatch.map_json.as_bytes())?;
-    write("/output.json", &to_bytes(&output_def()))?;
+    write("/output.json", &to_bytes(&output_def(&swatch.output_name)))?;
 
     let mut nodes = serde_json::Map::new();
     nodes.insert("clock".into(), json!({ "ref": "./clock.json" }));
@@ -161,13 +161,15 @@ fn rig_fixture_def(pattern_fixture: Option<&Value>) -> Result<(Value, RigFixture
     Ok((def, rig))
 }
 
-/// One output on the control bus. Its options are the display pipeline's
+/// One output on the control bus, named as the swatch's mapping starts on
+/// it (map2d format 6 names its output). Its options are the display pipeline's
 /// (white point, LUT, interpolation), which run downstream of the runtime
 /// buffer the preview reads — set to identity anyway, so the def says what
 /// the record means.
-fn output_def() -> Value {
+fn output_def(name: &str) -> Value {
     json!({
         "kind": "Output",
+        "name": name,
         "ports": { "0": { "endpoint": "ws281x:local:D10" } },
         "bindings": { "input": { "source": CONTROL_BUS } },
         "options": {

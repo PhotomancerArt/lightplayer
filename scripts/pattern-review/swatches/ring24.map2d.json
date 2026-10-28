@@ -1,8 +1,49 @@
 {
-  "format": 1,
+  "format": 6,
   "sample_diameter": 1.0,
-  "canvas": [0.0, 0.0, 20.0, 20.0],
-  "objects": [
-    { "name": "ring", "shape": { "ring": { "center": [10, 10], "radius": 9, "outer_count": 24, "rings": 1, "order": "outer_first", "start_angle_deg": 0 } } }
+  "canvas": [
+    0.0,
+    0.0,
+    20.0,
+    20.0
+  ],
+  "start": {
+    "output": {
+      "set": "1"
+    },
+    "port": {
+      "set": 0
+    },
+    "channel": {
+      "set": {
+        "lamps": 0
+      }
+    }
+  },
+  "parts": [
+    {
+      "id": "ring",
+      "name": "ring",
+      "kind": {
+        "circle": {
+          "center": [
+            10.0,
+            10.0
+          ],
+          "start_angle_deg": 0.0,
+          "dir": "cw",
+          "drawn_from": "outside",
+          "split": "one",
+          "next_ring": 2,
+          "rings": [
+            {
+              "key": "r1",
+              "radius": 9.0,
+              "count": 24
+            }
+          ]
+        }
+      }
+    }
   ]
 }

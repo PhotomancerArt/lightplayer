@@ -1,15 +1,18 @@
 //! A swatch: a standard lamp shape a pattern is previewed on — one
 //! `*.map2d.json`, named by its file stem (`choker`, `matrix16`, …).
 //!
-//! The mapping is resolved here once so the record can carry the lamp
-//! positions in wiring order, which is also the order the output publishes
-//! their colours in.
+//! The mapping (map2d format 6) is rendered here once so the record can
+//! carry the lamp positions in wiring order, which is also the order the
+//! output publishes their colours in: every swatch is one fixture started at
+//! port 0, lamp 0 of the output it names, with no overrides, so its lamps
+//! land in the order its parts render them.
 
 use std::fs;
 use std::path::Path;
 
 use anyhow::{Context, Result, bail};
-use lpc_mapping::{Map2dDoc, resolve};
+use lpc_mapping::part::render;
+use lpc_mapping::patching::OutputOp;
 
 /// One swatch, loaded and resolved.
 #[derive(Debug, Clone)]
@@ -18,6 +21,8 @@ pub struct Swatch {
     pub name: String,
     /// The mapping document, verbatim (it is copied into the rig).
     pub map_json: String,
+    /// The output the mapping starts on: the rig's output carries this name.
+    pub output_name: String,
     /// Lamp positions in doc space, wiring order (doc y runs DOWN, SVG-style).
     pub positions: Vec<[f32; 2]>,
 }
@@ -35,17 +40,32 @@ impl Swatch {
             .to_string();
         let map_json =
             fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
-        let doc = Map2dDoc::from_json(&map_json)
-            .map_err(|e| anyhow::anyhow!("{}: not a map2d document: {e:?}", path.display()))?;
-        let positions = resolve(&doc)
-            .map_err(|e| anyhow::anyhow!("{}: mapping does not resolve: {e:?}", path.display()))?
-            .positions();
+        let mapping = lpc_mapping::map2d6::read(&map_json).map_err(|e| {
+            anyhow::anyhow!("{}: not a map2d format 6 document: {e}", path.display())
+        })?;
+        let OutputOp::Set(output) = &mapping.start.output else {
+            bail!(
+                "{}: the mapping names no output to start on",
+                path.display()
+            );
+        };
+        let output_name = output.as_str().to_string();
+        if !mapping.overrides.is_empty() {
+            bail!(
+                "{}: a swatch has no overrides (its lamps run in render order)",
+                path.display()
+            );
+        }
+        let positions = render(&mapping)
+            .map_err(|e| anyhow::anyhow!("{}: mapping does not render: {e}", path.display()))?
+            .take_positions();
         if positions.is_empty() {
             bail!("{}: mapping has no lamps", path.display());
         }
         Ok(Self {
             name,
             map_json,
+            output_name,
             positions,
         })
     }
@@ -117,6 +137,7 @@ mod tests {
         let swatch = Swatch {
             name: "t".into(),
             map_json: String::new(),
+            output_name: String::from("1"),
             positions: vec![[10.0, 5.0], [30.0, 5.0], [50.0, 15.0]],
         };
         let (positions, size) = swatch.drawing_positions();
