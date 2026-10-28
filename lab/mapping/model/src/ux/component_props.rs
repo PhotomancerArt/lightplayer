@@ -7,13 +7,14 @@
 //! way round the rings run is the circle's (every ring's); one ring runs
 //! the other way on the wire by its own override (`r`).
 //!
-//! **Rows that are verbs** (mapping rebuild M4 P07). Lamps, Copies, Rings
-//! and Inner ring first press the layout verbs (`set-count`, `add-ring`,
-//! `remove-ring`, `set-drawn-from`) through [`Project::prop_edits`] and
+//! **Rows that are verbs** (mapping rebuild M4 P07). Lamps, Copies, Rings,
+//! Inner ring first and A segment per subpath / per ring press the layout
+//! verbs (`set-count`, `add-ring`, `remove-ring`, `set-drawn-from`,
+//! `set-split`) through [`Project::prop_edits`] and
 //! `Editor::edit`, the function their offers run; the other rows (a
 //! radius, a grid's columns, a fixture's size…) still set their field.
 
-use lpc_mapping::part::{Circle, PartKind, Shape};
+use lpc_mapping::part::{Circle, CircleSplit, PartKind, PathSplit, Shape};
 use lpc_mapping::{GridRouting as Routing, RingDir, RingOrder};
 
 use crate::domain::color_order::ColorOrder;
@@ -21,7 +22,7 @@ use crate::domain::fixture::Fixture;
 use crate::domain::project::Project;
 use crate::domain::target::Target;
 use crate::ux::graph_edit::GraphEdit;
-use crate::ux::graph_layout_edit::Units;
+use crate::ux::graph_layout_edit::{Split, Units};
 use crate::ux::props::{PropDesc, PropEdit, PropKind, PropRaw, edited};
 
 pub const LAMPS: PropDesc = PropDesc {
@@ -144,6 +145,22 @@ pub const INNER_FIRST: PropDesc = PropDesc {
     nudge: false,
     reshapes: false,
 };
+/// A path split into one segment per subpath (Q24), patched apart.
+pub const SPLIT_SUBPATHS: PropDesc = PropDesc {
+    id: "split-subpaths",
+    label: "A segment per subpath",
+    kind: PropKind::Flag,
+    nudge: false,
+    reshapes: false,
+};
+/// A circle's rings each a segment (G1: the default), or one for them all.
+pub const SPLIT_RINGS: PropDesc = PropDesc {
+    id: "split-rings",
+    label: "A segment per ring",
+    kind: PropKind::Flag,
+    nudge: false,
+    reshapes: false,
+};
 /// A filled polygon's lattice, turned inside its outline.
 pub const ANGLE: PropDesc = PropDesc {
     id: "angle",
@@ -183,9 +200,13 @@ impl Project {
                 None => Vec::new(),
             },
             Target::Part(id) => match self.part(id).map(|c| &c.kind) {
-                Some(PartKind::Shape(Shape::Path(path))) => {
-                    vec![(LAMPS, PropRaw::Count(path.count as i64))]
-                }
+                Some(PartKind::Shape(Shape::Path(path))) => vec![
+                    (LAMPS, PropRaw::Count(path.count as i64)),
+                    (
+                        SPLIT_SUBPATHS,
+                        PropRaw::Flag(path.split == PathSplit::Subpaths),
+                    ),
+                ],
                 Some(PartKind::Shape(Shape::Polygon(polygon))) => {
                     vec![(LAMPS, PropRaw::Count(polygon.count as i64))]
                 }
@@ -202,6 +223,10 @@ impl Project {
                     (
                         INNER_FIRST,
                         PropRaw::Flag(circle.drawn_from == RingOrder::InnerFirst),
+                    ),
+                    (
+                        SPLIT_RINGS,
+                        PropRaw::Flag(circle.split == CircleSplit::Rings),
                     ),
                 ],
                 Some(PartKind::Shape(Shape::Grid(g))) => vec![
@@ -242,7 +267,10 @@ impl Project {
         edit: PropEdit,
         spacing: f64,
     ) -> Option<Vec<GraphEdit>> {
-        if !matches!(prop_id, "lamps" | "copies" | "rings" | "inner-first") {
+        if !matches!(
+            prop_id,
+            "lamps" | "copies" | "rings" | "inner-first" | "split-subpaths" | "split-rings"
+        ) {
             return None;
         }
         let mut out = Vec::new();
@@ -288,6 +316,14 @@ impl Project {
                     } else {
                         lpc_mapping::edit::DrawnFrom::Outside
                     },
+                }),
+                (_, "split-subpaths", PropRaw::Flag(apart)) => out.push(GraphEdit::SetSplit {
+                    part: part?,
+                    split: if apart { Split::Subpaths } else { Split::One },
+                }),
+                (_, "split-rings", PropRaw::Flag(apart)) => out.push(GraphEdit::SetSplit {
+                    part: part?,
+                    split: if apart { Split::Rings } else { Split::One },
                 }),
                 (_, "rings", PropRaw::Count(n)) => {
                     let part = part?;

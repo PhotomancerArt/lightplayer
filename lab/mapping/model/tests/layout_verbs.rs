@@ -242,6 +242,33 @@ fn a_layout_verb_is_offered_whatever_is_selected() {
     );
 }
 
+/// The inspector's "A segment per ring" row presses `set-split`: off, the
+/// circle is one segment and ring 3's override is kept and gone; one undo
+/// splits it again and ring 3 lands where it did.
+#[test]
+fn the_split_row_presses_set_split() {
+    let mut e = Editor::new(Project::circular_display_wired());
+    let circle = circle(&e.project);
+    let before = landings(&e.project);
+    e.input(GraphInput::Select(vec![Target::Part(circle.clone())]));
+    e.input(GraphInput::EditProp {
+        id: "split-rings",
+        edit: PropEdit::SetFlag(false),
+    });
+    let ids: Vec<String> = landings(&e.project).into_iter().map(|(id, _)| id).collect();
+    assert_eq!(ids, ["circle1"], "one segment");
+    let r3 = TreeRef::parse(&circle.fixture, "circle1/r3").unwrap();
+    assert!(
+        e.project
+            .effective_patch()
+            .problems
+            .iter()
+            .any(|x| x.kind == ProblemKind::GoneNode(r3.clone()))
+    );
+    e.undo();
+    assert_eq!(landings(&e.project), before);
+}
+
 // ---- helpers ------------------------------------------------------------------
 
 /// Every segment's id and where each of its lamps lands, in tree order.
