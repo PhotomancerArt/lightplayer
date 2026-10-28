@@ -976,30 +976,29 @@ export class StudioDriver {
 
   /// Studio's own flash flow on a blank board's card, the way a person does
   /// it: the Firmware row says "none", the primary Install firmware
-  /// (`flash`) opens the board pick, picking `model` presses it, and the
-  /// flash is the Firmware row's work — it must START and then FINISH (a
-  /// wait on "none went away" alone is satisfied the instant the work
-  /// starts). Finished means the work is gone and the row no longer says
-  /// "none"; the board's own state (its backing's registry) is the caller's
+  /// (`flash`) is ONE press — nobody picks a board first (plan
+  /// lp2025/2026-10-28-0025-install-without-board-pick) — and the flash is
+  /// the Firmware row's work, which must START and then FINISH (a wait on
+  /// "none went away" alone is satisfied the instant the work starts).
+  /// Finished means the work is gone and the row no longer says "none".
+  ///
+  /// Then the board model: the install saved it when exactly one catalog
+  /// board fit what the bootloader said; otherwise the Hardware row asks
+  /// "which board?", and this answers it with `model` (its tile's words,
+  /// "XIAO ESP32-C6"). Returns `"recognised"` or `"asked"`, for the walk's
+  /// record. The board's own state (its backing's registry) is the caller's
   /// to check.
-  /// `expectChip`: the picker must have narrowed to that chip ("Detected
-  /// esp32c6 …"), not offered every served board because no boot banner
-  /// named it (docs/defects/2026-10-25-a-blank-board-opened-mid-boot-loop-offered-every-board.md).
+  ///
+  /// `expectChip`: the board's terminal must say the install identified
+  /// that chip (`identified: esp32c6 · …`) — the chip the bootloader named,
+  /// not one a boot banner may never have printed
+  /// (docs/defects/2026-10-25-a-blank-board-opened-mid-boot-loop-offered-every-board.md).
   async flashBlank(
     model,
     { board = null, timeoutMs = DEFAULT_WAIT_MS, flashTimeoutMs = 900_000, expectChip = null } = {},
   ) {
     await this.waitBar("firmware", NO_FIRMWARE, { board, timeoutMs });
     await this.pressOffer("flash", { board, timeoutMs });
-    await this.waitFor(`Boolean(${PANEL})`, { timeoutMs, what: "the board-model picker" });
-    if (expectChip) {
-      await this.waitFor(
-        `(${PANEL})?.textContent.includes(${JSON.stringify(`Detected ${expectChip}`)})`,
-        { timeoutMs, what: `the board-model picker to narrow to ${expectChip}` },
-      );
-    }
-    // Picking the model is the press: the board pick in verb mode.
-    await this.click(model, { scope: PANEL });
     await this.waitWork("firmware", "running", { board, timeoutMs });
     const scope = await this.card({ board });
     await this.waitFor(
@@ -1009,6 +1008,23 @@ export class StudioDriver {
                 return !${textTest(NO_FIRMWARE)}(line); })()`,
       { timeoutMs: flashTimeoutMs, what: "the flash to finish" },
     );
+    if (expectChip) {
+      await this.boardSaid(new RegExp(`identified: ${expectChip}\\b`), { board, timeoutMs });
+    }
+    const hardware = (await this.barText("hardware", { board })) || "";
+    if (!/which board\?/.test(hardware)) return "recognised";
+    // Its chip fit several boards: the row's own question, answered with
+    // the model — picking the tile is the press (the pick in verb mode).
+    await this.pressOffer("set-board", { board, timeoutMs });
+    await this.waitFor(`Boolean(${PANEL})`, { timeoutMs, what: "the which-board picker" });
+    await this.click(model, { scope: PANEL });
+    await this.waitFor(
+      `(() => { const bar = ${scope}?.querySelector('[data-bar="hardware"]');
+                const line = bar ? ${LINE_TEXT}(bar) : '';
+                return Boolean(bar) && !line.includes('which board?'); })()`,
+      { timeoutMs: flashTimeoutMs, what: "the board model to be saved" },
+    );
+    return "asked";
   }
 
   /// What the board says it runs, as core reads it: `"empty"` once its

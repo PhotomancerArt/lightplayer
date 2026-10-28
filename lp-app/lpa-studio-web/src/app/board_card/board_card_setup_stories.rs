@@ -124,6 +124,7 @@ fn board_card_online_through_lightplayer_app() -> Element {
             Cell { caption: "met here · unplugged",
                 StoryBoardCard {
                     card: DeviceView {
+                        usb: None,
                         state_label: ONLINE_AT_LIGHTPLAYER_APP.to_string(),
                         ..offline()
                     },
@@ -575,6 +576,7 @@ const CARD_WIDTH_CLASS: &str = "tw:w-[300px] tw:max-w-full";
 /// project as it told lightplayer.app.
 fn never_met() -> DeviceView {
     DeviceView {
+        usb: None,
         id: DeviceId(11),
         title: "Fabric Test".to_string(),
         state_label: ONLINE_AT_LIGHTPLAYER_APP.to_string(),
@@ -649,6 +651,7 @@ fn kept_cloud_board(picture: bool) -> UiCloudBoard {
 /// firmware and project the last a Studio or the relay heard.
 fn never_met_offline() -> DeviceView {
     DeviceView {
+        usb: None,
         id: DeviceId(12),
         title: "Porch".to_string(),
         state_label: "Offline".to_string(),
@@ -681,6 +684,7 @@ const HOME: &str = "Cedar Lane";
 /// its model.
 fn fresh() -> DeviceView {
     DeviceView {
+        usb: None,
         title: "XIAO ESP32-C6".to_string(),
         loaded_project: DeviceLoadedProject::Empty,
         can_remove_project: false,

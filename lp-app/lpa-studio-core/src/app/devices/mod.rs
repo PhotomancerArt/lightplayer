@@ -239,8 +239,9 @@ pub use device_flash::{
     flash_target, flash_target_for, pending_flash_target, taken_device_titles,
 };
 pub use device_flash_offer::{
-    FLASH_NAME_PARAM, SET_BOARD, SET_BOARD_ALL_PARAM, SET_BOARD_PARAM, asks_which_board,
-    flash_device_offer, flash_pending_offer, set_board_offer, update_firmware_offer,
+    FLASH_NAME_PARAM, SET_BOARD, SET_BOARD_ALL_PARAM, SET_BOARD_PARAM, WHICH_BOARD_REASON,
+    asks_which_board, flash_device_offer, flash_pending_offer, set_board_offer,
+    update_firmware_offer,
 };
 pub use device_frame_feed::{DEVICE_FEED_PARK_AFTER_FAILURES, DeviceFrameFeed, DeviceFrameFeeds};
 pub use device_frame_snapshot::DEVICE_FRAME_SNAPSHOT_INTERVAL_SECS;

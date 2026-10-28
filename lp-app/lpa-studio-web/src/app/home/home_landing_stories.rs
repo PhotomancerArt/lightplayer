@@ -68,6 +68,7 @@ pub(crate) fn newcomer_home() -> UiHomeView {
         projects: Vec::new(),
         examples: Vec::new(),
         devices: DeviceRosterView {
+            which_board: Default::default(),
             transport_available: true,
             usb_available: true,
             ..DeviceRosterView::default()

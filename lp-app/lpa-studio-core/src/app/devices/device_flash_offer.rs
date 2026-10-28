@@ -54,6 +54,10 @@ pub const SET_BOARD_PARAM: &str = "board";
 pub const SET_BOARD_ALL_PARAM: &str = "all_boards";
 /// `devices/<board>/set-board`.
 pub const SET_BOARD: &str = "set-board";
+/// Why "Which board is this?" is asked at all — the one line its pick
+/// shows under the filter line.
+pub const WHICH_BOARD_REASON: &str = "Studio couldn't tell from the chip which board this is. \
+    Pick it so its pins are right; Studio saves it on the board and restarts it.";
 
 /// `<prefix>/flash` for a device whose firmware verb is Flash, or `None`
 /// when it offers no Flash (a running LightPlayer updates instead; a busy

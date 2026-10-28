@@ -51,6 +51,7 @@ pub(crate) fn porch_view() -> DeviceView {
         terminal: Vec::new(),
         terminal_dropped: 0,
         firmware_blocked: None,
+        usb: None,
         held_elsewhere: None,
         escapes: vec![DeviceEscape::Disconnect, DeviceEscape::Forget],
         update_blocked: None,
@@ -63,6 +64,7 @@ pub(crate) fn porch_view() -> DeviceView {
 pub(crate) fn card_and_tree(view: &DeviceView) -> (UiBoardCard, UiOfferTree) {
     let facts = DeviceOfferFacts {
         prefix: board(),
+        which_board: &[],
         face: DeviceFace::Wire,
         autoconnect: false,
         locked: false,
@@ -85,6 +87,7 @@ pub(crate) fn card_and_tree(view: &DeviceView) -> (UiBoardCard, UiOfferTree) {
         label: "porch".to_string(),
     };
     let card = board_card(&BoardCardInput {
+        which_board: &[],
         view,
         board: &board(),
         offers: &verbs,

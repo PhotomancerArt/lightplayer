@@ -17,10 +17,11 @@
 //! # The offer decides; this file draws (M3)
 //!
 //! Each popover renders ONE offer from the tree: the gallery is a board's
-//! `push` offer, the board pick a firmware verb's (`flash`, or
-//! `update-firmware` when its board did not resolve). The offer's
+//! `push` offer, the board pick its `set-board` ("Which board is this?" —
+//! no firmware verb takes a board since plan
+//! `lp2025/2026-10-28-0025-install-without-board-pick`). The offer's
 //! parameters are the controls — its `source` choice the gallery's cards,
-//! a firmware verb's `board` choice the tiles, the optional `name` the name
+//! the `board` choice the tiles, the optional `name` the name
 //! row, the toggles the "show all" escape and the "Name the board the
 //! same" tick — and the verb is the offer's own press with the values
 //! picked ([`OfferRowCta`]). Nothing here builds an op, so the app agent,
@@ -81,10 +82,10 @@
 use dioxus::prelude::*;
 use lpa_boards::{BoardDiagram, DiagramMode};
 use lpa_studio_core::{
-    ActionEnablement, FLASH_ALL_BOARDS_PARAM, FLASH_BOARD_PARAM, FLASH_NAME_PARAM, FirmwareVerb,
-    OfferArgs, OfferChoice, OfferParam, PUSH_NAME_BOARD_PARAM, PUSH_NAME_PARAM, PUSH_SOURCE_PARAM,
-    PreviewSource, PushOffer, PushSource, PushSourceChoice, PushSourceGroup, UiAction,
-    UiExampleCard, UiOffer, UiPackageCard, push_offer,
+    ActionEnablement, FLASH_NAME_PARAM, OfferArgs, OfferChoice, OfferParam, PUSH_NAME_BOARD_PARAM,
+    PUSH_NAME_PARAM, PUSH_SOURCE_PARAM, PreviewSource, PushOffer, PushSource, PushSourceChoice,
+    PushSourceGroup, SET_BOARD_ALL_PARAM, SET_BOARD_PARAM, UiAction, UiExampleCard, UiOffer,
+    UiPackageCard, WHICH_BOARD_REASON, push_offer,
 };
 
 use super::card_thumb::{CardThumb, thumb_swatch_style};
@@ -696,12 +697,12 @@ pub(crate) enum BoardPickMode {
     /// The needs-firmware verb row: a picker trigger that fills the row,
     /// with the Flash CTA beside it. Picking only updates the trigger.
     Row,
-    /// Update firmware on a board that is already running whose board did
-    /// not resolve ([`FirmwareVerb::UpdatePick`], the P4 amendment): the
-    /// quiet "Update firmware" chip IS the trigger, the panel says why a
-    /// pick is being asked for at all, and picking a board flashes it
-    /// straight away — the verb was already pressed, so the pick completes
-    /// the gesture rather than arming a second one.
+    /// "Which board is this?" on a running board (`set-board`, plan
+    /// `lp2025/2026-10-28-0025-install-without-board-pick`): the row's
+    /// quiet chip IS the trigger, the panel says why a pick is being asked
+    /// for at all, and picking a board saves it straight away — the verb
+    /// was already pressed, so the pick completes the gesture rather than
+    /// arming a second one.
     Verb,
 }
 
@@ -759,7 +760,7 @@ pub(crate) fn BoardPickPopover(
     });
     let why = match mode {
         BoardPickMode::Row => None,
-        BoardPickMode::Verb => FirmwareVerb::UpdatePick.pick_reason().map(str::to_string),
+        BoardPickMode::Verb => Some(WHICH_BOARD_REASON.to_string()),
     };
     let panel = rsx! {
         BoardPickPanel {
@@ -832,7 +833,7 @@ fn board_param(offer: &UiOffer) -> Option<OfferParam> {
     offer
         .params()
         .iter()
-        .find(|param| param.name == FLASH_BOARD_PARAM)
+        .find(|param| param.name == SET_BOARD_PARAM)
         .cloned()
 }
 
@@ -874,8 +875,8 @@ pub(crate) fn BoardPickPanel(
     let narrowable = offer
         .params()
         .iter()
-        .any(|param| param.name == FLASH_ALL_BOARDS_PARAM);
-    let show_all = toggle_value(&offer, &current, FLASH_ALL_BOARDS_PARAM);
+        .any(|param| param.name == SET_BOARD_ALL_PARAM);
+    let show_all = toggle_value(&offer, &current, SET_BOARD_ALL_PARAM);
     let chip_name = chip.as_ref().map(|(name, _)| name.clone());
     let lead = board_filter_lead(
         chip.as_ref().map(|(name, source)| (name.as_str(), *source)),
@@ -918,7 +919,7 @@ pub(crate) fn BoardPickPanel(
                             onclick: move |event: MouseEvent| {
                                 event.stop_propagation();
                                 args.write()
-                                    .insert(FLASH_ALL_BOARDS_PARAM, escape.show_all.to_string());
+                                    .insert(SET_BOARD_ALL_PARAM, escape.show_all.to_string());
                             },
                             "{escape.label}"
                         }
@@ -946,7 +947,7 @@ pub(crate) fn BoardPickPanel(
                                     title: candidate.disabled.clone().unwrap_or_default(),
                                     onclick: move |event: MouseEvent| {
                                         event.stop_propagation();
-                                        args.write().insert(FLASH_BOARD_PARAM, board_id.clone());
+                                        args.write().insert(SET_BOARD_PARAM, board_id.clone());
                                         if press_on_pick {
                                             let action = pressed_or_refused(&pick_offer, &args.read());
                                             if action.meta().enablement.is_enabled() {
