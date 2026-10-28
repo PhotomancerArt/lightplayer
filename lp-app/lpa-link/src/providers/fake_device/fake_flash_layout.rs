@@ -31,7 +31,6 @@ use super::fake_device_script::{
 
 /// What the scripted device answers to a chip probe during a layout
 /// operation.
-const FAKE_CHIP_NAME: &str = "ESP32-C6 (fake)";
 /// The scripted board's flash chip JEDEC id: 4 MB.
 pub(crate) const FAKE_FLASH_ID: u32 = 0x0016_4020;
 
@@ -221,7 +220,7 @@ impl FakeEsp32Device {
             image,
             region,
             partition_table,
-            chip_name: Some(FAKE_CHIP_NAME.to_string()),
+            chip_name: Some(self.bootloader_chip_name().to_string()),
         })
     }
 }
