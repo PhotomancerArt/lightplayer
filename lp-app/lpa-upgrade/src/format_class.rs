@@ -96,51 +96,64 @@ impl FormatClass {
 
 /// Sniff `files`' format without parsing any artifact.
 pub fn classify(files: &ProjectFiles) -> FormatClass {
-    let Some(bytes) = files.manifest() else {
-        return FormatClass::NotAProject;
+    let found = match stored_format(files) {
+        Ok(found) => found,
+        Err(class) => return class,
     };
-    let text = match std::str::from_utf8(bytes) {
-        Ok(text) => text,
-        Err(e) => {
-            return FormatClass::Unreadable {
-                detail: e.to_string(),
-            };
-        }
-    };
-    let manifest = match JsonNode::parse(text) {
-        Ok(manifest) => manifest,
-        Err(e) => return FormatClass::Unreadable { detail: e.detail },
-    };
-    if manifest.object().is_none() {
-        return FormatClass::Unreadable {
-            detail: String::from("project manifest root must be an object"),
-        };
-    }
-
-    let Some(format) = manifest.get("format") else {
-        // No version at all. A `kind` key means a pre-mitosis root, back
-        // when project.json WAS the root node artifact
-        // (`lpc-model/src/project/manifest.rs`, `read_json` tests).
-        return if manifest.get("kind").is_some() {
-            FormatClass::BelowFloor { found: None }
-        } else {
-            FormatClass::Unreadable {
-                detail: String::from("project.json has no `format` version"),
-            }
-        };
-    };
-    let Some(found) = format.as_u32() else {
-        return FormatClass::Unreadable {
-            detail: String::from("field `format` must be an unsigned integer"),
-        };
-    };
-
     match found {
         found if found == PROJECT_FORMAT_VERSION => FormatClass::Current,
         found if found > PROJECT_FORMAT_VERSION => FormatClass::FutureFormat { found },
         found if found >= UPGRADE_FLOOR => FormatClass::Upgradable { found },
         found => FormatClass::BelowFloor { found: Some(found) },
     }
+}
+
+/// The `format` a project's `project.json` states, whatever this build's
+/// own format is — or, when it states none, the verdict that says why
+/// ([`FormatClass::NotAProject`], [`FormatClass::Unreadable`], or a
+/// pre-mitosis [`FormatClass::BelowFloor`] with no number).
+///
+/// [`classify`] compares the number against this build's
+/// [`PROJECT_FORMAT_VERSION`]; a caller with another reference point (a
+/// board's engine, which may read an older or newer format than this
+/// build) compares it against that instead.
+pub fn stored_format(files: &ProjectFiles) -> Result<u32, FormatClass> {
+    let Some(bytes) = files.manifest() else {
+        return Err(FormatClass::NotAProject);
+    };
+    let text = match std::str::from_utf8(bytes) {
+        Ok(text) => text,
+        Err(e) => {
+            return Err(FormatClass::Unreadable {
+                detail: e.to_string(),
+            });
+        }
+    };
+    let manifest = match JsonNode::parse(text) {
+        Ok(manifest) => manifest,
+        Err(e) => return Err(FormatClass::Unreadable { detail: e.detail }),
+    };
+    if manifest.object().is_none() {
+        return Err(FormatClass::Unreadable {
+            detail: String::from("project manifest root must be an object"),
+        });
+    }
+
+    let Some(format) = manifest.get("format") else {
+        // No version at all. A `kind` key means a pre-mitosis root, back
+        // when project.json WAS the root node artifact
+        // (`lpc-model/src/project/manifest.rs`, `read_json` tests).
+        return Err(if manifest.get("kind").is_some() {
+            FormatClass::BelowFloor { found: None }
+        } else {
+            FormatClass::Unreadable {
+                detail: String::from("project.json has no `format` version"),
+            }
+        });
+    };
+    format.as_u32().ok_or_else(|| FormatClass::Unreadable {
+        detail: String::from("field `format` must be an unsigned integer"),
+    })
 }
 
 #[cfg(test)]

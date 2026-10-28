@@ -781,6 +781,7 @@ mod tests {
                 commit: "abc1234".to_string(),
                 dirty: false,
                 profile: "release-esp32".to_string(),
+                project_format: lpc_model::PROJECT_FORMAT_VERSION,
             },
             hardware: lpc_wire::HardwareFacts::default(),
             device_uid: None,
@@ -800,6 +801,7 @@ mod tests {
                 commit: "abc1234".to_string(),
                 dirty: false,
                 profile: "release-esp32".to_string(),
+                project_format: lpc_model::PROJECT_FORMAT_VERSION,
             },
             hardware: lpc_wire::HardwareFacts {
                 base_mac: base_mac.map(str::to_string),

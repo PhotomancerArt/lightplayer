@@ -16,10 +16,15 @@
 //! - [`drive`]: the update driver, a whole update or heal over one board's
 //!   links, and the person's intent (`Auto`, `Install`, `Reinstall`) it
 //!   carries ([`decide_for_intent`]);
+//! - [`projects`]: **the project stage**, the update's last stage — a
+//!   board's stored projects upgraded to the format its engine reads, over
+//!   channel 1, by `lpa-upgrade` on the host (a sibling of the driver, which
+//!   never sees a project);
 //! - `pack` (feature `pack`, std): **the one packer** of encoding 1 — a
 //!   piece's `.z` stream and its chunk-length index — and its prover.
 //!
-//! Sans-IO, `no_std` + `alloc` (except under `pack`): no clock (time is a
+//! Sans-IO, `no_std` + `alloc` in its own code (except under `pack`; the
+//! project stage's `lpa-upgrade` is a host/wasm `std` crate): no clock (time is a
 //! caller's `now_ms`), no IO, no executor. It emits decisions, stages and
 //! effects, never UI actions or copy (DM31). Of the firmware-distribution
 //! plan's crates it reads only `lpc-firmware-release` (the manifest format);
@@ -44,6 +49,7 @@ pub mod identity;
 pub mod login;
 #[cfg(feature = "pack")]
 pub mod pack;
+pub mod projects;
 pub mod serve;
 
 pub use backup::{BackupError, BackupSession, BackupStep};
@@ -59,6 +65,10 @@ pub use host_build_facts::{HostBuildFacts, HostPieceFacts};
 pub use host_refusal::HostRefusal;
 pub use identity::{IdentityMismatch, board_matches_release};
 pub use login::{Credential, LoginClient, LoginEvent};
+pub use projects::{
+    BatchOutcome, ProjectStage, ProjectStageEffect, ProjectStageReport, RefusedProject, StageEnd,
+    StoredDisposition, StoredProject, UpgradedProject,
+};
 pub use serve::{
     BLE_READ_BACK_PIECE, ServeConfig, ServeCounters, ServeEvent, ServeOutput, ServeSession,
 };

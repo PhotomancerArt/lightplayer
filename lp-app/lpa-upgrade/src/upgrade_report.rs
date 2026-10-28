@@ -24,7 +24,8 @@ pub struct UpgradeReport {
 }
 
 impl UpgradeReport {
-    pub(crate) fn new(from: u32) -> Self {
+    /// A report of nothing done yet, for a project at `from`.
+    pub fn new(from: u32) -> Self {
         Self {
             from,
             to: from,
@@ -39,27 +40,27 @@ impl UpgradeReport {
             && self.removed_files.is_empty()
     }
 
-    pub(crate) fn note(&mut self, note: impl Into<String>) {
+    pub fn note(&mut self, note: impl Into<String>) {
         self.notes.push(note.into());
     }
 
-    pub(crate) fn warn(&mut self, warning: impl Into<String>) {
+    pub fn warn(&mut self, warning: impl Into<String>) {
         self.warnings.push(warning.into());
     }
 
     /// Record that `path`'s bytes changed. Idempotent: a file touched by two
     /// steps in one chain is listed once.
-    pub(crate) fn record_changed(&mut self, path: &str) {
+    pub fn record_changed(&mut self, path: &str) {
         insert_sorted(&mut self.changed_files, path);
     }
 
     /// Record that `path` was added. Idempotent, sorted.
-    pub(crate) fn record_added(&mut self, path: &str) {
+    pub fn record_added(&mut self, path: &str) {
         insert_sorted(&mut self.added_files, path);
     }
 
     /// Record that `path` was removed. Idempotent, sorted.
-    pub(crate) fn record_removed(&mut self, path: &str) {
+    pub fn record_removed(&mut self, path: &str) {
         insert_sorted(&mut self.removed_files, path);
     }
 }

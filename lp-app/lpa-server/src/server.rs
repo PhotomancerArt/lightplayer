@@ -424,6 +424,7 @@ impl LpServer {
                     commit: "unknown".to_string(),
                     dirty: false,
                     profile: "unknown".to_string(),
+                    project_format: lpc_model::PROJECT_FORMAT_VERSION,
                 },
                 hardware,
                 device_uid: None,

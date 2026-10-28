@@ -54,11 +54,13 @@ mod upgrade_error;
 mod upgrade_report;
 mod v11;
 
-pub use format_class::{FormatClass, UPGRADE_FLOOR, classify};
+pub use format_class::{FormatClass, UPGRADE_FLOOR, classify, stored_format};
 pub use json::{JsonError, JsonNode};
 pub use project_files::{PROJECT_MANIFEST, ProjectFiles};
-pub use steps::UpgradeStep;
-pub use upgrade::{chain_tip, upgrade_steps, upgrade_to, upgrade_to_current};
+pub use steps::{StepFn, UpgradeStep};
+pub use upgrade::{
+    chain_tip, chain_tip_of, upgrade_steps, upgrade_to, upgrade_to_current, upgrade_with_chain,
+};
 pub use upgrade_error::UpgradeError;
 pub use upgrade_report::UpgradeReport;
 pub use v11::{

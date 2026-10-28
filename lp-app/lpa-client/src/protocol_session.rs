@@ -434,6 +434,7 @@ mod tests {
                     commit: "fake-firmware".to_string(),
                     dirty: false,
                     profile: "release-esp32".to_string(),
+                    project_format: lpc_model::PROJECT_FORMAT_VERSION,
                 },
                 hardware: Default::default(),
                 device_uid: Some("dev000000daqf6dvvt2".to_string()),
