@@ -74,7 +74,8 @@ fn project_shape_section(p: &mut String) {
         p,
         "This is the project the app itself creates for a {EXAMPLE_BOARD} board: a clock, \
          a playlist playing one pattern, a fixture (the LED layout: a one-row strip of \
-         {} lamps in its `.map2d.json`, rendered at {}×8 and sampled `direct`), and an \
+         {} lamps in its `.map2d.json`, map2d format 6, starting at lamp 0 of port 0 of \
+         the output named \"1\"; rendered at {}×8 and sampled `direct`), and an \
          output sending the fixture's colours to pin {}. Nodes talk over named buses: the \
          clock publishes `bus:time`, the playlist reads it and publishes `bus:visual.out`, \
          the fixture turns that into `bus:control.out`, and the output sends it to the \
@@ -344,6 +345,30 @@ mod tests {
     fn the_app_system_prompt_fits_a_small_context() {
         let prompt = lpa_agent::build_app_system_prompt(&app_agent_reference());
         assert!(prompt.len() / 4 < 12_000, "≈{} tokens", prompt.len() / 4);
+    }
+
+    /// The agent is taught map2d format 6 (one file: parts, a start naming
+    /// its output, overrides by id) and no patch file; every mapping it is
+    /// shown is format 6.
+    #[test]
+    fn the_agent_is_taught_map2d_format_6_and_no_patch_file() {
+        let prompt = lpa_agent::build_app_system_prompt(&app_agent_reference());
+        for needle in [
+            "map2d format 6",
+            "`overrides` keyed by a part's id",
+            "There are no `.patch.json` files and a fixture has no `patch` field",
+            "\"set\": \"1\"",
+        ] {
+            assert!(prompt.contains(needle), "the prompt lacks {needle}");
+        }
+        assert!(
+            !prompt.contains("\"objects\"") && !prompt.contains("\\\"objects\\\""),
+            "no mapping it is shown is older than format 6"
+        );
+        assert!(
+            !prompt.contains("/patch/"),
+            "no patch verb is offered any more"
+        );
     }
 
     #[test]

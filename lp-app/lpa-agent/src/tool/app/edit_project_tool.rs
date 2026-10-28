@@ -54,7 +54,8 @@ pub enum ProjectEdit {
     /// definition.
     Remove(SlotRef),
     /// Replace the whole text of a file a node references (e.g. a fixture's
-    /// `.map2d.json` mapping).
+    /// `.map2d.json`: map2d format 6, its lamp layout and its patching in
+    /// one file).
     SetAsset(SetAssetEdit),
     /// Set which board the project is for (the project's `target`).
     SetTarget(SetTargetEdit),

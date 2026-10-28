@@ -120,16 +120,20 @@ pub fn build_app_system_prompt(reference: &str) -> String {
          `edit_project` `remove_node` that would throw away unsaved edits \
          is refused with the node's `remove` path; `act` that path, which \
          hands the user the button as a card.\n\
-         - Patching (which object of a fixture goes on which output, at \
-         which lamp) is actions too: a fixture's are at \
-         `project/<node path>/patch/…` (`assign`, `re-anchor`, `reverse`, \
-         `rotate`, `clear`, `set-flow`, `unmap-all`), an output's are \
-         `swap-ports` and `shift-port`, and `project/patch/undo` and \
-         `project/patch/redo` walk the patch edits back and forth. The \
-         selected fixture's are listed in full; `read` a fixture or an \
-         output for its own. A `subject` defaults to what the user has \
-         selected; `lamp`, `steps`, `start`, `lamps` and `delta` are whole \
-         numbers.\n\
+         - A fixture's lamp layout and its patching (which output, port \
+         and lamp it starts on) are one file, its `.map2d.json`, in map2d \
+         format 6: `parts` (a `grid`, a `path` whose `d` is SVG path data, \
+         a `circle` of keyed rings, `points`, and groups and repeats of \
+         them, each with an `id`), the fixture's `start` naming its output \
+         by name, port and lamp (`{\"output\": {\"set\": \"1\"}, \
+         \"port\": {\"set\": 0}, \"channel\": {\"set\": {\"lamps\": \
+         0}}}`), and `overrides` keyed by a part's id for a part that \
+         starts somewhere else. The output a start names carries that \
+         `name` in its own definition. It says nothing about the lamps' \
+         colour order (the fixture's `color_order` does). There are no \
+         `.patch.json` files and a fixture has no `patch` field. Write the \
+         file whole with `set_asset`; a strip of N LEDs is a one-row grid \
+         of N columns, as in the worked example.\n\
          - A playlist's live controls are actions on the playlist node: \
          `play` (`entry`: which pattern), `next`, `prev`, `cycle` \
          (`cycling`: on or off), `step-shorter`, `step-longer` and `skip` \

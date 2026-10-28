@@ -893,8 +893,9 @@ fn binding<'a>(def: &'a Value, name: &str, side: &str) -> Option<&'a str> {
     def["bindings"][name][side].as_str()
 }
 
-/// The fixture's lamp positions in wiring order, from its Map2d body or its
-/// PathPoints paths.
+/// The fixture's lamp positions in render order (map2d format 6; the
+/// agent's projects are one strip from port 0, so render order is wiring
+/// order), or its PathPoints paths.
 fn fixture_lamps(project: &ProjectTree, fixture: &TreeNode) -> Result<Vec<[f32; 2]>, String> {
     let mapping = &fixture.def["mapping"];
     match mapping["kind"].as_str() {
@@ -907,11 +908,11 @@ fn fixture_lamps(project: &ProjectTree, fixture: &TreeNode) -> Result<Vec<[f32; 
             let text = project
                 .text(&path)
                 .ok_or_else(|| format!("the mapping body {path} is missing"))?;
-            let doc = lpc_mapping::Map2dDoc::from_json(text)
-                .map_err(|error| format!("{path} does not parse: {error:?}"))?;
-            let resolved = lpc_mapping::resolve(&doc)
-                .map_err(|error| format!("{path} does not resolve: {error:?}"))?;
-            Ok(resolved.positions())
+            let mapping = lpc_mapping::map2d6::read(text)
+                .map_err(|error| format!("{path} does not read as map2d format 6: {error}"))?;
+            let mut tree = lpc_mapping::part::render(&mapping)
+                .map_err(|error| format!("{path} does not render: {error}"))?;
+            Ok(tree.take_positions())
         }
         Some("PathPoints") => {
             let mut lamps = Vec::new();
