@@ -1,0 +1,5 @@
+{
+  "format": 12,
+  "name": "Circular display",
+  "target": "seeed/xiao-esp32-c6"
+}

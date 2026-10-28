@@ -1,0 +1,18 @@
+{
+  "kind": "Playlist",
+  "bindings": {
+    "time": {
+      "source": "bus:time"
+    }
+  },
+  "idle_entry": 1,
+  "default_fade": 0.35,
+  "entries": {
+    "1": {
+      "name": "meteor",
+      "node": {
+        "ref": "./effect/module.json"
+      }
+    }
+  }
+}

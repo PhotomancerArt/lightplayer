@@ -563,6 +563,36 @@ fn the_circular_display_from_nothing() {
     assert_eq!(text, expected, "the saved map2d is the golden");
 }
 
+/// `projects/test/circular-display-walk`, the project G3's and M5's walks
+/// map the circular display in by hand, is exactly what the journey above
+/// starts from: a new board's project as Studio generates it, with the
+/// display's output. Written with `LPA_STUDIO_CORE_BLESS=1`; its README is
+/// its own.
+#[test]
+fn the_walk_project_is_the_from_nothing_journeys() {
+    let dir =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../projects/test/circular-display-walk");
+    let files = display_walk_files();
+    if std::env::var_os("LPA_STUDIO_CORE_BLESS").is_some() {
+        for (path, bytes) in &files {
+            let to = dir.join(path);
+            std::fs::create_dir_all(to.parent().expect("a parent")).expect("the folder");
+            std::fs::write(&to, bytes).expect("it writes");
+        }
+    }
+    let mut on_disk = Vec::new();
+    collect(&dir, &dir, &mut on_disk);
+    on_disk.retain(|(path, _)| path != "README.md");
+    let mut want = files;
+    want.sort();
+    on_disk.sort();
+    let names = |f: &[(String, Vec<u8>)]| f.iter().map(|(p, _)| p.clone()).collect::<Vec<_>>();
+    assert_eq!(names(&on_disk), names(&want), "the same files");
+    for ((path, have), (_, want)) in on_disk.iter().zip(&want) {
+        assert!(have == want, "{path} is what Studio generates");
+    }
+}
+
 /// Every layout verb is offered at `project/graph/<verb>` with typed
 /// parameters, a `subject` first, whenever something can take it (ruling
 /// DD37), at its level (lean Q78): delete, unrepeat and remove-ring take
@@ -697,31 +727,9 @@ impl Journey {
     /// ports of 64 lamps (D0 to D4) and no name: the starter's output has
     /// one port and is named `1`, and no verb adds ports.
     fn new_board_with_display_output() -> Self {
-        let mut project = crate::app::home::generate_board_project(
-            "seeed/xiao-esp32-c6",
-            Some("Circular display"),
-        )
-        .expect("the board project");
-        let output = project
-            .files
-            .iter_mut()
-            .find(|(path, _)| path == "output.json")
-            .expect("its output");
-        let mut def: serde_json::Value = serde_json::from_slice(&output.1).expect("json");
-        def.as_object_mut().expect("an object").remove("name");
-        def["ports"] = (0..5)
-            .map(|k| {
-                (
-                    k.to_string(),
-                    serde_json::json!({"endpoint": format!("ws281x:local:D{k}"), "count": 64}),
-                )
-            })
-            .collect::<serde_json::Map<_, _>>()
-            .into();
-        output.1 = serde_json::to_vec_pretty(&def).expect("it writes");
         let server = crate::app::studio::studio_face_e2e_tests::files_e2e_server(
             "circular-display-from-nothing",
-            &project.files,
+            &display_walk_files(),
         );
         Self::open(Graph::on_server(server), "/fixture.map2d.json")
     }
@@ -965,6 +973,35 @@ impl Journey {
     fn saved_text(&mut self) -> String {
         self.graph.file_text(self.map)
     }
+}
+
+/// A new board's project as Studio generates it, its output given the
+/// display's five ports of 64 and no name (`new_board_with_display_output`,
+/// and `projects/test/circular-display-walk`).
+fn display_walk_files() -> Vec<(String, Vec<u8>)> {
+    let mut project =
+        crate::app::home::generate_board_project("seeed/xiao-esp32-c6", Some("Circular display"))
+            .expect("the board project");
+    let output = project
+        .files
+        .iter_mut()
+        .find(|(path, _)| path == "output.json")
+        .expect("its output");
+    let mut def: serde_json::Value = serde_json::from_slice(&output.1).expect("json");
+    def.as_object_mut().expect("an object").remove("name");
+    def["ports"] = (0..5)
+        .map(|k| {
+            (
+                k.to_string(),
+                serde_json::json!({"endpoint": format!("ws281x:local:D{k}"), "count": 64}),
+            )
+        })
+        .collect::<serde_json::Map<_, _>>()
+        .into();
+    let mut text = serde_json::to_vec_pretty(&def).expect("it writes");
+    text.push(b'\n');
+    output.1 = text;
+    project.files
 }
 
 fn id(text: &str) -> TreeId {

@@ -1,0 +1,40 @@
+{
+  "bindings": {
+    "input": {
+      "source": "bus:control.out"
+    }
+  },
+  "kind": "Output",
+  "options": {
+    "dithering_enabled": false,
+    "interpolation_enabled": true,
+    "lut_enabled": true,
+    "white_point": [
+      0.9,
+      1,
+      1
+    ]
+  },
+  "ports": {
+    "0": {
+      "count": 64,
+      "endpoint": "ws281x:local:D0"
+    },
+    "1": {
+      "count": 64,
+      "endpoint": "ws281x:local:D1"
+    },
+    "2": {
+      "count": 64,
+      "endpoint": "ws281x:local:D2"
+    },
+    "3": {
+      "count": 64,
+      "endpoint": "ws281x:local:D3"
+    },
+    "4": {
+      "count": 64,
+      "endpoint": "ws281x:local:D4"
+    }
+  }
+}
