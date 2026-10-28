@@ -10975,7 +10975,10 @@ fn board_on_tree_store(evidence: &lpa_devices::Evidence) -> Option<bool> {
     // not hold it back (since the tree-store cutover such a board is almost
     // always a tree board, and a tree core on a littlefs one holds its files
     // for the USB migration, AD3); an automatic start waits for the hello.
-    let hello = evidence.classification.hello()?;
+    // A hello from another wire says it in its own words (`fs.tree`, `fs`).
+    let Some(hello) = evidence.classification.hello() else {
+        return evidence.other_wire_tree_store();
+    };
     Some(
         (hello.tree_store || hello.fs == BoardFs::TreeStoreHeld) && hello.fs != BoardFs::LegacyHeld,
     )
