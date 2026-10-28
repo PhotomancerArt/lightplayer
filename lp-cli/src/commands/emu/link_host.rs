@@ -412,6 +412,12 @@ pub struct EmuLinkHost<B: EmuUsbBoard> {
     read_backlog: VecDeque<u8>,
     /// Bytes the throttled host may read: earned each slice, spent as it reads.
     read_credit: f64,
+    /// Why the board stopped (a `--flash-cut … then=stop` power cut, a
+    /// seam), once it has: a stopped board stays stopped, so every later
+    /// [`Self::step`] says so again. Without it a caller that turned the
+    /// first stop into a transport error (a channel-1 client's `receive`)
+    /// stepped on past the cut, on a flash that takes no more writes.
+    stopped: Option<String>,
 }
 
 impl<B: EmuUsbBoard> EmuLinkHost<B> {
@@ -442,6 +448,7 @@ impl<B: EmuUsbBoard> EmuLinkHost<B> {
             read_rate: None,
             read_backlog: VecDeque::new(),
             read_credit: 0.0,
+            stopped: None,
         }
     }
 
@@ -525,9 +532,14 @@ impl<B: EmuUsbBoard> EmuLinkHost<B> {
                 self.board_seconds()
             );
         }
-        self.board
-            .run_for_us(SLICE_US)
-            .map_err(|why| anyhow::anyhow!("the emulated board stopped: {why}"))?;
+        if let Some(why) = &self.stopped {
+            bail!("the emulated board stopped: {why}");
+        }
+        if let Err(why) = self.board.run_for_us(SLICE_US) {
+            let error = anyhow::anyhow!("the emulated board stopped: {why}");
+            self.stopped = Some(why);
+            return Err(error);
+        }
         if let Some(observer) = self.slice_observer.as_mut() {
             observer(&self.board);
         }
