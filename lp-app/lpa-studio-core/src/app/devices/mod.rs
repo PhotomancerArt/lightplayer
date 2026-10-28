@@ -131,6 +131,8 @@ pub mod link_health;
 pub mod new_sim_offer;
 pub mod own_build_source;
 pub mod pending_link_offers;
+pub mod project_stage_command;
+pub mod project_stage_controller;
 pub mod project_stage_status;
 pub mod provisional_board_numbers;
 pub mod relay_connect_failure;
@@ -316,6 +318,8 @@ pub use link_health::{LinkHealth, LinkHealthMap, LinkTrouble};
 pub use new_sim_offer::{NEW_SIM_BACKING_PARAM, NEW_SIM_BOARD_PARAM, new_sim_offer};
 pub use own_build_source::{MemoryOwnBuildSource, OwnBuildSource, own_for};
 pub use pending_link_offers::pending_link_offers;
+pub use project_stage_command::ProjectStageCommand;
+pub use project_stage_controller::ProjectStageController;
 pub use project_stage_status::{ProjectStageStatus, ProjectsHeldBack};
 pub use provisional_board_numbers::ProvisionalBoardNumbers;
 pub use relay_connect_failure::{

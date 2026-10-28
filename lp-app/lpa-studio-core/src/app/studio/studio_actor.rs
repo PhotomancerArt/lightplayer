@@ -347,6 +347,9 @@ where
         for command in plan.network {
             self.controller.apply_network_command(command);
         }
+        for command in plan.project_stages {
+            self.controller.apply_project_stage_command(command);
+        }
         // Before the device folds: what other tabs hold is what this
         // batch's device inputs are read against.
         for (from, note) in plan.board_hold {
@@ -745,6 +748,7 @@ struct CommandPlan {
     settings: Vec<crate::SettingsCommand>,
     access: Vec<crate::app::access::AccessCommand>,
     network: Vec<crate::app::network::NetworkCommand>,
+    project_stages: Vec<crate::app::devices::ProjectStageCommand>,
     /// Hold-channel notes from other tabs, in queue order (never coalesced).
     board_hold: Vec<(crate::TabId, crate::HoldNote)>,
     /// The hold edge's answers and hold deadlines, in queue order.
@@ -797,6 +801,7 @@ impl CommandPlan {
         let mut settings = Vec::new();
         let mut access = Vec::new();
         let mut network = Vec::new();
+        let mut project_stages = Vec::new();
         let mut board_hold = Vec::new();
         let mut hold_edge = Vec::new();
         let mut agent = Vec::new();
@@ -852,6 +857,7 @@ impl CommandPlan {
                 StudioCommand::Settings(command) => settings.push(command),
                 StudioCommand::Access(command) => access.push(command),
                 StudioCommand::Network(command) => network.push(command),
+                StudioCommand::ProjectStage(command) => project_stages.push(command),
                 StudioCommand::Agent(feedback) => agent.push(feedback),
                 // Coalesce: many queued ticks collapse to one pull.
                 StudioCommand::RefreshTick => tick = true,
@@ -864,6 +870,7 @@ impl CommandPlan {
             settings,
             access,
             network,
+            project_stages,
             board_hold,
             hold_edge,
             agent,

@@ -433,6 +433,9 @@ pub struct StudioController {
     access: crate::app::access::AccessController,
     /// Each board's Wi‑Fi status and the Wi‑Fi offers' changes.
     network: crate::app::network::NetworkController,
+    /// Each board's project stage (M3 P11): its stored projects brought to
+    /// the format its engine reads, with no click.
+    project_stages: crate::ProjectStageController,
 }
 
 /// Which device an open lands on — the model half of the URL's `?on=`
@@ -646,6 +649,7 @@ impl StudioController {
             agent: crate::AgentController::new(),
             access: crate::app::access::AccessController::new(),
             network: crate::app::network::NetworkController::new(),
+            project_stages: crate::ProjectStageController::new(),
         }
     }
 
@@ -1620,6 +1624,7 @@ impl StudioController {
             .set_spawner(move |future| shared(future));
         self.wifi_spawner = Some(Rc::clone(&spawner));
         self.network.set_spawner(Rc::clone(&spawner));
+        self.project_stages.set_spawner(Rc::clone(&spawner));
         self.access.set_spawner(spawner);
     }
 
@@ -1641,6 +1646,7 @@ impl StudioController {
         // same queue.
         self.wifi_tx = Some(tx.clone());
         self.network.set_command_sender(tx.clone());
+        self.project_stages.set_command_sender(tx.clone());
         self.access.set_command_sender(tx);
     }
 
@@ -1754,6 +1760,69 @@ impl StudioController {
             |device| access.granted_tier(device),
         );
         self.mark_dirty();
+    }
+
+    /// Start the project stages due now: an update's last stage, or one a
+    /// board found with older projects needs (M3 P11, Q107).
+    pub(crate) fn drive_project_stages(&mut self) {
+        let updates = self.devices.effects().update_host().projects_wanted();
+        let access = &self.access;
+        let follow_ups = self.project_stages.drive(
+            self.devices.roster(),
+            self.devices.effects(),
+            |device| access.granted_tier(device),
+            &updates,
+        );
+        for follow_up in follow_ups {
+            self.project_stage_follow_up(follow_up);
+        }
+    }
+
+    /// Apply one command from a project stage (its progress, its end).
+    pub fn apply_project_stage_command(&mut self, command: crate::ProjectStageCommand) {
+        if let Some(follow_up) = self.project_stages.apply(command, self.devices.roster()) {
+            self.project_stage_follow_up(follow_up);
+        }
+        self.mark_dirty();
+    }
+
+    fn project_stage_follow_up(
+        &mut self,
+        follow_up: crate::app::devices::project_stage_controller::ProjectStageFollowUp,
+    ) {
+        use crate::app::devices::project_stage_controller::ProjectStageFollowUp;
+        match follow_up {
+            ProjectStageFollowUp::UpdateDone { device, lines } => {
+                self.devices
+                    .effects()
+                    .update_host()
+                    .projects_done(device, lines);
+            }
+            ProjectStageFollowUp::UpdateProgress {
+                device,
+                done,
+                total,
+            } => {
+                self.devices
+                    .effects()
+                    .update_host()
+                    .projects_progress(device, done, total);
+            }
+            ProjectStageFollowUp::Say { device, lines } => {
+                for label in lines {
+                    self.fold_device_input(crate::DeviceInput::Event(
+                        lpa_devices::event::Event::ActivityMarker {
+                            device,
+                            effect: None,
+                            marker: lpa_devices::event::ActivityMarker::Progress {
+                                label,
+                                percent: None,
+                            },
+                        },
+                    ));
+                }
+            }
+        }
     }
 
     /// Run a Wi‑Fi step the network controller parked because the editor
@@ -2110,7 +2179,7 @@ impl StudioController {
             store_lookups: Some(self.update_build_facts.store_lookups()),
             file_build: self.update_build_facts.file_build(),
             board_tree_store: evidence.and_then(board_on_tree_store).unwrap_or(true),
-            projects: None,
+            projects: self.project_stages.status(view.id),
         };
         crate::UpdateOfferFacts::read(
             &inputs,
@@ -2196,6 +2265,10 @@ impl StudioController {
         // A board waiting for its engine, or holding this Studio's
         // interrupted update, is restored or finished with no click (DS4).
         self.drive_device_updates();
+        // A board whose engine reads a newer project format than projects
+        // it stores has them upgraded with no click, and an update waiting
+        // in its project stage runs it (M3 P11).
+        self.drive_project_stages();
         // A chooser an agent card's press opened has answered: that is the
         // press's outcome, and the run it resumes reads the roster after it.
         if let Some((link, answer)) = grant_answer
