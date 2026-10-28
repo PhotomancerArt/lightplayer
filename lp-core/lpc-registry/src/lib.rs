@@ -23,7 +23,10 @@ pub use asset::{AssetBytes, AssetReadError, AssetText};
 pub use lpc_model::{
     ArtifactOverlay, AssetBodyOverlay, ProjectOverlay, SlotEdit, SlotEditOp, SlotOverlay,
 };
-pub use overlay::{EditApplyError, serialize_slot_draft};
+pub use overlay::{
+    EditApplyError, apply_op_to_def, apply_slot_overlay_to_def, parse_def_bytes,
+    serialize_slot_draft,
+};
 pub use registry::commit_error::CommitError;
 pub use registry::entry_issue_check::EntryIssue;
 pub use registry::entry_residency::EntryResidency;

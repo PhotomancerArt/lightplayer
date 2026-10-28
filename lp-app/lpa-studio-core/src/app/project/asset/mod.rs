@@ -14,6 +14,8 @@
 
 pub mod asset_content_fetch_op;
 pub mod asset_edit_op;
+pub(crate) mod def_body_slot_edits;
+pub(crate) mod held_body;
 pub mod pending_asset_edit;
 pub mod ui_asset_content;
 pub mod ui_shader_error;

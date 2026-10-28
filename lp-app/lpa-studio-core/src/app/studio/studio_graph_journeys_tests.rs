@@ -564,15 +564,17 @@ fn the_circular_display_from_nothing() {
 }
 
 /// The output the Graph names keeps its name on the board when it is then
-/// selected, and Save writes it (docs/defects/2026-10-28-the-graph-names-
-/// an-output-the-board-keeps-it-unnamed.md). Selecting an output writes its
-/// `highlight` Debug slot; on the board that slot edit replaced the output
-/// file's pending body (the name) and clearing it dropped the file's
-/// overlay, so Save wrote nothing for it. What Studio showed kept the name,
-/// which is why the journey above never saw it: this asks the board. Once
-/// saved, the output breathes on the board again when selected; and a body
-/// the Graph writes while it breathes (a port's lamps) is kept and saved
-/// too.
+/// selected, breathes while it is, and Save writes it
+/// (docs/defects/2026-10-28-the-graph-names-an-output-the-board-keeps-it-
+/// unnamed.md). Selecting an output writes its `highlight` Debug slot; the
+/// board holds a file's slot edits or its body, never both, so that slot
+/// edit used to replace the output file's pending body (the name). Studio
+/// now says the body as slot edits first, so the board holds the name and
+/// the highlight together: the output breathes before Save, the name is
+/// saved, and the highlight is still there after Save with no selection
+/// change. A body the Graph writes while it breathes (a port's lamps) is
+/// kept beside the highlight, and saved too. This asks the board, not
+/// Studio's copy.
 #[test]
 fn a_named_output_keeps_its_name_on_the_board_when_selected_and_saved() {
     let mut j = Journey::new_board_with_display_output();
@@ -589,17 +591,7 @@ fn a_named_output_keeps_its_name_on_the_board_when_selected_and_saved() {
     };
     let name = |text: Option<String>| field(text, "/name");
     let one = Some(serde_json::Value::from("1"));
-    // Breathing on the board: its overlay holds the output's `highlight`.
-    let breathes = |j: &Journey| {
-        use lpc_model::project::overlay::ArtifactOverlay;
-        let server = j.graph.server.borrow();
-        let project = server.project_manager().first_loaded().expect("a project");
-        let overlay = project.registry().overlay().get();
-        matches!(
-            overlay.artifact(&lpc_model::ArtifactLocation::file("/output.json")),
-            Some(ArtifactOverlay::Slot { .. })
-        )
-    };
+    let breathes = |j: &Journey| board_holds_slot(j, "/output.json", "highlight");
 
     // Named by choosing its port.
     let d0 = j.offered_option(
@@ -621,15 +613,20 @@ fn a_named_output_keeps_its_name_on_the_board_when_selected_and_saved() {
         "the board holds the name"
     );
 
-    // The output selected, then nothing, then the output, then nothing.
-    for (targets, what) in [
-        (vec![Target::Node(output.clone())], "the output selected"),
-        (Vec::new(), "nothing selected"),
+    // The output selected, then nothing, then the output, then nothing:
+    // it breathes whenever it is selected, before any Save.
+    for (targets, what, breathing) in [
+        (
+            vec![Target::Node(output.clone())],
+            "the output selected",
+            true,
+        ),
+        (Vec::new(), "nothing selected", false),
         (
             vec![Target::Node(output.clone())],
             "the output selected again",
+            true,
         ),
-        (Vec::new(), "nothing selected again"),
     ] {
         select(&mut j, targets);
         assert_eq!(
@@ -637,9 +634,16 @@ fn a_named_output_keeps_its_name_on_the_board_when_selected_and_saved() {
             one,
             "{what}, the board still holds the name"
         );
+        assert_eq!(breathes(&j), breathing, "{what}: does it breathe?");
+        assert_eq!(
+            name(Some(j.graph.file_text("/output.json"))),
+            one,
+            "{what}, Studio reads the name"
+        );
     }
 
-    // Saved: the board's own file carries it.
+    // Saved while selected: the board's own file carries the name, and the
+    // highlight is still there, with no selection change.
     actor_clicks(&mut j.graph.actor, &j.graph.tx).press("project/save", OfferArgs::new());
     j.graph.refresh();
     assert_eq!(
@@ -647,11 +651,10 @@ fn a_named_output_keeps_its_name_on_the_board_when_selected_and_saved() {
         one,
         "saved, the board's output.json is named"
     );
+    assert!(breathes(&j), "saved, the selected output still breathes");
 
-    // Selected again, it breathes; a port's lamps written while it does
-    // are kept when it stops, and saved.
-    select(&mut j, vec![Target::Node(output.clone())]);
-    assert!(breathes(&j), "saved, the selected output breathes again");
+    // A port's lamps written while it breathes are kept beside the
+    // highlight, kept when it stops, and saved.
     j.press(
         "set-port-lamps",
         OfferArgs::new()
@@ -663,7 +666,9 @@ fn a_named_output_keeps_its_name_on_the_board_when_selected_and_saved() {
         field(j.graph.board_text("/output.json"), "/ports/4/count"),
         fifty
     );
+    assert!(breathes(&j), "a body written beside the highlight keeps it");
     select(&mut j, Vec::new());
+    assert!(!breathes(&j), "nothing selected, nothing breathes");
     assert_eq!(
         field(j.graph.board_text("/output.json"), "/ports/4/count"),
         fifty,
@@ -674,6 +679,78 @@ fn a_named_output_keeps_its_name_on_the_board_when_selected_and_saved() {
     let saved = j.graph.board_saved_text("/output.json");
     assert_eq!(field(saved.clone(), "/ports/4/count"), fifty, "saved");
     assert_eq!(name(saved), one, "and still named");
+}
+
+/// A user's ordinary slot edit (the slot editor setting a value) to a node
+/// file whose whole-file body the Graph wrote and nobody saved keeps both
+/// on the board: the body's change (a colour order) and the edit (the
+/// wire reversed), and Save writes both. The board used to drop the body for
+/// the edit.
+#[test]
+fn a_slot_edit_to_a_file_with_an_unsaved_body_keeps_both_on_the_board() {
+    let mut j = Journey::new_board_with_display_output();
+    j.press(
+        "set-colour-order",
+        OfferArgs::new()
+            .with("subject", "fixture:")
+            .with("order", "grb"),
+    );
+    let get = |text: Option<String>, key: &str| -> Option<serde_json::Value> {
+        let def: serde_json::Value =
+            serde_json::from_str(&text.expect("the fixture's file")).expect("json");
+        def.get(key).cloned()
+    };
+    let grb = Some(serde_json::Value::from("grb"));
+    assert_eq!(get(j.graph.board_text("/fixture.json"), "color_order"), grb);
+
+    let address = {
+        let controller = j.graph.actor.controller_mut_for_test();
+        let project = controller.project_for_test();
+        let node = project
+            .graph_node_for_def(&lpc_model::ArtifactLocation::file("/fixture.json"))
+            .expect("the fixture's node");
+        let node = project
+            .graph_node_address(node)
+            .expect("the fixture's address");
+        crate::ProjectSlotAddress::new(
+            crate::ProjectNodeAddress::parse(&node).expect("an address"),
+            crate::ProjectSlotRoot::def(),
+            lpc_model::SlotPath::parse("wire_reversed").expect("a path"),
+        )
+    };
+    super::studio_edit_e2e_tests::drive(j.graph.actor.controller_mut_for_test().dispatch(
+        crate::UiAction::from_op(
+            crate::ProjectController::NODE_ID,
+            crate::SlotEditOp::SetValue {
+                address,
+                value: lpc_model::LpValue::Bool(true),
+            },
+        ),
+    ))
+    .expect("the edit is taken");
+    j.graph.refresh();
+
+    let reversed = Some(serde_json::Value::from(true));
+    let board = j.graph.board_text("/fixture.json");
+    assert_eq!(
+        get(board.clone(), "color_order"),
+        grb,
+        "the body's change kept"
+    );
+    assert_eq!(
+        get(board, "wire_reversed"),
+        reversed,
+        "and the edit beside it"
+    );
+    let studio = Some(j.graph.file_text("/fixture.json"));
+    assert_eq!(get(studio.clone(), "color_order"), grb, "Studio reads both");
+    assert_eq!(get(studio, "wire_reversed"), reversed);
+
+    actor_clicks(&mut j.graph.actor, &j.graph.tx).press("project/save", OfferArgs::new());
+    j.graph.refresh();
+    let saved = j.graph.board_saved_text("/fixture.json");
+    assert_eq!(get(saved.clone(), "color_order"), grb, "saved");
+    assert_eq!(get(saved, "wire_reversed"), reversed, "both");
 }
 
 /// The same for a fixture: the Graph writes its file as a body (its
@@ -1202,4 +1279,18 @@ fn collect(root: &Path, dir: &Path, out: &mut Vec<(String, Vec<u8>)>) {
             ));
         }
     }
+}
+
+/// Whether the board's overlay holds a slot edit at `slot` on `file` (a
+/// Debug slot's `highlight`: the output breathes).
+fn board_holds_slot(j: &Journey, file: &str, slot: &str) -> bool {
+    use lpc_model::project::overlay::ArtifactOverlay;
+    let server = j.graph.server.borrow();
+    let project = server.project_manager().first_loaded().expect("a project");
+    let overlay = project.registry().overlay().get();
+    let path = lpc_model::SlotPath::parse(slot).expect("a path");
+    matches!(
+        overlay.artifact(&lpc_model::ArtifactLocation::file(file)),
+        Some(ArtifactOverlay::Slot { overlay }) if overlay.contains_path(&path)
+    )
 }

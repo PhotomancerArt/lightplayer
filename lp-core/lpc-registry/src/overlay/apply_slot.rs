@@ -21,7 +21,8 @@ pub fn serialize_slot_draft(def: &NodeDef, ctx: &ParseCtx<'_>) -> Result<Vec<u8>
     Ok(text.into_bytes())
 }
 
-pub(crate) fn parse_def_bytes(bytes: &[u8], ctx: &ParseCtx<'_>) -> Result<NodeDef, EditApplyError> {
+/// Read a node-definition file's bytes as the registry does.
+pub fn parse_def_bytes(bytes: &[u8], ctx: &ParseCtx<'_>) -> Result<NodeDef, EditApplyError> {
     let text = core::str::from_utf8(bytes).map_err(|err| EditApplyError::Parse {
         message: err.to_string(),
     })?;
@@ -30,7 +31,9 @@ pub(crate) fn parse_def_bytes(bytes: &[u8], ctx: &ParseCtx<'_>) -> Result<NodeDe
     })
 }
 
-pub(crate) fn apply_slot_overlay_to_def(
+/// Apply an artifact's pending slot edits to its definition, in the
+/// overlay's apply order (what commit materializes).
+pub fn apply_slot_overlay_to_def(
     def: &mut NodeDef,
     overlay: &SlotOverlay,
     ctx: &ParseCtx<'_>,
@@ -42,7 +45,8 @@ pub(crate) fn apply_slot_overlay_to_def(
     Ok(())
 }
 
-pub(crate) fn apply_op_to_def(
+/// Apply one slot edit to a definition, as the overlay applies it.
+pub fn apply_op_to_def(
     def: &mut NodeDef,
     op: &SlotEdit,
     ctx: &ParseCtx<'_>,

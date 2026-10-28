@@ -676,9 +676,22 @@ impl Graph {
             Some(ArtifactOverlay::Asset {
                 overlay: AssetBodyOverlay::Delete,
             }) => return None,
-            // Slot edits sit over the file on disk (a Debug slot's, say):
-            // the file is what they edit.
-            Some(ArtifactOverlay::Slot { .. }) | None => {}
+            // Slot edits sit over the file on disk: the file is what its
+            // definition, edits applied, writes (what Save writes; a Debug
+            // slot's edit writes nothing).
+            Some(ArtifactOverlay::Slot { .. }) => {
+                let shapes = lpc_model::SlotShapeRegistry::default();
+                let ctx = lpc_registry::ParseCtx { shapes: &shapes };
+                let location = lpc_model::NodeDefLocation::artifact_root(artifact);
+                let def = project
+                    .registry()
+                    .def(&location)
+                    .and_then(|entry| entry.state.loaded_def())
+                    .expect("the file's definition reads");
+                let bytes = lpc_registry::serialize_slot_draft(def, &ctx).expect("it writes");
+                return Some(String::from_utf8(bytes).expect("utf-8"));
+            }
+            None => {}
         }
         drop(server);
         self.board_saved_text(path)

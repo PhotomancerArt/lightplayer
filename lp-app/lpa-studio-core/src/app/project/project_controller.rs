@@ -8,6 +8,10 @@ use lpa_client::{CancelSignal, ProgressDeadline};
 use crate::app::project::agent_support::{
     AgentShaderBinding, AgentShaderTarget, param_upsert_edits, space_declaration_edits,
 };
+use crate::app::project::asset::def_body_slot_edits::{
+    canonical_def_text, materialize_def_text, slot_edits_for_body,
+};
+use crate::app::project::asset::held_body::HeldBody;
 use crate::app::project::device_bind::{BindOutcome, PulledPackage, RunningPackage};
 use crate::app::project::edit_journal::{EditJournal, EditStep};
 use crate::app::project::node::node_face_builder;
@@ -131,6 +135,11 @@ pub struct ProjectController {
     /// invalidated after commit acks (save rewrites files) and overlay
     /// clears (revert).
     asset_base_bodies: BTreeMap<ArtifactLocation, Vec<u8>>,
+    /// Node files whose pending whole-file body the board holds as slot
+    /// edits, so a slot edit (a Debug slot's, a value the slot editor sets)
+    /// sits beside it instead of dropping it ([`Self::hold_body_as_slots`]):
+    /// what each file reads as until Save writes it.
+    held_bodies: BTreeMap<ArtifactLocation, HeldBody>,
     /// The connected project's **server** filesystem root (e.g.
     /// `/projects/studio`), from the connect flow. Artifact locations are
     /// project-relative; the base-body fetch ([`Self::asset_content`])
@@ -446,6 +455,11 @@ pub(crate) enum TransientOrigin {
     SharedView { parent_project: String },
 }
 
+/// Why a slot edit to a node file wasn't sent: the file holds an unsaved
+/// whole-file change the edit would drop, and it can't be kept beside it.
+const UNHELD_BODY: &str =
+    "this file has an unsaved change Studio can't keep beside this edit; save first, then edit it";
+
 impl ProjectController {
     pub const NODE_ID: &'static str = "studio|project";
 
@@ -469,6 +483,7 @@ impl ProjectController {
             selected_fixtures: BTreeSet::new(),
             verdict_chase_ticks: 0,
             asset_base_bodies: BTreeMap::new(),
+            held_bodies: BTreeMap::new(),
             project_fs_root: None,
             def_artifacts: BTreeMap::new(),
             slot_shapes: SlotShapeRegistry::default(),
@@ -1658,6 +1673,12 @@ impl ProjectController {
                     ))
                 })?
         };
+        if !self.hold_body_as_slots(server, &def_artifact).await? {
+            return Ok((
+                ProjectEditRun::notice(UiNotice::warning(UNHELD_BODY)),
+                Some(UNHELD_BODY.to_string()),
+            ));
+        }
         let batch = MutationCmdBatch::new(
             edits
                 .into_iter()
@@ -1717,6 +1738,12 @@ impl ProjectController {
                 .cloned()
                 .ok_or_else(|| UiError::Project(format!("no def artifact is known for {node}")))?
         };
+        if !self.hold_body_as_slots(server, &def_artifact).await? {
+            return Ok((
+                ProjectEditRun::notice(UiNotice::warning(UNHELD_BODY)),
+                Some(UNHELD_BODY.to_string()),
+            ));
+        }
         let batch = MutationCmdBatch::new(
             edits
                 .into_iter()
@@ -6365,6 +6392,7 @@ impl ProjectController {
         self.edit_buffer.clear();
         self.asset_edit_buffer.clear();
         self.asset_base_bodies.clear();
+        self.held_bodies.clear();
         self.project_fs_root = None;
         self.def_artifacts.clear();
         self.slot_shapes = SlotShapeRegistry::default();
@@ -6592,8 +6620,8 @@ impl ProjectController {
     /// subject no wire carries) clears everything. The writes are ordinary
     /// Debug-slot overlay edits, so they reach whatever runs the engine and
     /// never touch dirty/save accounting. An output whose file holds a
-    /// pending whole-body edit is not written
-    /// ([`Self::holds_pending_body`]).
+    /// pending whole-file body has it said as slot edits first
+    /// ([`Self::hold_body_as_slots`]), so the highlight sits beside it.
     pub async fn apply_patch_pulse(
         &mut self,
         server: &mut StudioServerClient,
@@ -6635,10 +6663,7 @@ impl ProjectController {
             }
             _ => Vec::new(),
         };
-        let writes: Vec<(NodeId, String)> = writes
-            .into_iter()
-            .filter(|(node, _)| !self.holds_pending_body(*node))
-            .collect();
+        let writes = self.keep_bodies_beside(server, writes).await?;
 
         let written: BTreeSet<NodeId> = writes.iter().map(|(node, _)| *node).collect();
         let stale: Vec<NodeId> = self
@@ -6689,17 +6714,14 @@ impl ProjectController {
     /// write set and this one doesn't. Like [`Self::apply_patch_pulse`]: one
     /// selection, never a trail; ordinary Debug-slot overlay edits, so they
     /// reach whatever runs the engine and are never saved. A fixture whose
-    /// file holds a pending whole-body edit is not written
-    /// ([`Self::holds_pending_body`]).
+    /// file holds a pending whole-file body has it said as slot edits first
+    /// ([`Self::hold_body_as_slots`]).
     pub(crate) async fn apply_fixture_selection(
         &mut self,
         server: &mut StudioServerClient,
         writes: Vec<(NodeId, String)>,
     ) -> Result<(), UiError> {
-        let writes: Vec<(NodeId, String)> = writes
-            .into_iter()
-            .filter(|(node, _)| !self.holds_pending_body(*node))
-            .collect();
+        let writes = self.keep_bodies_beside(server, writes).await?;
         let written: BTreeSet<NodeId> = writes.iter().map(|(node, _)| *node).collect();
         let stale: Vec<NodeId> = self
             .selected_fixtures
@@ -6729,34 +6751,314 @@ impl ProjectController {
         Ok(())
     }
 
-    /// Whether the node's file holds a pending whole-body edit on the board
-    /// (the Graph writes a node file it changes as a body: an output it
-    /// named, a fixture's colour order). A slot edit to that file — a Debug
-    /// slot's `highlight` or `selection` included — would replace the
-    /// body in the board's overlay (an artifact holds slot edits or a body,
-    /// never both), and clearing it would then drop the file's overlay
-    /// entry: the body's change gone, unsaved, with Studio still showing
-    /// it (docs/defects/2026-10-28-the-graph-names-an-output-the-board-
-    /// keeps-it-unnamed.md). So a Debug write skips such a node: its lamps
-    /// don't breathe or chase on the board until Save puts the file on
-    /// disk.
-    fn holds_pending_body(&self, node: NodeId) -> bool {
-        let Some(controller) = self.node_by_runtime_id(node) else {
-            return false;
+    /// The Debug writes whose node files can take a slot edit without
+    /// losing a pending whole-file body: each file's body is said as slot
+    /// edits first ([`Self::hold_body_as_slots`]). A node whose body can't
+    /// be (a file not on disk yet, a body of another kind) is left out:
+    /// its lamps don't breathe or chase on the board until Save.
+    async fn keep_bodies_beside(
+        &mut self,
+        server: &mut StudioServerClient,
+        writes: Vec<(NodeId, String)>,
+    ) -> Result<Vec<(NodeId, String)>, UiError> {
+        let mut kept = Vec::with_capacity(writes.len());
+        for (node, text) in writes {
+            let held = match self.def_artifacts.get(&node).cloned() {
+                Some(artifact) => self.hold_body_as_slots(server, &artifact).await?,
+                None => true,
+            };
+            if held {
+                kept.push((node, text));
+            }
+        }
+        Ok(kept)
+    }
+
+    /// Ready a node file for slot edits without losing a pending whole-file
+    /// body. The board's overlay holds, per file, slot edits or a body,
+    /// never both, so a slot edit (a Debug slot's `highlight` or
+    /// `selection`, a value the slot editor sets) would replace the body
+    /// the Graph wrote (an output it named) and Save would write nothing
+    /// of it (docs/defects/2026-10-28-the-graph-names-an-output-the-board-
+    /// keeps-it-unnamed.md). When the board holds a body for `artifact`,
+    /// it is said as the slot edits that make the file on disk read as it
+    /// ([`slot_edits_for_body`]): the board then holds both, Save writes
+    /// what the body said, and Studio reads the file as the body
+    /// ([`Self::held_bodies`]). `false` when the body can't be said as slot
+    /// edits; the board still holds it, and a slot edit would drop it.
+    async fn hold_body_as_slots(
+        &mut self,
+        server: &mut StudioServerClient,
+        artifact: &ArtifactLocation,
+    ) -> Result<bool, UiError> {
+        let body = match self
+            .sync
+            .as_ref()
+            .and_then(|sync| sync.overlay_asset_edit_at(artifact))
+        {
+            Some(AssetBodyOverlay::ReplaceBody(body)) => body.clone(),
+            _ => return Ok(true),
         };
-        let address = ProjectSlotAddress::new(
-            controller.address().clone(),
-            ProjectSlotRoot::def(),
-            SlotPath::root(),
+        let handle_id = self.ready_handle_id()?;
+        let Some(base) = self.base_body(server, artifact).await else {
+            log::info!(
+                "{}: not on disk yet, so its pending body stays whole",
+                artifact.file_path().as_str()
+            );
+            return Ok(false);
+        };
+        let edits = match slot_edits_for_body(&base, &body, &SlotShapeRegistry::default()) {
+            Ok(edits) => edits,
+            Err(why) => {
+                log::warn!(
+                    "{}: its pending body can't be said as slot edits: {why}",
+                    artifact.file_path().as_str()
+                );
+                return Ok(false);
+            }
+        };
+        let held = !edits.is_empty();
+        let mutations: Vec<MutationOp> = match held {
+            // The body says what the file on disk says.
+            false => vec![MutationOp::ClearArtifact {
+                artifact: artifact.clone(),
+            }],
+            true => edits
+                .into_iter()
+                .map(|edit| MutationOp::PutSlotEdit {
+                    artifact: artifact.clone(),
+                    edit,
+                })
+                .collect(),
+        };
+        let batch = MutationCmdBatch::new(
+            mutations
+                .into_iter()
+                .map(|mutation| MutationCmd {
+                    id: self.allocate_mutation_cmd_id(),
+                    mutation,
+                })
+                .collect(),
         );
-        let Ok(artifact) = self.resolve_def_artifact(&address) else {
-            return false;
+        let mutation = server
+            .project_overlay_mutate(handle_id, batch.clone())
+            .await?;
+        let rejections = self.apply_mutation_acks(&batch, &mutation, &[]);
+        if !rejections.is_empty() {
+            log::warn!(
+                "{}: the board refused its body as slot edits: {}",
+                artifact.file_path().as_str(),
+                rejections
+                    .iter()
+                    .map(rejection_text)
+                    .collect::<Vec<_>>()
+                    .join("; ")
+            );
+            return Ok(false);
+        }
+        if held {
+            self.held_bodies
+                .insert(artifact.clone(), HeldBody { base, text: body });
+        }
+        Ok(true)
+    }
+
+    /// Write `bytes` as a node file's pending body when the board holds
+    /// Debug slot edits on it (a selected output's `highlight`): as slot
+    /// edits, with the Debug ones put back beside them, so writing the body
+    /// doesn't stop the highlight ([`Self::hold_body_as_slots`]'s other
+    /// direction). `None` when the file has no Debug slot edits, or the
+    /// body can't be said as slot edits: write it whole.
+    async fn write_body_beside_debug_slots(
+        &mut self,
+        server: &mut StudioServerClient,
+        handle_id: u32,
+        artifact: &ArtifactLocation,
+        bytes: &[u8],
+    ) -> Result<Option<ProjectEditRun>, UiError> {
+        let debug = self.debug_slot_edits_at(artifact);
+        if debug.is_empty() {
+            return Ok(None);
+        }
+        let Some(base) = self.base_body(server, artifact).await else {
+            return Ok(None);
         };
-        self.asset_edit_buffer.contains_key(&artifact)
-            || self
-                .sync
-                .as_ref()
-                .is_some_and(|sync| sync.overlay_asset_edit_at(&artifact).is_some())
+        let edits = match slot_edits_for_body(&base, bytes, &SlotShapeRegistry::default()) {
+            Ok(edits) => edits,
+            Err(why) => {
+                log::warn!(
+                    "{}: its body can't be said as slot edits, so it is written whole: {why}",
+                    artifact.file_path().as_str()
+                );
+                return Ok(None);
+            }
+        };
+        let held = !edits.is_empty();
+        let mut mutations = vec![MutationOp::ClearArtifact {
+            artifact: artifact.clone(),
+        }];
+        mutations.extend(
+            edits
+                .into_iter()
+                .chain(debug)
+                .map(|edit| MutationOp::PutSlotEdit {
+                    artifact: artifact.clone(),
+                    edit,
+                }),
+        );
+        let batch = MutationCmdBatch::new(
+            mutations
+                .into_iter()
+                .map(|mutation| MutationCmd {
+                    id: self.allocate_mutation_cmd_id(),
+                    mutation,
+                })
+                .collect(),
+        );
+        self.asset_edit_buffer.remove(artifact);
+        let mutation = server
+            .project_overlay_mutate(handle_id, batch.clone())
+            .await?;
+        let rejections = self.apply_mutation_acks(&batch, &mutation, &[]);
+        if rejections.is_empty() {
+            if held {
+                self.held_bodies.insert(
+                    artifact.clone(),
+                    HeldBody {
+                        base,
+                        text: bytes.to_vec(),
+                    },
+                );
+            }
+            self.verdict_chase_ticks = VERDICT_CHASE_TICKS;
+        }
+        Ok(Some(ProjectEditRun {
+            notices: rejection_notices(&rejections),
+            logs: mutation.logs,
+        }))
+    }
+
+    /// The Debug (transient) slot edits the board holds on a node file.
+    fn debug_slot_edits_at(&self, artifact: &ArtifactLocation) -> Vec<SlotEdit> {
+        let Some(slots) = self
+            .sync
+            .as_ref()
+            .and_then(|sync| sync.overlay().artifact(artifact))
+            .and_then(|overlay| overlay.as_slot())
+        else {
+            return Vec::new();
+        };
+        let Some(node) = self
+            .def_artifacts
+            .iter()
+            .find(|(_, def)| *def == artifact)
+            .map(|(node, _)| *node)
+        else {
+            return Vec::new();
+        };
+        let root = ProjectSlotRoot::def();
+        slots
+            .edits
+            .iter()
+            .filter(|(path, _)| {
+                self.persistence_at(node, root.name(), path) == SlotPersistence::Transient
+            })
+            .map(|(path, op)| SlotEdit {
+                path: path.clone(),
+                op: op.clone(),
+            })
+            .collect()
+    }
+
+    /// A file's bytes on the board's disk, fetched once and cached with the
+    /// asset editor's base bodies; `None` when the board has no such file.
+    async fn base_body(
+        &mut self,
+        server: &mut StudioServerClient,
+        artifact: &ArtifactLocation,
+    ) -> Option<Vec<u8>> {
+        if let Some(bytes) = self.asset_base_bodies.get(artifact) {
+            return Some(bytes.clone());
+        }
+        let root = self.project_fs_root.as_ref()?;
+        let server_path = root.join(artifact.file_path().as_str().trim_start_matches('/'));
+        let read = server.fs_read(&server_path).await.ok()?;
+        self.asset_base_bodies
+            .insert(artifact.clone(), read.data.clone());
+        Some(read.data)
+    }
+
+    /// Keep [`Self::held_bodies`] in step with what the board took: a body
+    /// written whole, a file cleared or the whole overlay cleared lets go
+    /// of it; a slot edit to a held file reads it again from its slot
+    /// edits — the same text when only a Debug slot moved, else what the
+    /// edit made of it.
+    fn follow_held_bodies(&mut self, accepted: &[(MutationCmd, MutationEffect)]) {
+        if self.held_bodies.is_empty() {
+            return;
+        }
+        let mut touched = BTreeSet::new();
+        for (command, _) in accepted {
+            match &command.mutation {
+                MutationOp::Clear => {
+                    self.held_bodies.clear();
+                    return;
+                }
+                MutationOp::SetArtifactBody { artifact, .. }
+                | MutationOp::ClearArtifact { artifact } => {
+                    self.held_bodies.remove(artifact);
+                    touched.remove(artifact);
+                }
+                MutationOp::PutSlotEdit { artifact, .. }
+                | MutationOp::RemoveSlotEdit { artifact, .. }
+                | MutationOp::MoveSlotEntry { artifact, .. } => {
+                    touched.insert(artifact.clone());
+                }
+            }
+        }
+        for artifact in touched {
+            self.reread_held_body(&artifact);
+        }
+    }
+
+    /// Read a held file again from the board's slot edits on it.
+    fn reread_held_body(&mut self, artifact: &ArtifactLocation) {
+        let Some(held) = self.held_bodies.get(artifact) else {
+            return;
+        };
+        let shapes = SlotShapeRegistry::default();
+        let now = self
+            .sync
+            .as_ref()
+            .and_then(|sync| sync.overlay().artifact(artifact))
+            .and_then(|overlay| overlay.as_slot())
+            .map(|overlay| materialize_def_text(&held.base, overlay, &shapes));
+        let on_disk = canonical_def_text(&held.base, &shapes).ok();
+        let was = canonical_def_text(&held.text, &shapes).ok();
+        match now {
+            // Nothing left, or only what the disk says: nothing to hold.
+            None => {
+                self.held_bodies.remove(artifact);
+            }
+            Some(Ok(now)) if Some(&now) == on_disk.as_ref() => {
+                self.held_bodies.remove(artifact);
+            }
+            // Only a Debug slot moved: the file reads as it did, in the
+            // body's own bytes.
+            Some(Ok(now)) if Some(&now) == was.as_ref() => {}
+            Some(Ok(now)) => {
+                if let Some(held) = self.held_bodies.get_mut(artifact) {
+                    held.text = now;
+                }
+            }
+            Some(Err(why)) => {
+                log::warn!(
+                    "{}: its slot edits no longer read: {why}",
+                    artifact.file_path().as_str()
+                );
+                self.held_bodies.remove(artifact);
+            }
+        }
     }
 
     /// Whether a fixture's firmware has the `selection` Debug slot (the
@@ -7078,6 +7380,9 @@ impl ProjectController {
         // The commit rewrote persisted artifacts, so every cached base body
         // is suspect; drop them all and let the next editor open re-fetch.
         self.asset_base_bodies.clear();
+        // A body held as slot edits is on disk now (its Debug slots stay
+        // pending, as the commit keeps them).
+        self.held_bodies.clear();
         // Staged node removals materialized (files deleted); the records
         // backing their save-panel rows are done.
         self.staged_removals.clear();
@@ -7156,6 +7461,7 @@ impl ProjectController {
         let handle_id = self.ready_handle_id()?;
         self.edit_buffer.clear();
         self.asset_edit_buffer.clear();
+        self.held_bodies.clear();
         // Every artifact's overlay entry clears with the batch, so cached
         // base bodies re-fetch on the next editor open (invalidate-on-clear).
         self.asset_base_bodies.clear();
@@ -8479,6 +8785,21 @@ impl ProjectController {
                 ))));
             }
         };
+        match self.hold_body_as_slots(server, &artifact).await {
+            Ok(true) => {}
+            Ok(false) => {
+                let reason = UNHELD_BODY.to_string();
+                self.fail_pending_edit(&address, reason.clone());
+                return Ok(ProjectEditRun::notice(UiNotice::warning(format!(
+                    "Edit on {} was not sent: {reason}",
+                    address.path
+                ))));
+            }
+            Err(error) => {
+                self.fail_pending_edit(&address, error.to_string());
+                return Err(error);
+            }
+        }
 
         let cmd_id = self.allocate_mutation_cmd_id();
         if let Some(edit) = self.edit_buffer.get_mut(&address) {
@@ -8632,6 +8953,7 @@ impl ProjectController {
         {
             sync.apply_acked_edits(&accepted, mutation.overlay_revision);
         }
+        self.follow_held_bodies(&accepted);
         // A stored `bindings[…]` edit changes which facts read as authored,
         // and the synced slot tree only learns that on the next passive read
         // — re-derive the per-slot binding presentation from the updated
@@ -8991,6 +9313,15 @@ impl ProjectController {
             return Ok(ProjectEditRun::notice(UiNotice::warning(notice)));
         }
 
+        // A selected node's file: the body goes as slot edits, beside its
+        // Debug slot, so the highlight doesn't stop.
+        if let Some(run) = self
+            .write_body_beside_debug_slots(server, handle_id, &artifact, &bytes)
+            .await?
+        {
+            return Ok(run);
+        }
+
         // apply → Pending: stage the body so DTOs reflect it (and a stale
         // Failed entry from an earlier attempt is replaced).
         self.asset_edit_buffer
@@ -9146,6 +9477,7 @@ impl ProjectController {
         {
             sync.apply_acked_edits(&accepted, mutation.overlay_revision);
         }
+        self.follow_held_bodies(&accepted);
         // A `ClearArtifact` drops the artifact's whole mirror entry — slot
         // edits included when the artifact carried them — so binding
         // presentation re-derives here exactly like on slot-edit acks.
@@ -9217,6 +9549,9 @@ impl ProjectController {
             .unwrap_or_default();
         if let Some(pending) = self.asset_edit_buffer.get(artifact) {
             return Some(UiAssetContent::from_bytes(&pending.bytes, true, revision));
+        }
+        if let Some(held) = self.held_bodies.get(artifact) {
+            return Some(UiAssetContent::from_bytes(&held.text, true, revision));
         }
         if let Some(body) = self
             .sync
