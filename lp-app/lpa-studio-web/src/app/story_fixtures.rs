@@ -48,6 +48,7 @@ pub(crate) fn simulator_lens_card() -> UiLensCard {
     let verbs: Vec<UiOffer> = tree.own_verbs_of(&board).cloned().collect();
     let card = lpa_studio_core::board_card(&lpa_studio_core::BoardCardInput {
         view: &view,
+        which_board: &[],
         board: &board,
         offers: &verbs,
         link: Some(lpa_studio_core::UiLinkKind::Usb),
@@ -131,6 +132,7 @@ fn sim_lens_device_view() -> lpa_studio_core::DeviceView {
         terminal: Vec::new(),
         terminal_dropped: 0,
         firmware_blocked: None,
+        usb: None,
         escapes: vec![
             lpa_studio_core::DeviceEscape::Disconnect,
             lpa_studio_core::DeviceEscape::Forget,

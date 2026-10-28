@@ -496,6 +496,7 @@ fn porch_lights(link: Link) -> DeviceView {
         terminal: Vec::new(),
         terminal_dropped: 0,
         firmware_blocked: (link != Link::Usb).then(|| FIRMWARE_NEEDS_USB.to_string()),
+        usb: None,
         held_elsewhere: None,
         escapes: vec![DeviceEscape::Disconnect, DeviceEscape::Forget],
         update_blocked: None,

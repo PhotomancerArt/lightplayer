@@ -15,6 +15,8 @@
 //! [`push::PushActivity`] (its second consumer), the two always-actions
 //! [`erase::EraseActivity`] (Factory reset) and
 //! [`remove_project::RemoveProjectActivity`], and
+//! [`set_board::SetBoardActivity`] (saving the board model on a running
+//! board, then restarting it), and
 //! [`update::UpdateActivity`] — an over-the-air update run in legs across
 //! the board's resets, the one activity that outlives its link. Flash and
 //! Update wait for a reset board the same way: `reopen_rung` is that
@@ -23,6 +25,7 @@
 //! the card ruling — Flash and Push ARE the flows.
 
 pub(crate) mod activity_cell;
+pub mod board_identity;
 pub mod erase;
 pub mod flash;
 pub mod flash_step;
@@ -31,6 +34,7 @@ pub mod layout_verdict;
 pub mod push;
 pub mod remove_project;
 pub(crate) mod reopen_rung;
+pub mod set_board;
 pub mod update;
 pub mod update_activity_view;
 pub mod update_intent_facts;
@@ -41,6 +45,9 @@ pub use activity_cell::{
     ActivityCell, ActivityCtx, ActivityKind, ActivityOutcome, ActivityProgress, ActivityReducer,
     ActivityStep, CancelPhase,
 };
+pub use board_identity::{
+    BoardIdentity, ChipBuildRow, FlashBuildChoice, FlashReplaceView, Resident,
+};
 pub use erase::EraseActivity;
 pub use flash::FlashActivity;
 pub use flash_step::FlashStep;
@@ -48,6 +55,7 @@ pub use identify::IdentifyActivity;
 pub use layout_verdict::{FlashLayoutView, LayoutVerdict};
 pub use push::PushActivity;
 pub use remove_project::RemoveProjectActivity;
+pub use set_board::SetBoardActivity;
 pub use update::{UPDATE_DEADLINE_MS, UPDATE_GAP_MS, UpdateActivity};
 pub use update_activity_view::UpdateActivityView;
 pub use update_intent_facts::UpdateIntentFacts;

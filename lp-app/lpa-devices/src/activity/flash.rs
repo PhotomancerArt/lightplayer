@@ -59,9 +59,24 @@
 //! The ladder therefore asks for a hello heard at or after the instant the
 //! write effect ended — see [`FlashActivity::heard_flashed_firmware`].
 //!
+//! **Nobody picks a board first** (plan
+//! `lp2025/2026-10-28-0025-install-without-board-pick`). The inspection's
+//! session also identifies the board: the effects layer reports a
+//! [`BoardIdentity`] marker — the chip the SYNC named, the build that chip
+//! gets, the board model when exactly one catalog board fits, and what the
+//! board ran before — just before the layout verdict. A chip with no build
+//! stops the install untouched. Somebody else's firmware (or one that does
+//! not say what it is) is the one question an install asks before writing:
+//! [`ConsentReason::Replace`], answered by
+//! [`Action::ConfirmFlashReplace`]. Blank and LightPlayer boards are never
+//! asked.
+//!
 //! Once the hello proves the app protocol is up, one more coarse effect
-//! writes the picked board's runtime manifest to `/hardware.json`
-//! (board-selection D4, effective next boot). Its failure degrades honestly:
+//! writes the board model's runtime manifest to `/hardware.json`
+//! (board-selection D4, effective next boot) — only when the model is
+//! known. With no model (several catalog boards fit), nothing is stamped:
+//! the board keeps whatever pin map it had, and the card asks which board it
+//! is afterwards. The stamp's failure degrades honestly:
 //! the flash stands, and the summary says only what the reducer knows. A
 //! stamp the board answered with an error carries the conversation's own
 //! words (it knows what it left on the board); a stamp that heard nothing
@@ -90,6 +105,7 @@ use crate::time::Millis;
 use super::activity_cell::{
     ActivityCtx, ActivityKind, ActivityOutcome, ActivityReducer, ActivityStep,
 };
+use super::board_identity::{BoardIdentity, FlashBuildChoice, FlashReplaceView};
 use super::flash_step::FlashStep;
 use super::layout_verdict::{FlashLayoutView, LayoutVerdict};
 use super::reopen_rung::{self, ClosedPort};
@@ -154,10 +170,15 @@ enum FlashPhase {
     /// filesystem — in the bootloader, and stages a plan with the effects
     /// layer. Ends with a [`LayoutVerdict`] and leaves the chip parked.
     Inspecting,
-    /// The inspection found files to move (or a backup to restore); the
-    /// card asks first. Continue starts the write; Cancel or the deadline
+    /// The inspection found something the user decides: files to move (or
+    /// a backup to restore), or somebody else's firmware to replace. The
+    /// card asks first. The yes starts the write; Cancel or the deadline
     /// resets the board back into its old firmware, untouched.
-    AwaitingConsent { deadline: Millis },
+    AwaitingConsent {
+        deadline: Millis,
+        #[serde(default)]
+        reason: ConsentReason,
+    },
     /// The coarse effect owns the wire; we absorb markers.
     Writing,
     /// The effect succeeded; the ladder is bringing the board back.
@@ -175,6 +196,18 @@ enum FlashPhase {
     },
     /// Hello heard; the board-manifest effect is writing `/hardware.json`.
     Stamping { deadline: Millis },
+}
+
+/// What a Flash is waiting for the user's yes about.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub enum ConsentReason {
+    /// The board's files move to the new layout (or a backup goes back):
+    /// [`Action::ConfirmFlashLayout`].
+    #[default]
+    Layout,
+    /// The board runs somebody else's firmware, which the install replaces:
+    /// [`Action::ConfirmFlashReplace`].
+    Replace,
 }
 
 /// The escalation order. Each rung's *name* is the reset it fires on entry;
@@ -197,8 +230,14 @@ enum ReconnectRung {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct FlashActivity {
     device: DeviceId,
-    board_id: String,
-    build_id: String,
+    /// The board model to stamp after the write: the action's, else the
+    /// identification's unique fit; `None` stamps nothing.
+    board_id: Option<String>,
+    /// Which build the action asked for.
+    build: FlashBuildChoice,
+    /// The build the write writes: the action's fixed one, else the one the
+    /// inspection's session chose for the chip it heard.
+    build_id: Option<String>,
     park_first: bool,
     /// Dead-port retries left. Enumeration jitter after the park has more
     /// faces than one settle constant covers (bench: esptool died at
@@ -227,14 +266,26 @@ pub struct FlashActivity {
     /// (or transport) that inspects nothing — a plain flash.
     #[serde(default)]
     inspected: bool,
+    /// What the inspection's session learned about the board.
+    #[serde(default)]
+    identity: Option<BoardIdentity>,
+    /// The user said yes to replacing the firmware the board ran.
+    #[serde(default)]
+    replace_confirmed: bool,
 }
 
 impl FlashActivity {
-    pub fn new(device: DeviceId, board_id: String, build_id: String, park_first: bool) -> Self {
+    pub fn new(
+        device: DeviceId,
+        board_id: Option<String>,
+        build: FlashBuildChoice,
+        park_first: bool,
+    ) -> Self {
         Self {
             device,
             board_id,
-            build_id,
+            build_id: build.fixed().map(str::to_string),
+            build,
             park_first,
             open_retries_left: 1,
             phase: FlashPhase::Writing,
@@ -244,6 +295,8 @@ impl FlashActivity {
             restore_backup: false,
             layout: None,
             inspected: false,
+            identity: None,
+            replace_confirmed: false,
         }
     }
 
@@ -260,8 +313,32 @@ impl FlashActivity {
         let verdict = self.layout.clone()?;
         Some(FlashLayoutView {
             verdict,
-            awaiting_consent: matches!(self.phase, FlashPhase::AwaitingConsent { .. }),
+            awaiting_consent: matches!(
+                self.phase,
+                FlashPhase::AwaitingConsent {
+                    reason: ConsentReason::Layout,
+                    ..
+                }
+            ),
         })
+    }
+
+    /// The replace question, while the install waits on it.
+    pub fn replace_view(&self) -> Option<FlashReplaceView> {
+        match self.phase {
+            FlashPhase::AwaitingConsent {
+                reason: ConsentReason::Replace,
+                ..
+            } => Some(FlashReplaceView {
+                resident: self.identity.as_ref()?.resident.clone(),
+            }),
+            _ => None,
+        }
+    }
+
+    /// What the inspection's session learned about the board, once heard.
+    pub fn identity(&self) -> Option<&BoardIdentity> {
+        self.identity.as_ref()
     }
 
     /// Which step the card names, given the label of the coarse effect's
@@ -295,7 +372,7 @@ impl FlashActivity {
     /// the activity first: the consent deadline is the bound.
     pub(crate) fn supervision_floor(&self) -> Option<Millis> {
         match self.phase {
-            FlashPhase::AwaitingConsent { deadline } => Some(deadline),
+            FlashPhase::AwaitingConsent { deadline, .. } => Some(deadline),
             _ => None,
         }
     }
@@ -341,7 +418,7 @@ impl FlashActivity {
             link,
             effect_id: ctx.effect_id,
             effect: EffectRequest::InspectLayout {
-                build_id: self.build_id.clone(),
+                build: self.build.clone(),
                 restore_backup: self.restore_backup,
             },
         }]
@@ -350,7 +427,7 @@ impl FlashActivity {
     /// The command that hands the wire to the flasher: after the layout
     /// inspection (and the user's yes, when files move).
     fn start_effect(&mut self, ctx: &ActivityCtx<'_>) -> Vec<Command> {
-        let Some(link) = ctx.link else {
+        let (Some(link), Some(build_id)) = (ctx.link, self.build_id.clone()) else {
             return Vec::new();
         };
         self.phase = FlashPhase::Writing;
@@ -359,7 +436,7 @@ impl FlashActivity {
             link,
             effect_id: ctx.effect_id,
             effect: EffectRequest::Flash {
-                build_id: self.build_id.clone(),
+                build_id,
                 board_id: self.board_id.clone(),
                 carry: self.carries_files(),
             },
@@ -385,18 +462,24 @@ impl FlashActivity {
         ActivityStep::Done { outcome, commands }
     }
 
-    /// The inspection's verdict arrived (its `Ended` follows).
+    /// The inspection ended (its identity and verdict, when it had any, are
+    /// in): decide what happens to the parked board.
     fn on_inspected(&mut self, now: Millis, ctx: &ActivityCtx<'_>) -> ActivityStep {
         self.inspected = true;
-        match self.layout.clone() {
-            None | Some(LayoutVerdict::Plain) => ActivityStep::Continue(self.start_effect(ctx)),
-            Some(LayoutVerdict::Migrate { .. } | LayoutVerdict::Restore { .. }) => {
-                self.phase = FlashPhase::AwaitingConsent {
-                    deadline: now.plus_ms(ctx.config.flash_consent_ms),
-                };
-                ActivityStep::nothing()
-            }
-            Some(refused @ LayoutVerdict::Refused { .. }) => self.release_untouched(
+        if self.build_id.is_none() {
+            let message = match self.identity.as_ref().and_then(|id| id.chip.as_deref()) {
+                Some(chip) => format!(
+                    "not installed: LightPlayer has no firmware for this chip ({chip}). Nothing \
+                     was written."
+                ),
+                None => "not installed: Studio could not tell which chip this is. Nothing was \
+                         written."
+                    .to_string(),
+            };
+            return self.release_untouched(ActivityOutcome::Failed { message }, ctx);
+        }
+        if let Some(refused @ LayoutVerdict::Refused { .. }) = &self.layout {
+            return self.release_untouched(
                 ActivityOutcome::Failed {
                     message: format!(
                         "not updated: {} Nothing was changed — remove a project from the \
@@ -405,7 +488,37 @@ impl FlashActivity {
                     ),
                 },
                 ctx,
-            ),
+            );
+        }
+        self.proceed(now, ctx)
+    }
+
+    /// Ask what is still the user's to answer — replacing somebody else's
+    /// firmware first, then moving files — or write.
+    fn proceed(&mut self, now: Millis, ctx: &ActivityCtx<'_>) -> ActivityStep {
+        let replaces = self
+            .identity
+            .as_ref()
+            .is_some_and(|id| id.resident.is_replaced_by_install());
+        let reason = if replaces && !self.replace_confirmed {
+            Some(ConsentReason::Replace)
+        } else if matches!(
+            self.layout,
+            Some(LayoutVerdict::Migrate { .. } | LayoutVerdict::Restore { .. })
+        ) {
+            Some(ConsentReason::Layout)
+        } else {
+            None
+        };
+        match reason {
+            Some(reason) => {
+                self.phase = FlashPhase::AwaitingConsent {
+                    deadline: now.plus_ms(ctx.config.flash_consent_ms),
+                    reason,
+                };
+                ActivityStep::nothing()
+            }
+            None => ActivityStep::Continue(self.start_effect(ctx)),
         }
     }
 
@@ -451,6 +564,11 @@ impl FlashActivity {
             }
             _ => false,
         };
+        let Some(board_id) = self.board_id.clone() else {
+            // No model to stamp: several catalog boards fit, and the board
+            // keeps whatever pin map it had. The card asks which it is.
+            return ActivityStep::done(self.success(ctx));
+        };
         let Some(link) = ctx.link else {
             // The hello proves the board is alive, but the link vanished
             // under us in the same instant; the stamp cannot run.
@@ -472,7 +590,7 @@ impl FlashActivity {
             link,
             effect_id: ctx.effect_id,
             effect: EffectRequest::WriteBoardManifest {
-                board_id: self.board_id.clone(),
+                board_id,
                 layout_verified,
             },
         }])
@@ -514,6 +632,18 @@ impl FlashActivity {
         marker: &ActivityMarker,
         ctx: &mut ActivityCtx<'_>,
     ) -> ActivityStep {
+        if let ActivityMarker::BoardIdentified { identity } = marker {
+            if matches!(self.phase, FlashPhase::Inspecting) {
+                if self.build_id.is_none() {
+                    self.build_id = identity.build_id.clone();
+                }
+                if self.board_id.is_none() {
+                    self.board_id = identity.board_id.clone();
+                }
+                self.identity = Some(identity.clone());
+            }
+            return ActivityStep::nothing();
+        }
         if let ActivityMarker::LayoutVerdict { verdict } = marker {
             if matches!(self.phase, FlashPhase::Inspecting) {
                 self.layout = Some(verdict.clone());
@@ -642,15 +772,23 @@ impl FlashActivity {
                 ActivityStep::nothing()
             }
             FlashPhase::Inspecting | FlashPhase::Writing => ActivityStep::nothing(),
-            FlashPhase::AwaitingConsent { deadline } => {
+            FlashPhase::AwaitingConsent { deadline, reason } => {
                 if now >= deadline {
                     // Nobody answered: nothing was written; the board goes
                     // back to its old firmware with every file.
+                    let message = match reason {
+                        ConsentReason::Layout => {
+                            "not updated: the question about moving the board's files went \
+                             unanswered. Nothing was written."
+                        }
+                        ConsentReason::Replace => {
+                            "not installed: the question about replacing this board's \
+                             firmware went unanswered. Nothing was written."
+                        }
+                    };
                     return self.release_untouched(
                         ActivityOutcome::Failed {
-                            message: "not updated: the question about moving the board's \
-                                      files went unanswered. Nothing was written."
-                                .to_string(),
+                            message: message.to_string(),
                         },
                         ctx,
                     );
@@ -878,8 +1016,31 @@ impl ActivityReducer for FlashActivity {
                 }
             }
             Input::Action(Action::ConfirmFlashLayout { .. }) => {
-                if matches!(self.phase, FlashPhase::AwaitingConsent { .. }) && !self.winding_down {
+                if matches!(
+                    self.phase,
+                    FlashPhase::AwaitingConsent {
+                        reason: ConsentReason::Layout,
+                        ..
+                    }
+                ) && !self.winding_down
+                {
                     ActivityStep::Continue(self.start_effect(ctx))
+                } else {
+                    ActivityStep::nothing()
+                }
+            }
+            Input::Action(Action::ConfirmFlashReplace { .. }) => {
+                if matches!(
+                    self.phase,
+                    FlashPhase::AwaitingConsent {
+                        reason: ConsentReason::Replace,
+                        ..
+                    }
+                ) && !self.winding_down
+                {
+                    self.replace_confirmed = true;
+                    // A files question may still follow; it asks its own.
+                    self.proceed(now, ctx)
                 } else {
                     ActivityStep::nothing()
                 }
@@ -917,7 +1078,7 @@ impl ActivityReducer for FlashActivity {
             } => Some(settle_at.map_or(*deadline, |settle| settle.min(*deadline))),
             // The effect drives; the supervision backstop bounds it (I1).
             FlashPhase::Inspecting | FlashPhase::Writing => None,
-            FlashPhase::AwaitingConsent { deadline } => Some(*deadline),
+            FlashPhase::AwaitingConsent { deadline, .. } => Some(*deadline),
             FlashPhase::Reconnecting {
                 rung_deadline,
                 next_poke_at,
@@ -931,6 +1092,7 @@ impl ActivityReducer for FlashActivity {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::activity::board_identity::Resident;
     use crate::evidence::Evidence;
     use crate::identity::IdentityChain;
     use crate::link::{LinkId, LinkInfo};
@@ -944,8 +1106,8 @@ mod tests {
         // G1 2026-08-31).
         let mut activity = FlashActivity::new(
             DeviceId(1),
-            "seeed-xiao-esp32c6".to_string(),
-            "esp32c6-4mb".to_string(),
+            Some("seeed-xiao-esp32c6".to_string()),
+            FlashBuildChoice::Fixed("esp32c6-4mb".to_string()),
             true,
         );
         let evidence = Evidence::default();
@@ -1026,8 +1188,8 @@ mod tests {
     fn flash() -> FlashActivity {
         FlashActivity::new(
             DeviceId(1),
-            "seeed-xiao-esp32c6".to_string(),
-            "esp32c6-4mb".to_string(),
+            Some("seeed-xiao-esp32c6".to_string()),
+            FlashBuildChoice::Fixed("esp32c6-4mb".to_string()),
             false,
         )
     }
@@ -1282,8 +1444,8 @@ mod tests {
         opened(&mut evidence, Millis(0), &config);
         let mut activity = FlashActivity::new(
             DeviceId(1),
-            "seeed-xiao-esp32c6".to_string(),
-            "esp32c6-4mb".to_string(),
+            Some("seeed-xiao-esp32c6".to_string()),
+            FlashBuildChoice::Fixed("esp32c6-4mb".to_string()),
             true,
         );
         with_ctx(&evidence, &config, |ctx| {
@@ -1998,5 +2160,323 @@ mod tests {
             ),
             "{step:?}"
         );
+    }
+
+    /// The install's identification (plan
+    /// `lp2025/2026-10-28-0025-install-without-board-pick`): a press that
+    /// named no board and no build writes the build the session chose for
+    /// the chip it heard, and stamps the board the fingerprint settled on.
+    #[test]
+    fn a_chip_table_install_writes_the_build_the_session_chose() {
+        let config = RosterConfig::default();
+        let mut evidence = Evidence::default();
+        opened(&mut evidence, Millis(0), &config);
+        let mut activity = by_chip();
+        let spawn = with_ctx(&evidence, &config, |ctx| {
+            activity.spawn_commands(Millis(0), ctx)
+        });
+        assert!(matches!(
+            spawn.as_slice(),
+            [Command::RunEffect {
+                effect: EffectRequest::InspectLayout {
+                    build: FlashBuildChoice::ByChip(_),
+                    ..
+                },
+                ..
+            }]
+        ));
+        let step = identified_then_inspected(
+            &mut activity,
+            &evidence,
+            &config,
+            identity(
+                Some("esp32c6-4mb"),
+                Some("seeed/xiao-esp32-c6"),
+                Resident::Blank,
+            ),
+        );
+        assert!(
+            matches!(
+                step,
+                ActivityStep::Continue(ref commands)
+                    if matches!(commands.as_slice(), [Command::RunEffect {
+                        effect: EffectRequest::Flash { build_id, board_id: Some(board), .. },
+                        ..
+                    }] if build_id == "esp32c6-4mb" && board == "seeed/xiao-esp32-c6")
+            ),
+            "a blank board is written with no question: {step:?}"
+        );
+        assert_eq!(
+            activity.identity().map(|id| id.chip.as_deref()),
+            Some(Some("esp32c6"))
+        );
+    }
+
+    #[test]
+    fn a_chip_with_no_build_gives_the_board_back_untouched() {
+        let config = RosterConfig::default();
+        let mut evidence = Evidence::default();
+        opened(&mut evidence, Millis(0), &config);
+        let mut activity = by_chip();
+        let step = identified_then_inspected(
+            &mut activity,
+            &evidence,
+            &config,
+            identity(None, None, Resident::Blank),
+        );
+        let ActivityStep::Done {
+            outcome: ActivityOutcome::Failed { message },
+            commands,
+        } = step
+        else {
+            panic!("no build ends the install: {step:?}");
+        };
+        assert!(
+            message.contains("no firmware for this chip (esp32c6)"),
+            "{message}"
+        );
+        assert!(message.contains("Nothing was written"), "{message}");
+        assert!(matches!(
+            commands.as_slice(),
+            [Command::Link {
+                command: LinkCommand::RunReset(ResetKind::Normal),
+                ..
+            }]
+        ));
+    }
+
+    #[test]
+    fn somebody_elses_firmware_waits_for_the_replace_yes() {
+        let config = RosterConfig::default();
+        let mut evidence = Evidence::default();
+        opened(&mut evidence, Millis(0), &config);
+        let mut activity = by_chip();
+        let wled = Resident::Foreign {
+            project_name: Some("WLED".to_string()),
+            version: Some("0.15.0".to_string()),
+        };
+        let step = identified_then_inspected(
+            &mut activity,
+            &evidence,
+            &config,
+            identity(Some("esp32c6-4mb"), None, wled.clone()),
+        );
+        assert!(
+            matches!(step, ActivityStep::Continue(ref commands) if commands.is_empty()),
+            "nothing is written before the yes: {step:?}"
+        );
+        assert_eq!(activity.step(None), FlashStep::WaitingForAnswer);
+        assert_eq!(
+            activity.replace_view().map(|view| view.resident),
+            Some(wled)
+        );
+        assert!(
+            !activity
+                .layout_view()
+                .is_some_and(|view| view.awaiting_consent),
+            "no files question"
+        );
+
+        // The layout's yes does not answer the replace question.
+        let wrong = with_ctx(&evidence, &config, |ctx| {
+            activity.handle(
+                Millis(6_000),
+                &Input::Action(Action::ConfirmFlashLayout {
+                    device: DeviceId(1),
+                }),
+                ctx,
+            )
+        });
+        assert_eq!(wrong, ActivityStep::nothing());
+
+        let step = with_ctx(&evidence, &config, |ctx| {
+            activity.handle(
+                Millis(7_000),
+                &Input::Action(Action::ConfirmFlashReplace {
+                    device: DeviceId(1),
+                }),
+                ctx,
+            )
+        });
+        assert!(
+            matches!(
+                step,
+                ActivityStep::Continue(ref commands)
+                    if matches!(commands.as_slice(), [Command::RunEffect {
+                        effect: EffectRequest::Flash { board_id: None, .. },
+                        ..
+                    }])
+            ),
+            "the yes writes, with no board to stamp: {step:?}"
+        );
+    }
+
+    #[test]
+    fn an_unanswered_replace_question_expires_without_writing() {
+        let config = RosterConfig::default();
+        let mut evidence = Evidence::default();
+        opened(&mut evidence, Millis(0), &config);
+        let mut activity = by_chip();
+        identified_then_inspected(
+            &mut activity,
+            &evidence,
+            &config,
+            identity(Some("esp32c6-4mb"), None, Resident::Unrecognized),
+        );
+        let late = Millis(5_000).plus_ms(config.flash_consent_ms);
+        let step = with_ctx(&evidence, &config, |ctx| {
+            activity.handle(late, &timer(), ctx)
+        });
+        assert!(matches!(
+            step,
+            ActivityStep::Done {
+                outcome: ActivityOutcome::Failed { ref message },
+                ..
+            } if message.contains("replacing this board's firmware went unanswered")
+        ));
+    }
+
+    #[test]
+    fn a_board_the_session_could_not_tell_is_not_stamped() {
+        let config = RosterConfig::default();
+        let mut evidence = Evidence::default();
+        opened(&mut evidence, Millis(0), &config);
+        let mut activity = by_chip();
+        identified_then_inspected(
+            &mut activity,
+            &evidence,
+            &config,
+            identity(Some("esp32c6-4mb"), None, Resident::LightPlayer),
+        );
+        with_ctx(&evidence, &config, |ctx| {
+            activity.handle(
+                Millis(60_000),
+                &ended(ActivityOutcome::Succeeded {
+                    summary: "written".to_string(),
+                }),
+                ctx,
+            )
+        });
+        hello(&mut evidence, Millis(62_000), &config);
+        let frame = Input::link(
+            LinkId(1),
+            LinkEvent::Frame(ServerFrame::hello(
+                1,
+                HelloFacts {
+                    proto: config.expected_proto,
+                    ..Default::default()
+                },
+            )),
+        );
+        let step = with_ctx(&evidence, &config, |ctx| {
+            activity.handle(Millis(62_000), &frame, ctx)
+        });
+        assert!(
+            matches!(
+                step,
+                ActivityStep::Done {
+                    outcome: ActivityOutcome::Succeeded { .. },
+                    ref commands,
+                } if !commands.iter().any(|c| matches!(c, Command::RunEffect { .. }))
+            ),
+            "no model, no stamp: {step:?}"
+        );
+    }
+
+    #[test]
+    fn a_board_the_press_named_wins_over_the_sessions_guess() {
+        let config = RosterConfig::default();
+        let mut evidence = Evidence::default();
+        opened(&mut evidence, Millis(0), &config);
+        let mut activity = FlashActivity::new(
+            DeviceId(1),
+            Some("espressif/esp32-c6-devkitc-1".to_string()),
+            chip_table(),
+            false,
+        );
+        let step = identified_then_inspected(
+            &mut activity,
+            &evidence,
+            &config,
+            identity(
+                Some("esp32c6-4mb"),
+                Some("seeed/xiao-esp32-c6"),
+                Resident::LightPlayer,
+            ),
+        );
+        assert!(matches!(
+            step,
+            ActivityStep::Continue(ref commands)
+                if matches!(commands.as_slice(), [Command::RunEffect {
+                    effect: EffectRequest::Flash { board_id: Some(board), .. },
+                    ..
+                }] if board == "espressif/esp32-c6-devkitc-1")
+        ));
+    }
+
+    fn chip_table() -> FlashBuildChoice {
+        FlashBuildChoice::ByChip(vec![super::super::board_identity::ChipBuildRow {
+            chip: "esp32c6".to_string(),
+            build_id: "esp32c6-4mb".to_string(),
+        }])
+    }
+
+    fn by_chip() -> FlashActivity {
+        FlashActivity::new(DeviceId(1), None, chip_table(), false)
+    }
+
+    fn identity(build: Option<&str>, board: Option<&str>, resident: Resident) -> BoardIdentity {
+        BoardIdentity {
+            chip: Some("esp32c6".to_string()),
+            build_id: build.map(str::to_string),
+            board_id: board.map(str::to_string),
+            candidates: Vec::new(),
+            resident,
+        }
+    }
+
+    /// Spawn, then answer the inspection with `identity` and a plain layout.
+    fn identified_then_inspected(
+        activity: &mut FlashActivity,
+        evidence: &Evidence,
+        config: &RosterConfig,
+        identity: BoardIdentity,
+    ) -> ActivityStep {
+        with_ctx(evidence, config, |ctx| {
+            activity.spawn_commands(Millis(0), ctx)
+        });
+        with_ctx(evidence, config, |ctx| {
+            activity.handle(
+                Millis(3_000),
+                &Input::Event(Event::ActivityMarker {
+                    device: DeviceId(1),
+                    effect: Some(crate::event::EffectId(1)),
+                    marker: ActivityMarker::BoardIdentified { identity },
+                }),
+                ctx,
+            )
+        });
+        inspected_after_spawn(activity, evidence, config, LayoutVerdict::Plain)
+    }
+
+    /// Answer an already-spawned inspection with `verdict`.
+    fn inspected_after_spawn(
+        activity: &mut FlashActivity,
+        evidence: &Evidence,
+        config: &RosterConfig,
+        verdict: LayoutVerdict,
+    ) -> ActivityStep {
+        with_ctx(evidence, config, |ctx| {
+            activity.handle(Millis(4_000), &layout(verdict), ctx)
+        });
+        with_ctx(evidence, config, |ctx| {
+            activity.handle(
+                Millis(5_000),
+                &ended(ActivityOutcome::Succeeded {
+                    summary: "inspected".to_string(),
+                }),
+                ctx,
+            )
+        })
     }
 }

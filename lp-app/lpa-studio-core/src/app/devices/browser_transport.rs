@@ -117,12 +117,12 @@ impl DeviceTransport for BrowserSerialTransport {
                 ),
             });
             match call {
-                DeviceEffectCall::InspectLayout { build_id } => {
+                DeviceEffectCall::InspectLayout { build } => {
                     // The C6 repartition's layout read: one esptool session
                     // that ends WITHOUT a reset, so the board waits parked
                     // for the write (or the reset a refusal sends).
                     let inspection = provider
-                        .inspect_layout_with_events(&endpoint, Some(&build_id), events)
+                        .inspect_layout_with_events(&endpoint, &build, events)
                         .await
                         .map_err(|error| error.to_string())?;
                     Ok(DeviceEffectFacts {

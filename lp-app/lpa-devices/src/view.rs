@@ -142,6 +142,10 @@ pub struct DeviceView {
     /// update this?" is answered where it is asked.
     #[serde(default)]
     pub firmware_blocked: Option<String>,
+    /// The USB vendor/product of the link the board is on, when it is a
+    /// USB link: which bridge it sits behind, for the install's board guess.
+    #[serde(default)]
+    pub usb: Option<crate::link::UsbIds>,
     /// Why an over-the-air update cannot run from here, when it cannot:
     /// [`FIRMWARE_NEEDS_USB`]'s sentence unless the current link carries
     /// lp-link's update channel (USB, Bluetooth, the LAN and the relay all
@@ -178,6 +182,10 @@ pub struct ActivityView {
     /// and whether the card must ask before the board's files move.
     #[serde(default)]
     pub layout: Option<crate::activity::FlashLayoutView>,
+    /// A Flash waiting on the user's yes to replace somebody else's
+    /// firmware: what the board runs, for the question's words.
+    #[serde(default)]
+    pub replace: Option<crate::activity::FlashReplaceView>,
     /// An Update's stage, progress, outcome and whether it is waiting for
     /// the board between legs — typed, so the card's words never parse
     /// [`Self::label`].
@@ -261,6 +269,9 @@ pub struct PendingLinkView {
     /// restart request, which waits for the board to answer.)
     #[serde(default)]
     pub firmware_blocked: Option<String>,
+    /// The link's USB vendor/product, when it is a USB link.
+    #[serde(default)]
+    pub usb: Option<crate::link::UsbIds>,
     /// This link's port is held by another tab of this browser, so it was
     /// not opened here ([`crate::Event::LinkHeld`]).
     #[serde(default)]
@@ -302,6 +313,7 @@ pub fn device_view(device: &Device, now: Millis) -> DeviceView {
         cancellable: cell.accepts_cancel() && !cell.is_cancel_requested(),
         cancel_requested: matches!(cell.cancel, CancelPhase::CancelRequested { .. }),
         layout: cell.flash_layout(),
+        replace: cell.flash_replace(),
         flash_step: cell.flash_step(),
         update: cell.update_view(),
     });
@@ -414,6 +426,7 @@ pub fn device_view(device: &Device, now: Millis) -> DeviceView {
             .as_ref()
             .filter(|endpoint| endpoint.is_network())
             .map(|_| FIRMWARE_NEEDS_USB.to_string()),
+        usb: device.evidence.link_usb(),
         update_blocked: update_blocked(device),
         held_elsewhere: device.evidence.held_elsewhere.clone(),
         escapes,
@@ -806,6 +819,7 @@ pub fn pending_link_view(entry: &PendingLink, now: Millis) -> PendingLinkView {
             .endpoint
             .is_bluetooth()
             .then(|| FIRMWARE_NEEDS_USB.to_string()),
+        usb: entry.info.usb,
         held_by_tab,
         escapes: vec![Escape::Forget],
     }

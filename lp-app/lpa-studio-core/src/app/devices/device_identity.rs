@@ -339,6 +339,7 @@ mod tests {
             terminal: Vec::new(),
             terminal_dropped: 0,
             firmware_blocked: None,
+            usb: None,
             held_elsewhere: None,
             escapes: vec![Escape::Forget],
             update_blocked: None,
@@ -658,6 +659,7 @@ mod tests {
             cancellable: true,
             cancel_requested: false,
             layout: None,
+            replace: None,
             flash_step: None,
             update: None,
         });
@@ -715,6 +717,7 @@ mod tests {
             detected_chip: None,
             mac: None,
             firmware_blocked: None,
+            usb: None,
             held_by_tab: false,
             escapes: vec![Escape::Forget],
         }

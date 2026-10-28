@@ -48,7 +48,7 @@ use crate::app::module::module_fixtures::{
 // --- Every state ------------------------------------------------------------
 
 #[story(
-    description = "The board card in every state, one height each (AC5), every row reading icon · kind · name · state (docs/ux/anatomy/board-card.md), the card's top saying what matters (round 3's surface: the state's icon in its tone and plain sentences, the picture dimmed under them): live (the picture alone, the corner a quiet ⋯, Connect as the primary, Edit on the Project row), connected (the bars give way to the board's whole panel and the card grows to hold it: Brightness, Speed and Scale knobs, the palette across the card, Edit at its foot; Done as the primary), identifying (\"Identifying this board.\" with the spinner; the Hardware row working; no button), offline with its last picture (\"This board isn't plugged in. Connect over Wi‑Fi to use it.\" over it, the rows' last-known values dimmed, Connect over Wi‑Fi), locked (over Bluetooth: \"This board is locked. Unlock it to connect.\", Unlock), updating (\"This board is updating its firmware.\" and its bar at 40 %, over the board's own light strip), done (the project bar green for a few seconds), failed (\"Studio couldn't send the project to this board. Retry to send it again.\"; the Project row keeps its words and Retry, quietly), a new board (\"This board doesn't have LightPlayer firmware.\", Install firmware with the board pick), an emulated board (\"Emulated running\" on its USB row, the model alone on its Hardware row), a board reached through lightplayer.app (lightplayer.app \"connected\", the cloud icon), and the three states of a board another tab of this browser holds: held (\"This board is open in another tab. Connect here to move it to this tab.\" over the picture that tab saved; Connect here), taking over (\"Moving this board to this tab.\", the spinner, here and as the primary) and taken (\"Another tab took this board.\", Connect here). The picture is 138 px, the name bar 50 px, each bar 28 px: every card but the connected one is 414 px tall, and each keeps its own height in the grid."
+    description = "The board card in every state, one height each (AC5), every row reading icon · kind · name · state (docs/ux/anatomy/board-card.md), the card's top saying what matters (round 3's surface: the state's icon in its tone and plain sentences, the picture dimmed under them): live (the picture alone, the corner a quiet ⋯, Connect as the primary, Edit on the Project row), connected (the bars give way to the board's whole panel and the card grows to hold it: Brightness, Speed and Scale knobs, the palette across the card, Edit at its foot; Done as the primary), identifying (\"Identifying this board.\" with the spinner; the Hardware row working; no button), offline with its last picture (\"This board isn't plugged in. Connect over Wi‑Fi to use it.\" over it, the rows' last-known values dimmed, Connect over Wi‑Fi), locked (over Bluetooth: \"This board is locked. Unlock it to connect.\", Unlock), updating (\"This board is updating its firmware.\" and its bar at 40 %, over the board's own light strip), done (the project bar green for a few seconds), failed (\"Studio couldn't send the project to this board. Retry to send it again.\"; the Project row keeps its words and Retry, quietly), a new board (\"This board doesn't have LightPlayer firmware.\", Install firmware, one press), an emulated board (\"Emulated running\" on its USB row, the model alone on its Hardware row), a board reached through lightplayer.app (lightplayer.app \"connected\", the cloud icon), and the three states of a board another tab of this browser holds: held (\"This board is open in another tab. Connect here to move it to this tab.\" over the picture that tab saved; Connect here), taking over (\"Moving this board to this tab.\", the spinner, here and as the primary) and taken (\"Another tab took this board.\", Connect here). The picture is 138 px, the name bar 50 px, each bar 28 px: every card but the connected one is 414 px tall, and each keeps its own height in the grid."
 )]
 fn board_card_every_state() -> Element {
     rsx! {
@@ -381,6 +381,7 @@ fn board_card_says_nothing() -> Element {
 )]
 fn board_card_surface_work() -> Element {
     let sending = DeviceView {
+        usb: None,
         status: DeviceStatus::Busy,
         can_receive_project: false,
         can_remove_project: false,
@@ -397,6 +398,7 @@ fn board_card_surface_work() -> Element {
         ..porch()
     };
     let installing = DeviceView {
+        usb: None,
         status: DeviceStatus::Busy,
         activity: Some(activity(
             DeviceActivityKind::Flash,
@@ -471,8 +473,10 @@ fn board_card_surface_work() -> Element {
 )]
 fn board_card_surface_install() -> Element {
     let at = |step: DeviceFlashStep, percent: Option<u8>| DeviceView {
+        usb: None,
         status: DeviceStatus::Busy,
         activity: Some(DeviceActivityView {
+            replace: None,
             flash_step: Some(step),
             ..activity(DeviceActivityKind::Flash, step.label(), percent)
         }),
@@ -510,6 +514,7 @@ fn board_card_surface_project() -> Element {
     faulted.status = DeviceStatus::Degraded;
     faulted.degraded = Some("Degraded: orbit.shader:12: 'tme' is not declared".to_string());
     let empty = DeviceView {
+        usb: None,
         loaded_project: DeviceLoadedProject::Empty,
         can_remove_project: false,
         ..porch()
@@ -1395,6 +1400,7 @@ pub(crate) fn held_by_another_tab(level: HoldLevel, taken_from_here: bool) -> De
         can_receive_project: false,
         can_remove_project: false,
         terminal: Vec::new(),
+        usb: None,
         held_elsewhere: Some(HeldElsewhere {
             via: HoldVia::Usb,
             level,
@@ -1472,6 +1478,7 @@ fn failed_connect(through_relay: bool) -> UiWifiConnect {
 /// its board known, which this Studio's link cannot speak to.
 pub(crate) fn older_lightplayer() -> DeviceView {
     DeviceView {
+        usb: None,
         title: "XIAO ESP32-C6".to_string(),
         state_label: "Older LightPlayer firmware".to_string(),
         ..needs_firmware(DeviceFirmwareFace::OlderLightPlayer { proto: Some(33) })
@@ -1483,6 +1490,7 @@ pub(crate) fn older_lightplayer() -> DeviceView {
 pub(crate) fn needs_firmware(face: DeviceFirmwareFace) -> DeviceView {
     let board_known = matches!(face, DeviceFirmwareFace::OlderLightPlayer { .. });
     DeviceView {
+        usb: None,
         status: DeviceStatus::NeedsAttention,
         state_label: "Needs firmware".to_string(),
         firmware_face: face,
@@ -1504,6 +1512,7 @@ fn activity(kind: DeviceActivityKind, label: &str, percent: Option<u8>) -> Devic
         cancellable: true,
         cancel_requested: false,
         layout: None,
+        replace: None,
         flash_step: None,
         update: None,
     }
@@ -1594,6 +1603,7 @@ pub(crate) fn porch() -> DeviceView {
         terminal: porch_terminal(),
         terminal_dropped: 0,
         firmware_blocked: None,
+        usb: None,
         held_elsewhere: None,
         escapes: vec![DeviceEscape::Disconnect, DeviceEscape::Forget],
         update_blocked: None,
@@ -1604,6 +1614,7 @@ pub(crate) fn porch() -> DeviceView {
 /// The porch board saying who it is: the link row's work.
 pub(crate) fn identifying() -> DeviceView {
     DeviceView {
+        usb: None,
         status: DeviceStatus::Busy,
         state_label: "Identifying".to_string(),
         loaded_project: DeviceLoadedProject::Unknown,
@@ -1617,6 +1628,7 @@ pub(crate) fn identifying() -> DeviceView {
             cancellable: true,
             cancel_requested: false,
             layout: None,
+            replace: None,
             flash_step: None,
             update: None,
         }),
@@ -1632,6 +1644,7 @@ pub(crate) fn identifying() -> DeviceView {
 /// The porch board, remembered and not here.
 pub(crate) fn offline() -> DeviceView {
     DeviceView {
+        usb: None,
         status: DeviceStatus::Offline,
         state_label: "Offline".to_string(),
         freshness_label: None,
@@ -1652,6 +1665,7 @@ pub(crate) fn offline() -> DeviceView {
 pub(crate) fn over_network(card: DeviceView) -> DeviceView {
     DeviceView {
         firmware_blocked: Some(FIRMWARE_NEEDS_USB.to_string()),
+        usb: None,
         ..card
     }
 }
@@ -1659,6 +1673,7 @@ pub(crate) fn over_network(card: DeviceView) -> DeviceView {
 /// An emulated board in this tab, running.
 pub(crate) fn emulated() -> DeviceView {
     DeviceView {
+        usb: None,
         id: DeviceId(9),
         title: "Bench emulator".to_string(),
         identity_label: None,
@@ -1688,6 +1703,7 @@ pub(crate) fn new_board() -> PendingLinkView {
         detected_chip: Some("esp32c6".to_string()),
         mac: Some("60:55:f9:0a:0b:0d".to_string()),
         firmware_blocked: None,
+        usb: None,
         held_by_tab: false,
         escapes: vec![DeviceEscape::Forget],
     }
@@ -1698,6 +1714,7 @@ pub(crate) fn new_board() -> PendingLinkView {
 /// name but the placeholder.
 fn never_said_hello() -> DeviceView {
     DeviceView {
+        usb: None,
         id: DeviceId(105),
         title: "New device".to_string(),
         state_label: "No response — needs firmware".to_string(),
@@ -1816,6 +1833,7 @@ pub(crate) fn last_picture() -> Option<DeviceCardFeedView> {
 /// publishes for it, raising the firmware details.
 fn layout_card(refused: bool) -> Element {
     let base = DeviceView {
+        usb: None,
         firmware_face: DeviceFirmwareFace::LightPlayer {
             firmware: Some("fw-esp32c6 abc1234".to_string()),
             wire: DeviceWireVersion::Match,
@@ -1827,6 +1845,7 @@ fn layout_card(refused: bool) -> Element {
     let (card, staged) = match refused {
         false => (
             DeviceView {
+                usb: None,
                 status: DeviceStatus::Busy,
                 state_label: waiting.to_string(),
                 can_receive_project: false,
@@ -1849,6 +1868,7 @@ fn layout_card(refused: bool) -> Element {
                         awaiting_consent: true,
                     }),
                     update: None,
+                    replace: None,
                     flash_step: Some(DeviceFlashStep::WaitingForAnswer),
                 }),
                 escapes: vec![
@@ -1862,6 +1882,7 @@ fn layout_card(refused: bool) -> Element {
         ),
         true => (
             DeviceView {
+                usb: None,
                 last_outcome: Some(OutcomeView {
                     summary: "the board's files don't fit the new firmware — nothing was changed"
                         .to_string(),

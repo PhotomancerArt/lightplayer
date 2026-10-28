@@ -135,6 +135,7 @@ fn remembered_tile(connect: Option<UiWifiConnect>) -> Element {
     card.escapes = vec![DeviceEscape::Reconnect, DeviceEscape::Forget];
     let id = card.id;
     let devices = DeviceRosterView {
+        which_board: Default::default(),
         transport_available: true,
         usb_available: true,
         wifi_connects: connect.into_iter().map(|connect| (id, connect)).collect(),

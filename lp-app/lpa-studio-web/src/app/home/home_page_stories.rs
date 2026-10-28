@@ -341,6 +341,7 @@ fn roster(boards: &[Board]) -> DeviceRosterView {
             }
             Board::Truck => {
                 let card = DeviceView {
+                    usb: None,
                     id: DeviceId(6),
                     title: "Truck".to_string(),
                     freshness_label: Some("last heard 1 day ago".to_string()),
@@ -354,6 +355,7 @@ fn roster(boards: &[Board]) -> DeviceRosterView {
         }
     }
     DeviceRosterView {
+        which_board: Default::default(),
         transport_available: true,
         usb_available: true,
         board_projects: BoardProjects::from_answers(answers),

@@ -118,6 +118,11 @@ pub fn roster_board_card(input: &RosterCardsInput<'_>, view: &DeviceView) -> Opt
         update: roster.updates.get(&view.id),
         sending: roster.sending.get(&view.id).map(String::as_str),
         layout: roster.layout.get(&view.id),
+        which_board: roster
+            .which_board
+            .get(&view.id)
+            .map(Vec::as_slice)
+            .unwrap_or(&[]),
         plays,
         sharing: roster.board_projects.sharing(view.id),
         project,

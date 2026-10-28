@@ -478,6 +478,7 @@ pub fn with_update_intent(
         cancellable,
         cancel_requested: false,
         layout: None,
+        replace: None,
         flash_step: None,
         update: Some(UpdateActivityView {
             intent,
@@ -721,6 +722,7 @@ mod tests {
             terminal: Vec::new(),
             terminal_dropped: 0,
             firmware_blocked: over_bluetooth.then(|| FIRMWARE_NEEDS_USB.to_string()),
+            usb: None,
             update_blocked: None,
             held_elsewhere: None,
             escapes: vec![Escape::Disconnect, Escape::Forget],

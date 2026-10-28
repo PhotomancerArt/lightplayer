@@ -82,7 +82,7 @@ fn e4_the_agent_connects_flashes_a_blank_board_pushes_and_sees_it_run() {
     // turn ends, and its end resumes the agent with a note.
     let flash = "devices/new-1/flash".to_string();
     seat.script(vec![
-        act_turn("f1", &flash, &[("board", &board.board_id)]),
+        act_turn("f1", &flash, &[]),
         say("Flashing LightPlayer onto it."),
     ]);
     seat.script(vec![say("It is flashed and runs nothing yet.")]);
@@ -100,10 +100,8 @@ fn e4_the_agent_connects_flashes_a_blank_board_pushes_and_sees_it_run() {
     );
     let seen = seat.readout_of_request(before);
     assert!(
-        seen.contains(&format!(
-            "- {flash}: Flash firmware [choose a board in args]\n"
-        )),
-        "the agent saw the blank board's Flash, Routine (no click needed): {seen}"
+        seen.contains(&format!("- {flash}: Flash firmware\n")),
+        "the agent saw the blank board's Flash, Routine and needing no board: {seen}"
     );
     let results = seat.tool_results(&mut bench);
     assert!(
@@ -274,11 +272,13 @@ fn a_cancelled_chooser_leaves_the_connect_card_pending_and_the_agent_hears_it() 
     });
 }
 
-/// The negative: asked to flash a board that runs somebody else's firmware,
-/// the agent's press is Lasting — the firmware on it would be lost — so it
-/// becomes a card pre-filled with the agent's board, a second press while
-/// the card waits is refused, and nothing is flashed: the board still
-/// needs firmware however long the bench runs.
+/// The negative: asked to put LightPlayer on a board that runs somebody
+/// else's firmware, the agent's Install runs — nothing is written before
+/// the board is read — and stops at the replace question. Replace is
+/// Lasting (the firmware on it would be lost), so the agent's press of it
+/// becomes a card, a second press while the card waits is refused, and
+/// nothing is flashed: the install waits on the user however long the
+/// bench runs.
 #[test]
 fn e4_the_agents_flash_over_firmware_is_a_card_and_flashes_nothing() {
     let device = FakeEsp32Device::new(FakeDeviceScript::new(FakeBootState::ForeignFirmware));
@@ -292,50 +292,54 @@ fn e4_the_agents_flash_over_firmware_is_a_card_and_flashes_nothing() {
             .is_some_and(|pending| pending.needs_firmware())
     });
     let flash = "devices/new-1/flash".to_string();
-    let board = c6_board_choice();
-    let mut turn = act_turn("f1", &flash, &[("board", &board.board_id)]);
+    // Still the provisional ref: the board has not said hello yet.
+    let replace = "devices/new-1/confirm-replace".to_string();
+    seat.script(vec![
+        act_turn("f1", &flash, &[]),
+        say("Reading the board first."),
+    ]);
+    let mut turn = act_turn("r1", &replace, &[]);
     // A second press in the same turn, while the card waits.
     turn.splice(
         turn.len() - 1..turn.len() - 1,
-        act_call("f2", &flash, &[("board", &board.board_id)]),
+        act_call("r2", &replace, &[]),
     );
     seat.script(vec![
         turn,
-        say("Click Flash on the card to replace its firmware."),
+        say("Click Replace on the card: it replaces WLED on the board."),
     ]);
     seat.send(&mut bench, &tasks, "Put LightPlayer on this board.");
-
-    let seen = seat.readout_of_request(0);
+    let heard = seat.last_user_text(2);
     assert!(
-        seen.contains(&format!(
-            "- {flash}: Flash firmware [choose a board in args] [needs the user's click]\n"
-        )),
-        "{seen}"
+        heard.starts_with("[flashing \"")
+            && heard.contains("waits for the user: This board is running WLED 0.15.0.")
+            && heard.contains(&replace),
+        "the install's question resumed the agent: {heard}"
     );
     let results = seat.tool_results(&mut bench);
-    assert_eq!(results[0]["needs_user"]["card"], "c1", "{:#}", results[0]);
+    assert!(results[0].get("done").is_some(), "{:#}", results[0]);
     assert!(
-        results[1]["refused"]["reason"]
+        results[1]["needs_user"]["card"].is_string(),
+        "{:#}",
+        results[1]
+    );
+    assert!(
+        results[2]["refused"]["reason"]
             .as_str()
             .is_some_and(|reason| reason.contains("waiting for the user's click")),
         "{:#}",
-        results[1]
+        results[2]
     );
     let cards = seat.cards(&mut bench);
     assert_eq!(cards.len(), 1, "{cards:#?}");
     assert!(cards[0].is_pending() && cards[0].destructive);
-    assert_eq!(
-        cards[0].args,
-        crate::OfferArgs::new().with("board", &board.board_id),
-        "the card is pre-filled with the agent's board"
-    );
     for _ in 0..200 {
         bench.step(&tasks);
     }
     assert!(bench.manifest_writes.borrow().is_empty(), "nothing flashed");
     assert!(
-        bench.view().devices.is_empty() && bench.view().pending[0].needs_firmware(),
-        "the board still runs its own firmware: {:?}",
+        bench.view().devices[0].activity.is_some(),
+        "the install waits on the user: {:?}",
         bench.view()
     );
 }

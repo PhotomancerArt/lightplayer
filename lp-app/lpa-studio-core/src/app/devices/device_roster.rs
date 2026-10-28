@@ -134,6 +134,11 @@ pub struct DeviceRosterView {
     /// its files move, the refusal, a board holding its files, a backup to
     /// put back. Absent = nothing to say.
     pub layout: std::collections::BTreeMap<lpa_devices::DeviceId, super::UiDeviceLayout>,
+    /// The boards whose install could not tell which board they are, with
+    /// every catalog board that fit: the card asks "Which board is this?"
+    /// until one is saved (plan
+    /// `lp2025/2026-10-28-0025-install-without-board-pick`).
+    pub which_board: std::collections::BTreeMap<lpa_devices::DeviceId, Vec<String>>,
     /// The latest backup the user asked to download; the shell downloads
     /// when its `seq` advances.
     pub backup_download: Option<super::device_layout_effect::BackupDownload>,
@@ -200,6 +205,7 @@ impl Default for DeviceRosterView {
             connections: std::collections::BTreeMap::new(),
             updates: std::collections::BTreeMap::new(),
             layout: std::collections::BTreeMap::new(),
+            which_board: std::collections::BTreeMap::new(),
             backup_download: None,
             board_projects: super::BoardProjects::default(),
             link_kinds: std::collections::BTreeMap::new(),
@@ -571,6 +577,19 @@ impl DeviceRoster {
     }
 
     /// The projection the home page renders.
+    /// The boards an install this session could not tell, with their fits.
+    fn which_board(&self) -> std::collections::BTreeMap<lpa_devices::DeviceId, Vec<String>> {
+        self.roster
+            .devices()
+            .iter()
+            .filter_map(|device| {
+                let identity = self.effects.install_identity(device.id)?;
+                (identity.board_id.is_none() && identity.candidates.len() > 1)
+                    .then(|| (device.id, identity.candidates))
+            })
+            .collect()
+    }
+
     pub fn view(&self, now: Millis) -> DeviceRosterView {
         DeviceRosterView {
             roster: roster_view(&self.roster, now),
@@ -612,6 +631,7 @@ impl DeviceRoster {
             // The verbs land in a scratch tree here; the studio view
             // publishes them for real (`publish_layout_offers`).
             layout: self.layout_views(now, &mut crate::UiOfferTree::new(), None),
+            which_board: self.which_board(),
             backup_download: self.effects.layout().download(),
             // Joined by the controller, which holds the library and the lens.
             board_projects: super::BoardProjects::default(),
@@ -1086,6 +1106,7 @@ mod tests {
             terminal: Vec::new(),
             terminal_dropped: 0,
             firmware_blocked: None,
+            usb: None,
             held_elsewhere: None,
             escapes: vec![Escape::Reconnect, Escape::Forget],
             update_blocked: None,
@@ -1118,6 +1139,7 @@ mod tests {
             terminal: Vec::new(),
             terminal_dropped: 0,
             firmware_blocked: None,
+            usb: None,
             held_elsewhere: None,
             escapes: vec![Escape::Disconnect, Escape::Forget],
             update_blocked: None,
@@ -1169,6 +1191,7 @@ mod tests {
             )]),
             runtime_bands: std::collections::BTreeMap::new(),
             layout: std::collections::BTreeMap::new(),
+            which_board: std::collections::BTreeMap::new(),
             backup_download: None,
             board_projects: Default::default(),
             link_kinds: Default::default(),
@@ -1234,6 +1257,7 @@ mod tests {
             feeds: std::collections::BTreeMap::new(),
             runtime_bands: std::collections::BTreeMap::new(),
             layout: std::collections::BTreeMap::new(),
+            which_board: std::collections::BTreeMap::new(),
             backup_download: None,
             board_projects: Default::default(),
             link_kinds: Default::default(),

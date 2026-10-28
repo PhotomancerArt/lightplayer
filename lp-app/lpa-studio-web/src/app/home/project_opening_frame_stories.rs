@@ -246,6 +246,7 @@ fn story_board(state: &OpeningState) -> lpa_studio_core::DeviceView {
         terminal: Vec::new(),
         terminal_dropped: 0,
         firmware_blocked: None,
+        usb: None,
         held_elsewhere: None,
         escapes: vec![DeviceEscape::Disconnect, DeviceEscape::Forget],
         update_blocked: None,
@@ -256,6 +257,7 @@ fn story_board(state: &OpeningState) -> lpa_studio_core::DeviceView {
             reason: DeviceWaitReason::NotConnected,
             ..
         }) => DeviceView {
+            usb: None,
             status: DeviceStatus::Offline,
             state_label: "Not connected".to_string(),
             escapes: vec![DeviceEscape::Reconnect, DeviceEscape::Forget],
@@ -265,6 +267,7 @@ fn story_board(state: &OpeningState) -> lpa_studio_core::DeviceView {
             reason: DeviceWaitReason::Identifying,
             ..
         }) => DeviceView {
+            usb: None,
             status: DeviceStatus::Busy,
             state_label: "Identifying…".to_string(),
             activity: Some(DeviceActivityView {
@@ -274,6 +277,7 @@ fn story_board(state: &OpeningState) -> lpa_studio_core::DeviceView {
                 cancellable: true,
                 cancel_requested: false,
                 layout: None,
+                replace: None,
                 flash_step: None,
                 update: None,
             }),

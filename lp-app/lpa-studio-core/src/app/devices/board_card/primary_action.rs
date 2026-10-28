@@ -29,8 +29,8 @@
 //! | A move of its files stopped half-way | Resume update | `finish-update` | download |
 //! | Keeps crashing | Reinstall firmware | `reinstall-firmware` | firmware |
 //! | Needs a version Studio can't get, or only its core runs | Install firmware | `install-firmware`: Studio's own at one press, or the version its list picks | firmware |
-//! | An older LightPlayer | Update firmware | `update-firmware`, else `flash` (the board pick) | firmware |
-//! | From before the hello, no LightPlayer, download mode, says nothing (it never said hello) | Install firmware | `flash` (the board pick) | firmware |
+//! | An older LightPlayer | Update firmware | `update-firmware`, else `flash` | firmware |
+//! | From before the hello, no LightPlayer, download mode, says nothing (it never said hello) | Install firmware | `flash`, one press | firmware |
 //! | Locked | Unlock (the password sheet) | `unlock` | lock |
 //! | Its port closed | Connect | `connect` | the link's |
 //! | A shader error | Edit project | `edit` (its lock on a play-only link) | edit |
@@ -67,7 +67,7 @@ use lpa_devices::ActivityKind;
 
 use lpa_devices::view::{FirmwareFace, PendingLinkView};
 
-use super::bar_work::{board_pick, retry};
+use super::bar_work::retry;
 use super::board_card_input::{BoardCardInput, link_icon, offer_at};
 use super::board_surface::{offline_road, road_link, runs_no_project, surface_state};
 use super::project_bar::edit_action;
@@ -179,7 +179,7 @@ pub(crate) fn state_action(
         OldFirmware => update_firmware(input).or_else(|| {
             input.offer("flash").map(|flash| UiCardAction {
                 word: UPDATE_FIRMWARE.to_string(),
-                ..install(flash).drawn(board_pick(input))
+                ..install(flash)
             })
         }),
         PreHelloFirmware | NoFirmware | DownloadMode | Silent => {
@@ -228,15 +228,10 @@ fn verb_alone(word: &str) -> Option<&'static str> {
     })
 }
 
-/// Update firmware: `update-firmware`, one press, or the board pick when
-/// the board must be picked.
+/// Update firmware: `update-firmware`, one press.
 fn update_firmware(input: &BoardCardInput<'_>) -> Option<UiCardAction> {
     let update = input.offer("update-firmware")?;
-    let action = UiCardAction::press(update, UPDATE_FIRMWARE).with_icon("firmware");
-    Some(match update.params().is_empty() {
-        true => action,
-        false => action.drawn(board_pick(input)),
-    })
+    Some(UiCardAction::press(update, UPDATE_FIRMWARE).with_icon("firmware"))
 }
 
 /// Done: the session's own verb.
@@ -293,20 +288,16 @@ pub(crate) fn pending_action(
     };
     Some(UiCardAction {
         word: word.to_string(),
-        ..install(flash).drawn(UiActionDraw::BoardPick {
-            chip: pending.detected_chip.clone(),
-            chip_from_banner: pending.detected_chip.is_some(),
-        })
+        ..install(flash)
     })
 }
 
-/// Install firmware on a board with no LightPlayer: the `flash` offer with
-/// the board pick — the primary's, and the Firmware row's to-do ("none ·
-/// Install").
+/// Install firmware on a board with no LightPlayer: the `flash` offer, one
+/// press — the primary's, and the Firmware row's to-do ("none · Install").
+/// The board is read in its bootloader before anything is written; nobody
+/// picks a board first (plan `lp2025/2026-10-28-0025-install-without-board-pick`).
 pub(crate) fn install_firmware(input: &BoardCardInput<'_>) -> Option<UiCardAction> {
-    input
-        .offer("flash")
-        .map(|flash| install(flash).drawn(board_pick(input)))
+    input.offer("flash").map(install)
 }
 
 /// Install firmware: the `flash` offer, in the card's words (P12: install
@@ -424,8 +415,10 @@ pub(crate) mod tests {
         assert_eq!(primary_action(&fixture.input(), None), None);
     }
 
+    /// No board pick: Install is one press (plan
+    /// `lp2025/2026-10-28-0025-install-without-board-pick`).
     #[test]
-    fn a_board_that_needs_firmware_installs_with_the_board_pick() {
+    fn a_board_that_needs_firmware_installs_on_one_press() {
         let mut fixture = CardFixture::ready();
         fixture.view.firmware_face = FirmwareFace::Blank;
         fixture.view.loaded_project = LoadedProject::Unknown;
@@ -436,13 +429,7 @@ pub(crate) mod tests {
         assert_eq!(action.word, "Install firmware");
         assert_eq!(action.icon.as_deref(), Some("firmware"));
         assert_eq!(path(&action), "flash");
-        assert_eq!(
-            action.draw,
-            UiActionDraw::BoardPick {
-                chip: Some("esp32c6".to_string()),
-                chip_from_banner: true
-            }
-        );
+        assert_eq!(action.draw, UiActionDraw::Press);
     }
 
     #[test]
@@ -536,13 +523,14 @@ pub(crate) mod tests {
             "the update keeps the project and the files: {:?}",
             update.consequence()
         );
-        // Its board not known: the same words over the board pick.
+        // Its board not known: the same one press — the install reads the
+        // chip in the board's bootloader.
         fixture.view.board_id = None;
         fixture.view.detected_chip = None;
         let action = offered(&mut fixture);
         assert_eq!(action.word, "Update firmware");
-        assert_eq!(path(&action), "flash");
-        assert!(matches!(action.draw, UiActionDraw::BoardPick { .. }));
+        assert_eq!(path(&action), "update-firmware");
+        assert_eq!(action.draw, UiActionDraw::Press);
     }
 
     #[test]
@@ -828,6 +816,7 @@ pub(crate) mod tests {
             detected_chip: Some("esp32c6".to_string()),
             mac: None,
             firmware_blocked: None,
+            usb: None,
             held_by_tab: false,
             escapes: vec![Escape::Forget],
         }

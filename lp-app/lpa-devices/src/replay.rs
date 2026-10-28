@@ -605,8 +605,8 @@ impl Step {
                 name,
             } => Input::Action(Action::Flash {
                 device: DeviceId(device),
-                board_id: board,
-                build_id: build,
+                board_id: Some(board),
+                build: crate::activity::FlashBuildChoice::Fixed(build),
                 park_first: false,
                 name,
                 restore_backup: false,
