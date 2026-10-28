@@ -165,10 +165,10 @@ mod tests {
         };
         assert_eq!(texture_config.width(), 64);
         assert_eq!(texture_config.height(), 64);
-        assert!(matches!(
-            texture_config.bindings.entries()["input"].source_ref(),
-            Some(BindingRef::Bus(_))
-        ));
+        // A texture declares no `input` slot, so the starter binds none: a
+        // binding to it made the whole project refuse to load
+        // (docs/defects/2026-10-28-lp-cli-create-project-did-not-load.md).
+        assert!(texture_config.bindings.entries().is_empty());
 
         // Verify shader node content
         let shader_json = fs.read_file("/shader.json".as_path()).unwrap();
