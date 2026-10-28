@@ -7,6 +7,7 @@ use crate::domain::patch_edits::OnWire;
 use crate::domain::project::Project;
 use crate::domain::target::Target;
 use crate::ux::editor::Editor;
+use crate::ux::graph_edit::GraphEdit;
 use crate::ux::graph_verb::GraphVerb;
 use crate::ux::props::common_props;
 use crate::ux::ui::{UiCrumb, UiInspector, UiItem, UiSection};
@@ -203,6 +204,18 @@ impl Editor {
             )));
         }
         part_items.extend(props(&[Target::Part(part.clone())]));
+        // A circle with no centre lamp offers one (Q94): the verb's own
+        // edit, as its offer makes it.
+        if p.circle(&part)
+            .is_some_and(|c| !c.rings.iter().any(|r| r.is_centre()))
+        {
+            part_items.push(UiItem::Edit {
+                text: "No centre lamp".into(),
+                edit: GraphEdit::AddCentreLamp {
+                    circle: part.clone(),
+                },
+            });
+        }
         if let Some(f) = p.fixture(&fixture) {
             part_items.push(UiItem::Fact(format!(
                 "Lamps: {}, {} channels each",

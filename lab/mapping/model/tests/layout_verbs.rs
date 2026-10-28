@@ -413,6 +413,43 @@ fn every_row_presses_its_verb() {
     }
 }
 
+/// A circle with no centre lamp says so on its Part section, beside an
+/// Add centre lamp button that makes `add-centre-lamp`'s edit; with one,
+/// the button is gone.
+#[test]
+fn a_circle_with_no_centre_offers_one_on_the_inspector() {
+    let mut e = Editor::new(Project::circular_display_wired());
+    let circle = circle(&e.project);
+    let centre = TreeRef::parse(&circle.fixture, "circle1/r5").unwrap();
+    e.edit(&[GraphEdit::RemoveRing {
+        ring: centre.clone(),
+    }])
+    .unwrap();
+    e.input(GraphInput::Select(vec![Target::Part(circle.clone())]));
+    let edit = |e: &Editor| {
+        e.view_inspector()
+            .sections
+            .iter()
+            .flat_map(|s| s.items.iter())
+            .find_map(|i| match i {
+                UiItem::Edit { text, edit } => Some((text.clone(), edit.clone())),
+                _ => None,
+            })
+    };
+    let (text, made) = edit(&e).expect("Add centre lamp on the circle");
+    assert_eq!(text, "No centre lamp");
+    assert_eq!(
+        made,
+        GraphEdit::AddCentreLamp {
+            circle: circle.clone()
+        }
+    );
+    e.input(GraphInput::Edit(made));
+    let c = e.project.circle(&circle).unwrap();
+    assert!(c.rings.iter().any(|r| r.is_centre()), "a centre lamp");
+    assert_eq!(edit(&e), None, "nothing more to add");
+}
+
 /// `r` on a circle, Move & draw on, presses `set-way-round`: its rings run
 /// the other way, and ring 3's override still lands it on port 1.
 #[test]

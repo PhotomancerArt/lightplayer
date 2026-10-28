@@ -3,6 +3,7 @@
 
 use crate::domain::part_ref::TreeRef;
 use crate::domain::target::Target;
+use crate::ux::graph_edit::GraphEdit;
 use crate::ux::graph_verb::GraphVerb;
 use crate::ux::patch_section::PatchField;
 use crate::ux::props::Prop;
@@ -87,6 +88,9 @@ pub enum UiItem {
     /// A fact with the verb that changes it beside it, as a button that
     /// presses the verb (`GraphInput::Verb`).
     Action { text: String, verb: GraphVerb },
+    /// A fact with a verb that takes values beside it, bound: a button
+    /// that makes the edit (`GraphInput::Edit`), as its offer does.
+    Edit { text: String, edit: GraphEdit },
     /// A patching row (`patch_section.rs`): its value, and where the value
     /// came from (`start_words.rs`).
     Field(UiField),

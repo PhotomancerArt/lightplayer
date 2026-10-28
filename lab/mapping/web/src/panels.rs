@@ -187,6 +187,23 @@ fn InspectorItem(ed: GraphEditor, item: UiItem) -> Element {
                 }
             }
         },
+        UiItem::Edit { text, edit } => {
+            let label = edit.verb().label();
+            rsx! {
+                div { class: "fact action-fact",
+                    span { "{text}" }
+                    button {
+                        class: "action-fact-button",
+                        tabindex: "-1",
+                        onmousedown: move |evt| evt.prevent_default(),
+                        onclick: move |_| {
+                            ed.input(GraphInput::Edit(edit.clone()));
+                        },
+                        "{label}"
+                    }
+                }
+            }
+        }
         UiItem::Action { text, verb } => rsx! {
             div { class: "fact action-fact",
                 span { "{text}" }
