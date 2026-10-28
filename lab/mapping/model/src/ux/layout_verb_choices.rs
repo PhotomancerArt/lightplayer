@@ -142,10 +142,11 @@ impl Editor {
     }
 
     /// Each repeat (its node, as a value) with the fewest copies that keep
-    /// every override on its copies, where that is more than one: a count
-    /// below it leaves some kept and gone
-    /// (`lpc_mapping::edit::overrides_past_count`), so `set-count` to it
-    /// takes something away.
+    /// every override on the copies it makes now, where that is more than
+    /// one: a count below it drops a copy an override is on, leaving the
+    /// override kept and gone (`lpc_mapping::edit::overrides_past_count`),
+    /// so `set-count` to it takes something away. Overrides already past
+    /// its count don't count: no press drops them again.
     pub fn counts_that_keep(&self) -> Vec<(String, u32)> {
         let mut out = Vec::new();
         for (f, part) in self.every_part() {
@@ -157,13 +158,14 @@ impl Editor {
             };
             let past = |count| lpc_mapping::edit::overrides_past_count(m, &part.id, count);
             let (mut low, mut high) = (1, repeat.count.max(1));
-            if past(low) == 0 || past(high) > 0 {
+            let now = past(high);
+            if past(low) == now {
                 continue;
             }
             // past(c) only falls as c grows.
             while low < high {
                 let mid = (low + high) / 2;
-                if past(mid) == 0 {
+                if past(mid) == now {
                     high = mid;
                 } else {
                     low = mid + 1;
