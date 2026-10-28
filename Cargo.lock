@@ -6715,6 +6715,8 @@ dependencies = [
  "lp-recovery",
  "lp-tree-store",
  "lpa-client",
+ "lpa-update",
+ "lpa-upgrade",
  "lpc-access",
  "lpc-engine",
  "lpc-hardware",

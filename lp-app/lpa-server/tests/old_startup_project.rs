@@ -82,6 +82,128 @@ fn a_newer_engine_refuses_an_old_startup_project_and_keeps_serving_over_the_tree
     );
 }
 
+/// End to end, the design's whole loop on this server: engine Y boots with
+/// two format-11 projects and refuses its startup one; the update's project
+/// stage (`lpa-update`, driven here over the real wire messages) reads the
+/// engine's format off the hello, upgrades both projects in one batch each
+/// with `lpa-upgrade`, startup first, and loads it — and the engine runs it.
+#[test]
+fn the_update_stage_upgrades_a_real_servers_projects_and_the_engine_loads_the_startup_one() {
+    let mut flash = NorFlashSim::new(NorGeometry::c6(64));
+    TreeStore::format(&mut flash, SoftSha256, StoreConfig::default())
+        .map_err(|(e, ..)| e)
+        .expect("format");
+    let tree = LpFsTree::new(mount(flash));
+    old_board(&tree);
+    for (path, bytes) in corpus_files("v11/fiber-headband") {
+        tree.write_file(
+            format!("/projects/headband/{path}").as_str().as_path(),
+            &bytes,
+        )
+        .unwrap();
+    }
+    let board = Board::over(Box::new(tree));
+    let startup = format!("/projects/{STARTUP}");
+    assert!(
+        board
+            .server
+            .borrow_mut()
+            .load_startup_project(startup.as_str().as_path())
+            .is_err()
+    );
+
+    let WireServerMsgBody::Hello(hello) = board.request(ClientRequest::Hello) else {
+        panic!("hello");
+    };
+    assert_eq!(
+        hello.build.project_format,
+        lpc_model::PROJECT_FORMAT_VERSION
+    );
+    let mut stage =
+        lpa_update::ProjectStage::new(hello.build.project_format, Some(lpc_access::Tier::Edit));
+    let (report, trace) = run_stage(&board, &mut stage);
+
+    assert_eq!(report.end, lpa_update::StageEnd::Finished, "{report:?}");
+    assert_eq!(
+        trace,
+        [
+            "write projects/eaves",
+            "load projects/eaves",
+            "write projects/headband"
+        ]
+    );
+    assert_eq!(report.load, Some(Ok(())));
+    assert_eq!(report.upgraded.len(), 2);
+    board.frames(8);
+    assert_eq!(board.running(), vec![startup.clone()]);
+    let WireServerMsgBody::ListLoadedProjects { projects } =
+        board.request(ClientRequest::ListLoadedProjects)
+    else {
+        panic!("loaded");
+    };
+    assert!(
+        projects.len() == 1 && projects[0].fault.is_none(),
+        "the upgraded startup project runs with no fault: {projects:?}"
+    );
+    assert!(!board.rebooted.get());
+    for name in [STARTUP, "headband"] {
+        let manifest = board
+            .read_root(&format!("/projects/{name}/project.json"))
+            .unwrap();
+        assert!(
+            String::from_utf8(manifest)
+                .unwrap()
+                .contains("\"format\": 12"),
+            "{name}"
+        );
+    }
+    assert!(
+        board
+            .read_root("/projects/headband/fixture.map2d.json")
+            .is_some(),
+        "the placed lamps' map2d was added"
+    );
+    assert!(
+        board
+            .read_root(&format!("{startup}/fixture.patch.json"))
+            .is_none(),
+        "the patch file was removed"
+    );
+
+    // Q110: the board's project, upgraded in place, hashes the same as a
+    // library copy of the same project upgraded on open (the step is
+    // deterministic), so Studio's runtime-hash check still matches.
+    for (name, corpus) in [
+        (STARTUP, "v11/eaves-wired"),
+        ("headband", "v11/fiber-headband"),
+    ] {
+        let mut library: lpa_upgrade::ProjectFiles = corpus_files(corpus).into_iter().collect();
+        lpa_upgrade::upgrade_to_current(&mut library).expect("the library copy upgrades");
+        let mirror = LpFsMemory::new();
+        for (path, bytes) in library.iter() {
+            mirror
+                .write_file(format!("/{path}").as_str().as_path(), bytes)
+                .unwrap();
+        }
+        let library_hash = lpc_history::hash_package(&mirror).unwrap().0.to_string();
+        let FsResponse::PackageHash { hash, error, .. } = board.fs(FsRequest::HashPackage {
+            prefix: format!("/projects/{name}").as_str().as_path_buf(),
+        }) else {
+            panic!("hash");
+        };
+        assert_eq!((hash, error), (library_hash, None), "{name}");
+    }
+
+    // A second stage finds nothing to do.
+    let mut again = lpa_update::ProjectStage::new(12, Some(lpc_access::Tier::Edit));
+    let (report, trace) = run_stage(&board, &mut again);
+    assert_eq!(report.end, lpa_update::StageEnd::Finished);
+    assert!(
+        trace.is_empty() && report.untouched.len() == 2,
+        "{report:?}"
+    );
+}
+
 fn the_old_startup_project_is_refused_and_the_board_keeps_serving(board: &Board, atomic: bool) {
     let startup_config = board.read_root(ServerConfig::PATH);
     let project = format!("/projects/{STARTUP}");
@@ -205,6 +327,134 @@ fn the_old_startup_project_is_refused_and_the_board_keeps_serving(board: &Board,
         lpc_wire::json::from_slice(&board.read_root(ServerConfig::PATH).expect("config"))
             .expect("config parses");
     assert_eq!(config.startup_project.as_deref(), Some(STARTUP));
+}
+
+// --- the stage's edge over the real wire messages -----------------------------------
+
+/// Drive `stage` over `board` with the channel-1 requests each effect
+/// names. Returns the report and the writes and loads, in order.
+fn run_stage(
+    board: &Board,
+    stage: &mut lpa_update::ProjectStage,
+) -> (lpa_update::ProjectStageReport, Vec<String>) {
+    use lpa_update::{BatchOutcome, ProjectStageEffect};
+
+    let absolute = |project: &str| format!("/{}", project.trim_matches('/'));
+    let read = |path: &str| match board.fs(FsRequest::Read {
+        path: path.as_path_buf(),
+    }) {
+        FsResponse::Read {
+            data, error: None, ..
+        } => data,
+        _ => None,
+    };
+    let mut trace = Vec::new();
+    let mut effects = stage.start();
+    loop {
+        let effect = effects.pop().expect("an effect until done");
+        effects = match effect {
+            ProjectStageEffect::Done(report) => return (report, trace),
+            ProjectStageEffect::ListProjects => {
+                let WireServerMsgBody::ListAvailableProjects { projects } =
+                    board.request(ClientRequest::ListAvailableProjects)
+                else {
+                    panic!("listing");
+                };
+                stage.projects_listed(
+                    projects
+                        .iter()
+                        .map(|p| String::from(p.path.as_str()))
+                        .collect(),
+                )
+            }
+            ProjectStageEffect::ReadStartupChoice => {
+                stage.startup_choice_read(read(ServerConfig::PATH))
+            }
+            ProjectStageEffect::ReadManifest { project } => {
+                let manifest = read(&format!("{}/project.json", absolute(&project)));
+                stage.manifest_read(&project, manifest)
+            }
+            ProjectStageEffect::ReadProject { project } => {
+                let root = absolute(&project);
+                let FsResponse::ListDir {
+                    entries,
+                    error: None,
+                    ..
+                } = board.fs(FsRequest::ListDir {
+                    path: root.as_str().as_path_buf(),
+                    recursive: true,
+                })
+                else {
+                    panic!("list {root}");
+                };
+                let entries: Vec<String> =
+                    entries.iter().map(|e| String::from(e.as_str())).collect();
+                let mut files = lpa_upgrade::ProjectFiles::new();
+                for entry in &entries {
+                    let dir = format!("{}/", entry.trim_end_matches('/'));
+                    if entries.iter().any(|other| other.starts_with(&dir)) {
+                        continue;
+                    }
+                    let key = entry.strip_prefix(&format!("{root}/")).expect("inside");
+                    files.insert(key, read(entry).expect("a listed file reads"));
+                }
+                stage.project_read(&project, files)
+            }
+            ProjectStageEffect::WriteBatch {
+                project,
+                writes,
+                deletes,
+            } => {
+                trace.push(format!("write {project}"));
+                let root = absolute(&project);
+                let FsResponse::Batch {
+                    atomic,
+                    error: None,
+                    ..
+                } = board.fs(FsRequest::BeginBatch)
+                else {
+                    panic!("begin");
+                };
+                let outcome = if !atomic {
+                    BatchOutcome::NotAtomic
+                } else {
+                    for (path, data) in writes {
+                        let FsResponse::Write { error: None, .. } = board.fs(FsRequest::Write {
+                            path: format!("{root}/{path}").as_str().as_path_buf(),
+                            data,
+                        }) else {
+                            panic!("write {path}");
+                        };
+                    }
+                    for path in deletes {
+                        let FsResponse::DeleteFile { error: None, .. } =
+                            board.fs(FsRequest::DeleteFile {
+                                path: format!("{root}/{path}").as_str().as_path_buf(),
+                            })
+                        else {
+                            panic!("delete {path}");
+                        };
+                    }
+                    match board.fs(FsRequest::CommitBatch) {
+                        FsResponse::Batch { error: None, .. } => BatchOutcome::Committed,
+                        other => BatchOutcome::Failed(format!("{other:?}")),
+                    }
+                };
+                stage.batch_done(&project, outcome)
+            }
+            ProjectStageEffect::LoadProject { project } => {
+                trace.push(format!("load {project}"));
+                let result = match board.request(ClientRequest::LoadProject {
+                    path: absolute(&project),
+                }) {
+                    WireServerMsgBody::LoadProject { .. } => Ok(()),
+                    WireServerMsgBody::Error { error } => Err(error),
+                    other => Err(format!("{other:?}")),
+                };
+                stage.load_done(&project, result)
+            }
+        };
+    }
 }
 
 // --- the board -------------------------------------------------------------------
