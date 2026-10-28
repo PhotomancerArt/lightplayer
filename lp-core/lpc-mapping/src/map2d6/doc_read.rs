@@ -29,12 +29,14 @@ use crate::part::{CircleSplit, PathSplit, Points, Shape, TreeId};
 use crate::patching::{
     Amount, ChannelOp, Direction, Flow, OutputName, OutputOp, Override, PortKey, PortOp, Start,
 };
+use crate::sorted_set::{WordNumbers, set_word};
 
 /// A format-6 document as written, before its rules are checked.
 pub(crate) struct DocText {
     pub sample_diameter: f32,
     pub canvas: Option<[f32; 4]>,
-    pub next: BTreeMap<String, u32>,
+    /// By word, sorted; a word given twice keeps its last number.
+    pub next: WordNumbers,
     pub start: Start,
     pub flow: Flow,
     pub parts: Vec<PartText>,
@@ -124,7 +126,7 @@ pub(crate) fn read_doc(t: &mut JsonText) -> Read<DocText> {
     let mut doc = DocText {
         sample_diameter: DEFAULT_SAMPLE_DIAMETER,
         canvas: None,
-        next: BTreeMap::new(),
+        next: WordNumbers::new(),
         start: Start::KEEP,
         flow: Flow::EndToEnd,
         parts: Vec::new(),
@@ -153,7 +155,7 @@ pub(crate) fn read_doc(t: &mut JsonText) -> Read<DocText> {
                 t.begin_object()?;
                 while let Some(word) = t.next_key()? {
                     let n = t.u32()?;
-                    doc.next.insert(word.into_owned(), n);
+                    set_word(&mut doc.next, &word, n);
                 }
             }
             4 => doc.start = read_start(t)?,
