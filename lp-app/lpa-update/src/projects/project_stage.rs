@@ -18,6 +18,14 @@
 //!   → Done(Finished)
 //! ```
 //!
+//! **The dark corner** (DD27): a link that drops after the startup
+//! project's batch commits and before its load leaves a board whose startup
+//! project is current and not running, and a stage run again finds nothing
+//! older. When the board says it refused its startup project for its format
+//! ([`ProjectStage::startup_refused`]), the stage loads it — once it is
+//! current, before any other project is rewritten — and never otherwise, so
+//! a board someone stopped on purpose stays stopped. Loading needs edit.
+//!
 //! **It resumes from the board, never from its own memory** (DM9, the
 //! driver's rule): it keeps nothing across a link. Every run lists and reads
 //! the board afresh, and a project already at the engine's format is left
@@ -63,6 +71,8 @@ pub struct ProjectStage {
     order: Vec<String>,
     /// The older projects, in `order`'s order.
     todo: Vec<String>,
+    /// The board said it refused its startup project for its format (DD27).
+    startup_refused: bool,
     report: ProjectStageReport,
 }
 
@@ -84,9 +94,10 @@ enum Phase {
         at: usize,
         report: lpa_upgrade::UpgradeReport,
     },
-    /// Waiting for the startup project's (`todo[at]`) load.
+    /// Waiting for the startup project's load; then `todo[next]` follows.
     Loading {
-        at: usize,
+        project: String,
+        next: usize,
     },
     Done,
 }
@@ -110,10 +121,37 @@ impl ProjectStage {
             phase: Phase::NotStarted,
             order: Vec::new(),
             todo: Vec::new(),
+            startup_refused: false,
             report: ProjectStageReport {
                 engine_format,
                 ..ProjectStageReport::default()
             },
+        }
+    }
+
+    /// The board's own report says it refused its startup project for its
+    /// format (DD27): once that project is current, the stage loads it even
+    /// when this run rewrote nothing. Without this report a current startup
+    /// project is never loaded by the stage, so a board someone stopped on
+    /// purpose stays stopped.
+    pub fn startup_refused(mut self, refused: bool) -> Self {
+        self.startup_refused = refused;
+        self
+    }
+
+    /// How far the rewriting is: `(done, total)` counted in projects older
+    /// than the engine's format, once every manifest is read; `None` before
+    /// that and once the stage is done.
+    pub fn progress(&self) -> Option<(usize, usize)> {
+        let total = self.todo.len();
+        match self.phase {
+            Phase::ReadingProject { at } | Phase::Writing { at, .. } => Some((at, total)),
+            Phase::Loading { next, .. } => Some((next.min(total), total)),
+            Phase::NotStarted
+            | Phase::Listing
+            | Phase::ReadingStartup
+            | Phase::ReadingManifest { .. }
+            | Phase::Done => None,
         }
     }
 
@@ -206,12 +244,24 @@ impl ProjectStage {
             self.phase = Phase::ReadingManifest { at: at + 1 };
             return vec![ProjectStageEffect::ReadManifest { project }];
         }
-        if self.todo.is_empty() {
-            return self.finish(StageEnd::Finished);
-        }
         if self.tier != Some(Tier::Edit) {
+            if self.todo.is_empty() {
+                return self.finish(StageEnd::Finished);
+            }
             self.report.pending = self.todo.clone();
             return self.finish(StageEnd::NeedsEdit);
+        }
+        // DD27: a current startup project the board refused for its format
+        // is loaded first, before anything else is rewritten.
+        if let Some(startup) = self.refused_current_startup() {
+            self.phase = Phase::Loading {
+                project: startup.clone(),
+                next: 0,
+            };
+            return vec![ProjectStageEffect::LoadProject { project: startup }];
+        }
+        if self.todo.is_empty() {
+            return self.finish(StageEnd::Finished);
         }
         self.read_project(0)
     }
@@ -270,7 +320,10 @@ impl ProjectStage {
                     report: report.clone(),
                 });
                 if self.report.startup.as_deref() == Some(project) {
-                    self.phase = Phase::Loading { at };
+                    self.phase = Phase::Loading {
+                        project: String::from(project),
+                        next: at + 1,
+                    };
                     return vec![ProjectStageEffect::LoadProject {
                         project: String::from(project),
                     }];
@@ -295,14 +348,22 @@ impl ProjectStage {
         project: &str,
         result: Result<(), String>,
     ) -> Vec<ProjectStageEffect> {
-        let Phase::Loading { at } = self.phase else {
+        let Phase::Loading {
+            project: ref loading,
+            next,
+        } = self.phase
+        else {
             return Vec::new();
         };
-        if self.todo[at] != project {
+        if loading != project {
             return Vec::new();
         }
         self.report.load = Some(result);
-        self.next_project(at)
+        if next < self.todo.len() {
+            self.read_project(next)
+        } else {
+            self.finish(StageEnd::Finished)
+        }
     }
 
     /// A read the stage asked for failed: it ends, and a run on the next
@@ -321,6 +382,13 @@ impl ProjectStage {
     /// Whether the stage has said `Done`.
     pub fn is_done(&self) -> bool {
         self.phase == Phase::Done
+    }
+
+    /// The startup project, when the board refused it for its format and it
+    /// is current now (DD27).
+    fn refused_current_startup(&self) -> Option<String> {
+        let startup = self.report.startup.as_ref()?;
+        (self.startup_refused && self.report.untouched.contains(startup)).then(|| startup.clone())
     }
 
     fn read_project(&mut self, at: usize) -> Vec<ProjectStageEffect> {
@@ -342,7 +410,7 @@ impl ProjectStage {
         let first_pending = match self.phase {
             Phase::NotStarted | Phase::Done => return Vec::new(),
             Phase::ReadingProject { at } | Phase::Writing { at, .. } => Some(at),
-            Phase::Loading { at } => Some(at + 1),
+            Phase::Loading { next, .. } => Some(next),
             Phase::Listing | Phase::ReadingStartup | Phase::ReadingManifest { .. } => None,
         };
         if let Some(at) = first_pending {

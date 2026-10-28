@@ -361,6 +361,88 @@ fn a_link_dropped_anywhere_and_a_fresh_stage_on_a_new_link_finish_the_job() {
     );
 }
 
+/// The dark corner (DD27): the link dropped after the startup project's
+/// batch committed and before its load. When the board says it refused its
+/// startup project for its format, the next stage loads it first — though
+/// it rewrites nothing for it — and then finishes the others.
+#[test]
+fn a_startup_project_left_unloaded_by_a_drop_is_loaded_when_the_board_says_it_refused_it() {
+    let mut board = dropped_before_the_startup_load();
+    let (report, trace) = edge::run(
+        &mut ProjectStage::new(ENGINE, Some(Tier::Edit)).startup_refused(true),
+        &mut board,
+    );
+
+    assert_eq!(report.end, StageEnd::Finished);
+    assert_eq!(
+        trace,
+        [
+            "load projects/shader-oracle-6",
+            "read projects/eaves-wired",
+            "write projects/eaves-wired",
+            "read projects/fiber-headband",
+            "write projects/fiber-headband",
+        ]
+    );
+    assert_eq!(board.loads, ["/projects/shader-oracle-6"]);
+    assert_eq!(report.load, Some(Ok(())));
+    assert_eq!(report.untouched, ["projects/shader-oracle-6"]);
+    assert_eq!(report.upgraded.len(), 2);
+}
+
+/// The same board, but its own report says nothing of a refusal (a board
+/// someone stopped on purpose): the stage loads nothing, and the others are
+/// still upgraded.
+#[test]
+fn a_startup_project_the_board_did_not_refuse_is_never_loaded_by_the_stage() {
+    let mut board = dropped_before_the_startup_load();
+    let (report, trace) = edge::run(&mut ProjectStage::new(ENGINE, Some(Tier::Edit)), &mut board);
+
+    assert_eq!(report.end, StageEnd::Finished);
+    assert!(
+        !trace.iter().any(|line| line.starts_with("load")),
+        "{trace:?}"
+    );
+    assert!(board.loads.is_empty());
+    assert_eq!(report.load, None);
+    assert_eq!(report.upgraded.len(), 2);
+
+    // Nor with less than edit, even when the board says it refused it: a
+    // load needs edit.
+    let mut board = dropped_before_the_startup_load();
+    let (report, trace) = edge::run(
+        &mut ProjectStage::new(ENGINE, Some(Tier::Play)).startup_refused(true),
+        &mut board,
+    );
+    assert_eq!(report.end, StageEnd::NeedsEdit);
+    assert!(trace.is_empty() && board.loads.is_empty(), "{trace:?}");
+}
+
+/// A board whose stage lost its link at the startup project's load, after
+/// that project's batch committed: on a new link, its startup project is
+/// current and not running, and the other two are still older.
+fn dropped_before_the_startup_load() -> Board {
+    for n in 0.. {
+        let mut board = Board::tree_with(&old_board());
+        board.drop_at = Some(n);
+        let (report, trace) =
+            edge::run(&mut ProjectStage::new(ENGINE, Some(Tier::Edit)), &mut board);
+        if trace.last().map(String::as_str) == Some("load projects/shader-oracle-6")
+            && board.loads.is_empty()
+        {
+            assert!(matches!(report.end, StageEnd::Interrupted(_)), "{report:?}");
+            assert_eq!(report.pending.len(), 2, "{report:?}");
+            board.new_link();
+            return board;
+        }
+        assert!(
+            n < 200,
+            "the stage never reached the startup project's load"
+        );
+    }
+    unreachable!()
+}
+
 // --- the uncut run, and what a cut must leave --------------------------------------
 
 struct Uncut {
