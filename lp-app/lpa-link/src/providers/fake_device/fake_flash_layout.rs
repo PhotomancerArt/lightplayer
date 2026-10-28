@@ -72,10 +72,16 @@ impl FakeEsp32Device {
             probe.record(read, bytes.clone());
             reads.push((read, bytes));
         }
+        while let Some(read) = crate::next_resident_read(&reads) {
+            let at = read.offset as usize;
+            reads.push((read, flash[at..at + read.length as usize].to_vec()));
+        }
         let (efuse_mac, _) = self.board_constants();
         LinkLayoutInspection {
             chip_name: Some(FAKE_CHIP_NAME.to_string()),
             probed_mac: efuse_mac,
+            build_id: None,
+            flash_id: None,
             target_table: fake_target_table().to_bytes(),
             target_image_len: FAKE_FIRMWARE_LEN,
             target_fs: crate::FsKind::Littlefs,
