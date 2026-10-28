@@ -119,7 +119,8 @@ renders its parts into the compact carrier (the positions moved out of the
 tree, held once, the rest of the tree dropped), asks the engine for the
 port tables of the named outputs that read its bus channel
 (`TickContext::control_patch_outputs`, cut by the same walk as the wires,
-`node::output_port_slices`), renders the tree again for each patch, patches
+`node::output_port_slices`), lays the tree out again for each patch (its
+structure only, `lpc_mapping::part::render_layout`: no lamp is placed), patches
 with `lpc_mapping::patching::patch_mapping_placed` (no walk record), and
 publishes `PatchedRun`s that each name their output. Between patches it
 holds only the mapping, its runs and its status. A live edit that changes

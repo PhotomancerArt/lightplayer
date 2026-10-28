@@ -6,7 +6,7 @@
 //! exact-size buffer; [`Tree::take_positions`] moves that buffer out and the
 //! fit rewrites it in place, with no copy
 //! (`docs/reports/2026-09-02-per-lamp-memory-table.md`).
-//! The rest of the tree is dropped: the patcher renders its own for each
+//! The rest of the tree is dropped: the patcher lays out its own for each
 //! patch (`parts_patch.rs`).
 //!
 //! [`Tree::take_positions`]: lpc_mapping::part::Tree::take_positions
