@@ -19,6 +19,10 @@ lp-crc32 = { path = "../../lp-base/lp-crc32" }
 lpa-devices = { path = "../lpa-devices" }
 lpc-access = { path = "../../lp-core/lpc-access" }
 lpc-update = { path = "../../lp-core/lpc-update" }
+# The project stage (`projects`): the host upgrades a board's stored
+# projects with the one upgrader. Host and wasm only, like this crate;
+# `scripts/check-upgrade-fw.sh` keeps both out of every firmware graph.
+lpa-upgrade = { path = "../lpa-upgrade" }
 sha2 = { workspace = true }
 # `pack` only: the one packer of encoding 1 (std). The compressor is a
 # dependency (zlib-rs, pure Rust, Zlib licence), never copied source;
@@ -32,6 +36,14 @@ pack = ["dep:flate2", "dep:lp-deflate"]
 [dev-dependencies]
 lpc-update = { path = "../../lp-core/lpc-update", features = ["test-support"] }
 serde_json = { workspace = true }
+# `tests/projects_sim/`: the project stage against a board whose projects
+# live in the real tree store on simulated NOR flash (the C6's and the S3's
+# store), cut after every flash operation; memory stands in for a board
+# with no transactions.
+lp-tree-store = { path = "../../lp-base/lp-tree-store", features = ["lpfs", "nor-sim"] }
+lp-nor-sim = { path = "../../lp-emu/lp-nor-sim" }
+lpfs = { path = "../../lp-base/lpfs", default-features = false, features = ["std"] }
+lpc-model = { path = "../../lp-core/lpc-model", default-features = false }
 
 [lints]
 workspace = true

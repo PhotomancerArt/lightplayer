@@ -6,8 +6,9 @@ defines the protocol and the board's session). Studio (wasm, M7) and
 
 **Sans-IO.** `no_std` + `alloc` in its own code (except under `pack`): no
 clock (time is the caller's `now_ms`), no IO, no executor. It links
-`lpa-devices` for M1's version comparison, which brings `std` in on host
-and wasm; nothing here does IO. It emits decisions, stages and effects,
+`lpa-devices` for M1's version comparison and `lpa-upgrade` for the project
+stage, which bring `std` in on host and wasm; nothing here does IO, and
+`scripts/check-upgrade-fw.sh` keeps both out of every firmware graph. It emits decisions, stages and effects,
 never UI actions or copy (DM31): whether an offer becomes a one-click or a
 two-click button is `lpa-studio-core`'s (M7).
 
@@ -28,6 +29,7 @@ is Part B's (B-P02).
 | `login` | `LoginClient`: answers a core's `L` challenge |
 | `decide` | `decide()`, the decision; `EngineSource`, where an engine comes from |
 | `drive` | `UpdateDriver`: a whole update or heal over one board's links; `UpdateIntent` and `decide_for_intent`, what the person asked for |
+| `projects` | `ProjectStage`: **the project stage**, the update's last stage — a board's stored projects upgraded to the format its engine reads, over channel 1 (a sibling of the driver) |
 | `pack` (feature) | **The one packer** of encoding 1, and its prover |
 
 ## Serving (`serve/serve_session.rs`)
@@ -190,6 +192,56 @@ at every cut, resume rather than restart after a mid-piece cut, and that
 the backup the host kept is the old engine. `tests/v1_board_fixture.rs`
 drives the host with the v1 golden's board lines: an old core must take a
 new one.
+
+## The project stage (`projects/`)
+
+When an update brings an engine that reads a newer project format than the
+board's stored projects, the update upgrades them (M3 P10; the plan
+`lp2025/2026-10-27-0114-mapping-rebuild`, Q99). A fielded board's files are
+out of a newer host's reach until the new engine speaks the host's wire, so
+this is the update's **last stage**, run over channel 1 once engine Y
+answers: the engine's hello says the format it reads
+(`build.projectFormat`, wire 46), each stored `project.json` says its own,
+and `lpa-upgrade` does the rest on the host. **The device never upgrades**:
+it refuses an older project by name and keeps serving (`lpa-server`'s
+`tests/old_startup_project.rs`).
+
+```text
+ProjectStage::new(engine_format, tier)
+  ├─ engine_format past this host's chain → Done(HostTooOld), nothing read
+  → ListProjects → ReadStartupChoice → ReadManifest per project
+  ├─ none older                           → Done(Finished)
+  ├─ older, less than edit                → Done(NeedsEdit), nothing written
+  → per older project, the startup project first:
+      ReadProject → lpa_upgrade::upgrade_with_chain(engine_format)
+        ├─ refused → named with the upgrader's sentence; next
+        → WriteBatch (BeginBatch; atomic: false → NotAtomic, nothing written;
+          writes, deletes, CommitBatch) → (the startup project) LoadProject
+  → Done(Finished)
+```
+
+`UpdateDriver` and its decision table are untouched: the stage runs after
+the driver's `Done(UpToDate)`, and on its own when a board is found with
+older projects (P11 wires both). It **resumes from the board, never from
+its memory** (DM9): every run lists and reads afresh, and a project at the
+engine's format is left alone. **One atomic batch per project**, the
+startup project first and then loaded, so after a cut each project is
+wholly old or wholly new and any edit-capable host finishes it with no
+click. It is general: it knows formats and `lpa-upgrade`'s chain, nothing
+of what a step changes (`ProjectStage::with_chain` runs a caller's chain;
+the simulation proves a toy v12→v13 rides it).
+
+`tests/projects_sim/` is its oracle: three real format-11 projects from
+`lpa-upgrade`'s v11 corpus (a patch file removed, a map2d added, the
+startup project not first by name) in the tree store on `lp-nor-sim`,
+served by a minimal channel-1 responder through the edge P11's hosts
+mirror. The statements cover the order and the load, a rerun that changes
+nothing, a refused project named while the others finish, less than edit,
+a board with no transactions, a host older than the engine and the toy
+step; the sweeps cut the power after **every** flash program and erase
+under every model `lp-nor-sim` names and drop the link at every request,
+then run a fresh stage: each project is wholly 11 or wholly 12 after every
+cut, and the rerun ends with an uncut run's bytes.
 
 ## The one packer (`pack`, feature `pack`)
 
