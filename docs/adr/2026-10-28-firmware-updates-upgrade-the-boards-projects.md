@@ -168,6 +168,13 @@ transaction: a cut before its commit leaves the old state.
   transactions (littlefs, which never updates over the air) gets nothing
   written.
 - **Walked:** see `docs/reports/2026-10-28-ota-project-upgrade-walk.md`.
+  The stage ran on USB, the LAN, the relay and Bluetooth, and power cuts
+  at every flash operation of it were finished by the next host. **The
+  walk found that the update before it reaches a board on an older wire
+  only over a cable**: Studio updates such a board with a USB flash, and
+  over Wi‑Fi, Bluetooth and the relay it offers none ("Firmware updates
+  need USB"). Every wire bump does this; whether the update channel should
+  carry an older-wire board's update is open (the walk record's "Found").
 
 ## Alternatives Considered
 
