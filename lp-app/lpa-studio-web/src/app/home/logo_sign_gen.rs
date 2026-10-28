@@ -14,6 +14,11 @@
 //! corpus SVG importer. Drawing it by hand would have forked the brand
 //! geometry the moment either side moved.
 //!
+//! The committed file is map2d format 6 (project format 12): the geometry is
+//! built as today's shape structs, then each object becomes a part, ids
+//! minted as the format-12 upgrade mints them, and the fixture starts at
+//! port 0, lamp 0 of output `"1"`; `lpc-mapping`'s writer writes it.
+//!
 //! Drift is gated the way the favicon's is: [`logo_sign_map2d_in_sync`]
 //! compares the committed JSON byte for byte, and
 //! [`logo_sign_map2d_regen`] rewrites it. A nudge to `HERO_TRI`, to
@@ -24,6 +29,8 @@
 //! the running app reads this, and the wasm bundle should not carry the letter
 //! SVG twice.
 
+use lpc_mapping::part::{Mapping, Part, PartId, PartKind, Path, PathCommand, Shape};
+use lpc_mapping::patching::{Amount, Start};
 use lpc_mapping::{
     FilledPolygonShape, GridCorner, GridRouting, Map2dDoc, Map2dObject, Map2dShape, PathShape,
 };
@@ -117,10 +124,95 @@ fn logo_sign_map2d() -> Map2dDoc {
     doc
 }
 
-/// The committed document's bytes: pretty JSON with a trailing newline, the
-/// same shape every generated map2d in `catalog/` is written in.
+/// The output the sign's mapping starts on (`output.json`'s name).
+const OUTPUT_NAME: &str = "1";
+
+/// The sign as a format-6 mapping: one part per object, in wiring order,
+/// starting at port 0, lamp 0 of [`OUTPUT_NAME`]. The matrix's 132 lamps fill
+/// port 0 and the letters follow on port 1, as `output.json` splits them.
+fn logo_sign_mapping() -> Mapping {
+    let doc = logo_sign_map2d();
+    let ids = minted_ids(&doc.objects);
+    let parts = doc
+        .objects
+        .iter()
+        .zip(ids)
+        .map(|(object, id)| {
+            let shape = match &object.shape {
+                Map2dShape::FilledPolygon(matrix) => Shape::FilledPolygon(matrix.clone()),
+                Map2dShape::Path(path) => Shape::Path(path_of(path)),
+                _ => unreachable!("the sign is a matrix and letter strands"),
+            };
+            let mut part = Part::new(
+                PartId::new(&id).expect("a minted id is valid"),
+                PartKind::Shape(shape),
+            );
+            part.name = object.name.clone();
+            part
+        })
+        .collect();
+    Mapping {
+        sample_diameter: doc.sample_diameter,
+        canvas: doc.canvas,
+        parts,
+        start: Start::at(OUTPUT_NAME, 0, Amount::lamps(0)),
+        ..Mapping::default()
+    }
+}
+
+/// The ids the format-12 upgrade gives objects with none: the name, lower
+/// case, when that is a valid id no other object's name also gives; else
+/// the kind's word and the next number (`L` and `l` both read `l`, so they
+/// are `path1` and `path2`).
+fn minted_ids(objects: &[Map2dObject]) -> Vec<String> {
+    let slug = |name: &str| name.to_ascii_lowercase();
+    let mut next_path = 1;
+    objects
+        .iter()
+        .map(|object| {
+            let own = slug(&object.name);
+            let unique = objects.iter().filter(|o| slug(&o.name) == own).count() == 1;
+            if unique && PartId::new(&own).is_ok() {
+                own
+            } else {
+                assert!(
+                    matches!(object.shape, Map2dShape::Path(_)),
+                    "only letters collide"
+                );
+                let id = format!("path{next_path}");
+                next_path += 1;
+                id
+            }
+        })
+        .collect()
+}
+
+/// A letter strand in SVG path data's words: a move to its first point,
+/// lines on, and a move where today's jumper (a gap) was.
+fn path_of(path: &PathShape) -> Path {
+    let commands = path
+        .points
+        .iter()
+        .enumerate()
+        .map(|(i, point)| {
+            if i == 0 || path.gaps.contains(&(i as u32 - 1)) {
+                PathCommand::Move(*point)
+            } else {
+                PathCommand::Line(*point)
+            }
+        })
+        .collect();
+    Path {
+        reversed: path.reversed,
+        align: path.align,
+        ..Path::of(commands, path.count)
+    }
+}
+
+/// The committed document's bytes, as `lpc-mapping`'s format-6 writer
+/// writes them.
 fn logo_sign_map2d_json() -> String {
-    logo_sign_map2d().to_json_pretty() + "\n"
+    lpc_mapping::map2d6::write(&logo_sign_mapping()).expect("the logo sign writes as format 6")
 }
 
 /// Object 1: the shaped matrix. The brand triangle in stage coordinates,
@@ -288,33 +380,31 @@ fn logo_sign_map2d_regen() {
 /// count out in the example; here it lands as a failing assert.
 #[test]
 fn logo_sign_lamp_counts_are_pinned() {
-    let doc = logo_sign_map2d();
-    let resolved = lpc_mapping::resolve(&doc).expect("the logo sign resolves");
-    let matrix = resolved.object_span(0).expect("the matrix resolves").count;
+    let tree = lpc_mapping::part::render(&logo_sign_mapping()).expect("the logo sign renders");
+    let matrix = tree.segments()[0].count();
     assert_eq!(matrix, 132, "shaped matrix lamps");
     assert_eq!(
-        resolved.lamps.len() as u32 - matrix,
+        tree.positions().len() as u32 - matrix,
         109,
         "letter string lamps"
     );
-    assert_eq!(resolved.lamps.len(), 241, "the whole sign");
-    // One span per object: the three jumpered letters stay one strand each in
-    // wiring order (their breaks are `path_gap_breaks`, not span boundaries).
-    assert_eq!(resolved.spans.len(), 12);
+    assert_eq!(tree.positions().len(), 241, "the whole sign");
+    // One segment per part: the three jumpered letters stay one strand each
+    // in wiring order (a move inside a path is its jumper, not a split).
+    assert_eq!(tree.segments().len(), 12);
 }
 
-/// The document declares format 5 — the `filled_polygon` floor — and frames
-/// itself on the hero's stage.
+/// The document is map2d format 6, frames itself on the hero's stage, and
+/// keeps its object names, in wiring order.
 #[test]
-fn logo_sign_map2d_is_a_format_5_stage() {
-    let doc = logo_sign_map2d();
-    assert_eq!(doc.format, 5);
-    assert_eq!(doc.canvas, Some([0.0, 0.0, 300.0, 308.0]));
-    assert_eq!(doc.objects.len(), 12);
-    assert_eq!(doc.objects[0].name, "matrix");
-    let names: Vec<&str> = doc.objects[1..]
+fn logo_sign_map2d_is_a_format_6_stage() {
+    let mapping = lpc_mapping::map2d6::read(&logo_sign_map2d_json()).expect("format 6");
+    assert_eq!(mapping.canvas, Some([0.0, 0.0, 300.0, 308.0]));
+    assert_eq!(mapping.parts.len(), 12);
+    assert_eq!(mapping.parts[0].name, "matrix");
+    let names: Vec<&str> = mapping.parts[1..]
         .iter()
-        .map(|object| object.name.as_str())
+        .map(|part| part.name.as_str())
         .collect();
     assert_eq!(
         names,
