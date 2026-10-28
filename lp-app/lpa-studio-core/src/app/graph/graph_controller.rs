@@ -28,7 +28,10 @@
 //! unchanged. A project nobody edited writes nothing. The written files are
 //! then the baseline the next save compares against, and the port tables
 //! are built again from them (an output's ports edited on the Graph
-//! re-patch at once). Where pinned nodes sit is written too (`editor.json`'s
+//! re-patch at once). Read back, a node the Graph made is keyed by its
+//! name; it is keyed again by the id the Graph gave it
+//! (`ProductProject::adopt_new_nodes`), so the next save knows it as
+//! written instead of writing its file again and deleting it. Where pinned nodes sit is written too (`editor.json`'s
 //! `canvas` surface, Debug's Pinning). Undo is the Graph's own (the lab's
 //! project snapshots); what it puts back is saved the same way. A deleted
 //! node's files (`Saved::removed`) are deleted through the same asset path
@@ -248,7 +251,7 @@ impl GraphController {
         project: &mut ProjectController,
         server: &mut StudioServerClient,
     ) -> bool {
-        let (saved, revision, gone, back) = {
+        let (saved, revision, gone, back, new) = {
             let Some(opened) = self.opened.as_ref() else {
                 return false;
             };
@@ -276,6 +279,7 @@ impl GraphController {
                 e.project.revision(),
                 gone,
                 back,
+                opened.files.new_nodes(&e.project),
             )
         };
         self.saved = revision;
@@ -357,20 +361,22 @@ impl GraphController {
             }
         }
         if !saved.writes.is_empty() || !saved.removed.is_empty() {
-            self.rebase(project);
+            self.rebase(project, &new);
         }
         false
     }
 
     /// What was written is what the next save compares against, and what
-    /// the open read now: read the files again, and build the port tables
-    /// from them, so an output whose ports the Graph edited re-patches at
-    /// once instead of on the next open.
-    fn rebase(&mut self, project: &ProjectController) {
+    /// the open read now: read the files again, key the nodes the Graph
+    /// made (`new`, with the files saving wrote them to) by the Graph's ids,
+    /// and build the port tables from them, so an output whose ports the
+    /// Graph edited re-patches at once instead of on the next open.
+    fn rebase(&mut self, project: &ProjectController, new: &[(NodeId, String)]) {
         let source = GraphSource::new(project, &self.absent);
-        let Ok(reopened) = Opened::open(&source) else {
+        let Ok(mut reopened) = Opened::open(&source) else {
             return;
         };
+        reopened.files.adopt_new_nodes(new);
         if !source.misses().is_empty() {
             return;
         }
@@ -387,9 +393,14 @@ impl GraphController {
                 *self.frame.borrow_mut() = None;
             }
         }
+        let nodes = node_map(project, &reopened.files);
         if let Some(opened) = self.opened.as_mut() {
             opened.files = reopened.files;
             opened.read = read;
+            // Nodes the Graph made join the map once Studio holds them.
+            for (id, node) in nodes {
+                opened.nodes.entry(id).or_insert(node);
+            }
         }
     }
 

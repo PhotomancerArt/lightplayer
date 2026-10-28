@@ -141,6 +141,39 @@ impl Editor {
             .collect()
     }
 
+    /// Each repeat (its node, as a value) with the fewest copies that keep
+    /// every override on its copies, where that is more than one: a count
+    /// below it leaves some kept and gone
+    /// (`lpc_mapping::edit::overrides_past_count`), so `set-count` to it
+    /// takes something away.
+    pub fn counts_that_keep(&self) -> Vec<(String, u32)> {
+        let mut out = Vec::new();
+        for (f, part) in self.every_part() {
+            let PartKind::Repeat(repeat) = &part.kind else {
+                continue;
+            };
+            let Some(m) = self.project.fixture(&f).map(|x| &x.mapping) else {
+                continue;
+            };
+            let past = |count| lpc_mapping::edit::overrides_past_count(m, &part.id, count);
+            let (mut low, mut high) = (1, repeat.count.max(1));
+            if past(low) == 0 || past(high) > 0 {
+                continue;
+            }
+            // past(c) only falls as c grows.
+            while low < high {
+                let mid = (low + high) / 2;
+                if past(mid) == 0 {
+                    high = mid;
+                } else {
+                    low = mid + 1;
+                }
+            }
+            out.push((node_value(&PartRef::new(&f, &part.id).node()), low));
+        }
+        out
+    }
+
     /// Every part of every fixture, fixtures in tree order, parts depth
     /// first.
     fn every_part(&self) -> Vec<(NodeId, &Part)> {

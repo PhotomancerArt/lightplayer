@@ -61,6 +61,43 @@ impl ProductProject {
     pub fn save_all(&self, project: &Project) -> Result<Saved, FilesError> {
         Writer::new(self, project, true).run()
     }
+
+    /// The nodes `project` holds that these files don't (the Graph made
+    /// them), each with the file saving writes it to.
+    pub fn new_nodes(&self, project: &Project) -> Vec<(NodeId, String)> {
+        let mut w = Writer::new(self, project, false);
+        w.place("module.json", project.nodes());
+        w.places
+            .into_iter()
+            .filter(|(id, _)| !self.nodes.contains_key(id))
+            .map(|(id, (_, path))| (id, path))
+            .collect()
+    }
+
+    /// Files read back after a save (`self`) key a node by its name in its
+    /// module; one the Graph made has the id the Graph minted (`output3`).
+    /// Key each of `new` ([`ProductProject::new_nodes`] before that save) by
+    /// the Graph's id again, found by the file it was written to, so the
+    /// next save knows it as written. Without it the next save takes the
+    /// Graph's node for another one: it writes the node's file again and
+    /// reports the same file gone (which Studio then deletes).
+    pub fn adopt_new_nodes(&mut self, new: &[(NodeId, String)]) {
+        for (id, path) in new {
+            if self.nodes.contains_key(id) {
+                continue;
+            }
+            let read_as = self
+                .nodes
+                .iter()
+                .find(|(k, f)| &f.path == path && !new.iter().any(|(n, _)| n == *k))
+                .map(|(k, _)| k.clone());
+            if let Some(k) = read_as
+                && let Some(file) = self.nodes.remove(&k)
+            {
+                self.nodes.insert(id.clone(), file);
+            }
+        }
+    }
 }
 
 struct Writer<'a> {

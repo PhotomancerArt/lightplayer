@@ -258,6 +258,76 @@ fn a_named_output_and_the_mapping_naming_it_save_together() {
     assert_eq!(wire(&again), wire(&o.project));
 }
 
+/// Saving twice after the Graph creates an output writes one output: the
+/// files read back after the first save know the new node by the id the
+/// Graph gave it (`adopt_new_nodes`), so the second save writes nothing,
+/// rather than writing the output's file again and reporting it gone.
+#[test]
+fn saving_twice_after_creating_an_output_writes_one_output() {
+    let o = common::open(&CHOKER);
+    let mut p = o.project.clone();
+    let spare = p
+        .add_output(None, "spare", &[("ws281x:local:D5", 10)])
+        .unwrap();
+    assert_ne!(spare.as_str(), "spare", "the Graph's own id, not its name");
+    let new = o.files.new_nodes(&p);
+    assert_eq!(new, [(spare.clone(), "spare.json".to_string())]);
+    let saved = o.files.save(&p).unwrap();
+    assert_eq!(paths(&saved), ["module.json", "spare.json"]);
+
+    // Read back as written, the new output is keyed by its name: a save
+    // from there takes the Graph's node for another one, writes its file
+    // again and reports the same file gone, which Studio deletes (DD36).
+    let mut again = reopen(&CHOKER, &saved).files;
+    let naive = again.save(&p).unwrap();
+    assert_eq!(paths(&naive), ["spare.json"], "written again");
+    assert_eq!(naive.removed, ["spare.json"], "and reported gone");
+
+    again.adopt_new_nodes(&new);
+    let second = again.save(&p).unwrap();
+    assert!(second.writes.is_empty(), "{:?}", paths(&second));
+    assert!(second.removed.is_empty());
+}
+
+/// Naming an output by choosing its port (lean Q96): an output with no
+/// name gets the lowest free number when the fixture's start is set on
+/// its port, and saving writes that name into the output's file with the
+/// mapping that names it, in one save; one undo takes both back.
+#[test]
+fn naming_an_output_on_a_port_choice_writes_its_name() {
+    let mut files = project_around(&common::format6_doc("choker"), "out", &[("D0", None)]);
+    let unnamed = serde_json::json!({"kind": "Output", "ports": {"0": {"endpoint": "D0"}}});
+    files
+        .files
+        .insert("output.json".into(), unnamed.to_string());
+    let o = open_files(&files);
+    let out = common::output();
+    assert_eq!(o.project.output(&out).unwrap().label, None);
+    let mut e = common::editor_of(o.project.clone());
+    e.edit(&[lab_mapping_model::GraphEdit::SetFixtureStart {
+        fixture: fixture(),
+        output: out.clone(),
+        port: "0".to_string(),
+        lamps: 0,
+    }])
+    .unwrap();
+    assert_eq!(e.project.output(&out).unwrap().label.as_deref(), Some("1"));
+    let saved = o.files.save(&e.project).unwrap();
+    assert_eq!(paths(&saved), ["fixture.map2d.json", "output.json"]);
+    for (path, text) in &saved.writes {
+        files.files.insert(path.clone(), text.clone());
+    }
+    let again = open_files(&files).project;
+    assert_eq!(again.output(&out).unwrap().label.as_deref(), Some("1"));
+    assert_eq!(
+        again.fixture(&fixture()).unwrap().mapping.start,
+        lpc_mapping::patching::Start::at("1", 0, lpc_mapping::patching::Amount::lamps(0))
+    );
+    assert!(again.effective_patch().problems.is_empty(), "it lands");
+    e.undo();
+    assert_eq!(e.project.output(&out).unwrap().label, None, "one undo step");
+}
+
 /// Resizing a fixture's box writes its canvas from the box's corner, and
 /// the box opens again that size.
 #[test]

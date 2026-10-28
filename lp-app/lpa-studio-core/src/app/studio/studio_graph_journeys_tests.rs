@@ -9,15 +9,20 @@
 //! over the Graph's mapping and the port tables Studio built from the
 //! outputs' files) and what Studio saved (the fixture's map2d format 6, as
 //! `lpc-mapping`'s writer writes the Graph's mapping, read back by the
-//! engine's reader). Each also shows one choice the Graph offers disabled,
-//! with its reason, and one verb it does not offer.
+//! engine's reader). Each also shows one verb it does not offer, and that
+//! choosing a port of an output with no name names it (lean Q96).
+//!
+//! The layout verbs (mapping rebuild M4 P07) are pressed the same way:
+//! `the_circular_display_from_nothing` maps A8's lead journey from a new
+//! board's project, and the saved file is checked against a golden.
 
 use std::path::{Path, PathBuf};
 
 use lab_mapping_model::{
-    GraphInput, GraphVerb, NodeId, NodeKind, Output, PartRef, PropEdit, Target, port_value,
+    Button, GraphInput, GraphVerb, Mods, NodeId, NodeKind, Output, PropEdit, Target, Vec2,
+    port_value,
 };
-use lpc_mapping::part::{Mapping, PartId, TreeId, render};
+use lpc_mapping::part::{Mapping, TreeId, render};
 use lpc_mapping::patching::{
     Amount, ChannelOp, Direction, Flow, OutputName, OutputOp, Override, Patching, PortKey, PortOp,
     Problem, patch_mapping,
@@ -25,7 +30,7 @@ use lpc_mapping::patching::{
 
 use crate::app::studio::offer_press_test_api::{OfferPressTestApi, actor_clicks};
 use crate::app::studio::studio_graph_e2e_tests::Graph;
-use crate::{ActionConsequence, OfferArgError, OfferArgs, OfferParamKind};
+use crate::{ActionConsequence, OfferArgs, OfferParamKind};
 
 /// The PLAYFUL choker: F's lower stroke set to start at lamp 60 takes F's
 /// bar, U and the last L along after it, and the letters before keep their
@@ -81,8 +86,8 @@ fn the_playful_choker() {
     assert_eq!(j.first_lamp("f-lower"), Some((0, 42)));
     assert_eq!(j.saved_text(), j.original, "the file's own bytes again");
 
-    // A port of an output with no name is offered, disabled.
-    j.a_port_of_an_unnamed_output_is_disabled("fixture:f-lower");
+    // A port of an output with no name is offered; choosing it names it.
+    j.choosing_a_port_of_an_unnamed_output_names_it("fixture:f-lower");
 }
 
 /// The circular display as soldered (`projects/test/circular-display-6`:
@@ -189,7 +194,7 @@ fn the_circular_display() {
     );
 
     j.not_offered("remove-override");
-    j.a_port_of_an_unnamed_output_is_disabled(&ring("r1"));
+    j.choosing_a_port_of_an_unnamed_output_names_it(&ring("r1"));
 }
 
 /// A dome slice (`catalog/zook-dome`: five copies of the sector's 300-lamp
@@ -258,7 +263,7 @@ fn a_dome_slice() {
     assert_eq!(saved.parts[0].flow, Flow::OnePerPort { from: PortKey(0) });
 
     j.not_offered("turn-on");
-    j.a_port_of_an_unnamed_output_is_disabled(&format!("fixture:{}", copy(1)));
+    j.choosing_a_port_of_an_unnamed_output_names_it(&format!("fixture:{}", copy(1)));
 }
 
 /// Sean's eaves (`lab/mapping/projects/eaves`: the front's 60 lamps on D10,
@@ -296,7 +301,7 @@ fn seans_eaves() {
     assert_eq!(saved.overrides.len(), 1);
 
     j.not_offered("remove-override");
-    j.a_port_of_an_unnamed_output_is_disabled("fixture:side");
+    j.choosing_a_port_of_an_unnamed_output_names_it("fixture:side");
 }
 
 /// An override whose node is gone — a copy counted away — is offered for
@@ -312,22 +317,26 @@ fn a_gone_overrides_remove_is_an_offer() {
             .with("subject", "fixture:sector@4")
             .with("direction", "reverse"),
     );
-    // Five copies down to four, as the inspector's Copies row does it (a
-    // count is a layout verb of P07's, not an offer yet): copy 4 is gone,
-    // its override kept.
-    let repeat = PartRef::new(&j.fixture, &PartId::new("repeat1").expect("an id"));
-    j.graph
-        .handle
-        .input(GraphInput::Select(vec![Target::Part(repeat)]));
-    j.graph.handle.input(GraphInput::MoveDraw(true));
-    j.graph.handle.input(GraphInput::EditProp {
-        id: "copies",
-        edit: PropEdit::SetCount(4),
-    });
-    // The page's inputs told the actor; it saves.
-    j.graph.batch();
-    j.graph.refresh();
+    // Five copies down to four by `set-count`: copy 4 is gone, its override
+    // kept, and so the press is Undoable (it takes copy 4 away).
+    let offer = actor_clicks(&mut j.graph.actor, &j.graph.tx).offered("project/graph/set-count");
+    assert_eq!(offer.action.meta().consequence, ActionConsequence::Routine);
+    let args = OfferArgs::new()
+        .with("subject", "fixture:repeat1")
+        .with("count", "4");
+    let action = offer.press(&args).expect("it binds");
+    assert_eq!(
+        action.meta().consequence,
+        ActionConsequence::Undoable,
+        "a count that drops an overridden copy takes something away"
+    );
+    j.press("set-count", args);
     assert!(j.saved().overrides.contains_key(&id("sector@4")), "kept");
+    let notice = j.graph.handle.editor().borrow().notice.clone();
+    assert_eq!(
+        notice.and_then(|n| n.why),
+        Some("1 override on repeat1's copies is kept; it shows as a problem".to_string())
+    );
     let offer =
         actor_clicks(&mut j.graph.actor, &j.graph.tx).offered("project/graph/remove-override");
     assert_eq!(offer.action.meta().consequence, ActionConsequence::Undoable);
@@ -353,7 +362,7 @@ fn the_patching_verbs_are_offered_with_their_levels() {
         OfferArgs::new().with("subject", "fixture:circle1/r3"),
     );
     let mut listed = Vec::new();
-    for verb in GraphVerb::WITH_VALUES {
+    for verb in GraphVerb::PATCHING {
         let path = format!("project/graph/{}", verb.name());
         if verb == GraphVerb::RemoveOverride {
             j.not_offered(verb.name());
@@ -394,6 +403,271 @@ fn the_patching_verbs_are_offered_with_their_levels() {
     println!("{}", listed.join("\n"));
 }
 
+/// The circular display from nothing (A8's lead journey, lean Q97), on a
+/// new board's project as Studio generates it (M3 P5): its strip deleted,
+/// a circle drawn with the circle tool, its outer ring set to 24 lamps,
+/// rings of 16, 12 and 8 and a centre lamp added, the fixture started on
+/// D0 of its output (which has no name, so choosing its port names it
+/// `1`), ring 3 reversed and moved to D1 from its first lamp. Every step
+/// but the drawing is an offer pressed by its path; the drawing is the
+/// pointer input the page reports. It ends where M1's journey does: ring 3
+/// runs 11 → 0 on port 1, ring 4 12–19, the centre 20, no problems; and
+/// what Studio saved is the golden next to this test.
+#[test]
+fn the_circular_display_from_nothing() {
+    let mut j = Journey::new_board_with_display_output();
+    let ring = |k: &str| format!("fixture:circle1/{k}");
+
+    // The starter's strip, deleted by its offer (Undoable).
+    let delete = actor_clicks(&mut j.graph.actor, &j.graph.tx).offered("project/graph/delete");
+    assert_eq!(
+        delete.action.meta().consequence,
+        ActionConsequence::Undoable
+    );
+    j.press("delete", OfferArgs::new().with("subject", "fixture:strip"));
+    assert!(j.mapping().parts.is_empty(), "nothing left to map");
+
+    // The box made room for a circle (the inspector's Width and Height:
+    // page input, as a person types them).
+    j.graph
+        .handle
+        .input(GraphInput::Select(vec![Target::Node(j.fixture.clone())]));
+    j.graph.handle.input(GraphInput::MoveDraw(true));
+    for id in ["width", "height"] {
+        j.graph.handle.input(GraphInput::EditProp {
+            id,
+            edit: PropEdit::SetNumber(100.0),
+        });
+    }
+    // The page lays the canvas out again and says where everything went.
+    let placement = {
+        let e = j.graph.handle.editor().borrow();
+        lab_layout::canvas_layout(&e.layout_input())
+    };
+    j.graph.handle.input(GraphInput::Placement(placement));
+    j.graph.batch();
+    j.graph.refresh();
+
+    // The circle tool (an offer), and a circle drawn from the box's middle
+    // out 42 (the pointer, as the page reports it).
+    j.press("circle-tool", OfferArgs::new());
+    j.draw_circle([50.0, 50.0], 42.0);
+    let circle = &j.mapping().parts[0];
+    assert_eq!(circle.id.as_str(), "circle1");
+
+    // Its ring 24 lamps; rings of 16, 12 and 8 inside it; a centre lamp.
+    j.press(
+        "set-count",
+        OfferArgs::new()
+            .with("subject", ring("r1"))
+            .with("count", "24"),
+    );
+    for (count, radius) in [("16", "32"), ("12", "22"), ("8", "12")] {
+        j.press(
+            "add-ring",
+            OfferArgs::new()
+                .with("subject", "fixture:circle1")
+                .with("count", count)
+                .with("radius", radius),
+        );
+    }
+    j.press(
+        "add-centre-lamp",
+        OfferArgs::new().with("subject", "fixture:circle1"),
+    );
+    j.not_offered("add-centre-lamp"); // it has one now
+
+    // Started on D0 of its output, which has no name: choosing its port
+    // names it `1`, in the same step, and the fixture's start (the
+    // starter's, naming `1` already) finds it.
+    assert!(
+        j.graph
+            .handle
+            .editor()
+            .borrow()
+            .project
+            .port_tables(&j.fixture)
+            .is_empty(),
+        "an output with no name has no ports to land on"
+    );
+    let d0 = j.offered_option(
+        "set-fixture-start",
+        "port",
+        "D0 of output (names it output 1)",
+    );
+    j.press(
+        "set-fixture-start",
+        OfferArgs::new()
+            .with("subject", "fixture:")
+            .with("port", d0)
+            .with("lamps", "0"),
+    );
+    let output: serde_json::Value =
+        serde_json::from_str(&j.graph.file_text("/output.json")).expect("json");
+    assert_eq!(output["name"], "1", "the output's file carries its name");
+    assert_eq!(j.span("circle1/r1"), Some((0, 0, 23)));
+    assert_eq!(j.span("circle1/r2"), Some((0, 24, 39)));
+    assert_eq!(j.span("circle1/r3"), Some((0, 40, 51)));
+    assert_eq!(j.span("circle1/r4"), Some((0, 52, 59)));
+    assert_eq!(j.span("circle1/r5"), Some((0, 60, 60)));
+    assert!(j.patching().problems.is_empty());
+
+    // Ring 3 reversed, then on D1 from its first lamp.
+    j.press(
+        "set-direction",
+        OfferArgs::new()
+            .with("subject", ring("r3"))
+            .with("direction", "reverse"),
+    );
+    let d1 = j.offered_option("set-port", "port", "D1 of output 1");
+    j.press(
+        "set-port",
+        OfferArgs::new()
+            .with("subject", ring("r3"))
+            .with("port", d1),
+    );
+
+    // Where M1's circular-display journey ends.
+    assert_eq!(j.span("circle1/r1"), Some((0, 0, 23)));
+    assert_eq!(j.span("circle1/r2"), Some((0, 24, 39)));
+    assert_eq!(j.span("circle1/r3"), Some((1, 11, 0)));
+    assert_eq!(j.span("circle1/r4"), Some((1, 12, 19)));
+    assert_eq!(j.span("circle1/r5"), Some((1, 20, 20)));
+    let p = j.patching();
+    assert!(p.problems.is_empty(), "{:?}", p.problems);
+    assert!(
+        p.segment(&id("circle1/r3"))
+            .expect("r3")
+            .direction
+            .is_reverse()
+    );
+    for k in ["r1", "r2", "r4", "r5"] {
+        let segment = p.segment(&id(&format!("circle1/{k}"))).expect("a ring");
+        assert!(!segment.direction.is_reverse(), "{k} runs forward");
+    }
+
+    // What Studio saved: the writer's bytes for the Graph's mapping, with
+    // the canvas its resized box gives (the Graph's in-memory canvas is the
+    // one it opened with: P05's finding), read back by the engine's
+    // reader; and the golden next to this test.
+    let text = j.saved_text();
+    let read = lpc_mapping::map2d6::read(&text).expect("the engine's reader reads it");
+    let mut held = j.mapping();
+    held.canvas = Some([0.0, 0.0, 100.0, 100.0]);
+    assert_eq!(read, held);
+    assert_eq!(text, lpc_mapping::map2d6::write(&held).expect("it writes"));
+    let golden = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/src/app/studio/circular_display_from_nothing.map2d.json"
+    );
+    if std::env::var_os("LPA_STUDIO_CORE_BLESS").is_some() {
+        std::fs::write(golden, &text).expect("the golden writes");
+    }
+    let expected = std::fs::read_to_string(golden).expect("the golden");
+    assert_eq!(text, expected, "the saved map2d is the golden");
+}
+
+/// Every layout verb is offered at `project/graph/<verb>` with typed
+/// parameters, a `subject` first, whenever something can take it (ruling
+/// DD37), at its level (lean Q78): delete, unrepeat and remove-ring take
+/// something away (Undoable), the rest Routine, nothing Lasting. A count
+/// is priced by its press (`a_gone_overrides_remove_is_an_offer`).
+#[test]
+fn the_layout_verbs_are_offered_with_their_levels() {
+    let mut j = Journey::repo("projects/test/circular-display-6", "/fixture.map2d.json");
+    // A repeat, so unrepeat and expand have something to take; then the
+    // circle has its centre, so add-centre-lamp has nothing.
+    j.press(
+        "repeat",
+        OfferArgs::new()
+            .with("subject", "fixture:circle1")
+            .with("count", "2"),
+    );
+    let mut listed = Vec::new();
+    for verb in GraphVerb::LAYOUT {
+        let path = format!("project/graph/{}", verb.name());
+        if verb == GraphVerb::AddCentreLamp {
+            j.not_offered(verb.name());
+            continue;
+        }
+        let offer = actor_clicks(&mut j.graph.actor, &j.graph.tx).offered(&path);
+        let params: Vec<String> = offer
+            .params()
+            .iter()
+            .map(|p| {
+                let kind = match &p.kind {
+                    OfferParamKind::Choice { options, .. } => {
+                        format!("choice of {}", options.len())
+                    }
+                    OfferParamKind::Text { .. } => "text".into(),
+                    OfferParamKind::Toggle { .. } => "toggle".into(),
+                };
+                format!("{} ({kind})", p.name)
+            })
+            .collect();
+        assert_eq!(offer.params()[0].name, "subject", "{path}");
+        let consequence = offer.action.meta().consequence.clone();
+        let undoable = matches!(
+            verb,
+            GraphVerb::Delete | GraphVerb::Unrepeat | GraphVerb::RemoveRing
+        );
+        assert_eq!(
+            consequence,
+            if undoable {
+                ActionConsequence::Undoable
+            } else {
+                ActionConsequence::Routine
+            },
+            "{path}"
+        );
+        listed.push(format!("{path} · {consequence:?} · {}", params.join(", ")));
+    }
+    println!("{}", listed.join("\n"));
+
+    // Rename refuses an id that breaks the rule, and says why.
+    let rings = ["r1", "r2", "r3", "r4", "r5"];
+    let ids = |part: &str| -> Vec<String> {
+        rings
+            .iter()
+            .flat_map(|k| [format!("{part}/{k}"), format!("{part}/{k}@1")])
+            .collect()
+    };
+    let before: Vec<_> = ids("circle1").iter().map(|x| j.span(x)).collect();
+    j.press(
+        "rename",
+        OfferArgs::new()
+            .with("subject", "fixture:circle1")
+            .with("id", "Display"),
+    );
+    let notice = j
+        .graph
+        .handle
+        .editor()
+        .borrow()
+        .notice
+        .clone()
+        .expect("a notice");
+    assert!(
+        notice
+            .why
+            .as_deref()
+            .is_some_and(|why| why.contains("can't be an id")),
+        "{notice:?}"
+    );
+    // Renamed, every override on it follows (D6): every lamp lands where
+    // it did, copies included.
+    j.press(
+        "rename",
+        OfferArgs::new()
+            .with("subject", "fixture:circle1")
+            .with("id", "display"),
+    );
+    let after: Vec<_> = ids("display").iter().map(|x| j.span(x)).collect();
+    assert_eq!(after, before);
+    assert_eq!(j.span("display/r3"), Some((1, 11, 0)), "ring 3 of copy 0");
+    assert!(j.saved().overrides.contains_key(&id("display/r3")));
+}
+
 // ---- the bench ------------------------------------------------------------
 
 /// One journey: the Graph on a running project, its fixture `fixture`, and
@@ -415,6 +689,81 @@ impl Journey {
     /// A project from the repo, by its directory.
     fn repo(dir: &str, map: &'static str) -> Self {
         Self::open(Graph::on_server(repo_server(dir)), map)
+    }
+
+    /// A new board's project as Studio generates it (the setup flow's,
+    /// `generate_board_project`), its one output given the display's five
+    /// ports of 64 lamps (D0 to D4) and no name: the starter's output has
+    /// one port and is named `1`, and no verb adds ports.
+    fn new_board_with_display_output() -> Self {
+        let mut project = crate::app::home::generate_board_project(
+            "seeed/xiao-esp32-c6",
+            Some("Circular display"),
+        )
+        .expect("the board project");
+        let output = project
+            .files
+            .iter_mut()
+            .find(|(path, _)| path == "output.json")
+            .expect("its output");
+        let mut def: serde_json::Value = serde_json::from_slice(&output.1).expect("json");
+        def.as_object_mut().expect("an object").remove("name");
+        def["ports"] = (0..5)
+            .map(|k| {
+                (
+                    k.to_string(),
+                    serde_json::json!({"endpoint": format!("ws281x:local:D{k}"), "count": 64}),
+                )
+            })
+            .collect::<serde_json::Map<_, _>>()
+            .into();
+        output.1 = serde_json::to_vec_pretty(&def).expect("it writes");
+        let server = crate::app::studio::studio_face_e2e_tests::files_e2e_server(
+            "circular-display-from-nothing",
+            &project.files,
+        );
+        Self::open(Graph::on_server(server), "/fixture.map2d.json")
+    }
+
+    /// Draw a circle with the circle tool: the pointer pressed at `centre`
+    /// (the fixture's own coordinates) and dragged out `radius`, as the
+    /// page reports it; then let Studio save.
+    fn draw_circle(&mut self, centre: [f64; 2], radius: f64) {
+        let (from, to) = {
+            let e = self.graph.handle.editor().borrow();
+            let frame = e.project.frame(&self.fixture);
+            let screen = |x: f64, y: f64| e.camera.to_screen(frame.to_world(Vec2::new(x, y)));
+            (
+                screen(centre[0], centre[1]),
+                screen(centre[0] + radius, centre[1]),
+            )
+        };
+        let mods = Mods::default();
+        let input = |graph: &mut Graph, i: GraphInput| {
+            graph.handle.input(i);
+        };
+        input(
+            &mut self.graph,
+            GraphInput::PointerDown {
+                at: from,
+                button: Button::Primary,
+                mods,
+            },
+        );
+        input(&mut self.graph, GraphInput::PointerMove { at: to, mods });
+        input(&mut self.graph, GraphInput::PointerUp { at: to, mods });
+        self.graph.batch();
+        self.graph.refresh();
+    }
+
+    /// The fixture's mapping as the Graph holds it.
+    fn mapping(&self) -> Mapping {
+        let e = self.graph.handle.editor().borrow();
+        e.project
+            .fixture(&self.fixture)
+            .expect("the fixture")
+            .mapping
+            .clone()
     }
 
     fn open(mut graph: Graph, map: &'static str) -> Self {
@@ -470,36 +819,92 @@ impl Journey {
     }
 
     /// An output with no name, added to the Graph's project (none of the
-    /// journeys' projects has one): `set-port` lists its port, disabled
-    /// until it has a name (Q96), and a press choosing it is refused with
-    /// that reason.
+    /// journeys' projects has one; Studio names every output it makes):
+    /// `set-port` lists its port, saying what choosing it names it, and a
+    /// press choosing it names it with the lowest free number in the same
+    /// step (lean Q96). Saved, the output's file carries the name and the
+    /// mapping names it. Saving again writes that output once: its file is
+    /// neither written under a second name nor deleted.
     #[track_caller]
-    fn a_port_of_an_unnamed_output_is_disabled(&mut self, subject: &str) {
-        let spare = {
+    fn choosing_a_port_of_an_unnamed_output_names_it(&mut self, subject: &str) {
+        let (spare, name) = {
             let handle = self.graph.handle.clone();
             let mut e = handle.editor().borrow_mut();
             let mut output = Output::new(&[("ws281x:local:D5", 10)]);
             output.label = None;
-            e.project
+            let spare = e
+                .project
                 .add_node(None, "spare", NodeKind::Output(output))
-                .expect("a spare output")
+                .expect("a spare output");
+            (spare, e.project.next_output_name())
         };
-        let offer =
-            actor_clicks(&mut self.graph.actor, &self.graph.tx).offered("project/graph/set-port");
         let value = port_value(&spare, "0");
-        let refused = offer.press(
-            &OfferArgs::new()
+        let label = self.option_label("set-port", "port", &value);
+        assert!(
+            label.ends_with(&format!("(names it output {name})")),
+            "{label}"
+        );
+        self.press(
+            "set-port",
+            OfferArgs::new()
                 .with("subject", subject)
-                .with("port", value.clone()),
+                .with("port", value),
         );
+        let named = {
+            let e = self.graph.handle.editor().borrow();
+            e.project.output(&spare).and_then(|o| o.label.clone())
+        };
+        assert_eq!(named.as_deref(), Some(name.as_str()), "named");
+        let file: serde_json::Value =
+            serde_json::from_str(&self.graph.file_text("/spare.json")).expect("json");
+        assert_eq!(file["name"], name.as_str(), "its file carries the name");
+        let node =
+            TreeId::parse(subject.rsplit_once(':').expect("<fixture>:<id>").1).expect("an id");
         assert_eq!(
-            refused.err(),
-            Some(OfferArgError::OptionDisabled {
-                name: "port".to_string(),
-                value,
-                reason: "this output has no name yet".to_string(),
-            })
+            self.saved()
+                .overrides
+                .get(&node)
+                .and_then(|o| o.output.clone()),
+            Some(OutputOp::Set(OutputName::new(&name))),
+            "the mapping names it"
         );
+
+        // Saved again (another edit): one output, its file kept.
+        self.press(
+            "set-starts-at",
+            OfferArgs::new().with("subject", subject).with("lamps", "1"),
+        );
+        assert!(
+            self.graph
+                .file_text("/spare.json")
+                .contains(&format!("\"{name}\"")),
+            "its file is still there"
+        );
+        let module = self.graph.file_text("/module.json");
+        assert_eq!(module.matches("spare").count(), 2, "{module}"); // key and ref
+        assert!(!module.contains("spare_2"), "{module}");
+    }
+
+    /// The label of `verb`'s `param` option whose value is `value`.
+    #[track_caller]
+    fn option_label(&mut self, verb: &str, param: &str, value: &str) -> String {
+        let offer = actor_clicks(&mut self.graph.actor, &self.graph.tx)
+            .offered(format!("project/graph/{verb}"));
+        let OfferParamKind::Choice { options, .. } = &offer
+            .params()
+            .iter()
+            .find(|p| p.name == param)
+            .unwrap_or_else(|| panic!("{verb} takes a {param}"))
+            .kind
+        else {
+            panic!("{param} is a choice");
+        };
+        options
+            .iter()
+            .find(|o| o.value == value)
+            .unwrap_or_else(|| panic!("no {param} {value}"))
+            .label
+            .clone()
     }
 
     /// Where `node`'s lamp 0 lands, as (port, RGB lamp on that port).

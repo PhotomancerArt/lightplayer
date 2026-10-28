@@ -24,10 +24,23 @@
 //! controller makes it with `Editor::edit`, the function the inspector's
 //! rows and the keys run too.
 //!
+//! **Layout verbs that take values** (mapping rebuild M4 P07), the same
+//! way, each with a `subject` (`layout_verb_choices.rs`): `rename` (`id`,
+//! text), `repeat` and `set-count` (`count`, text), `unrepeat`, `expand`,
+//! `add-ring` (`count` and `radius`, text), `add-centre-lamp`,
+//! `remove-ring`, `set-split` (`split`, a choice), `set-drawn-from`
+//! (`from`, a choice) and `delete`, whose ⌫ key deletes the selection and
+//! whose offer takes a node, a part or a ring. A verb is offered whenever
+//! something can take it, never because of the selection (ruling DD37),
+//! which only preselects the subject.
+//!
 //! **Levels** (lean Q78). Delete, Everything off, Turn off, Back to the
-//! flow and Remove override are Undoable: each takes something away (a
-//! part off the canvas, a segment off the line, a value set here, an
-//! override), and the Graph's own undo puts it back. Unpatch (U) is
+//! flow, Remove override, Unrepeat and Remove ring are Undoable: each
+//! takes something away (a part off the canvas, a segment off the line, a
+//! value set here, an override, copies, a ring), and the Graph's own undo
+//! puts it back. A count is Undoable when it drops copies an override is
+//! on (the press says so: its action is priced by what it binds), Routine
+//! otherwise. Unpatch (U) is
 //! Routine: it puts the selected segments back to following their flow,
 //! which turns nothing off. Everything else is Routine: selecting, the
 //! tools, a count, a direction, an offset, a port, a flow, a start, Turn
@@ -36,7 +49,7 @@
 //! the Graph is Lasting. Moving the view (pan, zoom, fit, Canvas | Stack)
 //! is view state, never an offer.
 
-use lab_mapping_model::{Editor, GraphEdit, GraphVerb, VerbChoice};
+use lab_mapping_model::{Editor, GraphEdit, GraphVerb, VerbChoice, node_value};
 
 use crate::app::graph::GraphOp;
 use crate::{
@@ -54,6 +67,10 @@ pub fn graph_verb_path(verb: GraphVerb) -> OfferPath {
 /// Publish every verb the editor has on offer.
 pub fn publish_graph_offers(offers: &mut UiOfferTree, editor: &Editor) {
     for verb in editor.verbs() {
+        // Delete's key acts on the selection; its offer takes a subject.
+        if verb.takes_values() {
+            continue;
+        }
         let action = level(verb, GraphOp::action(verb));
         offers.publish(UiOffer::new(graph_verb_path(verb), icon(verb), action));
     }
@@ -71,6 +88,7 @@ fn value_offer(editor: &Editor, verb: GraphVerb, subjects: Vec<VerbChoice>) -> U
     let preselect = editor.selected_subject(verb, &subjects);
     let subject = OfferParam::choice("subject", subject_label(verb), options(subjects), preselect);
     let lamps = || OfferParam::text("lamps", "lamps", "a whole number of lamps");
+    let count = || OfferParam::text("count", "how many", "a whole number, at least 1");
     let mut params = vec![subject];
     match verb {
         GraphVerb::SetOutput => params.push(OfferParam::choice(
@@ -122,11 +140,53 @@ fn value_offer(editor: &Editor, verb: GraphVerb, subjects: Vec<VerbChoice>) -> U
             ));
             params.push(lamps().optional());
         }
+        GraphVerb::Rename => params.push(OfferParam::text(
+            "id",
+            "new id",
+            "a to z first, then a to z, 0 to 9, _ or -; at most 24",
+        )),
+        GraphVerb::Repeat | GraphVerb::SetCount => params.push(count()),
+        GraphVerb::AddRing => {
+            params.push(count());
+            params.push(OfferParam::text(
+                "radius",
+                "radius",
+                "how far from the centre, in the layout's units",
+            ));
+        }
+        GraphVerb::SetSplit => params.push(OfferParam::choice(
+            "split",
+            "split",
+            options(editor.split_choices()),
+            None,
+        )),
+        GraphVerb::SetDrawnFrom => params.push(OfferParam::choice(
+            "from",
+            "drawn from",
+            options(editor.drawn_from_choices()),
+            None,
+        )),
         _ => {}
     }
+    // A count that drops copies an override is on takes something away.
+    let keeps = if verb == GraphVerb::SetCount {
+        editor.counts_that_keep()
+    } else {
+        Vec::new()
+    };
     let binder = OfferBinder::new(move |args| {
         GraphEdit::bind(verb, &|name| args.get(name).map(str::to_string))
-            .map(|edit| level(verb, GraphOp::edit_action(edit)))
+            .map(|edit| {
+                let drops = match &edit {
+                    GraphEdit::SetCount { subject, count } => {
+                        let value = node_value(subject);
+                        keeps.iter().any(|(v, keep)| *v == value && count < keep)
+                    }
+                    _ => false,
+                };
+                let action = level(verb, GraphOp::edit_action(edit));
+                if drops { action.undoable() } else { action }
+            })
             .map_err(|reason| OfferArgError::Invalid {
                 name: verb.name().to_string(),
                 reason,
@@ -151,6 +211,14 @@ fn subject_label(verb: GraphVerb) -> &'static str {
         | GraphVerb::SetPort
         | GraphVerb::SetStartsAt
         | GraphVerb::SetOffset => "segment",
+        GraphVerb::Rename | GraphVerb::Repeat | GraphVerb::SetSplit | GraphVerb::SetDrawnFrom => {
+            "part"
+        }
+        GraphVerb::Unrepeat | GraphVerb::Expand => "repeat",
+        GraphVerb::SetCount => "repeat, path or ring",
+        GraphVerb::AddRing | GraphVerb::AddCentreLamp => "circle",
+        GraphVerb::RemoveRing => "ring",
+        GraphVerb::Delete => "node, part or ring",
         _ => "node",
     }
 }
@@ -175,14 +243,19 @@ fn level(verb: GraphVerb, action: UiAction) -> UiAction {
         | GraphVerb::UnpatchAll
         | GraphVerb::TurnOff
         | GraphVerb::BackToTheFlow
-        | GraphVerb::RemoveOverride => action.undoable(),
+        | GraphVerb::RemoveOverride
+        | GraphVerb::Unrepeat
+        | GraphVerb::RemoveRing => action.undoable(),
         _ => action,
     }
 }
 
 fn icon(verb: GraphVerb) -> &'static str {
     match verb {
-        GraphVerb::Delete | GraphVerb::UnpatchAll | GraphVerb::RemoveOverride => "trash",
+        GraphVerb::Delete
+        | GraphVerb::UnpatchAll
+        | GraphVerb::RemoveOverride
+        | GraphVerb::RemoveRing => "trash",
         GraphVerb::Unpatch | GraphVerb::Undo | GraphVerb::Redo | GraphVerb::BackToTheFlow => {
             "revert"
         }
