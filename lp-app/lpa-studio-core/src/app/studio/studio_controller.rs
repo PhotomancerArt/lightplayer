@@ -7095,6 +7095,21 @@ impl StudioController {
             }));
         }
         let (staged, migration_notice) = self.prepare_push(&op.source).await;
+        // A board whose engine reads an older project format would refuse
+        // the project only after the push stopped and cleared it: refused
+        // here, before the board is touched (Q111). The card's Update offer
+        // stands beside the words.
+        let staged = staged.and_then(|payload| {
+            let hello = self
+                .devices
+                .roster()
+                .device(op.device)
+                .and_then(|device| device.evidence.classification.hello());
+            match crate::app::devices::push_format_gate::push_refusal(&payload.files, hello) {
+                Some(refusal) => Err(refusal),
+                None => Ok(payload),
+            }
+        });
         match &staged {
             Ok(payload) => {
                 self.sending.insert(op.device, payload.label.clone());

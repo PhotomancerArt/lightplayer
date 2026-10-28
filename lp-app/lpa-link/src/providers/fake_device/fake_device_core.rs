@@ -769,7 +769,8 @@ impl FakeDeviceCore {
                 self.boots = self.boots.wrapping_add(1);
                 self.link = Some(
                     FakeBoardLink::new(lp.link_config.clone(), boot_nonce(self.boots))
-                        .with_hello_json(lp.hello_json_override.clone()),
+                        .with_hello_json(lp.hello_json_override.clone())
+                        .with_project_format(lp.project_format_override),
                 );
             }
             Err(error) => {

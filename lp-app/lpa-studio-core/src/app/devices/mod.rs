@@ -135,6 +135,7 @@ pub mod project_stage_command;
 pub mod project_stage_controller;
 pub mod project_stage_status;
 pub mod provisional_board_numbers;
+pub mod push_format_gate;
 pub mod relay_connect_failure;
 pub mod relay_connect_offer;
 pub mod relay_connect_op;

@@ -47,6 +47,8 @@ pub(crate) struct FakeBoardLink {
     tally: LinkCounterTally,
     /// Said verbatim in place of every hello (a board on another wire).
     hello_json: Option<String>,
+    /// Said as the hello's `build.projectFormat` in place of the server's.
+    project_format: Option<u32>,
 }
 
 impl FakeBoardLink {
@@ -61,12 +63,20 @@ impl FakeBoardLink {
             hello_sent: false,
             tally: LinkCounterTally::new(),
             hello_json: None,
+            project_format: None,
         }
     }
 
     /// Say `json` verbatim in place of every hello (`None`: the server's).
     pub(crate) fn with_hello_json(mut self, json: Option<String>) -> Self {
         self.hello_json = json;
+        self
+    }
+
+    /// Say `format` as the engine's project format in every hello (`None`:
+    /// the server's).
+    pub(crate) fn with_project_format(mut self, format: Option<u32>) -> Self {
+        self.project_format = format;
         self
     }
 
@@ -112,6 +122,17 @@ impl FakeBoardLink {
 
     /// Queue one reply on the proto channel, packed when the host opted in.
     pub(crate) fn send(&mut self, message: &WireServerMessage) -> FakeSendOutcome {
+        let rewritten;
+        let message = match (&message.msg, self.project_format) {
+            (lpc_wire::ServerMsgBody::Hello(hello), Some(format)) => {
+                let mut hello = hello.clone();
+                hello.build.project_format = format;
+                rewritten =
+                    WireServerMessage::new(message.id, lpc_wire::ServerMsgBody::Hello(hello));
+                &rewritten
+            }
+            _ => message,
+        };
         let mark = self.table.mark();
         let mut payload = Vec::new();
         let table: Option<&mut dyn LearnStore> = if self.packed {
