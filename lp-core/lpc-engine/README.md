@@ -126,9 +126,14 @@ publishes `PatchedRun`s that each name their output. Between patches it
 holds only the mapping, its runs and its status. A live edit that changes
 only the patching (`Mapping::same_layout`) re-patches and renders nothing.
 Nothing flows by default: an output lays only the runs that name it, and a
-lamp no run places is on no wire. A segment part-way into a lamp, of colors
-other than RGB or of an order other than the fixture's is refused by name in
-its status; the rest light where the patcher put them.
+lamp no run places is on no wire. A fixture with no run on any output is
+never rendered, so its shader is not compiled until something places it. A
+segment part-way into a lamp, of colors other than RGB or of an order other
+than the fixture's is refused by name in its status; the rest light where
+the patcher put them. A project older than `PROJECT_FORMAT_VERSION` (12) is
+refused as a whole ("unsupported project format 11 (expected 12)") and the
+server keeps answering file requests, so a host can upgrade it in place
+(the update's project stage, `lpa-update`).
 
 **Reads a node makes every frame** keep their query id in a
 `frame_plan::PlannedRead` (tagged with the epoch it was interned in) and

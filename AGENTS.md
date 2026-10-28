@@ -492,7 +492,11 @@ the app through the same view model and presses the same actions. See
   corpus goldens, and migrate `catalog/` + `projects/` in the same change.
   The v5→v6 step (`lp-app/lpa-upgrade/src/steps/v5_to_v6.rs`) is the
   worked example — value-preserving transcode, keyed off shape, never off
-  field names.
+  field names. A step may add and remove files (`UpgradeReport`'s
+  `added_files`/`removed_files`; every caller applies them), and a step
+  whose meaning lives in arithmetic (where a lamp lands) is proven against
+  goldens the live engine recorded *before* the bump, never re-blessed —
+  v11→v12's landing goldens (`lp-app/lpa-upgrade/README.md`).
 - **A project-format bump is also an update-time upgrade.** The next
   firmware update (or flash) upgrades each board's stored projects as its
   last stage, through the same `lpa-upgrade` step, rewritten by the host
@@ -542,6 +546,9 @@ are four ADRs, which cross-link each other:
 - **An update ends by upgrading the board's stored projects** to the format
   its new engine reads, with no click
   (`docs/adr/2026-10-28-firmware-updates-upgrade-the-boards-projects.md`).
+  So a project-format bump ships with nothing extra for fielded boards: the
+  host drives it (one atomic write per project), and the engine must refuse
+  an older project cleanly — by name, no reset, still serving files.
 - **Updates follow whatever link reaches the board**, the relay included. Who
   may flash is the link's tier (a key's, or "Anyone" on an open board, never
   through the relay): if you can edit, you can flash. A missing engine is

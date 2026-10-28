@@ -64,7 +64,7 @@ cargo run -p lab-mapping-radiance-gen  # regenerates projects/radiance-dome
   (`lpc-engine/tests/upgrade_landing.rs`) superseded it.
 - **`radiance-gen/`** (`lab-mapping-radiance-gen`): writes
   `projects/radiance-dome/`, the radiance dome in the product's formats,
-  from lp2014's geodesic geometry. **Its lamp counts and patch are
+  from lp2014's geodesic geometry. **Its lamp counts and patching are
   placeholders** (80 lamps a panel, 10 outputs × 32 ports, one panel a
   port); the project's README says what is unknown.
 

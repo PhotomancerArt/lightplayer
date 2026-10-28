@@ -1,6 +1,8 @@
 # Penta strands v3 — one output node, five wires
 
-The multi-channel bring-up project: **one** fixture authoring five paths and
+The multi-channel bring-up project: **one** fixture authoring five rows of
+lamps (five `points` parts in `fixture.map2d.json`; until project format 12
+they were listed inline in `fixture.json`) and
 **one** output node whose `channels` map splits that fixture's single control
 buffer across five wires. `projects/test/quad-strips-v3` is the shape this
 replaces — four nodes with one channel each — and it stays valid; this project

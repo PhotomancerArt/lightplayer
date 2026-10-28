@@ -226,7 +226,15 @@ ProjectStage::new(engine_format, tier)
 
 `UpdateDriver` and its decision table are untouched: the stage runs after
 the driver's `Done(UpToDate)`, and on its own when a board is found with
-older projects (P11 wires both). It **resumes from the board, never from
+older projects (P11 wires both).
+
+**The dark corner** (DD27): a link that drops after the startup project's
+batch commits and before its load leaves the startup project current and not
+running, so a rerun finds nothing older. The board's hello says when it
+refused its startup project for its format (`startupRefused`, wire 46; held
+until anything is loaded, unloaded or stopped), and only then the stage
+loads it (`ProjectStage::startup_refused`), so a board someone stopped on
+purpose stays stopped. It **resumes from the board, never from
 its memory** (DM9): every run lists and reads afresh, and a project at the
 engine's format is left alone. **One atomic batch per project**, the
 startup project first and then loaded, so after a cut each project is

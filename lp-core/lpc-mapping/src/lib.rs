@@ -1,17 +1,18 @@
-//! 2D LED fixture mapping: authored document schema and the single
-//! deterministic resolver shared by the engine, the device, and Studio.
+//! 2D LED fixture mapping, shared by the engine, the device, and Studio:
+//! mapping = layout + patching.
 //!
-//! The mapping *document* ([`Map2dDoc`]) is an opaque, format-versioned JSON
-//! asset authored per fixture (e.g. `fixture.map2d.json`). It contains
-//! parametric objects — grids, multi-ring circles, sampled paths, and
-//! rotational repeats of any of those — whose vec order **is** the wiring
-//! order. [`resolve`] turns a document into the
-//! ordered lamp list (wiring-order indices plus positions in doc space);
-//! [`fit_points`] maps doc-space positions
-//! into a fixture render target without stretching.
+//! A fixture's mapping document (`fixture.map2d.json`) is map2d format 6
+//! ([`map2d6`]): its parts render a tree whose leaves are segments
+//! ([`part`]), and the patcher gives every segment its address on an
+//! output's ports ([`patching`]), saved in the same file. Project format 12
+//! holds format 6 only.
 //!
-//! Where a fixture's lamps land on an output's wire is map2d format 6's
-//! patching ([`patching`], saved in the same file as the parts, [`map2d6`]).
+//! The older document ([`Map2dDoc`], formats 1–5: parametric objects whose
+//! vec order is the wiring order) stays for its resolver: [`resolve`] and
+//! [`resolve_into`] are the new model's geometry (each shape's lamps), and
+//! [`fit_points`] maps doc-space positions into a fixture render target
+//! without stretching. Studio's hidden Map tab still reads the document
+//! until it is deleted.
 //!
 //! A second document is project-level: the editor's `editor.json`
 //! ([`EditorMetaDoc`]) — per-node Arrange-canvas placement, for human eyes

@@ -254,7 +254,7 @@ RGB, and path commands not built (the reader's refusal).
 - M2: the engine's side, an amendment to this ADR (the contract between
   fixture and output, port tables, refusals): written, below.
 - M3: the upgrade, an amendment (the freeze into starts and overrides, the
-  refusals, `PathPoints` fixtures into `points` parts).
+  refusals, `PathPoints` fixtures into `points` parts): written, below.
 - M4: Studio's side, an amendment; "Add centre lamp" adds a ring of
   radius 0.
 
@@ -312,3 +312,102 @@ project onto it:
   `main` with M2a, are in PR #1319. Both crossed the plan's bars (lean Q44
   for heap, Q45's 32 KB for the engine), which went to the director with
   the numbers rather than being tuned toward them.
+
+## Amendment (2026-10-28): the upgrade (project format 12)
+
+Mapping rebuild M3 (the integration PR #1319; planning
+`lp2025/2026-10-27-0114-mapping-rebuild`, `notes.md` "M3 planning" and "M3
+amended for G1", Q52–Q70, Q99–Q114). Project format 12 moves every project
+onto this model through one `lpa-upgrade` step, `v11_to_v12`, and the engine
+keeps only this model's patching.
+
+- **The freeze (Q7, simple and correct, not minimal).** Per fixture, the
+  step predicts the patcher's cursor over today's landing (flat wire, placed
+  rows first, auto-flow per output in attach order) and writes the
+  fixture's `start` where its first lamp lands, then an override only on a
+  segment that does not simply follow on (the wrap to the next port counts
+  as following on): port and channel Set (channel in lamps), output Set
+  only when it changes, `direction: "reverse"` for a reversed row,
+  `offset` for a rotation. Every Set is followed by a segment that fits
+  where it was set, so the patcher's "the first segment after a Set does
+  not wrap" never changes a landing. The repo froze to 138 fixtures, 622
+  segments and 327 overrides (small-dome 50, radiance-dome 274, peach-1d
+  and -2d one each, eaves-wired one); every other fixture is a start alone.
+- **Dark lamps (Q8, DD18).** A segment that lands nowhere today gets `off`;
+  a fixture none of whose segments lands gets no start and no `off` (an
+  `off` everywhere would keep it dark after someone gives it a start). No
+  repo project has either.
+- **Ids (Q58).** An object with no id takes its name slugged (`F-lower` →
+  `f-lower`) when the slug is valid and no other object of the fixture
+  slugs or is id'd to the same text; otherwise kind and number (`path3`).
+  A repeat's held part takes the object's id (and name), the repeat
+  becomes `repeat<n>`, so today's row `/rim-a/2` is `rim-a@2`. `next`
+  exceeds every minted number. `stride` (11 objects) is dropped with a
+  report line. A repeat holds at most 64 copies, as the Map tab already
+  clamped.
+- **Outputs named (Q59).** Every output a start or override names gets a
+  name if it has none: the lowest free number (`"1"`, `"2"`, …),
+  project-unique, in the output's own file. 133 outputs were named;
+  small-dome's `"Box 2"` was kept. Outputs nothing names stay unnamed.
+- **Shapes.** A ring set becomes one `circle` with `split: "one"` and
+  today's radii (G1 6), every lamp bit-identical, a one-lamp derived ring
+  included (§4). A path's points become `d`. A `PathPoints` fixture (lamps
+  listed inline in the fixture def) gets a new `<def stem>.map2d.json` of
+  `points` parts in `first_channel` order (Q52), on a canvas fitted so every
+  lamp reaches the sampler where it does today; `projects/test/five-wire`
+  needed an offset canvas for that (DD19). The step writes no lamp fields
+  (DD12): `FixtureDef.color_order` stays where it is.
+- **Patch files go (G1, one file).** The fixture's `patch` slot and the
+  `*.patch.json` it named are removed (peach-1d and -2d, small-dome,
+  eaves-wired, radiance-dome). A patch file today's engine could not read
+  froze to what the engine did with it, auto-flow, with a report line
+  (DD8); a missing one is refused, as the engine refused it.
+- **Refusals by name (Q9).** A segment that does not land as one window on
+  one port — a patch row or a port boundary inside it — refuses the whole
+  project, naming the object, where it is cut and the split a person can
+  make today. No repo project is refused. `projects/test/quad-wire-oracle`
+  (one 8 × 8 grid over four 16-lamp ports) was hand-migrated beforehand into
+  four 8 × 2 grids whose positions are the grid's bit for bit (Q70); its old
+  form is kept as a refusal fixture (`lpa-upgrade/tests/refused/`).
+- **The proof is independent of the step (Q54).** Before the bump the live
+  format-11 engine recorded where every lamp of every repo and corpus
+  project landed (output node, port key, channel): the landing goldens,
+  `lp-app/lpa-upgrade/tests/landing/`, never re-blessed. After it,
+  `lpc-engine`'s `upgrade_landing` loads every migrated project through
+  this model and lands every lamp exactly there: 117 projects, 195
+  fixtures, 66,654 lamps, 0 differences. The step's frozen arithmetic is
+  checked against the same goldens separately (`frozen_landing`).
+- **One patching path (M3 P8).** The engine reads only format 6
+  (`map2d6::read`): today's map2d reader, the patch document
+  (`lpc-mapping`'s `patch.rs`), auto-flow, the default output, the lane
+  topology and `MappingConfig::PathPoints` are deleted. `PatchedRun` stays,
+  its output name now required (C26). A fixture with no runs on any output
+  is never rendered, so its shader is not compiled until it is placed.
+- **What the format-12 engine refuses (Q67).** A project at format 11 is
+  refused as a project ("unsupported project format 11 (expected 12)"); a
+  map2d at format 5 or older inside a format-12 project fails its fixture's
+  load in the reader's words on a host ("map2d format N is the older layout
+  document; this reader reads format 6"), and in one sentence on a device
+  (`map2d6::DEVICE_REFUSAL`, DD25). The device keeps every format-6 rule
+  check and drops only the words, so a board accepts exactly what a host
+  accepts (DD41). A fixture def naming a patch document or `PathPoints`
+  does not parse. The upgrade itself is the host's: Studio and lp-cli on
+  open, push and import, and an over-the-air update as its last stage
+  (`2026-10-28-firmware-updates-upgrade-the-boards-projects.md`).
+- **Port capacity stays in lamps (Q57).** An output port's `count` is
+  lamps and the patcher's capacity `count × 3` channels; the lamp-model
+  plan moves it when non-RGB lamps arrive, with its own bump.
+- **What stays until M4 (Q56, C17).** `Map2dDoc`, its resolver and
+  `map2d_fit` (the resolver is this model's geometry: each shape's lamps
+  come from `resolve_into`; the Map tab, hidden, still reads the document),
+  `lpc-mapping`'s corpus, `editor_meta`, `object_instance_spans`. Studio
+  hides the Map tab and the fixture face's mapping toggle, has deleted the
+  Patch tab (keeping what the Nodes view, the patch bay and the Graph's
+  highlight use, C28), and its Graph opens a format-6 fixture to "This
+  fixture uses the new mapping format. Its editor is coming soon." and saves
+  nothing. A fixture added in Studio starts on the first named output its
+  bus channel reaches, and a new output is named on creation (DD28).
+- **Cost on the C6** (split image, against the pre-rebuild base
+  `a35e3cd1f`, with the old path deleted and P13's trims): engine
+  +3,474 B, core +336 to +400 B, gated headroom 236,476 → 233,002 B; the
+  attribution by concept is in M3 P13's result and the G2 ship report.

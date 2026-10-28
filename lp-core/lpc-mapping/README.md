@@ -12,10 +12,13 @@ ADR `docs/adr/2026-10-27-mapping-model-parts-segments-patcher.md`):
   (project format 12) the engine runs it for every fixture, and its patching
   is the engine's one patching path. Studio's Graph moves onto it in M4.
 - **The older map2d document** (formats 1–5, `Map2dDoc`): its resolver is
-  also the new model's geometry, and Studio's Map tab reads it until M4. The
-  engine no longer reads it, and the patch document beside it is gone
-  (upgraded into format 6 by `lpa-upgrade`, which keeps its own frozen
-  readers).
+  also the new model's geometry (each shape's lamps come from
+  `resolve_into` on a one-object document), and Studio's Map tab, hidden
+  since M3, still reads it until M4 deletes the tab. Nothing that runs a
+  project reads it: the engine reads format 6 only. The patch document
+  (`patch.rs`, `PatchDoc`) and `MapObjectPath` were deleted in M3; projects
+  were upgraded into format 6 by `lpa-upgrade`, which keeps its own frozen
+  copy of the old readers.
 
 ## The mapping model
 
@@ -106,23 +109,33 @@ circular display as soldered:
   and `offset` (lamps). One naming no node is kept.
 - Counters: `next` (per kind word), `next_ring` (per circle). Format 6
   saves no lamp facts; the lamp-model plan adds them with its own bump.
-- The format is peeked first: a newer document is refused as newer, 1–5
-  go to today's reader. Writing gives one canonical form, so a document
-  read and written back is the same bytes.
+- `read` takes format 6 only. A newer document is refused as newer, and
+  1–5 as "the older layout document" (the upgrade is the host's,
+  `lpa-upgrade`). Without `std` (the device), every error's text is one
+  sentence, `map2d6::DEVICE_REFUSAL`: the device runs every check a host
+  runs and drops only the words, so a board accepts exactly what a host
+  accepts. Writing gives one canonical form, so a document read and written
+  back is the same bytes.
 
 ## Modules
 
 | Module | What |
 |---|---|
-| `part/` | The parts, the rendered tree, ids, segments, `render`, `Tree::take_positions` (the engine's carrier takes the positions), `Mapping::same_layout` (a patching-only edit renders nothing) |
+| `part/` | The parts, the rendered tree, ids, segments, `render`, `render_layout` (the same tree with no lamp placed: what a patch walks), `Tree::take_positions` (the engine's carrier takes the positions), `Mapping::same_layout` (a patching-only edit renders nothing) |
 | `patching/` | Starts, flows, overrides, the cursor, `patch_mapping`, `patch_mapping_placed` (no walk record: the engine's), spans, problems |
-| `map2d6/` | Format 6: its document structs, path data, `read`, `write` |
-| `map2d_doc`, `map2d_resolve`, `map2d_fit`, `map2d_object_id` | Today's document and resolver; the resolver is also the new model's geometry |
+| `map2d6/` | Format 6: its document structs, a small JSON reader (`json_text`, no serde on the read path), path data, `read`, `write`, `DEVICE_REFUSAL` |
+| `edit/` (feature `edit`) | Edits that rewrite references (insert, move, rename, wrap in a repeat, expand, rings, starts, flows, overrides): Studio's Graph; never compiled into firmware |
+| `sorted_set` | Sorted-`Vec` id sets the reader, render and patcher check ids with (smaller on the C6 than a B-tree) |
+| `map2d_doc`, `map2d_resolve`, `map2d_fit`, `map2d_object_id`, `map2d_error` | The older document (formats 1–5) and its resolver; the resolver is also the new model's geometry |
 | `editor_meta` | Studio's `editor.json` |
-| `import/` | SVG import into today's document |
-| `corpus` | Shared test scenes |
+| `import/` | SVG import into the older document (the Map tab's) |
+| `corpus` | Shared test scenes in the older document (the Map tab's, until M4) |
 
-## Today's map2d document (formats 1–5, until M3)
+## The older map2d document (formats 1–5)
+
+What follows describes `Map2dDoc`, which no project at format 12 holds: the
+upgrade rewrote every one into format 6. It stays for the resolver (the new
+model's geometry) and the hidden Map tab until M4.
 
 A mapping document (`fixture.map2d.json`) is a format-versioned JSON asset,
 opaque to the slot system, holding parametric objects whose order **is** the

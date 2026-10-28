@@ -14,4 +14,5 @@ What uses it:
   exactly as `segments-64-5` does.
 - The engine heap ratchet (`just heap-budget-check`).
 
-Studio's Map, Patch and Graph tabs don't read format 6 yet (M4).
+Studio's Graph edits format 6 from M4 (the Map tab is hidden and the Patch
+tab deleted since project format 12).
