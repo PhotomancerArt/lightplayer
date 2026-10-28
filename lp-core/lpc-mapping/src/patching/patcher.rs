@@ -57,7 +57,6 @@
 //! one up to the port's capacity (a port that takes the rest has no
 //! trailing gap).
 
-use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 
 use crate::part::{Mapping, Part, PartId, Tree};
@@ -98,10 +97,13 @@ pub fn patch_mapping_placed(mapping: &Mapping, tree: &Tree, outputs: &[OutputPor
 }
 
 fn patch(mapping: &Mapping, tree: &Tree, outputs: &[OutputPorts], record_walk: bool) -> Patching {
-    let mut parts = BTreeMap::new();
-    for part in mapping.all_parts() {
-        parts.insert(&part.id, part);
-    }
+    // By id, sorted for a binary search; a later part of one id wins, as
+    // a map's insert would have it (a rendered tree has none: the render
+    // refuses two parts of one id).
+    let mut parts = mapping.all_parts();
+    parts.reverse();
+    parts.sort_by(|a, b| a.id.cmp(&b.id));
+    parts.dedup_by(|later, kept| later.id == kept.id);
     let outputs: Vec<(&OutputName, Vec<Port>)> = outputs
         .iter()
         .map(|o| {
@@ -157,7 +159,8 @@ fn patch(mapping: &Mapping, tree: &Tree, outputs: &[OutputPorts], record_walk: b
 struct Patcher<'a> {
     mapping: &'a Mapping,
     tree: &'a Tree,
-    parts: BTreeMap<&'a PartId, &'a Part>,
+    /// Every part, sorted by id (one per id).
+    parts: Vec<&'a Part>,
     /// Each output's ports, in key order.
     outputs: Vec<(&'a OutputName, Vec<Port>)>,
     cursor: Cursor,
@@ -193,7 +196,11 @@ impl Patcher<'_> {
         // A part's own node (in any copy) carries its part's start and
         // flow; a generated segment has none.
         let part = if node.id.is_part_node() {
-            self.parts.get(&node.id.part).copied()
+            let id: &PartId = &node.id.part;
+            self.parts
+                .binary_search_by(|p| p.id.cmp(id))
+                .ok()
+                .map(|at| self.parts[at])
         } else {
             None
         };
