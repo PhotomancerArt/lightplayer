@@ -33,14 +33,23 @@ use lpc_hardware::{HardwareSystem, HwAddress, HwCapability};
 
 /// How long the pin must sit at its NON-wake level before sleeping. EXT1 is
 /// level-triggered: sleeping while the wake level is still present wakes
-/// again at once — a held button, or a switch still bouncing.
+/// again at once — a held button, or a switch still bouncing. Once the pin
+/// has been at rest, its wake level held this long is a wake instead.
 const SETTLE_MS: u64 = 100;
 const POLL_MS: u32 = 5;
 const LOG_EVERY_MS: u64 = 1_000;
 
-/// The sleep the link task runs once drained: the wake pin and whether it
-/// wakes on high.
-static PENDING_SLEEP: Mutex<Cell<Option<(u8, bool)>>> = Mutex::new(Cell::new(None));
+/// The sleep the link task runs once drained.
+static PENDING_SLEEP: Mutex<Cell<Option<PendingSleep>>> = Mutex::new(Cell::new(None));
+
+#[derive(Clone, Copy)]
+struct PendingSleep {
+    gpio: u8,
+    wake_high: bool,
+    /// [`PowerOffRequest::pin_at_rest`]: the pin was already at rest when
+    /// the node asked.
+    pin_at_rest: bool,
+}
 
 /// The C6's power-off, installed on the server with
 /// [`lpa_server::LpServer::set_power_platform`].
@@ -91,7 +100,12 @@ impl PowerPlatform for Esp32C6PowerPlatform {
             "[fw-esp32c6] powering off once the host link drains; wake on gpio{gpio} {}",
             if wake_high { "high" } else { "low" }
         );
-        critical_section::with(|cs| PENDING_SLEEP.borrow(cs).set(Some((gpio, wake_high))));
+        let pending = PendingSleep {
+            gpio,
+            wake_high,
+            pin_at_rest: request.pin_at_rest,
+        };
+        critical_section::with(|cs| PENDING_SLEEP.borrow(cs).set(Some(pending)));
         fw_esp32_common::usb_link::when_drained(sleep_now);
         Ok(())
     }
@@ -104,7 +118,11 @@ impl PowerPlatform for Esp32C6PowerPlatform {
 /// Deep sleep on the pending wake pin; run by the link task (see the module
 /// docs). Never returns: waking is a reset.
 fn sleep_now() -> ! {
-    let Some((gpio, wake_high)) = critical_section::with(|cs| PENDING_SLEEP.borrow(cs).get())
+    let Some(PendingSleep {
+        gpio,
+        wake_high,
+        pin_at_rest,
+    }) = critical_section::with(|cs| PENDING_SLEEP.borrow(cs).get())
     else {
         // Unreachable: the request is stored before the sleep is handed
         // over. A reset is the safe way out.
@@ -124,7 +142,18 @@ fn sleep_now() -> ! {
         // reset lights it again. A no-op on a board with no status LED.
         crate::board::esp32c6::status_led::play_power_off();
 
-        wait_for_non_wake_level(gpio, wake_high);
+        if settle_wake_pin(gpio, wake_high, pin_at_rest) == WakePin::Woken {
+            // The switch went back on between the request and the sleep (the
+            // link drain and the status LED take a second or two). Sleeping
+            // now would either wait for ever for it to go off again, dark
+            // with the LEDs powered, or wake at once: start again instead, as
+            // the wake would.
+            esp_println::println!(
+                "[fw-esp32c6] gpio{gpio} went {} again before sleeping; restarting",
+                if wake_high { "high" } else { "low" }
+            );
+            crate::board::esp32c6::restart::restart()
+        }
 
         esp_println::println!(
             "[fw-esp32c6] deep sleep; wake on gpio{gpio} {}",
@@ -147,8 +176,20 @@ fn sleep_now() -> ! {
     }
 }
 
-/// Block until the pin has read its non-wake level for [`SETTLE_MS`].
-fn wait_for_non_wake_level(gpio: u8, wake_high: bool) {
+/// What [`settle_wake_pin`] found.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum WakePin {
+    /// The pin read its non-wake level for [`SETTLE_MS`]: sleep.
+    Rest,
+    /// The pin, having been at rest, read its wake level for [`SETTLE_MS`]:
+    /// what would wake the chip has already happened.
+    Woken,
+}
+
+/// Block until the pin has read its non-wake level for [`SETTLE_MS`], or —
+/// once it has been at rest, which `pin_at_rest` says it already was when
+/// the node asked — its wake level for as long.
+fn settle_wake_pin(gpio: u8, wake_high: bool, pin_at_rest: bool) -> WakePin {
     let pull = if wake_high { Pull::Down } else { Pull::Up };
     let input = Input::new(
         unsafe { AnyPin::steal(gpio) },
@@ -166,12 +207,19 @@ fn wait_for_non_wake_level(gpio: u8, wake_high: bool) {
     let settle = Duration::from_millis(SETTLE_MS);
     let log_every = Duration::from_millis(LOG_EVERY_MS);
     let mut quiet_since = (!at_wake_level()).then(Instant::now);
+    let mut rested = pin_at_rest || quiet_since.is_some();
+    let mut woken_since = None;
     let mut last_log = Instant::now();
 
     loop {
         if at_wake_level() {
             quiet_since = None;
-            if last_log.elapsed() >= log_every {
+            if rested {
+                let since = *woken_since.get_or_insert_with(Instant::now);
+                if since.elapsed() >= settle {
+                    return WakePin::Woken;
+                }
+            } else if last_log.elapsed() >= log_every {
                 esp_println::println!(
                     "[fw-esp32c6] deep sleep waits for gpio{gpio} to be released ({} ms)",
                     started.elapsed().as_millis()
@@ -179,9 +227,11 @@ fn wait_for_non_wake_level(gpio: u8, wake_high: bool) {
                 last_log = Instant::now();
             }
         } else {
+            rested = true;
+            woken_since = None;
             let since = *quiet_since.get_or_insert_with(Instant::now);
             if since.elapsed() >= settle {
-                return;
+                return WakePin::Rest;
             }
         }
         delay.delay_millis(POLL_MS);
