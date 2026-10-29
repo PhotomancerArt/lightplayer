@@ -413,7 +413,7 @@ fn board_card_setup_rows_two_up() -> Element {
 // --- The name, renamed where it is --------------------------------------------
 
 #[story(
-    description = "Rename where the name is (AC7): the name bar's name with a faint pencil after it, always shown (brighter, and the name underlined, on hover); pressed, a field takes the name's place at the bar's height with the text selected — Enter or clicking away keeps it, Esc puts it back. Hardware's details no longer hold a name field."
+    description = "Rename where the name is (AC7): the name bar's name with a faint pencil after it, always shown (brighter, and the name underlined, on hover); pressed, a field takes the name's place at the bar's height with the text selected — Enter or clicking away keeps it, Esc puts it back; the kept name shows at once, dimmed with the bar's small spinner where the pencil was, until it is the board's. Hardware's details no longer hold a name field."
 )]
 fn board_card_rename_in_place() -> Element {
     rsx! {
@@ -431,6 +431,17 @@ fn board_card_rename_in_place() -> Element {
                     plays: BoardPlays::Nothing,
                     previews: CardPreviews {
                         renaming: true,
+                        ..CardPreviews::default()
+                    },
+                    on_action: |_| {},
+                }
+            }
+            Cell { caption: "saving the new name",
+                StoryBoardCard {
+                    card: fresh(),
+                    plays: BoardPlays::Nothing,
+                    previews: CardPreviews {
+                        rename_pending: Some("Flower-Viatrix".to_string()),
                         ..CardPreviews::default()
                     },
                     on_action: |_| {},
