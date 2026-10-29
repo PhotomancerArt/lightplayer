@@ -152,3 +152,10 @@ borrows a window.**
   again — a real trade, not a free follow-up.
 - `write_direct_lamps` (~313 cycles/lamp on the C6 model: gamma, brightness
   and power per channel) is now the largest non-shader per-lamp cost.
+
+## Amendment, 2026-10-29: texture-area sampling retires
+
+Fixture and shader space (`2026-10-29-fixture-and-shader-space.md`) makes fixtures point-sample only. The
+`texture_area` mode, its precompute and its default retire, along with
+`render_size`. Direct sampling in bounded batches is the one path. Each
+lamp's coordinate now comes through the fixture's transform.

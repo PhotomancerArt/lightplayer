@@ -149,3 +149,20 @@ is. One editor had to remain.
   plan (Yona at G3).
 - The Outputs panel and the patch bay as rows of spans from the patcher.
 - The Graph's canvas built from Studio's project model.
+
+## Amendment, 2026-10-29: the fixture card and one camera
+
+Fixture and shader space (`2026-10-29-fixture-and-shader-space.md`) settles the fixture's rectangles:
+
+- **One camera.** You zoom and pan the Graph. A fixture card is a placement
+  inside it, with no zoom or pan of its own.
+- **A standard width.** A fixture's card is 240 px wide at zoom 1. Its
+  height follows its box's ratio, capped at 3× the width, with a minimum
+  set by the chrome. There is no resize gesture and no corner drag. The box
+  is set in the card's Box section, with "Fit the box to the parts".
+- **Its own space.** A fixture is drawn in its own coordinate system, with
+  rulers in its units. The picture under its lamps is the source sampled
+  through the same transform as the lamps, faded past the box. The card is
+  drawn in `docs/ux/anatomy/fixture-card.md`.
+- The follow-up "the fixture's rectangles and coordinate spaces need their
+  own theory session" is closed.

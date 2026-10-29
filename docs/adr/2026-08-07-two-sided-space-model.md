@@ -98,3 +98,22 @@ Ambiance fat-signature anti-pattern, and the UX spike
   presented as the first *choice* of the consumer's one control rather
   than as a sibling checkbox. The 1D pattern template ships a true
   `render_1d` body under a `OneD` declaration.
+
+## Amendment, 2026-10-29: the fixture decides how a 1D source lands
+
+Fixture and shader space (`2026-10-29-fixture-and-shader-space.md`) reverses "the producer knows its own
+opinion":
+
+- **The fixture decides how a 1D source lands**, as it decides the fit:
+  along its order (lamp `k` of `N` at `k/(N−1)`, the default) or across its
+  drawing, through the fit and then a projection (extrude, radial, angular,
+  mirror, flip). Products do not suggest one.
+- The shader's `in_2d` and `in_1d` answers retire, along with the fixture's
+  `force` flag, its consumer policy and `strip_order_meaningful`. The
+  precedence ladder between them goes too. There is no centre scanline:
+  every fixture has a drawing, so a 2D source always reads across it.
+- **The projection code stays on the producer's side**
+  (`products/visual/coordinates.rs`). Only who decides moves. The request
+  carries the fixture's choice as the only authority.
+- Explicit `render_1d` and `render_2d` entries and the declared space
+  (decision 2) are unchanged.
