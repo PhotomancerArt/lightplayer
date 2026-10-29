@@ -52,11 +52,9 @@ pub fn choose(
         }
         log::warn!("[wifi] network seam engaged but it gave no MAC: running the radio");
     }
-    #[cfg(not(any(target_arch = "riscv32", target_arch = "xtensa")))]
-    let _ = chip;
     log::info!("[wifi] network: the radio");
     (
         NetFrameDevice::Radio(Counted(interface)),
-        BoardStation::Radio(EspStation::new(controller)),
+        BoardStation::Radio(EspStation::new(controller, chip.max_tx_power_qdbm)),
     )
 }

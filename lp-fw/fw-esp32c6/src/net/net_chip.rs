@@ -19,6 +19,7 @@ pub static NET_CHIP: NetChip = NetChip {
     on_thread_start,
     first_light_decided: crate::first_light::decided,
     on_join_attempt,
+    max_tx_power_qdbm: None,
     bind_seam_wake: crate::seams::seam_wake_handler::bind,
 };
 

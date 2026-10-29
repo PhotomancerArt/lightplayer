@@ -68,6 +68,12 @@ pub struct NetChip {
     /// The station is about to try a network (the C6's heap tracking, under
     /// its `heap_map_diag`; nothing otherwise).
     pub on_join_attempt: fn(),
+    /// The most the radio may transmit, in quarter dBm (esp-radio's
+    /// `set_max_tx_power`, 8..=84), set before every join; `None` keeps the
+    /// blob's 20 dBm. The S3 caps it: at 20 dBm its authentication frames
+    /// never reach the access point
+    /// (docs/defects/2026-10-22-the-s3-wifi-image-never-authenticates.md).
+    pub max_tx_power_qdbm: Option<i8>,
     /// The emulator's network seam engaged: bind its wake line
     /// (`net_bringup`).
     #[cfg(any(target_arch = "riscv32", target_arch = "xtensa"))]
