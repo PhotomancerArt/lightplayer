@@ -23,6 +23,10 @@ pub const RUNTIME_MANIFEST_SOURCES: &[(&str, &str)] = &[
         include_str!("../../../lp-core/lpc-hardware/boards/seeed/xiao-esp32-c6.json"),
     ),
     (
+        "seeed/xiao-esp32-s3",
+        include_str!("../../../lp-core/lpc-hardware/boards/seeed/xiao-esp32-s3.json"),
+    ),
+    (
         "seeed/xiao-esp32-s3-plus",
         include_str!("../../../lp-core/lpc-hardware/boards/seeed/xiao-esp32-s3-plus.json"),
     ),
