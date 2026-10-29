@@ -34,7 +34,7 @@ account proof at registration.
 
 | Column | What |
 |---|---|
-| `label` | the board's own name, as it reports it (roadmap D5): never a browser's rename |
+| `label` | the board's own name, as it reports it (roadmap D5). Since 2026-10-28 that is the name a person gave it, which Studio writes to the board ([one board name](2026-10-28-one-board-name.md)) |
 | `model` | the board's catalog model, from a Studio report only (D7) |
 | `firmware`, `project` | the last reported (the project by name) |
 | `joined_at` | when it joined this list |
@@ -160,7 +160,9 @@ the board still shows from the account) and **Remove from your account**
 
 ## Follow-ups
 
-- The account owns a board's name (roadmap future work).
+- The account owns a board's name (roadmap future work). Superseded
+  2026-10-28: the board owns it ([2026-10-28-one-board-name](2026-10-28-one-board-name.md)),
+  and the list's `label` carries it.
 - The model in the relay hello, with the next relay protocol.
 - The best link and the automatic move onto the LAN (roadmap M3); the
   extended emulated walks (M4). Both done, 2026-10-21: M4's lane `just

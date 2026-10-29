@@ -205,6 +205,9 @@ mod lan_move_tests;
 /// Reset on a board reached over Wi‑Fi: a restart request, and the card
 /// back on the redialled link with no click.
 mod lan_reset_tests;
+/// One board name: the push names the copy after the board, a rename
+/// reaches the board and its only project, and back.
+mod one_board_name_tests;
 /// "Connect through lightplayer.app" on a remembered board's tile: offered
 /// while signed in, dials `relay:<mac>`, and an offline board says so.
 mod relay_connect_tests;

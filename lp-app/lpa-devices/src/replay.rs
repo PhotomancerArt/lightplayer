@@ -455,6 +455,15 @@ impl Step {
         self
     }
 
+    /// Make a `hello` step name the board (its own name, wire 46).
+    pub fn named(mut self, value: &str) -> Self {
+        match &mut self {
+            Self::Hello { name, .. } => *name = Some(value.to_string()),
+            _ => panic!("named() only applies to hello steps"),
+        }
+        self
+    }
+
     /// Force a wire proto on a `hello` step.
     pub fn proto(mut self, value: u32) -> Self {
         match &mut self {

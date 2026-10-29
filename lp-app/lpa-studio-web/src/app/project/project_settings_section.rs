@@ -103,6 +103,96 @@ pub fn ProjectSettingsSection(
     }
 }
 
+/// The project's name as a title that renames where it is: a button with a
+/// faint pencil after it; pressing it puts a field in the name's place, its
+/// text selected; Enter or clicking away renames, Esc puts the name back. A
+/// blank or unchanged name renames nothing. The editor's project panel wears
+/// it as its title, so the name is changed where it is read (Yona,
+/// 2026-10-28: he could not find how to rename a project). Dispatches the
+/// same `RenamePackage` as the settings row below ([`rename_action`]).
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+pub fn ProjectTitleRename(
+    uid: String,
+    name: String,
+    /// The title's own classes (the panel's heading look).
+    class: String,
+    on_action: EventHandler<UiAction>,
+) -> Element {
+    let mut editing = use_signal(|| false);
+    let mut value = use_signal(|| name.clone());
+    let mut commit = {
+        let uid = uid.clone();
+        let name = name.clone();
+        move || {
+            if !editing() {
+                return;
+            }
+            editing.set(false);
+            let typed = value.read().trim().to_string();
+            if typed.is_empty() || typed == name {
+                return;
+            }
+            on_action.call(rename_action(uid.clone(), typed));
+        }
+    };
+    if editing() {
+        let reset = name.clone();
+        let mut enter = commit.clone();
+        return rsx! {
+            input {
+                class: "tw:min-w-0 tw:rounded tw:border tw:border-border tw:bg-terminal tw:px-1.5 tw:py-0.5 tw:text-[12.5px] tw:font-bold tw:text-strong-foreground",
+                aria_label: "Project name",
+                "data-project-rename-field": "true",
+                value: "{value}",
+                onmounted: move |event| async move {
+                    let _ = event.set_focus(true).await;
+                    crate::app::home::device_access_panel::select_focused_input();
+                },
+                oninput: move |event| value.set(event.value()),
+                onkeydown: move |event| match event.key() {
+                    Key::Enter => {
+                        event.prevent_default();
+                        enter();
+                    }
+                    Key::Escape => {
+                        event.prevent_default();
+                        value.set(reset.clone());
+                        editing.set(false);
+                    }
+                    _ => {}
+                },
+                onblur: move |_| commit(),
+            }
+        };
+    }
+    let hint = format!("Rename {name}");
+    rsx! {
+        button {
+            class: "tw:group tw:flex tw:min-w-0 tw:items-center tw:gap-1.5 tw:text-left",
+            r#type: "button",
+            title: "{hint}",
+            aria_label: "{hint}",
+            "data-project-rename": "true",
+            onclick: move |_| {
+                value.set(name.clone());
+                editing.set(true);
+            },
+            strong { class: "{class} tw:group-hover:underline", "{name}" }
+            span { class: "tw:flex tw:flex-none tw:items-center tw:text-dim-foreground tw:opacity-60 tw:group-hover:opacity-100",
+                aria_hidden: "true",
+                StudioIcon { name: StudioIconName::Edited, size: 12 }
+            }
+        }
+    }
+}
+
+/// The one rename this file builds: `RenamePackage` for the backing package
+/// (the gallery kebab's verb).
+fn rename_action(uid: String, name: String) -> UiAction {
+    home_action(HomeOp::RenamePackage { uid, name })
+}
+
 /// The name row with its rename form: the label in the row's place, the
 /// field where the value was, and a quiet Rename beside it. Submitting
 /// dispatches `RenamePackage` for the backing package — the controller
@@ -122,10 +212,7 @@ fn EditableNameRow(uid: String, name: String, on_action: EventHandler<UiAction>)
                 if name.is_empty() {
                     return;
                 }
-                on_action.call(home_action(HomeOp::RenamePackage {
-                    uid: uid.clone(),
-                    name,
-                }));
+                on_action.call(rename_action(uid.clone(), name));
             },
             span { class: "tw:flex-none tw:font-bold tw:text-subtle-foreground", "Name" }
             input {
