@@ -556,11 +556,11 @@ mod tests {
                 .map(|board| board.kind)
                 .collect::<Vec<_>>(),
             [
-                UiHomeBoardKind::Pending,
                 UiHomeBoardKind::Connected,
-                UiHomeBoardKind::Connected
+                UiHomeBoardKind::Connected,
+                UiHomeBoardKind::Pending
             ],
-            "a link being identified, a board and a sim"
+            "a board, a sim, then a link being identified (last, where it lands)"
         );
         assert_eq!(sections.offline.len(), 2);
         assert_eq!(sections.other_projects.len(), 3);
