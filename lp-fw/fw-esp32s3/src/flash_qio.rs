@@ -57,7 +57,7 @@ use core::mem::MaybeUninit;
 use fw_esp32_common::flash_qio::{ESP32S3_QIO_PARTS, qio_ready_on};
 use fw_esp32_common::flash_read_mode::{
     CHECK_AT, CHECK_WORDS, FREAD_DIO, FREAD_QIO, Mspi, NOT_SET_AFTER, READ_BACK_DIFFERED,
-    ROM_MODE_QIO, SWITCH_ON, SavedReadMode, fold_differ, verdict_words,
+    ROM_MODE_QIO, S3_QIO_ADDR_BITLEN, SWITCH_ON, SavedReadMode, fold_differ, verdict_words,
 };
 
 /// The S3's flash controllers: SPI0 (the cache's) at `0x6000_3000` and SPI1
@@ -229,7 +229,7 @@ fn switch_to_qio() -> u8 {
         esp_rom_spiflash_select_qio_pins(0, 0);
         differ |= esp_rom_spiflash_read(CHECK_AT, qio.as_mut_ptr().cast(), bytes) as u32;
         let differ = fold_differ(dio.assume_init_ref(), qio.assume_init_ref(), differ);
-        let v = MSPI.qio_verdict(&saved, differ);
+        let v = MSPI.qio_verdict_with(&saved, differ, S3_QIO_ADDR_BITLEN);
         if v != SWITCH_ON {
             saved.put_back(MSPI);
         }
