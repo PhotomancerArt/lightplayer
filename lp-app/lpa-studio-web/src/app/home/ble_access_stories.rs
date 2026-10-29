@@ -1009,6 +1009,7 @@ fn ble_card() -> DeviceView {
         detail: Some("LightPlayer · seeed/xiao-esp32-c6".to_string()),
         freshness_label: Some("last heard 2 s ago".to_string()),
         heard_age_ms: Some(2000),
+        detached_age_ms: None,
         identity_label: Some("a0:f2:62:87:b4:8c".to_string()),
         detected_chip: Some("esp32c6".to_string()),
         board_id: Some("seeed/xiao-esp32-c6".to_string()),

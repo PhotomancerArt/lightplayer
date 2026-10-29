@@ -133,6 +133,7 @@ pub mod new_sim_offer;
 pub mod own_build_source;
 pub mod pending_link_offers;
 pub mod provisional_board_numbers;
+pub mod reconnect_grace;
 pub mod relay_connect_failure;
 pub mod relay_connect_offer;
 pub mod relay_connect_op;
@@ -319,6 +320,7 @@ pub use new_sim_offer::{NEW_SIM_BACKING_PARAM, NEW_SIM_BOARD_PARAM, new_sim_offe
 pub use own_build_source::{MemoryOwnBuildSource, OwnBuildSource, own_for};
 pub use pending_link_offers::pending_link_offers;
 pub use provisional_board_numbers::ProvisionalBoardNumbers;
+pub use reconnect_grace::{RECONNECT_GRACE_MS, in_reconnect_grace, join_reconnect_grace};
 pub use relay_connect_failure::{
     RELAY_NO_HELD_KEY_WORDS, RELAY_OFFLINE_WORDS, RELAY_UNREACHABLE_WORDS, RelayConnectFailure,
 };

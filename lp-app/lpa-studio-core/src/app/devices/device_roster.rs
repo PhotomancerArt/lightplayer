@@ -270,7 +270,9 @@ pub struct RememberedView {
 ///
 /// A board another tab of this browser holds is connected, whatever its
 /// status here: it is plugged in and running, and "offline" would be false
-/// (it has no link in this tab only because that tab has the port).
+/// (it has no link in this tab only because that tab has the port). So is
+/// a board reconnecting ([`super::reconnect_grace`]): it is rebooting, and
+/// its card holds its place rather than leave the section and come back.
 pub fn split_roster(roster: &DeviceRosterView) -> RosterSplit {
     let mut connected = Vec::new();
     let mut remembered = Vec::new();
@@ -279,6 +281,8 @@ pub fn split_roster(roster: &DeviceRosterView) -> RosterSplit {
         // reaches.
         if device.status == lpa_devices::device::DeviceStatus::Offline
             && device.held_elsewhere.is_none()
+            && roster.connections.get(&device.id)
+                != Some(&super::board_card::BoardConnection::Reconnecting)
             && !roster
                 .cloud_boards
                 .get(&device.id)
@@ -1090,6 +1094,7 @@ mod tests {
             detail: None,
             freshness_label: Some("last heard 3 m ago".to_string()),
             heard_age_ms: Some(180000),
+            detached_age_ms: None,
             identity_label: Some(format!("dev{id}")),
             detected_chip: None,
             board_id: board_id.map(str::to_string),
@@ -1123,6 +1128,7 @@ mod tests {
             detail: None,
             freshness_label: None,
             heard_age_ms: None,
+            detached_age_ms: None,
             identity_label: None,
             detected_chip: None,
             board_id: None,

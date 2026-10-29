@@ -338,6 +338,10 @@ impl Roster {
             if self.id_is_held(record.device) {
                 record.device = self.mint_unheld_device_id();
             }
+            // A record saved before first-added was kept: before every board
+            // added since, and among its kind in the order the store lists
+            // it (the view's sort is stable). The next persist writes it.
+            record.added_at.get_or_insert(Millis(0));
             loaded.push(record.device);
             self.devices.push(Device::from_record(record));
         }
@@ -1007,7 +1011,10 @@ impl Roster {
 
     fn promote_pending(&mut self, now: Millis, entry: PendingLink) -> Vec<Command> {
         let link = entry.link;
-        let provisional = entry.provisional;
+        let mut provisional = entry.provisional;
+        // A new board is added when its link first appeared, so it lands
+        // where its identifying card stood: last.
+        provisional.added_at.get_or_insert(entry.since);
         let existing = self.devices.iter().position(|device| {
             match device.identity.match_against(&provisional.identity) {
                 Some(IdentityMatch::Uid) | Some(IdentityMatch::Mac) => true,
@@ -1086,6 +1093,7 @@ impl Roster {
         let entry = self.pending.remove(index);
         let link = entry.link;
         let mut provisional = entry.provisional;
+        provisional.added_at.get_or_insert(entry.since);
         provisional.intent.setup_requested = true;
         provisional.intent.connection = crate::intent::ConnectionIntent::Connected;
         let device_id = provisional.id;
@@ -1322,6 +1330,9 @@ impl RosterState {
 /// takes the fresher entry's bindings, name, live evidence and activity.
 fn absorb(into: &mut Device, from: Device) {
     into.identity.absorb(&from.identity);
+    // One board, one place: the earlier of the two, so a board that turns
+    // out to be one already listed takes that board's place.
+    into.added_at = crate::device::earliest_added(into.added_at, from.added_at);
     // The endpoint is a transport ADDRESS, not an identity: the entry that
     // carries the live link knows the current one (a re-granted port mints
     // a fresh endpoint — V3/CH340 replug, G1 2026-08-31), and a stale
@@ -2108,6 +2119,104 @@ mod tests {
         }
     }
 
+    /// The view lists boards first added first, whatever order the store or
+    /// the roster holds them in. A record saved before the time was kept
+    /// comes before every board added since, in the order the store listed
+    /// it.
+    #[test]
+    fn the_view_lists_boards_first_added_first() {
+        let mut roster = Roster::new(RosterConfig::default());
+        roster.load_records(vec![
+            DeviceRecord {
+                added_at: Some(Millis(5_000)),
+                ..DeviceRecord::new(DeviceId(1), mac_chain("02:00:00:00:00:01"))
+            },
+            DeviceRecord::new(DeviceId(2), mac_chain("02:00:00:00:00:02")),
+            DeviceRecord {
+                added_at: Some(Millis(1_000)),
+                ..DeviceRecord::new(DeviceId(3), mac_chain("02:00:00:00:00:03"))
+            },
+            DeviceRecord::new(DeviceId(4), mac_chain("02:00:00:00:00:04")),
+        ]);
+
+        assert_eq!(view_order(&roster), vec![2, 4, 3, 1]);
+    }
+
+    /// The stable-board-order fix: a new board lands last, where its
+    /// identifying link stood, keeps its place through a rename and a
+    /// reboot (its link goes and a fresh one says hello), and its record
+    /// carries the time so a reload keeps it there too.
+    #[test]
+    fn a_new_board_lands_last_and_keeps_its_place_through_a_rename_and_a_reboot() {
+        let mut roster = Roster::new(RosterConfig::default());
+        let facts = roster_proto(&roster);
+        roster.load_records(vec![
+            DeviceRecord::new(DeviceId(1), mac_chain("02:00:00:00:00:01")),
+            DeviceRecord {
+                added_at: Some(Millis(50)),
+                ..DeviceRecord::new(DeviceId(2), mac_chain("02:00:00:00:00:02"))
+            },
+        ]);
+
+        roster.handle(Millis(100), attach(LinkId(1), "usb-1"));
+        roster.handle(Millis(110), opened(LinkId(1), "usb-1"));
+        let commands = roster.handle(Millis(120), hello_mac(LinkId(1), &facts, DESK_MAC));
+        let order = view_order(&roster);
+        assert_eq!(order[..2], [1, 2], "the boards already listed stay put");
+        let board = DeviceId(order[2]);
+        let persisted = commands.iter().rev().find_map(|command| match command {
+            Command::PersistRecord(record) if record.device == board => Some(record),
+            _ => None,
+        });
+        assert_eq!(
+            persisted.and_then(|record| record.added_at),
+            Some(Millis(100)),
+            "added when its link appeared, and saved"
+        );
+
+        roster.handle(
+            Millis(200),
+            Input::Action(Action::SetName {
+                device: board,
+                name: "Aaa first by name".to_string(),
+            }),
+        );
+        assert_eq!(view_order(&roster), order, "a rename moves nothing");
+
+        roster.handle(
+            Millis(5_000),
+            Input::Event(Event::LinkDetached { link: LinkId(1) }),
+        );
+        assert_eq!(view_order(&roster), order, "gone a moment, same place");
+        roster.handle(Millis(6_000), attach(LinkId(2), "usb-2"));
+        roster.handle(Millis(6_010), opened(LinkId(2), "usb-2"));
+        roster.handle(Millis(6_020), hello_mac(LinkId(2), &facts, DESK_MAC));
+        assert!(roster.pending().is_empty());
+        assert_eq!(
+            view_order(&roster),
+            order,
+            "back on a fresh link, same place"
+        );
+    }
+
+    /// Two entries that turn out to be one board keep the earlier place,
+    /// whichever of them survives the merge.
+    #[test]
+    fn a_merge_keeps_the_earlier_place() {
+        let mut later = Device::new(DeviceId(1), mac_chain(DESK_MAC));
+        later.added_at = Some(Millis(9_000));
+        let mut earlier = Device::new(DeviceId(2), mac_chain(DESK_MAC));
+        earlier.added_at = Some(Millis(1_000));
+
+        absorb(&mut later, earlier);
+        assert_eq!(later.added_at, Some(Millis(1_000)));
+
+        // A link still identifying has no time: it never erases the board's.
+        let pending = Device::new(DeviceId(3), mac_chain(DESK_MAC));
+        absorb(&mut later, pending);
+        assert_eq!(later.added_at, Some(Millis(1_000)));
+    }
+
     /// Where the shared ids come from: a record that loads AFTER a link has
     /// minted the same number (the library hydrate is asynchronous). The
     /// loaded record has to take a fresh id, or a different board on that
@@ -2208,6 +2317,14 @@ mod tests {
     }
 
     const DESK_MAC: &str = "10:bd:a3:b0:8e:30";
+
+    fn view_order(roster: &Roster) -> Vec<u64> {
+        crate::view::roster_view(roster, Millis(0))
+            .devices
+            .iter()
+            .map(|device| device.id.0)
+            .collect()
+    }
 
     fn mac_chain(mac: &str) -> IdentityChain {
         IdentityChain {
