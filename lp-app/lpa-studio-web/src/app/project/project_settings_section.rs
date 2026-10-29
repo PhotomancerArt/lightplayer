@@ -169,7 +169,7 @@ pub fn ProjectTitleRename(
     let hint = format!("Rename {name}");
     rsx! {
         button {
-            class: "tw:group tw:flex tw:min-w-0 tw:items-center tw:gap-1.5 tw:text-left",
+            class: "tw:group tw:flex tw:min-w-0 tw:max-w-full tw:cursor-text tw:appearance-none tw:items-center tw:gap-1.5 tw:justify-self-start tw:rounded-sm tw:border-0 tw:bg-transparent tw:p-0 tw:text-left tw:text-inherit ux-focus-ring",
             r#type: "button",
             title: "{hint}",
             aria_label: "{hint}",

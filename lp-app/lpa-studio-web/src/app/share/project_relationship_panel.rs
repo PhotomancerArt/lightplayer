@@ -247,10 +247,18 @@ pub fn ProjectRelationshipPanel(
             // TOGETHER — a bare title read as odd, and a "Where" rule-line
             // under it drew a border through one thought.
             div { class: "tw:grid tw:min-w-0 tw:gap-1",
-                // The name renames where it is read, when a library package
-                // backs the project (`export`) and there is somewhere to send
-                // the rename; read-only otherwise.
-                if let (Some(target), Some(on_action)) = (export.clone(), on_action) {
+                // The name renames where it is read, when the project is
+                // yours (an example or someone else's is saved as a copy
+                // first), a library package backs it (`export`) and there
+                // is somewhere to send the rename; read-only otherwise.
+                if let (Some(target), Some(on_action), true) = (
+                    export.clone(),
+                    on_action,
+                    matches!(
+                        relationship,
+                        ProjectRelationship::MineLocal | ProjectRelationship::MinePublished
+                    ),
+                ) {
                     crate::app::project::project_settings_section::ProjectTitleRename {
                         uid: target.uid.clone(),
                         name: name.clone(),

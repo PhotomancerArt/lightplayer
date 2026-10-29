@@ -812,3 +812,11 @@ hours), and neither is an exit path on its own.
   180000 ms — killed.` ("a pipeline failure, not story drift"). The previous
   head of the same PR passed the job. Re-ran the failed job. Three hits since
   2026-10-23 makes the 180 s bound for a full capture the paydown to do.
+- 2026-10-29 — **`board-card-rename-in-place` flips between captures with
+  no source change.** Its "renaming" cell (`CardPreviews { renaming: true }`)
+  sometimes captures the open field and sometimes the closed name with its
+  pencil: main's own snapshots `sha-85f1f7a66` and `sha-3ce005d41` differ on
+  exactly that cell (sm and lg), so #1326 reported it as a change it did not
+  make. Likely cause: the field is focused on mount and commits on blur, so a
+  capture that moves focus closes it. The paydown is a preview that does not
+  close on blur.
