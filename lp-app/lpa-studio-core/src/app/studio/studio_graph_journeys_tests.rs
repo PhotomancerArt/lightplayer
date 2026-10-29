@@ -853,9 +853,10 @@ fn a_fixtures_colour_order_stays_on_the_board_when_selected() {
 /// `projects/test/circular-display-walk`, the project G3's and M5's walks
 /// map the circular display in by hand, is a new board's project as Studio
 /// generates it, with the display's output — the from-nothing journey's
-/// start, but with the output keeping the starter's name, so the walk
-/// opens with no problem. Written with `LPA_STUDIO_CORE_BLESS=1`; its
-/// README is its own.
+/// start, but with the output keeping the starter's name and the starter
+/// strip shrunk to the 64 lamps of port D0, so the walk opens with no
+/// problem (DD42). Written with `LPA_STUDIO_CORE_BLESS=1`; its README is
+/// its own.
 #[test]
 fn the_walk_project_is_a_new_boards_project_with_the_display() {
     let dir =
@@ -868,6 +869,9 @@ fn the_walk_project_is_a_new_boards_project_with_the_display() {
             std::fs::write(&to, bytes).expect("it writes");
         }
     }
+    let j = Journey::repo("projects/test/circular-display-walk", "/fixture.map2d.json");
+    let problems = j.patching().problems;
+    assert!(problems.is_empty(), "the walk opens with: {problems:?}");
     let mut on_disk = Vec::new();
     collect(&dir, &dir, &mut on_disk);
     on_disk.retain(|(path, _)| path != "README.md");
@@ -1316,6 +1320,21 @@ fn display_walk_files_with(named: bool) -> Vec<(String, Vec<u8>)> {
         }
     }
     output.1 = (out.join("\n") + "\n").into_bytes();
+    if named {
+        // The walk opens with no problem (DD42): the starter strip shrinks
+        // to the 64 lamps its port D0 holds.
+        for (path, bytes) in &mut project.files {
+            match path.as_str() {
+                "fixture.json" => {
+                    *bytes = crate::app::home::board_project::fixture_json(64).into_bytes()
+                }
+                "fixture.map2d.json" => {
+                    *bytes = crate::app::home::board_project::strip_map2d_json(64).into_bytes()
+                }
+                _ => {}
+            }
+        }
+    }
     project.files
 }
 

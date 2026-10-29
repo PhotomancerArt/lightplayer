@@ -8,10 +8,11 @@ fixture on D0, then reverse ring 3 and move it to D1.
 
 It is a new board's project exactly as Studio generates it (the XIAO
 ESP32-C6's setup flow, `generate_board_project`: clock, the meteor
-playlist, a 256-lamp starter strip, one output), with one change: the
-output has the display's **five ports of 64 lamps (D0 to D4)**. It keeps
-the starter's name, `1`, which the fixture starts on, so the walk opens
-with no problem.
+playlist, a starter strip, one output), with two changes: the output has
+the display's **five ports of 64 lamps (D0 to D4)**, and the starter strip
+is 64 lamps (Studio's is 256), so it fits port D0. The output keeps the
+starter's name, `1`, which the fixture starts on, so the walk opens with
+no problem.
 
 The core journey `the_circular_display_from_nothing`
 (`lp-app/lpa-studio-core/src/app/studio/studio_graph_journeys_tests.rs`)

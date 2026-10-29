@@ -143,7 +143,10 @@ pub fn generate_board_project(
         ("module.json".to_string(), ROOT_MODULE.into()),
         ("clock.json".to_string(), CLOCK.into()),
         ("playlist.json".to_string(), PLAYLIST.into()),
-        ("fixture.json".to_string(), fixture_json().into_bytes()),
+        (
+            "fixture.json".to_string(),
+            fixture_json(DEFAULT_STRIP_PIXELS).into_bytes(),
+        ),
         (
             "fixture.map2d.json".to_string(),
             strip_map2d_json(DEFAULT_STRIP_PIXELS).into_bytes(),
@@ -233,12 +236,13 @@ const PLAYLIST: &[u8] = br#"{
 }
 "#;
 
-fn fixture_json() -> String {
+/// The starter fixture's definition, its texture `pixels` wide.
+pub(crate) fn fixture_json(pixels: u32) -> String {
     format!(
         r#"{{
   "kind": "Fixture",
   "render_size": {{
-    "width": {DEFAULT_STRIP_PIXELS},
+    "width": {pixels},
     "height": {STRIP_TEXTURE_ROWS}
   }},
   "bindings": {{
@@ -271,7 +275,7 @@ const OUTPUT_NAME: &str = "1";
 /// lamp is one texel wide and the row sits on the texture's centre line.
 /// Map2d format 6 through `lpc-mapping`'s writer: one part, `strip`,
 /// starting at port 0, lamp 0 of the output [`OUTPUT_NAME`].
-fn strip_map2d_json(pixels: u32) -> String {
+pub(crate) fn strip_map2d_json(pixels: u32) -> String {
     use lpc_mapping::part::{Mapping, Part, PartId, PartKind, Shape};
     use lpc_mapping::patching::{Amount, Start};
     use lpc_mapping::{GridCorner, GridRouting, GridShape};
