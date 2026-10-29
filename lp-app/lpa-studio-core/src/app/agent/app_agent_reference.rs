@@ -369,6 +369,14 @@ mod tests {
             !prompt.contains("/patch/"),
             "no patch verb is offered any more"
         );
+        assert!(
+            !prompt.contains("/arrange/"),
+            "the arrange canvas went with the Map tab"
+        );
+        assert!(
+            prompt.contains("`project/graph/<verb>`"),
+            "the Graph's verbs are named"
+        );
     }
 
     #[test]

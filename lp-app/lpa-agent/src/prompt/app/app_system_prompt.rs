@@ -140,10 +140,17 @@ pub fn build_app_system_prompt(reference: &str) -> String {
          (`entry`, and `skipped`: on leaves it out of the cycle, off puts \
          it back). They change what plays now, not the saved project; to \
          change the project's own cycle or skip list, use `edit_project`.\n\
-         - Placing a fixture on the arrange canvas is \
-         `project/<node path>/arrange/set` (`x`, `y`, `rotation` in degrees, \
-         `scale`; a value left out stays), and `project/arrange/undo` and \
-         `project/arrange/redo` walk those placements. One pending edit is \
+         - While the Graph is open (the project canvas, where a fixture's \
+         mapping is edited), each of its edits is an action at \
+         `project/graph/<verb>`, most with a `subject` (a part or segment by \
+         its tree id, the selection by default): `set-output`, `set-port`, \
+         `set-starts-at`, `set-direction`, `set-offset`, `turn-off`, \
+         `turn-on`, `back-to-the-flow`, `set-flow`, `set-fixture-start`, \
+         `set-part-start`, `rename`, `repeat`, `unrepeat`, `expand`, \
+         `set-count`, `add-ring`, `add-centre-lamp`, `remove-ring`, \
+         `set-radius`, `set-port-lamps`; `project/graph/undo` and \
+         `project/graph/redo` walk them. With the Graph closed, write the \
+         `.map2d.json` with `set_asset` as above. One pending edit is \
          reverted with `project/revert-edit` (`edit`: which one), and a \
          built-in example is kept as the user's own with \
          `project/save-copy`.\n\
