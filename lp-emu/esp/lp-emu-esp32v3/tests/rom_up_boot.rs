@@ -115,7 +115,7 @@ fn the_merged_image_carries_the_bootloader_the_desk_board_runs() {
     assert_eq!(labels, vec!["nvs", "phy_init", "factory", "lpfs"]);
     let (partition, app) = parsed.app.as_ref().expect("an app partition with an image");
     assert_eq!(partition.offset, FACTORY_OFFSET);
-    assert_eq!(app.entry, 0x4008_0844, "the shipped image's `Reset`");
+    assert_eq!(app.entry, 0x4008_085C, "the shipped image's `Reset`");
     assert_eq!(
         app.drom_segments(),
         2,

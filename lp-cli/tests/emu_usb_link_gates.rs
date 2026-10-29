@@ -242,6 +242,10 @@ const ORACLE_RGB: &str = "324a0208376a1c2889007668098b4b0375544602631253162b0f70
 const ORACLE_CRC: u32 = 0x5577_2254;
 const PAD: u8 = 18;
 const LEDS: usize = 64;
+/// The black pixels the C6 sends after a frame that could replay its RMT
+/// prefill: `REPLAY_TAIL_PIXELS` in `fw-esp32c6`'s WS281x driver (lp-ws281x's
+/// replay recovery).
+const REPLAY_TAIL: usize = 8;
 /// `RMT_SIG_0` (`regs::output_signals`).
 const RMT_SIG_0: u16 = 71;
 /// The driver's open line for the oracle project: 64 LEDs on D10 = gpio18.
@@ -313,10 +317,16 @@ fn the_first_lit_frame_is_the_oracles(grade: TimeGrade) {
             )
         });
     let f = &frames[lit];
-    assert_eq!(f.leds(), LEDS, "frame {}", f.n);
+    assert_eq!(f.leds(), LEDS + REPLAY_TAIL, "frame {}", f.n);
     assert_eq!(f.error_count, 0, "frame {}: {:?}", f.n, f.errors);
     assert!(f.is_complete(), "frame {} was cut short: {f:?}", f.n);
-    let rgb = unpermute(&f.wire, ColorOrder::Grb);
+    assert!(
+        f.wire[LEDS * 3..].iter().all(|b| *b == 0),
+        "frame {}: the pixels after the frame are not black: {}",
+        f.n,
+        hex(&f.wire[LEDS * 3..])
+    );
+    let rgb = unpermute(&f.wire[..LEDS * 3], ColorOrder::Grb);
     let decoded = hex(&rgb);
     assert_eq!(
         decoded,

@@ -109,16 +109,52 @@
 //!   it. It is a real race and it kills the frame when lost. Here, `start_frame`
 //!   prefills both halves and plants nothing; the first threshold interrupt
 //!   plants the first guard, safely behind the read pointer. The cost is that a
-//!   lost *first* interrupt replays the initial buffer once — which is why
-//!   truncation is detected by cursor accounting at `tx_end`
-//!   ([`ChannelStats::guard_trips`]) rather than by pretending the window is
-//!   zero.
+//!   late *first* interrupt lets the transmitter go round the prefilled window
+//!   again, for as long as the interrupt is late. See "The first-interrupt
+//!   replay" below: it is counted, and with replay recovery on it is resent
+//!   and its spill lands in black.
 //! * **The guard slot is checked.** The threshold event marks the boundary
 //!   between halves, so the read pointer has passed the guard slot by the time
 //!   the handler runs (hardware read-ahead plus interrupt latency). If it
 //!   somehow has not, planting the guard would terminate a perfectly good
 //!   frame, so the driver skips it and counts a
 //!   [`ChannelStats::guard_skips`] instead.
+//!
+//! # The first-interrupt replay
+//!
+//! Until the first refill runs there is no guard anywhere, so a first
+//! threshold interrupt that is late by a half or more finds the transmitter
+//! back in the first half, re-sending bits it already sent. Those bits are
+//! *inserted* into the stream: the frame goes on from where the cursor left
+//! it, one replayed half further down the chain for every half the interrupt
+//! was late. The mapped pixels show one shifted frame; the frame's last bits
+//! spill past its final pixel into LEDs wired after it, and since nothing
+//! ever addresses those LEDs again, they **freeze on real pattern colours**.
+//! A field ESP32-C6 with Wi-Fi busy after boot did exactly that (2026-10-26).
+//! The spill is a whole number of halves and grows with the delay: it is not
+//! bounded by the window.
+//!
+//! Three parts deal with it, none of them visible above this driver:
+//!
+//! * **Detection, always.** The first refill expects the read pointer in the
+//!   second half (the threshold fired at the boundary into it). Finding it in
+//!   the first means the transmitter wrapped: [`ChannelStats::replays`]. An
+//!   even number of replayed halves puts the pointer back where an on-time
+//!   service finds it and is not seen — this driver has no clock to tell
+//!   them apart.
+//! * **A black tail** ([`Ws281xDriver::enable_replay_recovery`]). A frame that
+//!   can replay is followed by black pixels, at least a whole window's worth.
+//!   A replay's spill then lands in black instead of in pattern colour, and
+//!   every later frame rewrites those same pixels black again. A spill longer
+//!   than the tail still freezes what lies beyond it, so the tail is sized
+//!   for the interrupt delay the firmware expects, not for the window alone.
+//! * **A resend** (the same switch). At `tx_end` of a transmission that
+//!   replayed, the handler rewinds the cursor and sends the same frame again
+//!   instead of publishing completion: the shifted frame is on the strip for
+//!   one transmission rather than a whole frame period. This is sound inside
+//!   [`Ws281xDriver::start_frame`]'s contract — the bytes stay alive until
+//!   completion is published, and it has not been. One resend per frame; a
+//!   resend that replays again is completed as it is.
 
 #[cfg(feature = "test_hooks")]
 use core::sync::atomic::AtomicU32;
@@ -300,6 +336,41 @@ impl<H: RmtHw, const N: usize> Ws281xDriver<H, N> {
         state.set_timing(&codes, timing.color_order);
         state.ram_words.store(ram_words, Relaxed);
         state.half_words.store(ram_words / 2, Relaxed);
+        state.tail_bits.store(0, Relaxed);
+        Ok(())
+    }
+
+    /// Turn on replay recovery for `ch`: a black tail after every frame that
+    /// can replay its prefill, and one resend of a frame that did. See the
+    /// module docs, "The first-interrupt replay". Call after
+    /// [`Self::configure`] (which turns it off again), while idle.
+    ///
+    /// The tail is `min_tail_pixels`, or the channel's whole RAM window
+    /// rounded up to pixels if that is longer — never less than one full
+    /// replay of the prefill. A replay spills one half per half the first
+    /// interrupt is late, so a tail of `t` bits keeps the spill in black for
+    /// a first interrupt up to `t + half` bits (1.25 µs each) late; size
+    /// `min_tail_pixels` for the worst delay the firmware sees.
+    ///
+    /// The tail costs wire time (30 µs a pixel) and drives the LEDs after the
+    /// frame's last pixel black; frames short enough to end inside the
+    /// prefill never replay and are sent as they are.
+    pub fn enable_replay_recovery(
+        &self,
+        ch: u8,
+        min_tail_pixels: usize,
+    ) -> Result<(), ConfigError> {
+        let state = self
+            .channels
+            .get(ch as usize)
+            .ok_or(ConfigError::ChannelOutOfRange)?;
+        if !state.is_configured() {
+            return Err(ConfigError::ChannelUnavailable);
+        }
+        let ram_words = state.ram_words.load(Relaxed);
+        let window_pixels = ram_words.div_ceil(BITS_PER_PIXEL);
+        let pixels = min_tail_pixels.max(window_pixels);
+        state.tail_bits.store(pixels * BITS_PER_PIXEL, Relaxed);
         Ok(())
     }
 
@@ -347,7 +418,15 @@ impl<H: RmtHw, const N: usize> Ws281xDriver<H, N> {
         // guarantees the bytes stay valid and unmodified for the whole
         // transmission.
         unsafe { state.arm(frame.as_ptr(), frame.len()) };
+        self.prefill_and_start(ch, state);
+        Ok(())
+    }
 
+    /// Prefill both halves from the (rewound) cursor, arm the first
+    /// threshold and start the transmitter: the start of every transmission,
+    /// from [`Self::start_frame`] and from the handler's resend.
+    #[cfg_attr(feature = "isr-in-ram", link_section = ".rwtext")]
+    fn prefill_and_start(&self, ch: u8, state: &ChannelState) {
         self.fill_half(ch, state, Half::First);
         self.fill_half(ch, state, Half::Second);
 
@@ -358,7 +437,6 @@ impl<H: RmtHw, const N: usize> Ws281xDriver<H, N> {
         // It must be visible before `start_tx` can raise the first event.
         state.threshold_boundary.store(half, Release);
         self.hw.start_tx(ch);
-        Ok(())
     }
 
     /// Transmit `frame` on `ch` and wait for it to finish, calling `spin`
@@ -510,6 +588,11 @@ impl<H: RmtHw, const N: usize> Ws281xDriver<H, N> {
                 return false;
             }
         }
+        // Again, now that no pass is in service: a resend (see "The
+        // first-interrupt replay") restarts the transmitter from the handler,
+        // and a pass that missed the disarm may have done so after the stop
+        // above. Every later pass sees the disarm and starts nothing.
+        self.hw.stop_tx(ch);
         true
     }
 
@@ -582,7 +665,7 @@ impl<H: RmtHw, const N: usize> Ws281xDriver<H, N> {
                 state.errors.fetch_add(1, Relaxed);
             }
             if flags.end_for(ch) {
-                self.finish(state);
+                self.finish(ch, state);
             } else if flags.threshold_for(ch) {
                 self.refill(ch, state);
             }
@@ -647,13 +730,27 @@ impl<H: RmtHw, const N: usize> Ws281xDriver<H, N> {
         flags
     }
 
-    /// Handle `tx_end`: classify the frame and publish completion.
+    /// Handle `tx_end`: resend a replayed frame, or classify the frame and
+    /// publish completion.
     #[cfg_attr(feature = "isr-in-ram", link_section = ".rwtext")]
-    fn finish(&self, state: &ChannelState) {
+    fn finish(&self, ch: u8, state: &ChannelState) {
         // `SeqCst`, not `Acquire`: the ISR's entry check is half of the
         // abort handshake — see `ChannelState::is_complete_sync`.
         if state.is_complete_sync() {
             // Spurious or duplicated end event.
+            return;
+        }
+        if state.replayed.load(Relaxed)
+            && state.tail_bits.load(Relaxed) != 0
+            && !state.resent.load(Relaxed)
+        {
+            // The strip latched a shifted frame; send the real one now rather
+            // than a frame period from now. Completion is not published, so
+            // `start_frame`'s contract still holds the bytes for us.
+            state.resent.store(true, Relaxed);
+            state.resends.fetch_add(1, Relaxed);
+            state.rewind();
+            self.prefill_and_start(ch, state);
             return;
         }
         // A cursor short of `total_bits` means the transmitter stopped on a
@@ -716,6 +813,17 @@ impl<H: RmtHw, const N: usize> Ws281xDriver<H, N> {
         state.record_entry_delay((pos_before + ram - boundary) % ram, half);
 
         let in_second_half = pos_before >= half;
+
+        if state.first_service.load(Relaxed) {
+            state.first_service.store(false, Relaxed);
+            // The first threshold fired at the boundary into the second half;
+            // a pointer back in the first one went round the window, re-sending
+            // the prefill. See "The first-interrupt replay".
+            if !in_second_half && state.can_replay(state.data_bits.load(Relaxed)) {
+                state.replays.fetch_add(1, Relaxed);
+                state.replayed.store(true, Relaxed);
+            }
+        }
 
         // The transmitter is inside one half; the other one is free.
         let (guard_slot, free_half, next_threshold) = if in_second_half {

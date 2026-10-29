@@ -1052,7 +1052,12 @@ fn run_to_done(host: &mut EmuLinkHost<C6Board>, mut lit: Option<&mut Vec<[u8; 3]
 /// Every solid colour (one wire triple repeated) decoded on the pad so far.
 fn collect_lit(host: &EmuLinkHost<C6Board>, lit: &mut Vec<[u8; 3]>) {
     for frame in host.board.machine.frames(PAD) {
-        let w = &frame.wire;
+        // A frame that could replay its RMT prefill ends in black pixels
+        // (lp-ws281x's replay recovery): the colour is what comes before them.
+        let mut w = &frame.wire[..];
+        while w.len() > 3 && w.ends_with(&[0, 0, 0]) {
+            w = &w[..w.len() - 3];
+        }
         if w.len() >= 3 && w.len() % 3 == 0 && w.chunks(3).all(|c| c == &w[..3]) {
             let c = [w[0], w[1], w[2]];
             if !lit.contains(&c) {
