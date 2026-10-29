@@ -33,7 +33,7 @@
 //! Design record: `spikes/studio-chrome/index.html` (rounds 1–3 ratified
 //! 2026-08-12; rounds 4–6 — the band, the attached tabs, the Tree merge
 //! — ratified 2026-08-14). The Nodes center is the node workspace; the
-//! Graph's center, Tree and Props are the mapping lab's canvas, tree and
+//! Graph's center, Tree and Props are lpa-graph-web's canvas, tree and
 //! inspector (`graph_view.rs`).
 
 pub(crate) mod free_port_runs;
@@ -64,8 +64,9 @@ use panels::OutputsPanel;
 pub enum WorkbenchView {
     #[default]
     Nodes,
-    /// The mapping lab's canvas on the project (`graph_view.rs`): every
-    /// node a card, fixtures drawn in place, coloured by the board.
+    /// The Graph's canvas (lpa-graph-web) on the project
+    /// (`graph_view.rs`): every node a card, fixtures drawn in place,
+    /// coloured by the board.
     Graph,
 }
 
@@ -229,7 +230,7 @@ pub fn roster(view: WorkbenchView, side: DockSide) -> &'static [PanelId] {
     match (side, view) {
         (DockSide::Left, _) => &[PanelId::Tree],
         (DockSide::Right, WorkbenchView::Nodes) => &[PanelId::Device, PanelId::Outputs],
-        // The Graph's outputs are cards on its canvas: Props (the lab's
+        // The Graph's outputs are cards on its canvas: Props (the Graph's
         // inspector) and the board.
         (DockSide::Right, WorkbenchView::Graph) => &[PanelId::Props, PanelId::Device],
     }
@@ -244,7 +245,7 @@ pub fn defaults(view: WorkbenchView) -> DockState {
             left: Some(PanelId::Tree),
             right: Some(PanelId::Device),
         },
-        // The Graph opens as the lab does: the tree, the canvas, the
+        // The Graph opens as the mapping lab did: the tree, the canvas, the
         // inspector.
         WorkbenchView::Graph => DockState {
             left: Some(PanelId::Tree),

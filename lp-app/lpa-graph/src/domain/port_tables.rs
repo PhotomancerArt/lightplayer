@@ -10,12 +10,12 @@
 //! are a fact the project carries beside what it holds, as the placement
 //! is: handing new ones over re-patches without an edit.
 //!
-//! **Without them** (the lab's page and its tests, which have no engine)
-//! the project works them out from its own outputs the same way: every
-//! named output, ports in key order, a port's count in lamps of three
-//! channels, a port with no count taking the rest when it is the last one
-//! (an output with a count-less port before its last drives no wires, so
-//! it has no ports at all).
+//! **Without them** (lpa-graph's own tests and Studio's Graph stories,
+//! which have no engine) the project works them out from its own outputs
+//! the same way: every named output, ports in key order, a port's count
+//! in lamps of three channels, a port with no count taking the rest when
+//! it is the last one (an output with a count-less port before its last
+//! drives no wires, so it has no ports at all).
 
 use std::collections::BTreeMap;
 use std::sync::Arc;

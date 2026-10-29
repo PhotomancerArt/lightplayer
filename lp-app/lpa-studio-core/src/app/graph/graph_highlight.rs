@@ -14,12 +14,12 @@
 //! - a module says nothing on its own (as in Patch).
 //!
 //! An object or a lamp counts in its fixture's own lamp numbering (the
-//! lab resolves lamps in the product's order),
+//! Graph resolves lamps in the product's order),
 //! which core maps through the board's own placements; an output, a port
 //! or a pixel counts on the output's wire.
 //!
 //! **On a board whose fixtures have the `selection` slot** (plan M4b) the
-//! fixture side is the lab's own rules ([`board_selection`]): each fixture
+//! fixture side is the Graph's own rules ([`board_selection`]): each fixture
 //! is told what to do to its own lamps — every object under the selection
 //! chases, a lamp breathes, every other lamp in every fixture dims — and
 //! only an output, a port or a pixel goes through `highlight`. A board
@@ -31,7 +31,7 @@ use lpa_graph::{NodeId, Project, Target};
 
 use crate::{PatchPulseLamps, PatchPulseLanguage, PatchPulseOp, PatchPulseSubject};
 
-/// The pulse for `selection` (`nodes`: the lab's nodes as Studio's).
+/// The pulse for `selection` (`nodes`: the Graph's nodes as Studio's).
 pub(crate) fn highlight_of(
     project: &Project,
     nodes: &BTreeMap<NodeId, lpc_model::NodeId>,

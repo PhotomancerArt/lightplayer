@@ -384,13 +384,13 @@ impl Project {
         self.placed().lamp_count()
     }
 
-    /// The lab's starting project: Yona's desk. A tail rig (the tail that
-    /// runs out and back, its own shader and its own output), a two-ring
-    /// circle display and a strip sharing the main output, and an empty
-    /// fixture to draw a scarf into, already patched to its own output — so
-    /// drawing in it lights pixels at once. A rainbow shader at the root
-    /// feeds every fixture there; the tail reads its own module's shader,
-    /// the nearer writer of `visual.out`.
+    /// Yona's desk, the tests' starting project (it was the mapping
+    /// lab's). A tail rig (the tail that runs out and back, its own shader
+    /// and its own output), a two-ring circle display and a strip sharing
+    /// the main output, and an empty fixture to draw a scarf into, already
+    /// patched to its own output — so drawing in it lights pixels at once.
+    /// A rainbow shader at the root feeds every fixture there; the tail
+    /// reads its own module's shader, the nearer writer of `visual.out`.
     ///
     /// Every fixture is square, as a new one is, sized to hold its drawing
     /// with room around it. The tail is two straight paths, out and back,

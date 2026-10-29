@@ -1,4 +1,4 @@
-//! The open project's files, as the mapping lab's files crate reads them.
+//! The open project's files, as lpa-graph-files reads them.
 //!
 //! `lpa_graph_files::Opened::open` walks a project from `project.json`
 //! and asks for each file it needs by path. Studio holds a file's text

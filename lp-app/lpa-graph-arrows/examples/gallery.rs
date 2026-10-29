@@ -155,7 +155,7 @@ fn v(x: f64, y: f64) -> Vec2 {
     Vec2::new(x, y)
 }
 
-/// The lab's edge: leave heading toward the target, arrive from the left.
+/// The Graph's edge: leave heading toward the target, arrive from the left.
 fn edge(from: Vec2, to: Vec2) -> Arrow {
     Arrow::new(from, to)
         .leave(EndDirection::Direct)

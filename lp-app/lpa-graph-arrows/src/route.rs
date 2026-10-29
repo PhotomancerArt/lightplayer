@@ -37,7 +37,7 @@ pub struct Bend {
 }
 
 impl Default for Bend {
-    /// The lab's edges: 0.4 of the distance, at least 20.
+    /// The Graph's edges: 0.4 of the distance, at least 20.
     fn default() -> Self {
         Bend {
             reach: 0.4,

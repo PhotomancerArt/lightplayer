@@ -6,7 +6,7 @@
 //! `132.410000` are one value. Writing goes the other way: an f32 is
 //! written in its shortest form (`132.41`, not `132.41000366210938`), and a
 //! number that did not change keeps the exact JSON it was read from, so a
-//! file the lab did not change is never rewritten at all.
+//! file the Graph did not change is never rewritten at all.
 
 use serde_json::{Map, Number, Value};
 

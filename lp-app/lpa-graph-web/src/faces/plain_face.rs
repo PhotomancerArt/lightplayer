@@ -1,4 +1,4 @@
-//! A node the lab doesn't simulate: a card that says what it is.
+//! A node the Graph doesn't simulate: a card that says what it is.
 
 use dioxus::prelude::*;
 use lpa_graph::card_geometry::card_row;

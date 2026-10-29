@@ -1,6 +1,6 @@
 //! Which way an arrow leaves its start or arrives at its end.
 //!
-//! The lab's edges leave a lamp heading toward the output and arrive at a
+//! The Graph's edges leave a lamp heading toward the output and arrive at a
 //! pixel from its left, so the head points onto the pixel. Those are two
 //! different kinds of answer, and both are here: "toward the other end",
 //! "on this side of the point", or an explicit direction.

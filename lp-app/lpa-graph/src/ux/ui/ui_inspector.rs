@@ -1,5 +1,5 @@
 //! The inspector: where you are, and the selection's sections (Studio's
-//! tabs and sections, flattened: the lab has one tab).
+//! tabs and sections, flattened: the Graph's inspector has one tab).
 
 use crate::domain::part_ref::TreeRef;
 use crate::domain::target::Target;

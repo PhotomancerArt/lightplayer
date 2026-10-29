@@ -1,16 +1,17 @@
-//! Patching by hand, keyboard first: the editor's half of the lab
-//! roadmap's stage 4 (the model's half is `domain/patch_edits.rs`).
+//! Patching by hand, keyboard first: the editor's half of the mapping
+//! lab roadmap's stage 4 (the model's half is `domain/patch_edits.rs`).
 //!
-//! **Looking is free; a pair takes an arm** (plan D1, the lab's D15 and
-//! Studio's walk-up model). Selecting a port, a run of pixels or an object
-//! only ever selects. `A` arms a patch from what is selected: one object,
-//! or a **free segment** (a run of selected pixels on one port). While
-//! armed, ← → walk the **candidates** for the other end — free segments in
-//! wire order from an object, objects not yet on the wire from a segment —
-//! and the board previews the pair as if it were made, so the piece shows
-//! where it would land. Enter (or a click on the other end) makes it; `M`
-//! makes it and moves on to the next free segment, still armed, which is
-//! old LightPlayer's loop: one key and one look per object. Esc disarms.
+//! **Looking is free; a pair takes an arm** (plan D1, the mapping lab's
+//! D15 and Studio's walk-up model). Selecting a port, a run of pixels or
+//! an object only ever selects. `A` arms a patch from what is selected:
+//! one object, or a **free segment** (a run of selected pixels on one
+//! port). While armed, ← → walk the **candidates** for the other end —
+//! free segments in wire order from an object, objects not yet on the wire
+//! from a segment — and the board previews the pair as if it were made,
+//! so the piece shows where it would land. Enter (or a click on the other
+//! end) makes it; `M` makes it and moves on to the next free segment,
+//! still armed, which is old LightPlayer's loop: one key and one look per
+//! object. Esc disarms.
 //! `S` arms a swap the same way.
 //!
 //! Unarmed, the wiring keys act on the selected objects: `R` reverses a

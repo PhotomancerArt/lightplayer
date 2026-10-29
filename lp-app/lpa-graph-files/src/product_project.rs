@@ -8,14 +8,14 @@
 //! it reads and its colour order; for an output, its ports, its name and
 //! the channel it reads; for a module, its nodes and exports; for a shader
 //! (or another node writing a `visual.*` channel), the channel it writes
-//! and its GLSL, which the lab shows and never runs — it gets a stand-in
+//! and its GLSL, which the Graph shows and never runs — it gets a stand-in
 //! pattern picked from its GLSL. Every other node (a clock, a button)
-//! opens as a plain card, and every file keeps its JSON — fields the lab
+//! opens as a plain card, and every file keeps its JSON — fields the Graph
 //! knows nothing about included.
 //!
 //! Ids:
 //!
-//! | Lab | Product |
+//! | Graph | Product |
 //! |---|---|
 //! | node id | the node's name (its key in its module), made unique in the project |
 //! | part id | the map2d's part id, as it is (a part is named with its fixture) |
@@ -57,7 +57,7 @@ pub struct ProductProject {
     pub manifest: Value,
     /// The root `module.json`.
     pub root: Value,
-    /// Every node's file, by the lab's node id.
+    /// Every node's file, by the Graph's node id.
     pub nodes: BTreeMap<NodeId, NodeFile>,
 }
 
@@ -98,7 +98,7 @@ pub struct MapFile {
     /// The mapping it holds, as read: what saving compares the fixture's
     /// against (a mapping that is the same is not written).
     pub mapping: lpc_mapping::part::Mapping,
-    /// The box the lab gave a document with no canvas (none is written
+    /// The box the Graph gave a document with no canvas (none is written
     /// back while the box stays this size).
     pub derived_size: Option<Vec2>,
 }
@@ -306,7 +306,7 @@ impl Reader<'_> {
         let mapping = map2d6::read(&text).map_err(|e| FilesError::new(&map_path, e.to_string()))?;
 
         // The box: the canvas, from (0, 0). A canvas that starts elsewhere
-        // keeps its corner on disk; the lab's box reaches back to (0, 0).
+        // keeps its corner on disk; the Graph's box reaches back to (0, 0).
         let (size, derived_size) = match mapping.canvas {
             Some([x, y, w, h]) => (Vec2::new(f64::from(x + w), f64::from(y + h)), None),
             None => {

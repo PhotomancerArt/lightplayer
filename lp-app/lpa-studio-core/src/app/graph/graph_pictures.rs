@@ -47,7 +47,7 @@ pub(crate) fn wanted_sources(editor: &Editor, device: bool) -> Vec<NodeId> {
     out
 }
 
-/// Each wanted source's visual product (`nodes`: the lab's nodes as
+/// Each wanted source's visual product (`nodes`: the Graph's nodes as
 /// Studio's).
 pub(crate) fn wanted_products(
     project: &ProjectController,

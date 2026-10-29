@@ -3028,7 +3028,7 @@ fn colour_order_belongs_to_the_fixture() {
     );
 }
 
-/// A node the lab doesn't edit (a fluid, a clock) is a plain card: it
+/// A node the Graph doesn't edit (a fluid, a clock) is a plain card: it
 /// selects and deletes like any node, and holds nothing.
 #[test]
 fn a_node_the_lab_doesnt_edit_is_a_plain_card() {

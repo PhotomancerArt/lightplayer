@@ -24,7 +24,7 @@
 //! ```
 //! use lpa_graph_arrows::*;
 //!
-//! // The lab's patch edge: leave toward the pixel, arrive from its left.
+//! // The Graph's patch edge: leave toward the pixel, arrive from its left.
 //! let arrow = Arrow::new(Vec2::new(0.0, 0.0), Vec2::new(320.0, 90.0))
 //!     .arrive(EndDirection::Side(Side::Left))
 //!     .label(Label::primary("lamps 0–49 at pixel 0"))

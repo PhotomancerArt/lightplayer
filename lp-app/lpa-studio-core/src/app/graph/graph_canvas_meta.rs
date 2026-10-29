@@ -22,7 +22,7 @@ pub(crate) const EDITOR_JSON: &str = "editor.json";
 pub(crate) const CANVAS_SURFACE: &str = "canvas";
 
 /// Pin every node `editor.json` (`text`) says is pinned. `address_of`
-/// names a lab node as `editor.json` keys it.
+/// names a Graph node as `editor.json` keys it.
 pub(crate) fn apply_pins(
     project: &mut Project,
     text: Option<&str>,

@@ -33,7 +33,7 @@ pub struct Fixture {
     /// The visual channel whose render product it samples (the product's
     /// `bindings.input.source`).
     pub reads: Channel,
-    /// What about it the lab can't hold yet, when there is something.
+    /// What about it the Graph can't hold yet, when there is something.
     /// Such a fixture opens as its box alone: nothing is drawn in it,
     /// nothing can be drawn into it or resized, and its files are never
     /// written. The rest of the project opens round it (plan M4).
@@ -46,7 +46,7 @@ pub struct Fixture {
 /// Why a fixture opens as its box alone, and where it can be edited.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Unsupported {
-    /// What the lab can't hold, as a noun phrase for a sentence: "its
+    /// What the Graph can't hold, as a noun phrase for a sentence: "its
     /// point-list mapping", "a patch row that places part of an object".
     pub what: String,
     /// The view that edits it, by the name the user sees it under.
@@ -89,7 +89,7 @@ impl Fixture {
     }
 
     /// How many channels one of its lamps takes (its lamps' colors; RGB is
-    /// 3, and the lab has only RGB lamps so far).
+    /// 3, and the Graph has only RGB lamps so far).
     pub fn channels_per_lamp(&self) -> u32 {
         self.mapping.lamp.channels_per_lamp().max(1)
     }

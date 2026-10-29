@@ -1,6 +1,6 @@
-//! The Graph view's stories: the mapping lab's canvas on real projects,
-//! with the lab's tree and inspector beside it. No board is attached in a
-//! story, so the lab's simulated board stands in for the board's frames.
+//! The Graph view's stories: the Graph's canvas (lpa-graph-web) on real
+//! projects, with its tree and inspector beside it. No board is attached in
+//! a story, so the Graph's simulated board stands in for the board's frames.
 //!
 //! The projects are the repo's own, at project format 12 with their
 //! mappings in map2d format 6 (baked into `lpa_graph_files::embedded`).

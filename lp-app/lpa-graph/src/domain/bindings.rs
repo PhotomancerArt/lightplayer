@@ -7,7 +7,7 @@
 //!   nearest one — in its own module first, then outward, a module at a
 //!   time (fit-check §6: reads look outward, writes stay local). Among
 //!   writers in one module, the first in attach order (by name).
-//! - **Fixture → output**, over a control channel: the lab's placements
+//! - **Fixture → output**, over a control channel: the Graph's placements
 //!   ARE this binding, read the product's way (fit-check §1, §6). A rule
 //!   naming an output means the fixture writes the channel that output
 //!   reads, so the rule's output decides the channel and the binding's

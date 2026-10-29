@@ -1,7 +1,7 @@
-//! A render source the lab made (the desk's shaders), written as a
+//! A render source the Graph made (the desk's shaders), written as a
 //! product shader node: its node file, and a small GLSL file standing in
 //! for its pattern, so the saved project has a shader the product can
-//! run. A shader the lab opened is never written: its own files stay as
+//! run. A shader the Graph opened is never written: its own files stay as
 //! they were.
 
 use lpa_graph::{Pattern, RenderSource};

@@ -3,10 +3,10 @@
 //!
 //! It writes its render product to a visual channel (`visual.out`), and
 //! every fixture reading that channel samples it at its lamps (D55). The
-//! lab does not run GLSL: what it shows is a stand-in [`Pattern`], picked
-//! from the node. A shader opened from a real project keeps its source
-//! text, to show, and is saved back byte for byte — the lab never edits
-//! one.
+//! Graph does not run GLSL: what its simulated board shows is a stand-in
+//! [`Pattern`], picked from the node. A shader opened from a real project
+//! keeps its source text, to show, and is saved back byte for byte — the
+//! Graph never edits one.
 
 use crate::domain::channel::Channel;
 use crate::domain::pattern::Pattern;
@@ -15,11 +15,11 @@ use crate::domain::pattern::Pattern;
 pub struct RenderSource {
     /// The product's kind, as written: `Shader`, `Texture`, `Fluid`.
     pub kind: String,
-    /// A shader's GLSL, when the lab read it. Shown, never run.
+    /// A shader's GLSL, when the Graph read it. Shown, never run.
     pub glsl: Option<String>,
     /// The visual channel it writes its picture to.
     pub writes: Channel,
-    /// What the lab shows instead of running it.
+    /// What the Graph's simulated board shows instead of running it.
     pub pattern: Pattern,
 }
 

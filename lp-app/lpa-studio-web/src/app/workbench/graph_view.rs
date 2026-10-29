@@ -1,19 +1,19 @@
-//! The Graph view: the mapping lab's canvas on the open project
+//! The Graph view: the Graph's canvas on the open project
 //! (`lpa-graph-web`'s components, over core's editor).
 //!
 //! Core owns the editor (`lpa_studio_core::app::graph`) and shares it
 //! through a [`GraphHandle`] the app provides as context. This page wraps
-//! that handle as the lab's [`GraphEditor`]: the components read the
+//! that handle as lpa-graph-web's [`GraphEditor`]: the components read the
 //! editor through it and hand every pointer, key and layout fact to core
 //! through it, synchronously. What core changes on its own (it opened the
 //! project, or rebuilt it for an edit made elsewhere) arrives as the
 //! Graph's `generation` on the studio view, and the page draws again.
 //!
 //! The center is the canvas, its toolbar and the hint bar; the workbench's
-//! own docks carry the lab's tree (left) and inspector (Props, right). The
+//! own docks carry the Graph's tree (left) and inspector (Props, right). The
 //! colours are the board's own frames (`UiGraphView::frame`), except while
 //! a drawing is in progress: nothing of it has reached the board yet, so
-//! its lamps light from the lab's simulated board.
+//! its lamps light from the Graph's simulated board.
 
 use std::rc::Rc;
 
@@ -79,7 +79,7 @@ pub fn use_graph_page_with(handle: GraphHandle, graph: Option<UiGraphView>) -> G
         let ed = ed.clone();
         move || {
             // A drawing in progress hasn't reached the board: light it
-            // from the simulated board, as the lab does — again as the
+            // from the Graph's simulated board — again as the
             // draft moves, and only then.
             if drawing() {
                 let _ = ed.read();
@@ -147,7 +147,7 @@ fn GraphCanvas(page: GraphPage, live: bool, on_action: EventHandler<UiAction>) -
         div {
             class: "graph-keys tw:flex tw:min-h-0 tw:flex-1 tw:flex-col tw:outline-none",
             tabindex: "0",
-            // The size class, from the window's width, as in the lab.
+            // The size class, from the window's width.
             onresize: move |evt| {
                 if let Ok(size) = evt.get_content_box_size() {
                     let width = web_sys::window()
@@ -288,7 +288,7 @@ fn OfferTool(
     }
 }
 
-/// The Tree dock's body on the Graph: the lab's outline.
+/// The Tree dock's body on the Graph: the Graph's outline.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn GraphTreePanel(page: GraphPage) -> Element {
@@ -297,7 +297,7 @@ pub fn GraphTreePanel(page: GraphPage) -> Element {
     }
 }
 
-/// The Props dock's body on the Graph: the lab's inspector.
+/// The Props dock's body on the Graph: the Graph's inspector.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn GraphPropsPanel(page: GraphPage) -> Element {

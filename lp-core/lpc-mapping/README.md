@@ -10,12 +10,19 @@ ADR `docs/adr/2026-10-27-mapping-model-parts-segments-patcher.md`):
 - **The mapping model and map2d format 6** (`part`, `patching`, `map2d6`):
   parts, segments and the patcher, in one file. Built in M1; since M3
   (project format 12) the engine runs it for every fixture, and its patching
-  is the engine's one patching path. Studio's Graph moves onto it in M4.
+  is the engine's one patching path. Studio's Graph edits it too.
+- **Edits** (`edit`, behind the `edit` feature): the part-tree edits an
+  editor makes. Below, "The `edit` feature".
 - **The older map2d document** (formats 1–5, `Map2dDoc`): its resolver is
   also the new model's geometry (each shape's lamps come from
-  `resolve_into` on a one-object document), and Studio's Map tab, hidden
-  since M3, still reads it until M4 deletes the tab. Nothing that runs a
-  project reads it: the engine reads format 6 only. The patch document
+  `resolve_into` on a one-object document). Nothing that runs a project
+  reads it: the engine reads format 6 only. What still reads it: the
+  logo-sign and small-dome generators (`lpa-studio-web`'s
+  `logo_sign_gen.rs`, `tools/lpt-geodome`) build their geometry with it
+  before they write format 6; Studio's fixture-face stories draw the
+  `corpus` scenes; and the format-12 upgrade's statements
+  (`lpa-upgrade/tests/step_v11_to_v12.rs`) check lamps against its
+  resolver. Studio's Map tab, which edited it, is gone (2026-10-28). The patch document
   (`patch.rs`, `PatchDoc`) and `MapObjectPath` were deleted in M3; projects
   were upgraded into format 6 by `lpa-upgrade`, which keeps its own frozen
   copy of the old readers.
@@ -117,6 +124,32 @@ circular display as soldered:
   accepts. Writing gives one canonical form, so a document read and written
   back is the same bytes.
 
+## The `edit` feature
+
+`edit/` holds the edits an editor makes to a `part::Mapping`, each one
+function that keeps the document whole: add, insert, move, remove and
+rename a part; wrap a part in a repeat, unrepeat it, expand a repeat into
+its copies; set a repeat's count or a shape's lamps; add and remove
+rings, set a ring's radius, a circle's way round and split, a path's
+split, where a shape is drawn from, a lattice; set starts and flows; set
+and clear override fields. Every editor gets the same answers: Studio's
+Graph, the app agent through the Graph's offers, and someday `lp-cli`.
+
+Some edits change which ids exist (a rename, a wrap in a repeat, an
+expand, fewer copies). Overrides are keyed by id and are never
+retargeted: an edit carries an override to its node's new id, or keeps
+it as it was for the patcher to report as gone. An edit that could keep
+one only by pointing it at a different node is refused, and a refused
+edit changes nothing.
+
+The feature is off by default. `lpa-graph` (Studio's Graph) turns it on.
+No firmware does, and neither does `lpc-engine`, so the C6 image never
+compiles it. Its statements are `tests/edit.rs`:
+
+```sh
+cargo test -p lpc-mapping --features edit
+```
+
 ## Modules
 
 | Module | What |
@@ -128,14 +161,14 @@ circular display as soldered:
 | `sorted_set` | Sorted-`Vec` id sets the reader, render and patcher check ids with (smaller on the C6 than a B-tree) |
 | `map2d_doc`, `map2d_resolve`, `map2d_fit`, `map2d_object_id`, `map2d_error` | The older document (formats 1–5) and its resolver; the resolver is also the new model's geometry |
 | `editor_meta` | Studio's `editor.json` |
-| `import/` | SVG import into the older document (the Map tab's) |
-| `corpus` | Shared test scenes in the older document (the Map tab's, until M4) |
+| `import/` | SVG import into the older document (the logo-sign generator uses it) |
+| `corpus` | Shared test scenes in the older document (Studio's fixture-face stories) |
 
 ## The older map2d document (formats 1–5)
 
 What follows describes `Map2dDoc`, which no project at format 12 holds: the
 upgrade rewrote every one into format 6. It stays for the resolver (the new
-model's geometry) and the hidden Map tab until M4.
+model's geometry) and the readers named at the top.
 
 A mapping document (`fixture.map2d.json`) is a format-versioned JSON asset,
 opaque to the slot system, holding parametric objects whose order **is** the
@@ -291,10 +324,10 @@ document therefore declares what it *needs*, not what wrote it — strip the las
 newer construct out and it drops back to the older format, readable by older
 firmware again.
 
-**Editors refuse to edit what they cannot parse, and never rewrite it.** Both
-Studio hosts (the fixture face and the standalone `#/mapping` page) render the
-refusal in place of the editor: nothing mounts, no body is emitted, no autosave
-is overwritten, and the stored document survives open → close byte-identical.
+**Editors refuse to edit what they cannot parse, and never rewrite it.**
+Studio's Graph (`/graph`; the old `#/mapping` page and the Map tab are gone)
+refuses a mapping it cannot read by name and writes nothing: the stored
+document survives open → close byte-identical.
 
 ## Corpus
 

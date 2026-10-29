@@ -3,7 +3,7 @@
 //! Each test's doc comment IS the statement; read this file as the list.
 //! When a statement changes, change the sentence first, then the code.
 //!
-//! Cards are the lab's: 60 wide, 27 tall (a header and one row), an output
+//! Cards are the Graph's: 60 wide, 27 tall (a header and one row), an output
 //! 14 taller per port.
 
 use lpa_graph_layout::spacing::*;
@@ -378,8 +378,9 @@ fn role(input: &LayoutInput, id: &str) -> LayoutRole {
         .unwrap()
 }
 
-/// The lab's own desk: a shader, three fixtures and two outputs at the
-/// root (one output fed by two fixtures), and a rig module.
+/// The desk (the shape of `lpa_graph::Project::seed`): a shader, three
+/// fixtures and two outputs at the root (one output fed by two fixtures),
+/// and a rig module.
 fn desk() -> LayoutInput {
     LayoutInput::new(vec![
         card("rainbow", LayoutRole::Source),

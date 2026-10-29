@@ -146,7 +146,7 @@ impl Node {
         }
     }
 
-    /// Drawn as a card (an output, a render source, a node the lab doesn't
+    /// Drawn as a card (an output, a render source, a node the Graph doesn't
     /// simulate), not a frame.
     pub fn is_card(&self) -> bool {
         matches!(
@@ -156,7 +156,7 @@ impl Node {
     }
 
     /// A card that feeds what is to its right — a render source, or a node
-    /// the lab doesn't simulate — so the layout puts it at the left.
+    /// the Graph doesn't simulate — so the layout puts it at the left.
     pub fn feeds_from_the_left(&self) -> bool {
         matches!(self.kind, NodeKind::Source(_) | NodeKind::Other(_))
     }

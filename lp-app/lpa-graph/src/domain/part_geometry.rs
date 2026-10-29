@@ -1,4 +1,4 @@
-//! The geometry edits the canvas makes to parts, in the lab's units: a
+//! The geometry edits the canvas makes to parts, in the Graph's units: a
 //! path's points and jumpers, a circle's rings, moving a part.
 //!
 //! A path is SVG's moves and lines (`lpc_mapping::part::Path`): its points

@@ -3,7 +3,7 @@
 //!
 //! **Opening.** While the Graph tab is the place, the actor asks the
 //! controller to settle ([`GraphController::settle`]) after each batch.
-//! The first time, it opens the project with the lab's files crate,
+//! The first time, it opens the project with lpa-graph-files,
 //! fetching from the board every file the crate asks for that Studio
 //! hasn't read yet ([`GraphSource`]), then builds the editor and lays it
 //! out on the canvas (`lpa-graph-layout`).
@@ -32,7 +32,7 @@
 //! name; it is keyed again by the id the Graph gave it
 //! (`ProductProject::adopt_new_nodes`), so the next save knows it as
 //! written instead of writing its file again and deleting it. Where pinned nodes sit is written too (`editor.json`'s
-//! `canvas` surface, Debug's Pinning). Undo is the Graph's own (the lab's
+//! `canvas` surface, Debug's Pinning). Undo is the Graph's own (lpa-graph's
 //! project snapshots); what it puts back is saved the same way. A deleted
 //! node's files (`Saved::removed`) are deleted through the same asset path
 //! (ruling DD36), so no file stays that nothing names; undoing the delete
@@ -102,7 +102,7 @@ struct GraphOpened {
     files: ProductProject,
     /// Every path the open asked for, and what it said.
     read: BTreeMap<String, Option<String>>,
-    /// The lab's nodes, as Studio's.
+    /// The Graph's nodes, as Studio's.
     nodes: BTreeMap<NodeId, lpc_model::NodeId>,
 }
 
@@ -434,7 +434,7 @@ impl GraphController {
 
     /// Show the selection on the board while the Graph is the place, and
     /// stop when it isn't or nothing is selected: each fixture's
-    /// `selection` slot for what is selected in fixtures (the lab's rules,
+    /// `selection` slot for what is selected in fixtures (the Graph's rules,
     /// plan M4b), and the outputs' `highlight` slots — the Patch view's
     /// pulse — for outputs, ports and pixels.
     async fn highlight(
@@ -456,7 +456,7 @@ impl GraphController {
             (Some(opened), Some(selection)) => {
                 let editor = self.handle.editor().borrow();
                 let p = &editor.project;
-                // The lab's own rules when every fixture's firmware has the
+                // The Graph's own rules when every fixture's firmware has the
                 // `selection` slot (plan M4b); M3's `highlight` otherwise.
                 let has_slot = p.fixtures().iter().all(|n| {
                     opened
@@ -636,7 +636,7 @@ impl GraphController {
     }
 }
 
-/// The lab's nodes, as Studio's: each by the file its definition lives in.
+/// The Graph's nodes, as Studio's: each by the file its definition lives in.
 fn node_map(
     project: &ProjectController,
     files: &ProductProject,
@@ -651,7 +651,7 @@ fn node_map(
         .collect()
 }
 
-/// A lab node as `editor.json` keys it: its tree path.
+/// A Graph node as `editor.json` keys it: its tree path.
 fn address_of(
     project: &ProjectController,
     nodes: &BTreeMap<NodeId, lpc_model::NodeId>,

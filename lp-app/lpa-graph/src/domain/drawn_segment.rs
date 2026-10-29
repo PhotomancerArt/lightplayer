@@ -234,12 +234,12 @@ fn repeats_around<'a>(
     None
 }
 
-/// A point of the mapping, in the lab's units.
+/// A point of the mapping, in the Graph's units.
 pub fn vec2(p: [f32; 2]) -> Vec2 {
     Vec2::new(f64::from(p[0]), f64::from(p[1]))
 }
 
-/// A point of the lab, as the mapping holds it.
+/// A point of the Graph, as the mapping holds it.
 pub fn f32s(p: Vec2) -> [f32; 2] {
     [p.x as f32, p.y as f32]
 }

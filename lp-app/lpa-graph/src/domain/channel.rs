@@ -6,7 +6,7 @@
 //! fixture reads `visual.out`, and writes its lamps to `control.out`,
 //! which an output reads). On disk that is a binding on the node:
 //! `"output": {"target": "bus:visual.out"}`, `"input": {"source":
-//! "bus:control.out"}` (`lpc-model`'s `BindingDefs`). The lab follows that
+//! "bus:control.out"}` (`lpc-model`'s `BindingDefs`). The Graph follows that
 //! closely (D52, D55): every edge between two nodes on the canvas is one
 //! of these channels, and says its name (D53).
 //!

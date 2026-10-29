@@ -31,7 +31,7 @@ impl Picture {
     }
 
     /// A picture made by sampling `colour` at each pixel's centre, `(0, 0)`
-    /// the top-left corner and `(1, 1)` the bottom-right: the lab's
+    /// the top-left corner and `(1, 1)` the bottom-right: the Graph's
     /// simulated board drawing a stand-in pattern.
     pub fn sampled(width: u32, height: u32, colour: impl Fn(Vec2) -> Rgb) -> Picture {
         let mut rgb = Vec::with_capacity((width * height * 3) as usize);

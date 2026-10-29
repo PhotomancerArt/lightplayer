@@ -71,8 +71,8 @@ then drops as `Crowded` rather than nudging the primary aside.
 
 ## How the page uses it
 
-Core says which edges there are and what each says; the page
-(`web/src/edge_layer.rs`) builds one `Arrow` per shown edge from where the
+The Graph's editor (`lpa-graph`) says which edges there are and what each
+says; the page (`lpa-graph-web/src/edge_layer.rs`) builds one `Arrow` per shown edge from where the
 cards landed, in screen pixels: on the canvas a curve from the source's
 right side, arriving from `Side::Left`; in the stack a `Gutter` route on
 its own lane, the shorter spans nearer the column. What it carries is a
@@ -80,5 +80,5 @@ its own lane, the shorter spans nearer the column. What it carries is a
 near the end. It lays them out together and draws what comes back: the
 path, the heads, and each placed label as a background-filled box with its
 text, rotated. Hovering tests `Arrow::line().distance_to`, and the page
-reports the hovered edge to core. The model doesn't depend on this crate;
-the page does.
+reports the hovered edge to the editor. The editor doesn't depend on this
+crate; the page does.

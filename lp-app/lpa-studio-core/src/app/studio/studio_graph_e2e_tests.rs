@@ -1,6 +1,6 @@
 //! The Graph tab on a running project, end to end: the actor opens the
 //! project's own files (project format 12, every mapping map2d format 6)
-//! on the lab's model while the Graph is the place, the page's handle reads
+//! on lpa-graph's model while the Graph is the place, the page's handle reads
 //! the same editor, and the colours are the board's own published frames;
 //! the selection breathes or chases on the board through its `highlight`
 //! and `selection` slots (plans `lp2025/2026-10-17-0202-mapping-lab-into-studio`
@@ -67,7 +67,7 @@ fn the_graph_opens_a_format_6_fixture() {
     );
 }
 
-/// The choker opens on the Graph as the lab opens it: its five nodes,
+/// The choker opens on the Graph as lpa-graph-files opens it: its five nodes,
 /// twelve paths and 73 lamps, laid out, its shader feeding its fixture and
 /// its fixture its output. Until the Graph is the place nothing is read.
 #[test]

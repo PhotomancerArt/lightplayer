@@ -41,7 +41,7 @@ pub struct UiFixtureFace {
     /// The shape the picture is fitted into: the fixture's render size,
     /// else the picture's own.
     pub render_size: Option<(u32, u32)>,
-    /// Why nothing is drawn in it: what it holds that the lab can't show
+    /// Why nothing is drawn in it: what it holds that the Graph can't show
     /// yet, in a sentence.
     pub not_shown: Option<String>,
     /// How far apart its lamps are, in its own units: the usual gap
@@ -162,7 +162,7 @@ pub struct UiSourceFace {
     pub pattern: Pattern,
 }
 
-/// A node the lab doesn't simulate: it says what it is.
+/// A node the Graph doesn't simulate: it says what it is.
 #[derive(Debug, Clone, PartialEq)]
 pub struct UiPlainFace {
     /// `power button`.

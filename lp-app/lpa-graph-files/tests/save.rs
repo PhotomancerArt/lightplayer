@@ -418,7 +418,7 @@ fn a_journeys_patching_reopens_landing_the_same() {
     );
 }
 
-/// The desk (the lab's own seed, every node new) saves as a new project:
+/// The desk (lpa-graph's own seed, every node new) saves as a new project:
 /// module, fixtures, outputs, a stand-in shader and a format-6 mapping for
 /// each fixture; it opens again with the same lamps landing on the same
 /// pixels.

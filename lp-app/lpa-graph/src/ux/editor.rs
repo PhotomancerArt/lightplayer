@@ -205,8 +205,8 @@ pub struct Editor {
     pub armed: Option<Armed>,
     pub debug: DebugFlags,
     /// The project runs for real (Studio's Graph: a board, or Studio's
-    /// preview host): a shader's picture is its own, not the lab's
-    /// stand-in, so nothing says it is one.
+    /// preview host): a shader's picture is its own, not the simulated
+    /// board's stand-in, so nothing says it is one.
     pub runs_for_real: bool,
     /// The layout you chose; `None` until you choose one, and the screen's
     /// size class picks.

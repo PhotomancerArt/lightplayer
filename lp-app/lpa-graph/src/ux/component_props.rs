@@ -182,7 +182,7 @@ impl Project {
     pub fn props_of(&self, t: &Target) -> Vec<(PropDesc, PropRaw)> {
         match t {
             // A module and an output have none yet (a name, later).
-            // A fixture the lab can't hold yet keeps its size.
+            // A fixture the Graph can't hold yet keeps its size.
             Target::Node(id) => match self.fixture(id) {
                 Some(f) if f.unsupported.is_none() => vec![
                     (WIDTH, PropRaw::Number(f.size.x)),

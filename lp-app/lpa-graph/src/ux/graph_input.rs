@@ -1,12 +1,13 @@
 //! Everything a page tells the editor, as one plain value.
 //!
-//! A page (the lab's, or Studio's Graph tab) never calls the editor's
-//! methods itself: it turns each browser event, and each fact it worked
-//! out (where the layout put the cards, the edge under the pointer, the
-//! screen's size class), into a [`GraphInput`] and hands it to its host.
-//! The lab applies it to its own editor at once; Studio hands it to core,
-//! which owns the editor there. One function, [`Editor::input`], applies
-//! any of them, so both hosts mean the same thing by the same input.
+//! A page (Studio's Graph tab) never calls the editor's methods itself:
+//! it turns each browser event, and each fact it worked out (where the
+//! layout put the cards, the edge under the pointer, the screen's size
+//! class), into a [`GraphInput`] and hands it to its host.
+//! Studio hands it to core, which owns the editor there; the tests apply
+//! it to an editor of their own (as the mapping lab's page once did). One
+//! function, [`Editor::input`], applies any of them, so every host means
+//! the same thing by the same input.
 
 use crate::domain::geom::Vec2;
 use crate::domain::node::NodeId;

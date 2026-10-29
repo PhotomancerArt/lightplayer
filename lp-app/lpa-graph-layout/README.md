@@ -3,10 +3,12 @@
 Layout for the Graph (Studio's project canvas): **a semantic graph of nodes in, placements
 out.** Pure Rust, no IO, no dependencies at all.
 
-Where cards sit is the view layer's job (architecture §5, D63): core says
-what there is (each node's role, size and parent, the dataflow), and the
-page runs this crate and draws the result. It is the layout piece of the
-Graph's view model, the way `lpa-graph-arrows` is the arrow piece.
+Where cards sit is the view layer's job: the Graph's editor (`lpa-graph`)
+says what there is (each node's role, size and parent, the dataflow,
+`Editor::layout_input`), Studio runs this crate, and the placement goes
+back to the editor as a fact (`Editor::set_placement`). The editor never
+lays anything out itself. This is the layout piece of the Graph, the way
+`lpa-graph-arrows` is the arrow piece.
 
 ```bash
 cargo test -p lpa-graph-layout  # the statements
@@ -75,8 +77,8 @@ hand. So, in order:
 
 ## Pins: the door left open
 
-The lab is trying automatic layout only (D64): pinning is behind a debug
-flag, and every reach for a drag is logged as a finding. Pins are an input
+The Graph is trying automatic layout only: pinning is behind its Debug
+switch, and every reach for a drag is a finding. Pins are an input
 from the start, as fixed points everything else lays out around, so if the
 trial says hand placement is needed, it is constraints added, not a
 rewrite.

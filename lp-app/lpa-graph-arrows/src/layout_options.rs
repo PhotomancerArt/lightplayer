@@ -1,6 +1,6 @@
 //! The knobs of label layout, all in the caller's units.
 //!
-//! The defaults suit the lab's canvas at screen scale (CSS pixels): 10-unit
+//! The defaults suit the Graph's canvas at screen scale (CSS pixels): 10-unit
 //! primary text, 9-unit quiet text.
 
 use crate::{LabelRole, Vec2};

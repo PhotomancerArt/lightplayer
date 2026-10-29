@@ -45,7 +45,7 @@ impl Head {
 }
 
 impl Default for Head {
-    /// The lab's edge head: a triangle 7 long and 7 wide.
+    /// The Graph's edge head: a triangle 7 long and 7 wide.
     fn default() -> Self {
         Head::triangle(7.0, 7.0)
     }

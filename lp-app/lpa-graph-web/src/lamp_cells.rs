@@ -1,6 +1,7 @@
 //! A fixture's live view: each lamp as a cell of light, the way Studio's
 //! live view draws them (`lamp_cells_geometry.rs` in `lpa-studio-web`, built
-//! again here on the lab's rasterizer: the lab depends on no product crate).
+//! again here on this crate's own rasterizer: `lpa-studio-web` depends on
+//! this crate, not the other way round).
 //!
 //! Every lamp claims the ground nearer to it than to any other lamp, out to
 //! a radius of 0.92 × the median distance between nearest neighbours, and

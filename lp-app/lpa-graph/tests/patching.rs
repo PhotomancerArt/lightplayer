@@ -1,6 +1,6 @@
-//! Statements: patching by hand (the lab roadmap's stage 4). One sentence
-//! per test, as in `statements.rs`: each test's doc comment IS the
-//! statement.
+//! Statements: patching by hand (the mapping lab roadmap's stage 4). One
+//! sentence per test, as in `statements.rs`: each test's doc comment IS
+//! the statement.
 //!
 //! The projects here are bare: a rainbow shader, a fixture `f` of paths,
 //! and an output `out` with the ports named.

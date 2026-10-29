@@ -5,6 +5,11 @@ two-pass posture ruled by Yona). Companion to the unified editor-shell spike
 (`spikes/unified-editor-shell/index.html`) and the slice-2 ADR
 (`../adr/2026-08-10-object-ids-output-names-and-scatter.md`).
 
+**2026-10-28:** the Patching view and the Map view are gone. The Graph,
+Studio's one project canvas, replaced them: patching by hand is its
+`A`/`M`/`S` arm on `lpc-mapping`'s patcher (`lp-app/lpa-graph/README.md`,
+"Keys"). What follows is the record of the earlier flow.
+
 **Amended 2026-08-20** (patching-view G1, `spikes/patching-controls/`
 rounds 1–3; ADR `../adr/2026-08-20-patching-view-grain-follows-activity.md`):
 the flow's home is ONE patch panel in the Patching view (object section

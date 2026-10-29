@@ -143,7 +143,7 @@ impl Shown {
 
 /// A target inside a fixture, or holding fixtures: a lamp, an object, a
 /// component, a fixture, a module. Not an output, its ports or pixels, a
-/// render source or a card the lab doesn't simulate.
+/// render source or a card the Graph doesn't simulate.
 fn is_fixture_side(p: &Project, t: &Target) -> bool {
     match t {
         Target::Port { .. } | Target::Span { .. } | Target::Pixel { .. } => false,

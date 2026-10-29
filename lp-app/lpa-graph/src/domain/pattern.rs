@@ -1,8 +1,9 @@
-//! Stand-in patterns: what a render source shows in the lab.
+//! Stand-in patterns: what a render source shows on the Graph's
+//! simulated board.
 //!
-//! The lab does not run GLSL (D55). A shader's render product is one of a
+//! The Graph does not run GLSL (D55). A shader's render product is one of a
 //! few built-in pictures instead, picked from the shader (its GLSL, or its
-//! name when the lab has none) so that different shaders look different
+//! name when the Graph has none) so that different shaders look different
 //! and the same shader always looks the same.
 //! They are enough to see the chain work: a fixture samples its picture at its
 //! lamps, and the colours go on through the patch to the pixels.

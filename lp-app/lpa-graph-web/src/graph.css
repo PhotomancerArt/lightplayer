@@ -1,7 +1,7 @@
 /* The mapping canvas, its panels and its hint bar (lpa-graph-web).
    Everything is nested under .graph, so a host page (Studio) keeps its
-   own styles. The colours are Studio's tokens, copied so the lab needs
-   nothing from the app. */
+   own styles. The colours are Studio's tokens, copied so lpa-graph-web needs
+   nothing from lpa-studio-web. */
 .graph {
     color-scheme: dark;
     --bg: #0d0d13;

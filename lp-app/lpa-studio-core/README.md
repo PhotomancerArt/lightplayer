@@ -53,8 +53,12 @@ lpa-studio-web, future CLI, future desktop, tests, and agents
   unit-tested), and `share` (the `lp.package` / `lp.node` clipboard
   envelope formats — see `docs/adr/2026-07-28-share-envelopes.md`; pure
   byte functions, with the clipboard itself living in the web edge).
-- `app/graph/` is the **Graph** tab's state: the Graph's editor
-  (`lpa-graph`) on the open project. While
+- `app/graph/` is the **Graph** tab's state. The Graph is Studio's one
+  project canvas and its mapping editor; a project's tabs are Nodes ·
+  Graph. The Map and Patch tabs are gone (2026-10-28), and their old
+  route suffixes (`/mapping`, `/map`, `/patch`, `/patching`) open the
+  Graph. Core here is the Graph's controller, its offers, its highlight
+  and how it opens a project; the editor itself is `lpa-graph`. While
   the Graph is the place, the actor opens the project's own files with
   `lpa-graph-files` (fetching what it asks for), lays it out with
   `lpa-graph-layout`, and rebuilds it only when a file it read changes. The page
@@ -70,8 +74,9 @@ lpa-studio-web, future CLI, future desktop, tests, and agents
   save through
   the ordinary asset edit (`apply_asset_body`) in map2d format 6, a deleted
   node's files are deleted the same way (`apply_asset_delete`), pins go in `editor.json`'s per-node `canvas` surface, and the
-  selection breathes or chases on the board through the Patch view's
-  `PatchPulseOp`. Colours are the board's own published frames. Plan:
+  selection breathes or chases on the board through a `PatchPulseOp`
+  (`graph_highlight.rs`; the op lives in `app/project/patch_pulse.rs`).
+  Colours are the board's own published frames. Plan:
   `lp2025/2026-10-17-0202-mapping-lab-into-studio`.
 - A future `base/` layer can hold truly primitive app-core concepts if one
   emerges. It is intentionally not present until there is a clean need for it.

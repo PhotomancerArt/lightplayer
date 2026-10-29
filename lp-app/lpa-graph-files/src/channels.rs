@@ -9,7 +9,7 @@
 //! attach order, that reads it (the engine's `is_default_fragments_consumer`).
 //! That is the node model, followed as it is (D52).
 //!
-//! The lab's auto rule names an output; on disk it is "the fixture writes
+//! The Graph's auto rule names an output; on disk it is "the fixture writes
 //! the channel that output reads" (fit-check §6).
 //!
 //! Scope: a channel belongs to a module. A module that exports a channel

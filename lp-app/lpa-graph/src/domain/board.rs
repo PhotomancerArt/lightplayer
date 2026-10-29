@@ -1,13 +1,14 @@
 //! The simulated board: a small recreation of the engine's dataflow (D55).
 //!
-//! The editor is always attached to a running board (D44). Until the lab
-//! talks to a real one, the board is simulated here, as the product's
+//! The editor is always attached to a running board (D44). Where no
+//! real one draws it (lpa-graph's tests, Studio's Graph stories, a drawing
+//! not yet on the board), the board is simulated here, as the product's
 //! engine runs it — nothing too crazy, and outside the engine's
 //! constraints:
 //!
 //! 1. **A render source** (a shader) publishes a render product on a
 //!    visual channel: a picture to sample at a point and a time
-//!    (`render_product.rs`; a stand-in pattern, since the lab runs no
+//!    (`render_product.rs`; a stand-in pattern, since the Graph runs no
 //!    GLSL).
 //! 2. **A fixture** reads that channel, samples the picture at each of its
 //!    lamps (in its own box, as the unit square), applies its **fixture
@@ -46,7 +47,7 @@ use crate::domain::project::Project;
 use crate::domain::rgb::Rgb;
 use crate::domain::target::Target;
 
-/// How many pixels each way the lab's simulated board draws a render
+/// How many pixels each way the Graph's simulated board draws a render
 /// source's stand-in.
 pub const SIMULATED_PICTURE: u32 = 32;
 
@@ -68,7 +69,7 @@ pub struct BoardFrame {
     /// project (`derived.rs`).
     wiring: Arc<Wiring>,
     /// Each render source's picture, when there is one: the board's (or the
-    /// preview host's) frame of its render product, or the lab's stand-in
+    /// preview host's) frame of its render product, or the Graph's stand-in
     /// drawn (plan D11).
     pictures: HashMap<NodeId, Picture>,
 }
