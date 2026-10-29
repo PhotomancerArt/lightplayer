@@ -147,7 +147,7 @@ fn probe_project_files(choker: &Path) -> Vec<(String, Vec<u8>)> {
                 text = bright.into_bytes();
             }
             "output.json" => {
-                text = b"{\n  \"kind\": \"Output\",\n  \"ports\": {\n    \"0\": { \"endpoint\": \"ws281x:local:D10\" }\n  },\n  \
+                text = b"{\n  \"kind\": \"Output\",\n  \"name\": \"1\",\n  \"ports\": {\n    \"0\": { \"endpoint\": \"ws281x:local:D10\" }\n  },\n  \
                     \"bindings\": {\n    \"input\": { \"source\": \"bus:control.out\" }\n  },\n  \
                     \"options\": {\n    \"white_point\": [1, 1, 1],\n    \"interpolation_enabled\": false,\n    \
                     \"dithering_enabled\": false,\n    \"lut_enabled\": false\n  }\n}\n"
@@ -161,14 +161,20 @@ fn probe_project_files(choker: &Path) -> Vec<(String, Vec<u8>)> {
 }
 
 /// Each lamp's expected RGB U16 from the rule, in f64, from the document's
-/// own lamps (wire order = resolve order on the choker's one auto-flowed
-/// strand).
+/// own lamps (wire order = render order: the choker's one fixture starts at
+/// port 0, lamp 0 of output "1" and has no overrides).
 fn expected_channels(choker: &Path) -> Vec<[u16; 3]> {
-    let doc = lpc_mapping::Map2dDoc::from_json(
+    let mapping = lpc_mapping::map2d6::read(
         &std::fs::read_to_string(choker.join("playful.map2d.json")).unwrap(),
     )
-    .expect("choker map2d parses");
-    let lamps = lpc_mapping::resolve(&doc).expect("resolve").positions();
+    .expect("choker map2d reads as format 6");
+    assert!(
+        mapping.overrides.is_empty(),
+        "the choker's lamps run in render order"
+    );
+    let lamps = lpc_mapping::part::render(&mapping)
+        .expect("render")
+        .take_positions();
     let mut min = [f64::MAX; 2];
     let mut max = [f64::MIN; 2];
     for lamp in &lamps {

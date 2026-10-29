@@ -294,3 +294,58 @@ never inside it.
   (unchanged from `2026-07-05-artifact-format-version-and-schema-snapshots.md`
   decision 6) — this plan gave the format a migration path, not a
   compatibility classifier.
+
+## Amendment (2026-10-28): steps that add and remove files, frozen arithmetic, and the first bump across over-the-air boards
+
+Project format 12 (the mapping rebuild's M3, PR #1319; planning
+`lp2025/2026-10-27-0114-mapping-rebuild`, Q54, Q55, Q60, Q99–Q114) set three
+precedents for every later step.
+
+- **A step may add and remove files (Q60).** `v11_to_v12` deletes each
+  `*.patch.json` (its patching moves into the map2d) and adds a
+  `<stem>.map2d.json` for a fixture whose lamps were listed in its def.
+  `UpgradeReport` names them in `added_files` and `removed_files` beside
+  `changed_files`; `ProjectFiles` has a remove. The corpus test no longer
+  asserts that the file set never changes: it asserts that it changes
+  exactly as the report says, and every other file comes back
+  byte-identical. Every caller applies all three lists (Studio's package
+  upgrade and zip import, `lp-cli project upgrade`, the update's project
+  stage).
+- **A step may carry a frozen port of retired arithmetic (Q55).** The step
+  needs where every lamp lands today, which depends on geometry (filled
+  polygons count cells, ring sets derive their rings), so it cannot work on
+  JSON shapes alone. `lpa-upgrade/src/v11/` is a port of exactly that
+  subset of format 11 (lamp counts, the patch rows, auto-flow, the default
+  output, port slicing) onto `JsonNode`, cell rule copied verbatim with its
+  source commit named, `libm` for bit-identical trig. The crate still
+  depends on no current model: `lpc-mapping` is a dev-dependency only.
+- **Its proof shares no code with it (Q54).** Before the bump, the live
+  format-11 engine recorded where every lamp of every repo and corpus
+  project landed: the landing goldens under `lpa-upgrade/tests/landing/`,
+  never re-blessed (the recorder was deleted with the bump). After it,
+  `lpc-engine`'s `upgrade_landing` lands every lamp of the migrated
+  projects exactly there (117 projects, 66,654 lamps, 0 differences), and
+  `frozen_landing` checks the frozen arithmetic against the same goldens.
+  A step whose arithmetic could hide behind itself proves nothing.
+- **`upgrade_to(files, target)`** runs the chain to a given format, beside
+  `upgrade_to_current`: a board's engine may read an older or newer format
+  than this host's current one. A project already at `target` comes back
+  untouched with an empty report; a `target` past the chain is refused
+  (update the host); a project newer than `target` is refused.
+  `upgrade_with_chain` runs a caller's chain, which is how a test proves a
+  toy v12→v13 step rides the same path. `upgrade_to_current` keeps its
+  classifier guard (an already-current project is still an error for the
+  library callers).
+- **The first bump across boards that update over the air.** Decision 7
+  (pull → migrate in the library → push, never in place) is narrowed by
+  [`2026-10-28-firmware-updates-upgrade-the-boards-projects.md`](2026-10-28-firmware-updates-upgrade-the-boards-projects.md):
+  a firmware update now ends by upgrading the board's own stored projects,
+  run by the host over the board's link with this crate (one atomic write
+  per project, the startup project first, no click), and a board found
+  later with older projects is finished on connect. The device still never
+  migrates; it refuses an older project by name and keeps serving files.
+  The policy for bumps themselves (an ask, but a cheap one) is
+  [`2026-10-28-project-format-policy.md`](2026-10-28-project-format-policy.md).
+  G2's question 5 (the window between the new engine's first start and the
+  write: accept, or close it with a core file service) is answered at the
+  ship gate; **the answer is recorded here when Yona gives it.**

@@ -1,5 +1,5 @@
 {
-  "format": 11,
+  "format": 12,
   "name": "Palette Waves",
   "description": "A sunset palette (violet, pink, orange, gold) travelling the strip under a slow swell; on a disc it lands as rings. Ported from WLED's Colorwaves.",
   "kind": "pattern",

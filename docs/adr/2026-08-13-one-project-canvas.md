@@ -1,6 +1,6 @@
 # ADR: The one project canvas
 
-- **Status:** Accepted
+- **Status:** Superseded (2026-10-28) by `2026-10-28-graph-is-the-project-canvas.md`: the Map and Patch tabs are deleted; the Graph is the one project canvas.
 - **Date:** 2026-08-13
 - **Deciders:** Photomancer
 - **Plan:** lp2025/2026-08-13-0859-one-project-canvas (PR #416);

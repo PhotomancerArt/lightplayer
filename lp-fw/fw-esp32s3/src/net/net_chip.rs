@@ -18,6 +18,12 @@ pub const PRIORITY: u32 = 1;
 /// (`io_thread`: an unpinned thread in this `multi_core` esp-rtos build can
 /// try to schedule core 1, which this firmware never starts).
 pub const CORE: u32 = 0;
+/// The radio's TX power cap: 15 dBm (60 quarter dBm). At the blob's 20 dBm
+/// FS3 (a XIAO ESP32-S3 Plus) never authenticated, 0 of 26 attempts, while
+/// it heard the access point at −15…−44 dBm; capped at 15 dBm it joined 10
+/// of 10 on the first attempt
+/// (docs/defects/2026-10-22-the-s3-wifi-image-never-authenticates.md).
+pub const MAX_TX_POWER_QDBM: i8 = 60;
 
 /// What `net_thread::start` is given on this chip.
 pub static NET_CHIP: NetChip = NetChip {
@@ -27,6 +33,7 @@ pub static NET_CHIP: NetChip = NetChip {
     on_thread_start: nothing,
     first_light_decided,
     on_join_attempt: nothing,
+    max_tx_power_qdbm: Some(MAX_TX_POWER_QDBM),
     bind_seam_wake: crate::seams::seam_wake_handler::bind,
 };
 

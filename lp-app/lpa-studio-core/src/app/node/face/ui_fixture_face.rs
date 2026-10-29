@@ -9,9 +9,9 @@ use crate::{
 ///
 /// Renders the lit preview (LED sample points, not the shader texture) with
 /// the dominant horizontal brightness fader below. When the fixture's
-/// mapping is a `Map2d` document, the output display doubles as the entry
-/// to the in-place mapping editor ("one home"): `mapping_editor` carries
-/// the asset-pipeline plumbing the web editor syncs through.
+/// mapping is a `Map2d` document, `mapping_editor` carries its
+/// asset-pipeline plumbing (the patch surface reads the document through
+/// it), and the web face links to the Graph, where the mapping is edited.
 #[derive(Clone, Debug, PartialEq)]
 pub struct UiFixtureFace {
     /// The fixture's produced control output, rendered as the lit preview.
@@ -22,9 +22,6 @@ pub struct UiFixtureFace {
     /// The mapping document's inline-editor plumbing (fetch/apply/revert
     /// targets), present when the mapping slot resolves to a `Map2d` asset.
     pub mapping_editor: Option<UiAssetEditor>,
-    /// The patch document's plumbing (`{stem}.patch.json`), when the
-    /// fixture authors one — the patch surface's write target (P6).
-    pub patch_editor: Option<UiAssetEditor>,
     /// Estimated draw against the declared supply budget. `None` when the
     /// fixture declares no budget, in which case nothing is ever limited and
     /// there is nothing worth saying on the face.
@@ -94,7 +91,7 @@ pub struct UiShapePresets {
     /// wire), Matrix `false` (the area is the real layout).
     pub strip_order: Option<ProjectSlotAddress>,
     /// Whether the mapping currently resolves to a `Map2d` document —
-    /// what makes the "Mapped shape" tile a live entry into the mapping
-    /// editor rather than a disabled hint.
+    /// what makes the "Mapped shape" tile live (it keeps the map, and on a
+    /// lens links to the Graph to edit it) rather than a disabled hint.
     pub has_map2d: bool,
 }

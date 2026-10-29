@@ -68,8 +68,10 @@ lpc-shared = { path = "../lp-core/lpc-shared" }
 lpfs = { path = "../lp-base/lpfs", features = ["std"] }
 lpc-view = { path = "../lp-core/lpc-view" }
 # `lan`: a board on the LAN (`lan:<host>[:port]`, a secure lp-link inside a
-# WebSocket; Wi-Fi plan P06).
-lpa-client = { path = "../lp-app/lpa-client", features = ["ws", "serial", "emu", "lan"] }
+# WebSocket; Wi-Fi plan P06). `project-stage`: the update's last leg, a
+# board's projects upgraded to its engine's format
+# (`commands/ota_host/board_projects.rs`).
+lpa-client = { path = "../lp-app/lpa-client", features = ["ws", "serial", "emu", "lan", "project-stage"] }
 # The cloud relay (`serve --relay`, `relay:`): its protocol and the cloud API
 # calls that fetch the account key (made with the one reqwest below).
 lpc-relay = { path = "../lp-core/lpc-relay" }
@@ -176,7 +178,8 @@ dioxus-ssr = { version = "0.7", optional = true }
 tempfile = "3"
 # `hardware tree` tests build real store images on the NOR model, and forge
 # the few the writer never makes (a bad directory name) record by record.
-lp-tree-store = { path = "../lp-base/lp-tree-store", features = ["inspect", "nor-sim", "stats"] }
+# `lpfs`: a real engine on the store (tests/board_projects_stage.rs).
+lp-tree-store = { path = "../lp-base/lp-tree-store", features = ["inspect", "nor-sim", "stats", "lpfs"] }
 lp-nor-sim = { path = "../lp-emu/lp-nor-sim" }
 lp-crc32 = { path = "../lp-base/lp-crc32" }
 lpa-server = { path = "../lp-app/lpa-server" }

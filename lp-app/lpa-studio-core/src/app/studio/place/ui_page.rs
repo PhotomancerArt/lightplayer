@@ -35,8 +35,8 @@ pub enum UiPage {
     Stories,
 }
 
-/// Which surface of the project editor the page shows: the `/play`,
-/// `/patch`, `/mapping` and `/graph` suffixes, or none.
+/// Which surface of the project editor the page shows: the `/play` and
+/// `/graph` suffixes, or none.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum UiProjectView {
     /// The node workspace (no suffix).
@@ -44,10 +44,6 @@ pub enum UiProjectView {
     Nodes,
     /// Play mode: the root module's panel, nothing else.
     Play,
-    /// The patching view.
-    Patch,
-    /// The mapping view.
-    Mapping,
     /// The Graph: the mapping lab's canvas (`app/graph`).
     Graph,
 }
@@ -77,7 +73,7 @@ impl UiPage {
     }
 
     /// The page in a few plain words, for the agent's readout:
-    /// `project editor, patch view`, `home`, `docs: wiring`.
+    /// `project editor, graph view`, `home`, `docs: wiring`.
     pub fn describe(&self) -> String {
         match self {
             Self::Home => "home".to_string(),
@@ -107,13 +103,11 @@ impl UiPage {
 }
 
 impl UiProjectView {
-    /// `nodes view`, `play mode`, `patch view`, `mapping view`, `graph view`.
+    /// `nodes view`, `play mode`, `graph view`.
     pub fn describe(self) -> &'static str {
         match self {
             Self::Nodes => "nodes view",
             Self::Play => "play mode",
-            Self::Patch => "patch view",
-            Self::Mapping => "mapping view",
             Self::Graph => "graph view",
         }
     }
@@ -127,11 +121,11 @@ mod tests {
     fn the_editor_is_about_the_project_and_the_home_page_about_devices() {
         let editor = UiPage::Project {
             uid: "prj123".to_string(),
-            view: UiProjectView::Patch,
+            view: UiProjectView::Graph,
         };
         assert!(editor.is_editor());
         assert_eq!(editor.offer_area(), Some(OfferPath::project()));
-        assert_eq!(editor.describe(), "project editor, patch view");
+        assert_eq!(editor.describe(), "project editor, graph view");
         assert_eq!(UiPage::Home.offer_area(), Some(OfferPath::devices()));
         assert_eq!(UiPage::Home.describe(), "home");
         assert_eq!(

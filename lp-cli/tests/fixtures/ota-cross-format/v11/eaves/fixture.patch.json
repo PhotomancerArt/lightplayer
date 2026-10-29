@@ -1,0 +1,8 @@
+{
+  "format": 3,
+  "flow": "manual",
+  "entries": [
+    ["/front",-1,0,"r"],
+    ["/side",-1,60]
+  ]
+}

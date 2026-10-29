@@ -208,11 +208,13 @@ pub fn hello_body() -> WireServerMsgBody {
             commit: "unknown".to_string(),
             dirty: false,
             profile: "release-esp32".to_string(),
+            project_format: lpc_model::PROJECT_FORMAT_VERSION,
         },
         hardware: HardwareFacts::default(),
         device_uid: None,
         pack_format: 0,
         auth: HelloAuth::TRUSTED,
+        startup_refused: None,
         firmware: None,
     })
 }

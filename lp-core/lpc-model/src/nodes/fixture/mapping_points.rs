@@ -1,14 +1,15 @@
 //! Mapping point generation from configuration
 //!
-//! Generates LED sample points (texture-space centers + radii) from either
-//! fixture mapping representation — the slot-modelled [`MappingConfig`] or
-//! the document-resolved [`ResolvedMappingCompact`], both viewed through
-//! [`MappingRef`]. Lives in the model crate so both the engine and
-//! Studio-side tooling can share the generator.
+//! Generates LED sample points (texture-space centers + radii) from a
+//! fixture's mapping, viewed through [`MappingRef`]: the document-resolved
+//! [`ResolvedMappingCompact`] holds the lamps; the slot form
+//! ([`MappingConfig`]: unset, or a map2d source not yet read) holds none.
+//! Lives in the model crate so both the engine and Studio-side tooling can
+//! share the generator.
 
 use alloc::vec::Vec;
 
-use crate::nodes::fixture::{MappingConfig, MappingRef, PathSpec, ResolvedMappingCompact};
+use crate::nodes::fixture::{MappingRef, ResolvedMappingCompact};
 
 /// Mapping point representing a single LED sampling location
 #[derive(Debug, Clone)]
@@ -25,15 +26,7 @@ pub struct MappingPoint {
 /// the streaming API is that nothing on these paths grows by doubling.
 pub fn mapping_point_count<'a>(mapping: impl Into<MappingRef<'a>>) -> usize {
     match mapping.into() {
-        MappingRef::Slots(MappingConfig::Unset) => 0,
-        MappingRef::Slots(MappingConfig::Map2d { .. }) => 0,
-        MappingRef::Slots(MappingConfig::PathPoints { paths, .. }) => paths
-            .entries
-            .values()
-            .map(|path_spec| match path_spec.value() {
-                PathSpec::PointList { points, .. } => points.entries.len(),
-            })
-            .sum(),
+        MappingRef::Slots(_) => 0,
         MappingRef::Compact(compact) => compact.lamp_count(),
     }
 }
@@ -42,23 +35,16 @@ pub fn mapping_point_count<'a>(mapping: impl Into<MappingRef<'a>>) -> usize {
 /// materializing the point list.
 ///
 /// `f(visit_index, point)` receives the running 0-based position of the
-/// point in the visit order (NOT its channel — channels come from the
-/// point-list entry keys and are not required to be contiguous or
-/// ordered). The visit order is: paths in `paths.entries.values()` order,
-/// points within a path in point-list entry order. That order is the
+/// point in the visit order (NOT its channel — a point's channel is its
+/// span's `first_channel` plus its offset within the span, and spans need
+/// not be contiguous or ordered). The visit order is spans in
+/// channel-assignment order, points in span order. That order is the
 /// contract every consumer's buffer layout depends on; see
 /// `visitor_matches_generate_mapping_points_across_configs`.
 ///
-/// `Map2d` is an authored source reference: the loader resolves it into a
-/// [`MappingRef::Compact`] carrier before this runs, so it yields no sample
-/// points here.
-///
-/// The `Compact` arm walks the span-concatenated point list with a running
-/// cursor, taking each point's channel from its span's `first_channel` plus
-/// its offset within the span — the same `first_channel + offset` rule the
-/// slot arm applies to point-list entry keys, and the same visit order
-/// (spans in channel-assignment order, points in span order). Radius is
-/// computed identically from the sample diameter.
+/// The slot form holds no lamps: `Unset`, and `Map2d`, an authored source
+/// reference the loader reads into a [`MappingRef::Compact`] carrier before
+/// this runs.
 pub fn for_each_mapping_point<'a>(
     mapping: impl Into<MappingRef<'a>>,
     texture_width: u32,
@@ -66,55 +52,9 @@ pub fn for_each_mapping_point<'a>(
     f: impl FnMut(usize, MappingPoint),
 ) {
     match mapping.into() {
-        MappingRef::Slots(config) => {
-            for_each_slot_mapping_point(config, texture_width, texture_height, f)
-        }
+        MappingRef::Slots(_) => {}
         MappingRef::Compact(compact) => {
             for_each_compact_mapping_point(compact, texture_width, texture_height, f)
-        }
-    }
-}
-
-fn for_each_slot_mapping_point(
-    config: &MappingConfig,
-    texture_width: u32,
-    texture_height: u32,
-    mut f: impl FnMut(usize, MappingPoint),
-) {
-    let MappingConfig::PathPoints {
-        paths,
-        sample_diameter,
-        ..
-    } = config
-    else {
-        return;
-    };
-
-    let normalized_radius =
-        normalized_sample_radius(sample_diameter.value().0, texture_width, texture_height);
-    let mut visit_index = 0usize;
-
-    for path_spec in paths.entries.values() {
-        match path_spec.value() {
-            PathSpec::PointList {
-                first_channel,
-                points,
-                ..
-            } => {
-                let first_channel = *first_channel.value();
-                for (index, point) in points.entries.iter() {
-                    let [x, y] = point.value().0;
-                    f(
-                        visit_index,
-                        MappingPoint {
-                            channel: first_channel.saturating_add(*index),
-                            center: [x.clamp(0.0, 1.0), y.clamp(0.0, 1.0)],
-                            radius: normalized_radius,
-                        },
-                    );
-                    visit_index += 1;
-                }
-            }
         }
     }
 }
@@ -143,7 +83,7 @@ fn for_each_compact_mapping_point(
                 MappingPoint {
                     channel: span.first_channel.saturating_add(offset as u32),
                     // Already clamped by the document fit; clamped again so
-                    // both arms answer identically for any input.
+                    // the answer holds for any carrier.
                     center: [x.clamp(0.0, 1.0), y.clamp(0.0, 1.0)],
                     radius: normalized_radius,
                 },
@@ -157,72 +97,38 @@ fn for_each_compact_mapping_point(
 /// the streaming twin of [`for_each_mapping_point`] for consumers that only
 /// need coordinates and cannot afford the per-point clamp (the fixture's
 /// per-render batch fill on a part with no FPU; its Q16 conversion clamps on
-/// the bit pattern instead, to the same answer). Same visit order — paths in
-/// `paths.entries.values()` order, points in point-list entry order; spans
-/// in channel-assignment order, points in span order, clamped to the point
+/// the bit pattern instead, to the same answer). Same visit order — spans in
+/// channel-assignment order, points in span order, clamped to the point
 /// list — pinned by `mapping_centers_visits_what_for_each_mapping_point_visits`.
 ///
 /// Resumable, unlike the visitor: a batched consumer takes `capacity` points
 /// at a time across as many calls as the product needs.
 pub fn mapping_centers<'a>(mapping: impl Into<MappingRef<'a>>) -> MappingCenters<'a> {
-    let inner = match mapping.into() {
-        MappingRef::Slots(MappingConfig::PathPoints { paths, .. }) => CentersInner::Slots {
-            paths: paths.entries.iter(),
-            current: None,
-        },
-        MappingRef::Slots(MappingConfig::Unset | MappingConfig::Map2d { .. }) => {
-            CentersInner::Empty
-        }
-        MappingRef::Compact(compact) => CentersInner::Compact {
-            points: compact.points[..compact.lamp_count()].iter(),
-        },
+    let points = match mapping.into() {
+        MappingRef::Slots(_) => [].iter(),
+        MappingRef::Compact(compact) => compact.points[..compact.lamp_count()].iter(),
     };
-    MappingCenters { inner }
+    MappingCenters { points }
 }
 
 /// See [`mapping_centers`].
 pub struct MappingCenters<'a> {
-    inner: CentersInner<'a>,
-}
-
-enum CentersInner<'a> {
-    Empty,
-    Compact {
-        points: core::slice::Iter<'a, [f32; 2]>,
-    },
-    Slots {
-        paths: lp_collection::VecMapIter<'a, u32, crate::EnumSlot<PathSpec>>,
-        current: Option<lp_collection::VecMapIter<'a, u32, crate::XySlot>>,
-    },
+    points: core::slice::Iter<'a, [f32; 2]>,
 }
 
 impl Iterator for MappingCenters<'_> {
     type Item = [f32; 2];
 
     fn next(&mut self) -> Option<[f32; 2]> {
-        match &mut self.inner {
-            CentersInner::Empty => None,
-            CentersInner::Compact { points } => points.next().copied(),
-            CentersInner::Slots { paths, current } => loop {
-                if let Some(points) = current {
-                    if let Some((_, point)) = points.next() {
-                        return Some(point.value().0);
-                    }
-                }
-                let (_, path_spec) = paths.next()?;
-                let PathSpec::PointList { points, .. } = path_spec.value();
-                *current = Some(points.entries.iter());
-            },
-        }
+        self.points.next().copied()
     }
 }
 
 /// Visit every lamp centre of `mapping` in visit order, unclamped, telling
 /// the visitor whether it opens a new strand: `f(starts_strand, center)`.
 ///
-/// A strand is one physical run of wire — a `PathPoints` path, or one
-/// span of a document-resolved mapping (a rotational `repeat` object
-/// contributes one per instance). Same visit order as [`mapping_centers`],
+/// A strand is one physical run of wire — one span of a document-resolved
+/// mapping (a segment: a repeat contributes one per copy). Same visit order as [`mapping_centers`],
 /// which is what lets scope geometry (the pattern-space lamp box and
 /// consecutive-lamp pitch) be computed in one O(n), O(1)-memory pass over
 /// exactly the coordinates the sampler will stream.
@@ -231,15 +137,7 @@ pub fn for_each_mapping_center_in_strands<'a>(
     mut f: impl FnMut(bool, [f32; 2]),
 ) {
     match mapping.into() {
-        MappingRef::Slots(MappingConfig::PathPoints { paths, .. }) => {
-            for path_spec in paths.entries.values() {
-                let PathSpec::PointList { points, .. } = path_spec.value();
-                for (offset, (_, point)) in points.entries.iter().enumerate() {
-                    f(offset == 0, point.value().0);
-                }
-            }
-        }
-        MappingRef::Slots(MappingConfig::Unset | MappingConfig::Map2d { .. }) => {}
+        MappingRef::Slots(_) => {}
         MappingRef::Compact(compact) => {
             let mut visit_index = 0usize;
             for span in &compact.spans {
@@ -255,7 +153,7 @@ pub fn for_each_mapping_center_in_strands<'a>(
     }
 }
 
-/// Generate mapping points from either mapping representation.
+/// Generate a mapping's points.
 ///
 /// A thin exact-capacity wrapper over [`for_each_mapping_point`] — kept for
 /// the consumers that genuinely need random access over the whole list
@@ -283,22 +181,35 @@ fn normalized_sample_radius(sample_diameter: f32, texture_width: u32, texture_he
 mod tests {
     use super::*;
     use alloc::vec;
-    use lp_collection::VecMap;
 
-    use crate::nodes::fixture::ResolvedSpan;
-    use crate::{EnumSlot, MapSlot, ValueSlot, Xy, XySlot};
+    use crate::nodes::fixture::{MappingConfig, ResolvedSpan};
 
-    fn config(paths: alloc::vec::Vec<PathSpec>) -> MappingConfig {
-        MappingConfig::path_points_vec(paths, 2.0)
+    /// One span per path, `(first_channel, points)`, diameter 2.0.
+    fn paths(paths: alloc::vec::Vec<(u32, alloc::vec::Vec<[f32; 2]>)>) -> ResolvedMappingCompact {
+        let mut spans = alloc::vec::Vec::new();
+        let mut points = alloc::vec::Vec::new();
+        for (object, (first_channel, path)) in paths.into_iter().enumerate() {
+            spans.push(ResolvedSpan {
+                object: object as u32,
+                first_channel,
+                count: path.len() as u32,
+            });
+            points.extend(path);
+        }
+        ResolvedMappingCompact {
+            spans,
+            points,
+            sample_diameter: 2.0,
+        }
     }
 
     #[test]
     fn point_lists_generate_points_with_sequential_channels() {
-        let config = config(vec![
-            PathSpec::point_list(0, [[0.1, 0.2], [0.3, 0.4]]),
-            PathSpec::point_list(2, [[0.5, 0.6]]),
+        let mapping = paths(vec![
+            (0, vec![[0.1, 0.2], [0.3, 0.4]]),
+            (2, vec![[0.5, 0.6]]),
         ]);
-        let points = generate_mapping_points(&config, 100, 100);
+        let points = generate_mapping_points(&mapping, 100, 100);
         assert_eq!(points.len(), 3);
         for (index, point) in points.iter().enumerate() {
             assert_eq!(point.channel, index as u32);
@@ -309,16 +220,16 @@ mod tests {
 
     #[test]
     fn sample_diameter_normalizes_against_max_dimension() {
-        let config = config(vec![PathSpec::point_list(0, [[0.5, 0.5]])]);
-        let points = generate_mapping_points(&config, 200, 100);
+        let mapping = paths(vec![(0, vec![[0.5, 0.5]])]);
+        let points = generate_mapping_points(&mapping, 200, 100);
         // diameter 2.0 px on a 200-wide texture -> radius 1/200.
         assert!((points[0].radius - 0.005).abs() < 1e-6);
     }
 
     #[test]
     fn coordinates_clamp_to_unit_range() {
-        let config = config(vec![PathSpec::point_list(0, [[-0.5, 1.5]])]);
-        let points = generate_mapping_points(&config, 100, 100);
+        let mapping = paths(vec![(0, vec![[-0.5, 1.5]])]);
+        let points = generate_mapping_points(&mapping, 100, 100);
         assert_eq!(points[0].center, [0.0, 1.0]);
     }
 
@@ -326,35 +237,6 @@ mod tests {
     fn unset_and_map2d_yield_no_points() {
         assert!(generate_mapping_points(&MappingConfig::Unset, 10, 10).is_empty());
         assert!(generate_mapping_points(&MappingConfig::map2d("a.map2d.json"), 10, 10).is_empty());
-    }
-
-    /// A path whose point-list keys are explicit, so the test can build the
-    /// sparse/out-of-order key sets `PathSpec::point_list` cannot express.
-    /// Channels come from the ENTRY KEY (`first_channel + key`), never from
-    /// a running offset — the gap cases below are what pins that.
-    fn path_with_keys(first_channel: u32, points: &[(u32, [f32; 2])]) -> PathSpec {
-        let mut entries = VecMap::new();
-        for (key, xy) in points {
-            entries.insert(*key, XySlot::new(Xy(*xy)));
-        }
-        PathSpec::PointList {
-            first_channel: ValueSlot::new(first_channel),
-            points: MapSlot::new(entries),
-        }
-    }
-
-    /// Paths keyed explicitly and inserted out of key order, so the test
-    /// exercises `paths.entries.values()` order rather than insertion order.
-    fn config_with_path_keys(paths: &[(u32, PathSpec)]) -> MappingConfig {
-        config_with_diameter(paths, 2.0)
-    }
-
-    fn config_with_diameter(paths: &[(u32, PathSpec)], sample_diameter: f32) -> MappingConfig {
-        let mut entries = VecMap::new();
-        for (key, spec) in paths {
-            entries.insert(*key, EnumSlot::new(spec.clone()));
-        }
-        MappingConfig::path_points(MapSlot::new(entries), sample_diameter)
     }
 
     fn visited<'a>(
@@ -369,20 +251,10 @@ mod tests {
 
     /// The streaming twin yields the same centres in the same order as the
     /// visitor — before the visitor's clamp, which is the one difference by
-    /// design — for every mapping shape, including the sparse/out-of-order
-    /// slot keys, a compact carrier, and one whose span total overshoots
-    /// its point list.
+    /// design — for an unset mapping and for a compact carrier whose span
+    /// total overshoots its point list.
     #[test]
     fn mapping_centers_visits_what_for_each_mapping_point_visits() {
-        let sparse = config_with_path_keys(&[
-            (4, path_with_keys(100, &[(0, [0.1, 0.1]), (7, [0.2, 0.2])])),
-            (
-                1,
-                path_with_keys(10, &[(3, [0.3, 0.3]), (2, [1.4, -0.4]), (9, [0.5, 0.5])]),
-            ),
-            (9, path_with_keys(0, &[])),
-            (2, path_with_keys(u32::MAX - 1, &[(5, [0.6, 0.6])])),
-        ]);
         let compact = ResolvedMappingCompact {
             spans: vec![
                 ResolvedSpan {
@@ -401,7 +273,6 @@ mod tests {
         };
         let cases: alloc::vec::Vec<(&str, MappingRef<'_>)> = vec![
             ("unset", MappingRef::Slots(&MappingConfig::Unset)),
-            ("sparse slots", MappingRef::Slots(&sparse)),
             ("compact, spans overshoot", MappingRef::Compact(&compact)),
         ];
         for (name, mapping) in cases {
@@ -419,7 +290,7 @@ mod tests {
                 "{name}: count"
             );
             // The strand walker visits the same centres in the same order,
-            // and opens a strand exactly where a path / span begins.
+            // and opens a strand exactly where a span begins.
             let mut stranded = alloc::vec::Vec::new();
             let mut starts = 0usize;
             for_each_mapping_center_in_strands(mapping, |starts_strand, center| {
@@ -433,8 +304,6 @@ mod tests {
             );
             let expected_starts = match name {
                 "unset" => 0,
-                // Four paths, one of them empty.
-                "sparse slots" => 3,
                 // Two spans; the second is clamped to the two points left.
                 _ => 2,
             };
@@ -446,40 +315,37 @@ mod tests {
     ///
     /// 1. against a hand-written golden `(channel, center)` sequence, which
     ///    is what actually catches a reordering — the wrapper delegates to
-    ///    the visitor now, so a visitor-vs-wrapper diff alone would sabotage
+    ///    the visitor, so a visitor-vs-wrapper diff alone would sabotage
     ///    both sides identically and stay green;
     /// 2. against the wrapper, which pins the wrapper as a faithful
-    ///    materialization of the visit order (the thing P3's `Compact` arm
-    ///    must keep true).
+    ///    materialization of the visit order.
     ///
     /// Every streaming consumer's buffer layout rides on this order.
     #[test]
     fn visitor_matches_generate_mapping_points_across_configs() {
-        // (name, config, golden (channel, center) sequence in visit order)
-        let cases: alloc::vec::Vec<(&str, MappingConfig, &[(u32, [f32; 2])])> = vec![
-            ("unset", MappingConfig::Unset, &[]),
-            ("map2d", MappingConfig::map2d("a.map2d.json"), &[]),
-            ("empty path set", config(vec![]), &[]),
+        // (name, mapping, golden (channel, center) sequence in visit order)
+        let cases: alloc::vec::Vec<(&str, ResolvedMappingCompact, &[(u32, [f32; 2])])> = vec![
+            ("empty path set", paths(vec![]), &[]),
             (
                 "single point",
-                config(vec![PathSpec::point_list(9, [[0.25, 0.75]])]),
+                paths(vec![(9, vec![[0.25, 0.75]])]),
                 &[(9, [0.25, 0.75])],
             ),
             (
                 "degenerate: empty path between populated ones",
-                config(vec![
-                    PathSpec::point_list(0, [[0.1, 0.2]]),
-                    PathSpec::point_list(5, []),
-                    PathSpec::point_list(7, [[0.3, 0.4], [0.5, 0.6]]),
+                paths(vec![
+                    (0, vec![[0.1, 0.2]]),
+                    (5, vec![]),
+                    (7, vec![[0.3, 0.4], [0.5, 0.6]]),
                 ]),
                 &[(0, [0.1, 0.2]), (7, [0.3, 0.4]), (8, [0.5, 0.6])],
             ),
             (
                 "multi-path, sequential",
-                config(vec![
-                    PathSpec::point_list(0, [[0.1, 0.2], [0.3, 0.4]]),
-                    PathSpec::point_list(2, [[0.5, 0.6]]),
-                    PathSpec::point_list(3, [[0.7, 0.8], [0.9, 1.0], [-0.1, 0.5]]),
+                paths(vec![
+                    (0, vec![[0.1, 0.2], [0.3, 0.4]]),
+                    (2, vec![[0.5, 0.6]]),
+                    (3, vec![[0.7, 0.8], [0.9, 1.0], [-0.1, 0.5]]),
                 ]),
                 &[
                     (0, [0.1, 0.2]),
@@ -491,35 +357,12 @@ mod tests {
                     (5, [0.0, 0.5]),
                 ],
             ),
-            (
-                "multi-path, sparse point keys and overlapping channel ranges",
-                config_with_path_keys(&[
-                    (4, path_with_keys(100, &[(0, [0.1, 0.1]), (7, [0.2, 0.2])])),
-                    (
-                        1,
-                        path_with_keys(10, &[(3, [0.3, 0.3]), (2, [0.4, 0.4]), (9, [0.5, 0.5])]),
-                    ),
-                    (9, path_with_keys(0, &[])),
-                    (2, path_with_keys(u32::MAX - 1, &[(5, [0.6, 0.6])])),
-                ]),
-                // Paths in ascending path-key order (1, 2, 4, 9), points in
-                // ascending point-key order, channel = first_channel + key
-                // (saturating).
-                &[
-                    (12, [0.4, 0.4]),
-                    (13, [0.3, 0.3]),
-                    (19, [0.5, 0.5]),
-                    (u32::MAX, [0.6, 0.6]),
-                    (100, [0.1, 0.1]),
-                    (107, [0.2, 0.2]),
-                ],
-            ),
         ];
 
-        for (name, config, golden) in cases {
+        for (name, mapping, golden) in cases {
             for (w, h) in [(1u32, 1u32), (100, 100), (200, 100)] {
-                let wrapped = generate_mapping_points(&config, w, h);
-                let actual = visited(&config, w, h);
+                let wrapped = generate_mapping_points(&mapping, w, h);
+                let actual = visited(&mapping, w, h);
 
                 assert_eq!(
                     actual.len(),
@@ -532,7 +375,7 @@ mod tests {
                     "{name} @ {w}x{h}: wrapper count"
                 );
                 assert_eq!(
-                    mapping_point_count(&config),
+                    mapping_point_count(&mapping),
                     golden.len(),
                     "{name} @ {w}x{h}: mapping_point_count"
                 );
@@ -567,20 +410,6 @@ mod tests {
                 }
             }
         }
-    }
-
-    #[test]
-    fn channels_come_from_entry_keys_not_a_running_offset() {
-        // Sparse keys: 2 points, keys 0 and 7, first_channel 100 -> 100, 107.
-        let config = config_with_path_keys(&[
-            (0, path_with_keys(100, &[(0, [0.0, 0.0]), (7, [0.0, 0.0])])),
-            (1, path_with_keys(200, &[(3, [0.0, 0.0])])),
-        ]);
-        let channels: alloc::vec::Vec<u32> = visited(&config, 1, 1)
-            .into_iter()
-            .map(|(_, point)| point.channel)
-            .collect();
-        assert_eq!(channels, vec![100, 107, 203]);
     }
 
     fn compact(
@@ -684,36 +513,6 @@ mod tests {
         }
     }
 
-    /// A compact carrier resolves to exactly what the equivalent slot form
-    /// resolves to — same channels, centers, and radii — which is the
-    /// property the engine's document differential test rides on.
-    #[test]
-    fn compact_matches_the_equivalent_slot_form() {
-        let points = [[0.1, 0.2], [0.3, 0.4], [0.5, 0.6], [0.7, 0.8]];
-        let carrier = compact(&[(0, 0, 3), (1, 3, 1)], &points, 3.0);
-        let slots = config_with_diameter(
-            &[
-                (
-                    0,
-                    path_with_keys(0, &[(0, points[0]), (1, points[1]), (2, points[2])]),
-                ),
-                (1, path_with_keys(3, &[(0, points[3])])),
-            ],
-            3.0,
-        );
-
-        for (w, h) in [(1u32, 1u32), (100, 100), (200, 100), (64, 128)] {
-            let from_slots = generate_mapping_points(&slots, w, h);
-            let from_compact = generate_mapping_points(&carrier, w, h);
-            assert_eq!(from_slots.len(), from_compact.len(), "count @ {w}x{h}");
-            for (index, (a, b)) in from_slots.iter().zip(from_compact.iter()).enumerate() {
-                assert_eq!(a.channel, b.channel, "channel {index} @ {w}x{h}");
-                assert_eq!(a.center, b.center, "center {index} @ {w}x{h}");
-                assert_eq!(a.radius, b.radius, "radius {index} @ {w}x{h}");
-            }
-        }
-    }
-
     /// A carrier whose spans disagree with its point list truncates rather
     /// than panicking — and `mapping_point_count` reports what the visitor
     /// will actually visit, in both directions of the disagreement.
@@ -743,11 +542,11 @@ mod tests {
 
     #[test]
     fn generate_mapping_points_allocates_exactly_once() {
-        let config = config(vec![
-            PathSpec::point_list(0, [[0.1, 0.2], [0.3, 0.4]]),
-            PathSpec::point_list(2, [[0.5, 0.6]]),
+        let mapping = paths(vec![
+            (0, vec![[0.1, 0.2], [0.3, 0.4]]),
+            (2, vec![[0.5, 0.6]]),
         ]);
-        let points = generate_mapping_points(&config, 100, 100);
+        let points = generate_mapping_points(&mapping, 100, 100);
         assert_eq!(points.len(), 3);
         assert_eq!(points.capacity(), 3);
     }

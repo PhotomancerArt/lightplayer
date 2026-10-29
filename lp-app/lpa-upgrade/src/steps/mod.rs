@@ -8,6 +8,7 @@
 //! crate README and `just format-bump`.
 
 pub(crate) mod v10_to_v11;
+pub(crate) mod v11_to_v12;
 pub(crate) mod v4_to_v5;
 pub(crate) mod v5_to_v6;
 pub(crate) mod v6_to_v7;
@@ -19,7 +20,11 @@ use crate::project_files::ProjectFiles;
 use crate::upgrade_error::UpgradeError;
 use crate::upgrade_report::UpgradeReport;
 
-pub(crate) type StepFn = fn(&mut ProjectFiles, &mut UpgradeReport) -> Result<(), UpgradeError>;
+/// A step's body: rewrite `files` in place from the step's `from` format to
+/// its `to`, recording every changed, added and removed file in the report.
+/// The chain runner works on a copy and drops it on a refusal, so a step may
+/// return early without undoing anything.
+pub type StepFn = fn(&mut ProjectFiles, &mut UpgradeReport) -> Result<(), UpgradeError>;
 
 /// One `from → to` migration.
 #[derive(Clone, Copy)]
@@ -30,6 +35,17 @@ pub struct UpgradeStep {
     /// bump is forced to declare what it changed.
     pub to: u32,
     pub(crate) apply: StepFn,
+}
+
+impl UpgradeStep {
+    /// A step outside this crate's own chain. The chain runner
+    /// ([`crate::upgrade_with_chain`]) knows nothing about what any step
+    /// does, so a caller's chain (this crate's [`crate::upgrade_steps`] with
+    /// a later step after it, say) upgrades through exactly the path the
+    /// shipped chain does. Tests use it to prove that path general.
+    pub const fn new(from: u32, to: u32, apply: StepFn) -> Self {
+        Self { from, to, apply }
+    }
 }
 
 impl std::fmt::Debug for UpgradeStep {
@@ -73,5 +89,10 @@ pub(crate) const STEPS: &[UpgradeStep] = &[
         from: 10,
         to: 11,
         apply: v10_to_v11::apply,
+    },
+    UpgradeStep {
+        from: 11,
+        to: 12,
+        apply: v11_to_v12::apply,
     },
 ];

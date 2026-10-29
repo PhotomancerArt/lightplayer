@@ -42,7 +42,16 @@ const SLICE_US: u64 = 250;
 
 /// Upload-and-list rounds under faults: enough traffic (~1,000 packets each
 /// way) that a 1 % rate injects a handful of faults per run, not one or none.
-const ROUNDS: usize = 5;
+///
+/// Five rounds once carried that; a round is now ~100 packets each way, so
+/// five made ~550 and an expected ~5.5 faults a direction. That is few
+/// enough to draw none: at the format-12 cutover a seeded run on CI's Linux
+/// drew 0 faults toward the host in 585 packets while the same seed on a Mac
+/// drew three (the host link's packet counts differ by a few percent between
+/// the two, so the dice land on different packets). Ten rounds carry
+/// ~1,000 each way, ~10 expected faults a direction, and a run that damages
+/// nothing one way is a 1-in-20,000 draw rather than a coin toss.
+const ROUNDS: usize = 10;
 
 /// The longest a request may wait for its answer, in emulated seconds. A
 /// project load compiles every shader on the board; the budget is generous

@@ -39,10 +39,7 @@ pub fn write(mapping: &Mapping) -> Result<String, Map2d6Error> {
     if mapping.lamp != LampRef::default() {
         return Err(no_lamp_facts("the fixture"));
     }
-    finite("sample_diameter", &[mapping.sample_diameter])?;
-    if let Some(canvas) = &mapping.canvas {
-        finite("canvas", canvas)?;
-    }
+    finite("view_box", &mapping.view_box)?;
 
     let mut next: BTreeMap<String, u32> = mapping
         .next
@@ -63,8 +60,7 @@ pub fn write(mapping: &Mapping) -> Result<String, Map2d6Error> {
 
     let doc = Map2d6Doc {
         format: MAP2D6_FORMAT,
-        sample_diameter: mapping.sample_diameter,
-        canvas: mapping.canvas,
+        view_box: mapping.view_box,
         next,
         start: write_start(&mapping.start)?,
         flow: write_flow(&mapping.flow),

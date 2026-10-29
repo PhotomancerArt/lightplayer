@@ -2500,13 +2500,13 @@ mod tests {
         // replay all of them — including removals of pre-existing entries —
         // without a follow-up fetch.
         let mut sync = ProjectSync::new();
-        let map = SlotPath::parse("mapping.PathPoints.paths").unwrap();
+        let map = SlotPath::parse("ports").unwrap();
         let from = map.child_key(lpc_model::SlotMapKey::U32(0));
         let to = map.child_key(lpc_model::SlotMapKey::U32(1));
 
         // Pre-existing mirrored edit under the source entry: the ack's
         // Removed entries must clear it (stranded-descendant cleanup).
-        let stale = SlotPath::parse("mapping.PathPoints.paths[0].PointList.first_channel").unwrap();
+        let stale = SlotPath::parse("ports[0].count.some").unwrap();
         sync.apply_acked_edits(
             &[(
                 MutationCmd {
@@ -2536,8 +2536,8 @@ mod tests {
             edits: vec![
                 lpc_model::StoredSlotEdit::put(lpc_model::SlotEdit::ensure_present(to.clone())),
                 lpc_model::StoredSlotEdit::put(lpc_model::SlotEdit::assign_value(
-                    to.child(lpc_model::SlotName::parse("PointList").unwrap())
-                        .child(lpc_model::SlotName::parse("first_channel").unwrap()),
+                    to.child(lpc_model::SlotName::parse("count").unwrap())
+                        .child(lpc_model::SlotName::parse("some").unwrap()),
                     lpc_model::LpValue::U32(5),
                 )),
                 lpc_model::StoredSlotEdit::removed(from.clone()),
@@ -2743,10 +2743,10 @@ mod tests {
         // entries drop their base values, including stranded descendants the
         // canonicalization cleared.
         let mut sync = ProjectSync::new();
-        let map = SlotPath::parse("mapping.PathPoints.paths").unwrap();
+        let map = SlotPath::parse("ports").unwrap();
         let from = map.child_key(lpc_model::SlotMapKey::U32(0));
         let to = map.child_key(lpc_model::SlotMapKey::U32(1));
-        let stale = SlotPath::parse("mapping.PathPoints.paths[0].PointList.first_channel").unwrap();
+        let stale = SlotPath::parse("ports[0].count.some").unwrap();
         sync.apply_acked_edits(
             &[(
                 MutationCmd {
@@ -2781,7 +2781,7 @@ mod tests {
                 lpc_model::StoredSlotEdit::put(lpc_model::SlotEdit::ensure_present(to.clone())),
                 lpc_model::StoredSlotEdit::put_with_base_display(
                     lpc_model::SlotEdit::remove(from.clone()),
-                    Some("{\"kind\":\"RingArray\"}".into()),
+                    Some("{\"endpoint\":\"ws281x:local:D10\"}".into()),
                 ),
                 lpc_model::StoredSlotEdit::removed(stale.clone()),
             ],
@@ -2796,7 +2796,7 @@ mod tests {
         );
         assert_eq!(
             sync.base_value_at(&overlay_test_artifact(), &from),
-            Some("{\"kind\":\"RingArray\"}"),
+            Some("{\"endpoint\":\"ws281x:local:D10\"}"),
             "the stored remove of the base-present source keeps its base display"
         );
         assert_eq!(

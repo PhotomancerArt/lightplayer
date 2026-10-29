@@ -589,7 +589,7 @@ fn frames_on(frames: &[Vec<u32>], entry: u32) -> usize {
 
 fn project_fs(authored: &Authored) -> LpFsMemory {
     let fs = LpFsMemory::new();
-    write(&fs, "/project.json", b"{\n  \"format\": 11\n}\n");
+    write(&fs, "/project.json", b"{\n  \"format\": 12\n}\n");
     write(
         &fs,
         "/module.json",

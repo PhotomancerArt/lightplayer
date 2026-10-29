@@ -2,6 +2,10 @@
 
 Captured 2026-08-21 (Yona, walk-up patching G1).
 
+**2026-10-28:** the Patching view this page names is gone; the Graph,
+Studio's one project canvas, replaced it. The use case stands: an
+unpatched fixture flows end to end with nothing to do.
+
 A single strip of lamps on a single port. A scarf, a bike frame, a rope
 light around a doorway, a costume seam. There is nothing to decide: the
 strip has a beginning, the port has a beginning, and they are the same

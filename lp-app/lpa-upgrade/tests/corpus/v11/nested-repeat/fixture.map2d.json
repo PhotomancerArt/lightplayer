@@ -1,0 +1,28 @@
+{
+  "format": 3,
+  "sample_diameter": 2.0,
+  "canvas": [
+    0.0,
+    0.0,
+    100.0,
+    100.0
+  ],
+  "objects": [
+    {
+      "id": "x",
+      "shape": {
+        "repeat": {
+          "center": [50, 50],
+          "count": 2,
+          "shape": {
+            "repeat": {
+              "center": [50, 50],
+              "count": 3,
+              "shape": { "path": { "points": [[60, 50], [80, 50]], "count": 2 } }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

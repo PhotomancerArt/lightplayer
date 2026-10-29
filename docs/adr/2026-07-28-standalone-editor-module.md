@@ -1,6 +1,7 @@
 # ADR: The standalone editor module pattern (`lpa-mapping-editor`)
 
 Date: 2026-07-28
+Superseded in part (2026-10-28) by `2026-10-28-graph-is-the-project-canvas.md`: `lpa-mapping-editor` and its route are deleted (`/mapping` opens the Graph); the pattern of an editor crate with its own model and undo under a humble web crate continues as `lpa-graph` and `lpa-graph-web`.
 Status: accepted
 
 ## Context

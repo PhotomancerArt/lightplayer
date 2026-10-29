@@ -136,7 +136,7 @@ fn clock_server(name: &str) -> (LpServer, WireProjectHandle, LpPathBuf) {
     let fs = server.base_fs_mut();
     fs.write_file(
         project_path.join("project.json").as_path(),
-        b"{\n  \"format\": 11\n}\n",
+        b"{\n  \"format\": 12\n}\n",
     )
     .expect("write container manifest");
     fs.write_file(

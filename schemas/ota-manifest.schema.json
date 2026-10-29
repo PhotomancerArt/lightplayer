@@ -231,6 +231,15 @@
       "$ref": "#/$defs/PackageRef",
       "description": "The USB package (schemaVersion 2 `package.json`) and its merged image."
     },
+    "projectFormat": {
+      "description": "The project format this build's engine reads\n(`lpc_model::PROJECT_FORMAT_VERSION` of the build; its hello's\n`build.projectFormat`): what tells a host, before it installs the\nbuild, whether the board's stored projects will need the update's\nproject stage — or will not load at all on an older build.\nAdditive (format 1): absent in every manifest written before it, which\na reader takes as \"not said\" (`None`), never as a format.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
     "requires": {
       "$ref": "#/$defs/Requires",
       "description": "What a board must have to take this build without USB."

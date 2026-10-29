@@ -66,6 +66,10 @@ pub fn summarize_command(command: &StudioCommand) -> Option<(String, String)> {
             format!("Network/{}", variant_of(&bounded_debug(network))),
             String::new(),
         ),
+        StudioCommand::ProjectStage(stage) => (
+            format!("ProjectStage/{}", variant_of(&bounded_debug(stage))),
+            String::new(),
+        ),
         StudioCommand::Agent(feedback) => (
             format!("Agent/{}", variant_of(&bounded_debug(feedback))),
             bounded_debug(feedback),

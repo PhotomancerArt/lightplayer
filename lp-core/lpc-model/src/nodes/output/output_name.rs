@@ -5,7 +5,7 @@
 //! 10.0.0.105" — the name is a short human label, never hardware identity:
 //! renaming an output moves no wires, and no endpoint/IP/pin is derived
 //! from it. Auto-assignment ([`next_output_name`]) hands out numeric
-//! defaults ("1", "2", …) the first time a patch needs to name an output;
+//! defaults ("1", "2", …): Studio names an output when it creates one;
 //! users edit them into "Box 5"-style labels. Project-uniqueness among
 //! outputs is a resolve/validation-layer check, not enforced here — like
 //! [`crate::NodeName`], the type validates shape locally.
@@ -60,8 +60,9 @@ impl OutputName {
 }
 
 /// The next free numeric default: "1", "2", … skipping names already in
-/// use. Pure — the UI invokes it when a verb first needs to name an
-/// unnamed output; nothing auto-writes.
+/// use. Pure — Studio names every output it creates or pastes with it
+/// (since project format 12 a fixture's mapping names the output it starts
+/// on, so an unnamed output is one nothing can reach).
 pub fn next_output_name<'a>(existing: impl Iterator<Item = &'a OutputName> + Clone) -> OutputName {
     for candidate in 1u32.. {
         let text = candidate.to_string();

@@ -14,7 +14,7 @@ use crate::products::control::ControlProduct;
 
 /// What an output used to re-derive every frame from its producers: the
 /// fragments planned from their placements (each producer's patch as this
-/// output sees it, which reads the engine's lane topology), and what those
+/// output sees it: the runs naming it), and what those
 /// fragments cover. Built by [`Self::build`] the first frame after its key moves and
 /// replayed after; only the render, the reversal and rotation, the overlays
 /// and the publish stay per frame.

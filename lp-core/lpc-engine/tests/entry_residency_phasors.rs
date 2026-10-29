@@ -187,7 +187,7 @@ fn phasors_of(engine: &Engine, subtree: &[NodeId]) -> Vec<PhasorKey> {
 /// pattern module), and `projects/test/basic`'s fixture and output.
 fn project_fs() -> LpFsMemory {
     let fs = LpFsMemory::new();
-    write(&fs, "/project.json", b"{\n  \"format\": 11\n}\n");
+    write(&fs, "/project.json", b"{\n  \"format\": 12\n}\n");
     write(
         &fs,
         "/module.json",

@@ -962,7 +962,6 @@ pub(crate) fn fixture_face() -> UiFixtureFace {
     UiFixtureFace {
         preview: control_preview_product("output"),
         mapping_editor: None,
-        patch_editor: None,
         brightness: fader_control(
             184.0,
             UiSlotFieldState::editable(),
@@ -1062,7 +1061,6 @@ pub(crate) fn map2d_fixture_face(doc: &lpc_mapping::Map2dDoc) -> UiFixtureFace {
     UiFixtureFace {
         preview: map2d_control_preview_product("output", doc, (16, 16)),
         mapping_editor: None,
-        patch_editor: None,
         brightness: fader_control(
             184.0,
             UiSlotFieldState::editable(),

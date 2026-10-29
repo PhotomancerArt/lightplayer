@@ -1,17 +1,40 @@
 {
-  "format": 1,
-  "sample_diameter": 3.0,
-  "canvas": [
+  "format": 6,
+  "view_box": [
     0.0,
     0.0,
     100.0,
     100.0
   ],
-  "objects": [
+  "start": {
+    "output": {
+      "set": "1"
+    },
+    "port": {
+      "set": 0
+    },
+    "channel": {
+      "set": {
+        "lamps": 0
+      }
+    }
+  },
+  "parts": [
     {
+      "id": "strip1",
       "name": "strip1",
-      "shape": {
-        "grid": { "origin": [1.6667, 12.5], "cols": 30, "rows": 1, "pitch": 3.3333 }
+      "kind": {
+        "grid": {
+          "origin": [
+            1.6667,
+            12.5
+          ],
+          "cols": 30,
+          "rows": 1,
+          "pitch": 3.3333,
+          "routing": "snake",
+          "start_corner": "tl"
+        }
       }
     }
   ]

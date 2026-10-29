@@ -136,12 +136,15 @@ fn board_card_every_state() -> Element {
 // --- Row states ---------------------------------------------------------------
 
 #[story(
-    description = "Round 2's row states the other stories do not show, each in the row's own grammar (icon · kind · name · state · action): a shader error (Project · aurora-drift · error, the fault in its details; the surface says \"This board's project has an error.\" in red, so the row goes quiet), play only (Access · play only, Unlock flush at its end), USB only (Access · USB only · no password, orange, no button: no core offer sets a board's password, so the details say what to do), and a board known only by its chip (Hardware · ESP32-C6 · model not set)."
+    description = "Round 2's row states the other stories do not show, each in the row's own grammar (icon · kind · name · state · action): a shader error (Project · aurora-drift · error, the fault in its details; the surface names the project, the node and the message in red, so the row goes quiet), play only (Access · play only, Unlock flush at its end), USB only (Access · USB only · no password, orange, no button: no core offer sets a board's password, so the details say what to do), and a board known only by its chip (Hardware · ESP32-C6 · model not set)."
 )]
 fn board_card_row_states() -> Element {
     let mut faulted = porch();
     faulted.status = DeviceStatus::Degraded;
-    faulted.degraded = Some("Degraded: orbit.shader:12: 'tme' is not declared".to_string());
+    faulted.degraded = Some(lpa_studio_core::DeviceDegraded::node_fault(
+        "/aurora-drift.show/orbit.shader",
+        "orbit.shader:12: 'tme' is not declared",
+    ));
     let mut chip_only = porch();
     chip_only.board_id = None;
     rsx! {
@@ -507,17 +510,35 @@ fn board_card_surface_install() -> Element {
 }
 
 #[story(
-    description = "The surface for what the board plays and who may: its files LOST (\"This board's files were lost. Restore them from a backup, or reset the board.\": with no backup in this browser, Reset is the primary), its project's SHADER ERROR (red; Edit project), NO PROJECT yet (Add a project), LOCKED (Unlock), a SEND that FAILED (Retry), its file store UNREADABLE (no button: no click here is safe), its files waiting for NEWER FIRMWARE (Update firmware), and a picture TOO LARGE to show over Bluetooth. Then the two states that say nothing over the picture: ALL WELL (Connect) and CONNECTED (Done, the panel in the rows' place). And one update over USB first, which is no notice: the board plays and connects, and the Firmware row's own Update carries it."
+    description = "The surface for what the board plays and who may: its files LOST (\"This board's files were lost. Restore them from a backup, or reset the board.\": with no backup in this browser, Reset is the primary), its project's SHADER ERROR (red, naming the project, the node and the board's message; Edit project), its STARTUP PROJECT that didn't load (the board's own words, which name it; orange, as history: with another project running since, the second sentence names that one, the one Edit opens; with nothing running, Add a project), NO PROJECT yet (Add a project), LOCKED (Unlock), a SEND that FAILED (Retry), its file store UNREADABLE (no button: no click here is safe), its files waiting for NEWER FIRMWARE (Update firmware), and a picture TOO LARGE to show over Bluetooth. Then the two states that say nothing over the picture: ALL WELL (Connect) and CONNECTED (Done, the panel in the rows' place). And one update over USB first, which is no notice: the board plays and connects, and the Firmware row's own Update carries it."
 )]
 fn board_card_surface_project() -> Element {
     let mut faulted = porch();
     faulted.status = DeviceStatus::Degraded;
-    faulted.degraded = Some("Degraded: orbit.shader:12: 'tme' is not declared".to_string());
+    faulted.degraded = Some(lpa_studio_core::DeviceDegraded::node_fault(
+        "/aurora-drift.show/orbit.shader",
+        "orbit.shader:12: 'tme' is not declared",
+    ));
     let empty = DeviceView {
         usb: None,
         loaded_project: DeviceLoadedProject::Empty,
         can_remove_project: false,
         ..porch()
+    };
+    // Its startup project didn't fit (the board's own words name it); a
+    // project sent since runs now, which the surface names (Yona at G3).
+    let zook_notice = || {
+        Some(lpa_studio_core::DeviceDegraded::load_notice(
+            "Zook dome didn't fit in memory at startup, so no project is running",
+        ))
+    };
+    let mut startup = porch();
+    startup.status = DeviceStatus::Degraded;
+    startup.degraded = zook_notice();
+    let startup_nothing = DeviceView {
+        status: DeviceStatus::Degraded,
+        degraded: zook_notice(),
+        ..empty.clone()
     };
     let too_large = DeviceCardFeedView {
         frame: live_feed().and_then(|feed| feed.frame).map(|frame| {
@@ -541,6 +562,18 @@ fn board_card_surface_project() -> Element {
                     plays: running(),
                     on_action: |_| {},
                 }
+            }
+            Cell { caption: "its startup project didn't load; another runs",
+                StoryBoardCard {
+                    card: startup,
+                    feed: live_feed(),
+                    open_uid: Some(PORCH_UID.to_string()),
+                    plays: running(),
+                    on_action: |_| {},
+                }
+            }
+            Cell { caption: "its startup project didn't load; nothing runs",
+                StoryBoardCard { card: startup_nothing, on_action: |_| {} }
             }
             Cell { caption: "no project",
                 StoryBoardCard { card: empty, on_action: |_| {} }

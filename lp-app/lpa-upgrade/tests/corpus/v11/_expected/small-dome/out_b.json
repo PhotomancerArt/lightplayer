@@ -1,0 +1,63 @@
+{
+  "kind": "Output",
+  "name": "Box 2",
+  "ports": {
+    "0": {
+      "endpoint": "ws281x:local:B01",
+      "count": 238
+    },
+    "1": {
+      "endpoint": "ws281x:local:B02",
+      "count": 238
+    },
+    "2": {
+      "endpoint": "ws281x:local:B03",
+      "count": 238
+    },
+    "3": {
+      "endpoint": "ws281x:local:B04",
+      "count": 238
+    },
+    "4": {
+      "endpoint": "ws281x:local:B05",
+      "count": 238
+    },
+    "5": {
+      "endpoint": "ws281x:local:B06",
+      "count": 238
+    },
+    "6": {
+      "endpoint": "ws281x:local:B07",
+      "count": 238
+    },
+    "7": {
+      "endpoint": "ws281x:local:B08",
+      "count": 238
+    },
+    "8": {
+      "endpoint": "ws281x:local:B09",
+      "count": 238
+    },
+    "9": {
+      "endpoint": "ws281x:local:B10",
+      "count": 238
+    },
+    "10": {
+      "endpoint": "ws281x:local:B11",
+      "count": 238
+    },
+    "11": {
+      "endpoint": "ws281x:local:B12",
+      "count": 238
+    },
+    "12": {
+      "endpoint": "ws281x:local:B13",
+      "count": 119
+    }
+  },
+  "bindings": {
+    "input": {
+      "source": "bus:control.out"
+    }
+  }
+}

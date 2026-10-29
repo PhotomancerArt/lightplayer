@@ -112,6 +112,10 @@ pub struct FakeLightPlayerState {
     /// wire whose hello this build cannot decode, such as the wire-32 hello
     /// a fielded C6 sends (no `hardware.fs`). `None`: the server's own.
     pub hello_json_override: Option<String>,
+    /// Say THIS project format in the hello (`build.projectFormat`) instead
+    /// of the build's: an engine that reads an older (or newer) project
+    /// format than this Studio writes. `None`: the server's own.
+    pub project_format_override: Option<u32>,
     /// Auto-load the seeded project at boot, like real firmware's
     /// startup-project resume (fw-esp32c6 `boot::auto_load_project`): the
     /// server reports it via `project_list_loaded` from the first request.
@@ -170,6 +174,7 @@ impl FakeLightPlayerState {
             heartbeat_interval: None,
             proto_override: None,
             hello_json_override: None,
+            project_format_override: None,
             load_project_at_boot: false,
             project_dir: FAKE_DEVICE_PROJECT_DIR.to_string(),
             packs: true,
@@ -280,6 +285,13 @@ impl FakeLightPlayerState {
     /// ([`Self::hello_json_override`]).
     pub fn with_hello_json(mut self, json: impl Into<String>) -> Self {
         self.hello_json_override = Some(json.into());
+        self
+    }
+
+    /// Say `format` as the engine's project format in every hello: firmware
+    /// whose engine reads an older (or newer) project format.
+    pub fn with_project_format(mut self, format: u32) -> Self {
+        self.project_format_override = Some(format);
         self
     }
 

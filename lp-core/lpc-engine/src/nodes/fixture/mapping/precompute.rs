@@ -3,7 +3,7 @@
 use alloc::vec::Vec;
 use libm;
 use lpc_model::Revision;
-use lpc_model::nodes::fixture::{MappingConfig, MappingRef};
+use lpc_model::nodes::fixture::MappingRef;
 use lps_q32::q32::Q32;
 
 use super::entry::PixelMappingEntry;
@@ -32,8 +32,8 @@ pub fn compute_mapping(
     match config {
         // An unresolved mapping publishes no entries at all — distinct from
         // a resolved-but-empty one, which publishes a full grid of skips.
-        MappingRef::Slots(MappingConfig::Unset | MappingConfig::Map2d { .. }) => {}
-        MappingRef::Slots(MappingConfig::PathPoints { .. }) | MappingRef::Compact(_) => {
+        MappingRef::Slots(_) => {}
+        MappingRef::Compact(_) => {
             // First pass: collect all mapping points (circles)
             let mapping_points = generate_mapping_points(config, texture_width, texture_height);
 

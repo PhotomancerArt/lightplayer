@@ -1,0 +1,25 @@
+[package]
+name = "lpa-graph-web"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+description = "The Graph — Studio's project canvas: its Dioxus web components (the canvas and its panels, over lpa-graph)"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+dioxus = { version = "0.7", features = ["web"] }
+gloo-timers = { version = "0.3", features = ["futures"] }
+lpa-graph = { path = "../lpa-graph" }
+lpa-graph-arrows = { path = "../lpa-graph-arrows" }
+lpa-graph-files = { path = "../lpa-graph-files" }
+lpa-graph-layout = { path = "../lpa-graph-layout" }
+wasm-bindgen = "0.2"
+web-sys = { version = "0.3", features = ["Window", "Document", "Element", "DomRect", "MouseEvent", "EventTarget", "HtmlCanvasElement", "CanvasRenderingContext2d", "TextMetrics", "ImageData", "Storage"] }
+
+[lints]
+workspace = true

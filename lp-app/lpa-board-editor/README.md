@@ -7,9 +7,10 @@ else in Studio depends on it.
 
 ## Boundary
 
-Document in, edits out — the mapping-editor precedent
-(`lp-app/lpa-mapping-editor`, ADR `2026-07-27-worktree-local-launch-json`
-era). This crate knows the `lpa-boards` display schema and how to edit it. It
+Document in, edits out — the precedent Studio's old mapping editor set
+(ADR `2026-07-27-worktree-local-launch-json` era). That editor and its Map
+tab were deleted on 2026-10-28; the Graph (`lpa-graph`) replaced them, on
+the same split: a pure editor core, a humble web. This crate knows the `lpa-boards` display schema and how to edit it. It
 knows nothing about projects, devices, routes, or the Studio server. The host
 page owns persistence (localStorage autosave, file open/save); the editor
 core (`editor_core/`) is pure Rust and host-testable.

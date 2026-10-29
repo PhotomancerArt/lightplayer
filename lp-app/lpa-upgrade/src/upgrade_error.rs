@@ -19,6 +19,14 @@ pub enum UpgradeError {
     Refused { file: String, reason: String },
     /// A file that must be JSON is not.
     Malformed { file: String, detail: String },
+    /// Asked to upgrade to a format past the last step this build knows
+    /// (`tip`): a board whose engine reads a newer format than this host.
+    /// The remedy is a newer host, never a guess.
+    TargetBeyondChain { target: u32, tip: u32 },
+    /// The project states a format newer than the target: saved by a newer
+    /// LightPlayer than the one that is to read it (a board put back on an
+    /// older release, say). There is no step backwards.
+    NewerThanTarget { found: u32, target: u32 },
 }
 
 impl std::fmt::Display for UpgradeError {
@@ -31,6 +39,16 @@ impl std::fmt::Display for UpgradeError {
                  ({reason}). Fix it by hand, then re-open the project."
             ),
             Self::Malformed { file, detail } => write!(f, "{file}: not readable JSON ({detail})"),
+            Self::TargetBeyondChain { target, tip } => write!(
+                f,
+                "This LightPlayer upgrades projects up to format {tip}, and the board reads \
+                 format {target}. Update lp-cli or reload Studio to finish this board."
+            ),
+            Self::NewerThanTarget { found, target } => write!(
+                f,
+                "This project was saved by a newer LightPlayer (project format {found}) than \
+                 the board runs (format {target}). Update the board's firmware to open it."
+            ),
         }
     }
 }

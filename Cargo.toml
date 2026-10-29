@@ -27,20 +27,18 @@ members = [
     "lp-app/lpa-devices",
     "lp-app/lpa-update",
     "lp-app/lpa-link",
-    "lp-app/lpa-mapping-editor",
     "lp-app/lpa-boards",
     "lp-app/lpa-board-editor",
     "lp-app/lpa-palettes",
     "lp-app/lpa-studio-core",
     "lp-app/lpa-studio-web",
-    # The mapping design lab (lab/mapping/README.md)
-    "lab/mapping/model",
-    "lab/mapping/web",
-    "lab/mapping/files",
-    "lab/mapping/fit-tests",
-    "lab/mapping/radiance-gen",
-    "lab/mapping/arrows",
-    "lab/mapping/layout",
+    "lp-app/lpa-graph",
+    # NOT in default-members, like lpa-studio-web: the Dioxus web dep tree.
+    # It has no tests of its own; `test-studio-host` builds it under Studio.
+    "lp-app/lpa-graph-web",
+    "lp-app/lpa-graph-files",
+    "lp-app/lpa-graph-layout",
+    "lp-app/lpa-graph-arrows",
     "lp-app/lpa-studio-web-story-macros",
     "lp-app/lpa-fs-opfs",
     "lp-app/lpa-upgrade",
@@ -58,6 +56,7 @@ members = [
     "tools/lp-app-version",
     "tools/lp-fw-split",
     "tools/lp-store-bench",
+    "tools/lpt-radiance-gen",
     "lp-fw/fw-esp32c6",
     "lp-fw/fw-esp32s3",
     # NOT in default-members (like the two above): the radio glue the chip
@@ -182,11 +181,14 @@ default-members = [
     "lp-app/lpa-devices",
     "lp-app/lpa-update",
     "lp-app/lpa-link",
-    "lp-app/lpa-mapping-editor",
     "lp-app/lpa-boards",
     "lp-app/lpa-board-editor",
     "lp-app/lpa-palettes",
     "lp-app/lpa-studio-core",
+    "lp-app/lpa-graph",
+    "lp-app/lpa-graph-files",
+    "lp-app/lpa-graph-layout",
+    "lp-app/lpa-graph-arrows",
     "lp-app/lpa-upgrade",
     "lp-app/lpa-cloud-client",
     "lp-app/lpa-firmware-store",
@@ -201,6 +203,7 @@ default-members = [
     "tools/lp-app-version",
     "tools/lp-fw-split",
     "tools/lp-store-bench",
+    "tools/lpt-radiance-gen",
     "lp-core/lpc-mapping",
     "lp-core/lpc-model",
     "lp-core/lpc-registry",
@@ -383,16 +386,13 @@ opt-level = 3
 # and dome-scale fixtures resolve 1500 lamps through lpc-mapping and shuttle
 # them through lpc-model layouts. At opt-level 0 that parse alone was 28% of
 # main-thread samples in a 2026-08-05 Chrome trace (12ms per message) and
-# made the mapping editor unusable at 1500 LEDs. These crates are schema/
-# engine surfaces that change rarely; the mapping editor is UI but small,
-# and its diff/format loop over 1500 SVG nodes runs per live-color frame.
+# made the (since retired) mapping editor unusable at 1500 LEDs. These
+# crates are schema/engine surfaces that change rarely.
 [profile.dev.package.lpc-wire]
 opt-level = 2
 [profile.dev.package.lpc-model]
 opt-level = 2
 [profile.dev.package.lpc-mapping]
-opt-level = 2
-[profile.dev.package.lpa-mapping-editor]
 opt-level = 2
 
 # dx (dioxus-cli) compiles WEB DEV builds under this profile, not `dev` —

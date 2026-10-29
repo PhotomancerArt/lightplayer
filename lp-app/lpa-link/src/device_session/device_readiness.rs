@@ -512,6 +512,7 @@ mod tests {
                 commit: "test".to_string(),
                 dirty: false,
                 profile: "release-esp32".to_string(),
+                project_format: lpc_model::PROJECT_FORMAT_VERSION,
             },
             hardware: HardwareFacts {
                 radio: true,
@@ -522,6 +523,7 @@ mod tests {
             device_uid: None,
             pack_format: lpc_wire::PACK_FORMAT_VERSION,
             auth: lpc_wire::HelloAuth::TRUSTED,
+            startup_refused: None,
             firmware: None,
         }
     }

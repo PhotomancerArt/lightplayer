@@ -5,31 +5,33 @@
 The project editor renders as the **workbench** (`src/app/workbench/`):
 a full-height PanelDock frame under ONE chrome band — each dock's
 attached panel tabs in a segment sized to its dock, the view tabs
-(Nodes · Map · Patch · Graph, as route suffixes; `/patching` and `/map`
-parse as aliases) centered between them. Fixed-home panels (Tree | Device ·
-Outputs · Props), radio per side with per-view memory; a collapsed side
-keeps its tab row as the reopen affordance; the Tree's body is
-view-keyed — node tree on Nodes, and the fixture tree's GRAIN follows
-the view (authored objects on Map, resolved instances with wire chips
-on Patch). The Patching view's center is the one project canvas with
-patch verbs, the selection pulse, and live sprite colors default-on.
-Below 820px it folds to a summon toolbar; the open project's state
-lives on the site header's session·project control. See
+(Nodes · Graph, as route suffixes) centered between them. Fixed-home
+panels (Tree | Device · Outputs · Props), radio per side with per-view
+memory; a collapsed side keeps its tab row as the reopen affordance; the
+Tree's body is view-keyed — the node tree on Nodes, the Graph's own tree
+on Graph. Below 820px it folds to a summon toolbar; the open project's
+state lives on the site header's session·project control. See
 `docs/adr/2026-08-12-studio-workbench-panel-dock.md` (amended
-2026-08-14),
-`docs/adr/2026-08-19-single-session-web-and-session-control.md`, and
-`docs/adr/2026-08-20-patching-view-grain-follows-activity.md`.
+2026-08-14) and
+`docs/adr/2026-08-19-single-session-web-and-session-control.md`.
 
-The **Graph** view (`/graph`, `src/app/workbench/graph_view.rs`) mounts
-the mapping design lab's canvas, tree, inspector and hint bar
-(`lab/mapping/web`'s library) over core's Graph editor
+The **Graph** (`/graph`, `src/app/workbench/graph_view.rs`) is Studio's
+one project canvas and its mapping editor. It mounts the Graph's canvas,
+tree, inspector and hint bar (`lpa-graph-web`) over core's Graph editor
 (`lpa_studio_core::app::graph`): the canvas and hint bar in the center,
-the lab's tree in the Tree dock and its inspector in Props. The page
+the Graph's tree in the Tree dock and its inspector in Props. The page
 holds core's `GraphHandle` (provided as context by `web_app.rs`) and
 hands it every pointer and key fact directly; the toolbar's tools, Move
 & draw, undo and redo are core's `project/graph/…` offers. Colours are
 the board's own frames from the Graph's slice of the studio view, except
-for a drawing in progress, which lights from the lab's simulated board.
+for a drawing in progress, which lights from the Graph's own simulated
+board (`lpa-graph`'s `board`).
+
+The Map and Patch tabs are gone (2026-10-28), and with them the old
+mapping editor and its arrange canvas: the Graph does their work. Their old route
+suffixes, `/mapping`, `/map`, `/patch` and `/patching`, still parse and
+open the Graph (`GRAPH_SUFFIXES` in `src/router.rs`); Studio only ever
+writes `/graph`.
 
 The web app owns Dioxus presentation. It renders `StudioView` panes and
 contextual `UiAction` controls, then dispatches those actions back into

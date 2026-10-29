@@ -379,30 +379,42 @@ fn attaching_a_runtime_and_adding_a_demand_root_move_the_epoch() {
         .expect("the shape guard accepts an announced root");
 }
 
-/// A steady frame builds no frame plan and derives no lane topology; the
-/// frame after a structural change builds the engine's lane plan once.
+/// A steady frame builds no frame plan; the frame after a structural change
+/// builds them again. Through a checked-in project with a fixture and an
+/// output, whose plans (the fixture's mapping plan, the output's fragments)
+/// are what the frame replays.
 #[test]
 fn a_steady_frame_builds_no_plan() {
-    let mut harness = EngineTestBuilder::new()
-        .shader("src", output("outputs[0]", 1.0))
-        .output_node("out")
-        .bind_demand_input("out", produced_slot("src", "outputs[0]"))
-        .demand_root("out")
-        .build();
-    harness
-        .engine
-        .set_plan_mode(crate::frame_plan::PlanMode::Replay);
-    harness.tick(16).expect("tick");
-    harness.tick(16).expect("tick");
-    let steady = *harness.engine.frame_plan_counters();
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../projects/test/shader-oracle-6");
+    let fs = lpfs::LpFsStd::new(dir);
+    let services = crate::EngineServices::new(
+        lpc_model::TreePath::parse("/shader_oracle_6.show").expect("root"),
+    );
+    let mut rt = crate::ProjectLoader::load_from_root(&fs, services).expect("load the project");
+    rt.set_plan_mode(crate::frame_plan::PlanMode::Replay);
+    rt.set_graphics(Some(alloc::sync::Arc::new(
+        lp_gfx_lpvm::TargetLpvmGraphics::new(lp_shader::ShaderFrontend::LpsGlsl),
+    )));
+    for _ in 0..3 {
+        rt.tick(16).expect("warm-up");
+    }
+    rt.tick(16).expect("tick");
+    let steady = *rt.engine().frame_plan_counters();
     assert_eq!(steady.structural_work(), 0, "{steady:?}");
-    assert!(steady.replays > 0, "the lane plan replays: {steady:?}");
+    assert!(steady.replays > 0, "the plans replay: {steady:?}");
 
-    harness.engine.add_demand_root(harness.node("src"));
-    harness.tick(16).expect("tick");
-    let after_edit = *harness.engine.frame_plan_counters();
-    assert_eq!(after_edit.builds, 1, "{after_edit:?}");
-    assert!(after_edit.default_fragments_reads > 0, "{after_edit:?}");
+    let output = rt
+        .engine()
+        .tree()
+        .entries()
+        .map(|entry| entry.id)
+        .max()
+        .expect("a node");
+    rt.engine_mut().add_demand_root(output);
+    rt.tick(16).expect("tick");
+    let after_edit = *rt.engine().frame_plan_counters();
+    assert!(after_edit.builds > 0, "{after_edit:?}");
 }
 
 /// The same scene, resolved cached and uncached, must produce the same values.

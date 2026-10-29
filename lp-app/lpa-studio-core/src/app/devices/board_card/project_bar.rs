@@ -45,6 +45,7 @@
 //! controls row ([`super::UiBoardPanel::edit`]): one function builds both,
 //! so they cannot disagree.
 
+use lpa_devices::DegradedCause;
 use lpa_devices::view::{FirmwareFace, LoadedProject};
 
 use super::bar_work::bar_work;
@@ -138,7 +139,11 @@ pub(crate) fn project_bar(input: &BoardCardInput<'_>) -> UiStackBar {
             _ => PROJECT_UNKNOWN,
         };
         (name.to_string(), None, UiStatusKind::Neutral, None)
-    } else if view.degraded.is_some() {
+    } else if view
+        .degraded
+        .as_ref()
+        .is_some_and(|degraded| degraded.cause != DegradedCause::LoadNotice)
+    {
         (
             name.unwrap_or_else(|| PROJECT_UNKNOWN.to_string()),
             Some(PROJECT_ERROR.to_string()),
@@ -348,8 +353,13 @@ fn details(
             .and_then(|layout| layout.line.clone())
             .unwrap_or_else(|| "This board's files are gone.".to_string());
         sections.push(notice("Project", tone, line, None));
-    } else if let Some(fault) = &view.degraded {
-        sections.push(notice("Project", UiStatusKind::Error, fault.clone(), None));
+    } else if let Some(degraded) = &view.degraded {
+        let tone = match degraded.cause {
+            // History: what the board's last start couldn't load.
+            DegradedCause::LoadNotice => UiStatusKind::Attention,
+            _ => UiStatusKind::Error,
+        };
+        sections.push(notice("Project", tone, degraded.line.clone(), None));
     } else if let BoardPlays::Given { at_head: false, .. } = input.plays {
         sections.push(notice(
             "Project",
@@ -479,7 +489,9 @@ mod tests {
     fn a_shader_error_is_red_with_the_fault_in_the_details() {
         let mut fixture = CardFixture::ready();
         fixture.view.status = DeviceStatus::Degraded;
-        fixture.view.degraded = Some("Degraded: node /studio.show/s faulted".to_string());
+        fixture.view.degraded = Some(lpa_devices::Degraded::recovery(
+            "Degraded: node /studio.show/s faulted",
+        ));
         let bar = project_bar(&fixture.input());
         assert_eq!(bar.summary, "porch", "the name stays");
         assert_eq!(bar.aside.as_deref(), Some("error"));
@@ -750,7 +762,9 @@ mod tests {
             label: "porch-sign".to_string(),
         };
         assert_eq!(project_bar(&fixture.input()).summary, "porch-sign");
-        fixture.view.degraded = Some("node /studio.show/s faulted".to_string());
+        fixture.view.degraded = Some(lpa_devices::Degraded::recovery(
+            "node /studio.show/s faulted",
+        ));
         let bar = project_bar(&fixture.input());
         assert_eq!(bar.summary, "porch-sign");
         assert_eq!(bar.aside.as_deref(), Some("error"), "a fault is the state");

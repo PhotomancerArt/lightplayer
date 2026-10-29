@@ -12,7 +12,7 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use lab_mapping_model::{BoardFrame, Editor, NodeId, Picture, Target};
+use lpa_graph::{BoardFrame, Editor, NodeId, Picture, Target};
 
 use crate::UiProductRef;
 use crate::app::project::ProjectController;
@@ -47,7 +47,7 @@ pub(crate) fn wanted_sources(editor: &Editor, device: bool) -> Vec<NodeId> {
     out
 }
 
-/// Each wanted source's visual product (`nodes`: the lab's nodes as
+/// Each wanted source's visual product (`nodes`: the Graph's nodes as
 /// Studio's).
 pub(crate) fn wanted_products(
     project: &ProjectController,
@@ -87,7 +87,7 @@ pub(crate) fn with_pictures(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lab_mapping_model::Project;
+    use lpa_graph::Project;
 
     /// On a simulator lens every render source shows its picture; on a
     /// device lens none does until the selection asks, and then only the

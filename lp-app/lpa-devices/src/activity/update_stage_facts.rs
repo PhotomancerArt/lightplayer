@@ -1,5 +1,5 @@
 //! Where an update is — the model's mirror of `lpa_update::Stage`, plus the
-//! one stage the driver does not name itself.
+//! two stages the driver does not name itself.
 
 use serde::{Deserialize, Serialize};
 
@@ -21,6 +21,11 @@ pub enum UpdateStageFacts {
     /// and takes over when it is free. Not a driver stage: the effects layer
     /// reports it off the driver's `Busy` decision.
     Waiting,
+    /// The update's last stage (M3 P11): the board's new engine reads a
+    /// newer project format than projects it stores, and this Studio is
+    /// rewriting them over channel 1. Counted in projects. Not a driver
+    /// stage: the effects layer reports it once the driver says up to date.
+    UpgradingProjects,
 }
 
 impl UpdateStageFacts {
@@ -33,6 +38,7 @@ impl UpdateStageFacts {
             Self::Restoring => "Restoring firmware…",
             Self::Finishing => "Finishing the update…",
             Self::Waiting => "Another device is updating it…",
+            Self::UpgradingProjects => "Upgrading its projects…",
         }
     }
 
@@ -55,6 +61,7 @@ mod tests {
             UpdateStageFacts::Restoring,
             UpdateStageFacts::Finishing,
             UpdateStageFacts::Waiting,
+            UpdateStageFacts::UpgradingProjects,
         ] {
             assert!(!stage.allows_cancel(), "{stage:?}");
             assert!(!stage.label().is_empty());

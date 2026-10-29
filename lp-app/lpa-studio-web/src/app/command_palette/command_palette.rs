@@ -11,9 +11,9 @@ use dioxus::prelude::*;
 use lpa_studio_core::{UiAction, UiOfferTree};
 
 use super::command_palette_dialog::CommandPaletteDialog;
-use crate::app::editor_shell::hotkeys::use_window_shortcut;
 use crate::base::Platform;
 use crate::base::keyboard::PALETTE;
+use crate::core::window_keys::use_window_shortcut;
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]

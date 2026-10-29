@@ -155,7 +155,7 @@ pub(crate) fn detail_popup() -> Element {
                     ),
                     pending_edit(
                         "Sunrise palette",
-                        "mapping.PathPoints.paths[0]",
+                        "entries[3]",
                         UiPendingEditKind::Added,
                         UiPendingEditPhase::Persisted,
                     ),
@@ -186,7 +186,7 @@ pub(crate) fn change_list() -> Element {
                     ),
                     pending_edit(
                         "Sunrise palette",
-                        "mapping.PathPoints.paths[0]",
+                        "entries[3]",
                         UiPendingEditKind::Added,
                         UiPendingEditPhase::Persisted,
                     ),

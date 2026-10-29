@@ -528,6 +528,11 @@ hours), and neither is an exit path on its own.
   (`workbench-nodes-view__md`, 25 px at max Δ1, story mounts no mapping
   canvas) is the known tolerated sub-AA raster class, diffed before being
   dismissed per this entry's own rule.
+  **2026-10-28:** `FitReconcile`, `ProjectCanvasHost` and the
+  mapping-editor stories were deleted with Studio's Map tab. Nothing in
+  Studio stamps `data-fit-viewport` now, so the ready gate's check for it
+  in `studio-story-pngs.mjs` finds no element and passes. The Graph's
+  stories are the canvas stories today.
   message points at it.** `story-apply-refresh.mjs` parsed `process.argv` and
   called `process.exit(2)` at *module scope*, so `story-pull.mjs` — which
   imports `applyRefresh` from it — exited 2 before doing anything. The

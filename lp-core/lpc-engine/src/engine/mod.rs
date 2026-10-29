@@ -36,6 +36,16 @@ mod probe_read_back_tests;
 // journeys, painted by a shader, read through real outputs.
 #[cfg(all(test, feature = "node-fixture", feature = "node-shader"))]
 mod parts_patch_tests;
+// A format-6 fixture's live edits (mapping rebuild M2 P4): a patching-only
+// edit re-patches without rendering, and a document edited across formats
+// switches path.
+#[cfg(all(test, feature = "node-fixture"))]
+mod format6_refresh_tests;
+// The format-6 test projects under `projects/test/`, loaded from disk
+// (mapping rebuild M2 P4): the circular display lands as its journey ends,
+// and each twin lights its outputs as its format <= 5 twin does.
+#[cfg(all(test, feature = "node-fixture", feature = "node-shader"))]
+mod format6_projects_tests;
 mod project_apply;
 mod project_fault;
 // The never-black policy's oracle: what faults a project, what must not,
@@ -66,6 +76,9 @@ mod shader_palette_tests;
 mod shader_timebase_tests;
 mod state_root_stamps;
 mod state_root_values_hash;
+// A fixture placed whole on a named output, for the hand-wired scenes above.
+#[cfg(all(test, feature = "node-fixture", feature = "node-shader"))]
+pub(crate) mod placed_fixture_test_support;
 #[cfg(test)]
 pub(crate) mod test_support;
 // Every project here drives a clock through an output → fixture → shader →

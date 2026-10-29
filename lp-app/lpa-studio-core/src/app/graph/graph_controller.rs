@@ -3,10 +3,10 @@
 //!
 //! **Opening.** While the Graph tab is the place, the actor asks the
 //! controller to settle ([`GraphController::settle`]) after each batch.
-//! The first time, it opens the project with the lab's files crate,
+//! The first time, it opens the project with lpa-graph-files,
 //! fetching from the board every file the crate asks for that Studio
 //! hasn't read yet ([`GraphSource`]), then builds the editor and lays it
-//! out on the canvas (`lab-layout`).
+//! out on the canvas (`lpa-graph-layout`).
 //!
 //! **Keeping in step.** When the project moves (an edit in Map or Nodes,
 //! the agent, a save), the controller reads again the files the open read.
@@ -15,13 +15,28 @@
 //! again from the files, keeping the camera and whatever of the selection
 //! still exists.
 //!
-//! **Saving.** After an edit (not mid-drag, not mid-drawing) the lab's
-//! writer says which of the project's files changed, in today's formats,
-//! and each is written as an ordinary asset edit — the same path the Map
-//! view's edits take — so Studio's dirty state, Save and the push to the
-//! board work unchanged. The written files are then the baseline the next
-//! save compares against. Undo is the Graph's own (the lab's project
-//! snapshots); what it puts back is saved the same way.
+//! **Patching.** Each fixture is patched by `lpc-mapping`'s patcher
+//! against port tables core builds with the engine's own walk over each
+//! output's authored ports (`graph_port_tables.rs`), handed to the editor
+//! when it opens, so the Graph and the board can't disagree.
+//!
+//! **Saving.** After an edit (not mid-drag, not mid-drawing) the files
+//! crate says which of the project's files changed — each fixture's
+//! mapping in map2d format 6, written by `lpc-mapping`'s own writer, and
+//! the node files the Graph edits — and each is written as an ordinary
+//! asset edit, so Studio's dirty state, Save and the push to the board work
+//! unchanged. A project nobody edited writes nothing. The written files are
+//! then the baseline the next save compares against, and the port tables
+//! are built again from them (an output's ports edited on the Graph
+//! re-patch at once). Read back, a node the Graph made is keyed by its
+//! name; it is keyed again by the id the Graph gave it
+//! (`ProductProject::adopt_new_nodes`), so the next save knows it as
+//! written instead of writing its file again and deleting it. Where pinned nodes sit is written too (`editor.json`'s
+//! `canvas` surface, Debug's Pinning). Undo is the Graph's own (lpa-graph's
+//! project snapshots); what it puts back is saved the same way. A deleted
+//! node's files (`Saved::removed`) are deleted through the same asset path
+//! (ruling DD36), so no file stays that nothing names; undoing the delete
+//! writes them again.
 //!
 //! **Colours.** [`GraphController::view`] carries the board's frame, built
 //! from the frames the board published (`graph_frame.rs`) and kept until
@@ -31,13 +46,16 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 
-use lab_mapping_files::{Opened, ProductProject};
-use lab_mapping_model::{BoardFrame, Editor, NodeId};
+use lpa_graph::Project;
+use lpa_graph::{BoardFrame, Editor, NodeId};
+use lpa_graph_files::{Opened, ProductProject};
 
 use crate::StudioServerClient;
 use crate::app::graph::graph_canvas_meta::{EDITOR_JSON, apply_pins, with_pins};
 use crate::app::graph::graph_frame;
+use crate::app::graph::graph_offers;
 use crate::app::graph::graph_pictures;
+use crate::app::graph::graph_port_tables::port_tables;
 use crate::app::graph::graph_source::{GraphSource, location};
 use crate::app::graph::{GraphHandle, UiGraphFrame, UiGraphState, UiGraphView};
 use crate::app::project::ProjectController;
@@ -62,8 +80,16 @@ pub struct GraphController {
     /// The editor's project revision its files last said (opened or
     /// written): another one is an edit to save.
     saved: u64,
+    /// The files of nodes the Graph deleted, as they were (path, text), by
+    /// node: what its undo writes back when the node returns (DD36).
+    deleted: BTreeMap<NodeId, Vec<(String, String)>>,
     /// The selection the board last breathed, while it breathes one.
-    pulsed: Option<Vec<lab_mapping_model::Target>>,
+    pulsed: Option<Vec<lpa_graph::Target>>,
+    /// The verbs that take values as last published, and what they were
+    /// worked out from: the project's revision, the generation (port
+    /// tables handed over move it) and the selection (which preselects
+    /// subjects). A view rebuilt while none of those moved reuses them.
+    value_offers: RefCell<Option<(OffersKey, Vec<crate::UiOffer>)>>,
     /// The render sources whose pictures the Graph shows, with their
     /// visual products (`graph_pictures.rs`, plan D11).
     pictures: Vec<(NodeId, crate::UiProductRef)>,
@@ -76,8 +102,16 @@ struct GraphOpened {
     files: ProductProject,
     /// Every path the open asked for, and what it said.
     read: BTreeMap<String, Option<String>>,
-    /// The lab's nodes, as Studio's.
+    /// The Graph's nodes, as Studio's.
     nodes: BTreeMap<NodeId, lpc_model::NodeId>,
+}
+
+/// What the Graph's verbs that take values were worked out from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct OffersKey {
+    revision: u64,
+    generation: u64,
+    selection: Vec<lpa_graph::Target>,
 }
 
 /// What the board's frame was built from: the board's frame count, the
@@ -204,26 +238,48 @@ impl GraphController {
 
     /// Publish the Graph's verbs (`project/graph/…`), once it is open.
     pub fn publish_offers(&self, offers: &mut crate::UiOfferTree) {
-        if matches!(self.state, Some(UiGraphState::Open { .. })) {
-            crate::app::graph::publish_graph_offers(offers, &self.handle.editor().borrow());
+        if !matches!(self.state, Some(UiGraphState::Open { .. })) {
+            return;
+        }
+        let editor = self.handle.editor().borrow();
+        graph_offers::publish_key_offers(offers, &editor);
+        let key = OffersKey {
+            revision: editor.project.revision(),
+            generation: self.generation,
+            selection: editor.selection.clone(),
+        };
+        let mut kept = self.value_offers.borrow_mut();
+        if kept.as_ref().is_none_or(|(k, _)| *k != key) {
+            *kept = Some((key, graph_offers::value_offers(&editor)));
+        }
+        for offer in kept.iter().flat_map(|(_, o)| o) {
+            offers.publish(offer.clone());
         }
     }
 
-    /// Press a verb from its offer, as its key does it.
-    pub fn press(&mut self, verb: lab_mapping_model::GraphVerb) -> bool {
-        let used = self.handle.editor().borrow_mut().press(verb);
+    /// Press a verb from its offer: as its key does it, or, for a verb
+    /// that takes values, the edit it was bound to, through the function
+    /// the inspector's rows and the keys run too. A refused edit says why.
+    pub fn press(&mut self, op: crate::app::graph::GraphOp) -> Result<bool, String> {
+        let done = {
+            let mut editor = self.handle.editor().borrow_mut();
+            match &op.edit {
+                Some(edit) => editor.edit(std::slice::from_ref(edit)).map(|()| true),
+                None => Ok(editor.press(op.verb)),
+            }
+        };
         self.generation += 1;
-        used
+        done
     }
 
-    /// Write what the editor changed to the project's files. Returns
-    /// whether the Graph's view changed (a notice).
+    /// Write what the editor changed to the project's files, after an
+    /// edit. Returns whether the Graph's view changed (a notice).
     async fn save(
         &mut self,
         project: &mut ProjectController,
         server: &mut StudioServerClient,
     ) -> bool {
-        let (saved, revision) = {
+        let (saved, revision, gone, back, new) = {
             let Some(opened) = self.opened.as_ref() else {
                 return false;
             };
@@ -231,7 +287,28 @@ impl GraphController {
             if e.dragging() || e.drawing() || e.project.revision() == self.saved {
                 return false;
             }
-            (opened.files.save(&e.project), e.project.revision())
+            // Nodes deleted since the files were read, with their files;
+            // and nodes deleted before that the editor holds again (undo).
+            let gone: Vec<(NodeId, Vec<String>)> = opened
+                .files
+                .nodes
+                .iter()
+                .filter(|(id, _)| e.project.node(id).is_none())
+                .map(|(id, f)| (id.clone(), f.own_files()))
+                .collect();
+            let back: Vec<NodeId> = self
+                .deleted
+                .keys()
+                .filter(|id| e.project.node(id).is_some())
+                .cloned()
+                .collect();
+            (
+                opened.files.save(&e.project),
+                e.project.revision(),
+                gone,
+                back,
+                opened.files.new_nodes(&e.project),
+            )
         };
         self.saved = revision;
         let saved = match saved {
@@ -246,6 +323,38 @@ impl GraphController {
                 .apply_asset_body(server, location(path), text.clone().into_bytes())
                 .await;
             if let Err(why) = written {
+                self.refuse_save(format!("{path}: {why}"));
+                return true;
+            }
+        }
+        // A node the Graph deleted takes its files with it, in the same
+        // step (DD36): nothing stays on disk that nothing names. What they
+        // said is kept, so the Graph's undo writes them back as they were.
+        for (id, paths) in gone {
+            self.fetch(project, server, &paths).await;
+            let texts: Vec<(String, String)> = paths
+                .iter()
+                .filter_map(|path| {
+                    let text = GraphSource::text_of(project, &self.absent, path).flatten()?;
+                    Some((path.clone(), text))
+                })
+                .collect();
+            self.deleted.insert(id, texts);
+        }
+        for id in back {
+            for (path, text) in self.deleted.remove(&id).unwrap_or_default() {
+                let written = project
+                    .apply_asset_body(server, location(&path), text.into_bytes())
+                    .await;
+                if let Err(why) = written {
+                    self.refuse_save(format!("{path}: {why}"));
+                    return true;
+                }
+            }
+        }
+        for path in &saved.removed {
+            let deleted = project.apply_asset_delete(server, location(path)).await;
+            if let Err(why) = deleted {
                 self.refuse_save(format!("{path}: {why}"));
                 return true;
             }
@@ -271,27 +380,61 @@ impl GraphController {
                 return true;
             }
             self.absent.remove(EDITOR_JSON);
+            // What was written is what the open read now.
+            if let Some(opened) = self.opened.as_mut() {
+                opened.read.insert(
+                    EDITOR_JSON.to_string(),
+                    GraphSource::text_of(project, &self.absent, EDITOR_JSON).flatten(),
+                );
+            }
         }
-        // What was written is what the next save compares against.
-        let source = GraphSource::new(project, &self.absent);
-        if let Ok(reopened) = Opened::open(&source)
-            && source.misses().is_empty()
-            && let Some(opened) = self.opened.as_mut()
-        {
-            opened.files = reopened.files;
-            let mut read = source.into_read();
-            read.insert(
-                EDITOR_JSON.to_string(),
-                GraphSource::text_of(project, &self.absent, EDITOR_JSON).flatten(),
-            );
-            opened.read = read;
+        if !saved.writes.is_empty() || !saved.removed.is_empty() {
+            self.rebase(project, &new);
         }
         false
     }
 
+    /// What was written is what the next save compares against, and what
+    /// the open read now: read the files again, key the nodes the Graph
+    /// made (`new`, with the files saving wrote them to) by the Graph's ids,
+    /// and build the port tables from them, so an output whose ports the
+    /// Graph edited re-patches at once instead of on the next open.
+    fn rebase(&mut self, project: &ProjectController, new: &[(NodeId, String)]) {
+        let source = GraphSource::new(project, &self.absent);
+        let Ok(mut reopened) = Opened::open(&source) else {
+            return;
+        };
+        reopened.files.adopt_new_nodes(new);
+        if !source.misses().is_empty() {
+            return;
+        }
+        let mut read = source.into_read();
+        read.insert(
+            EDITOR_JSON.to_string(),
+            GraphSource::text_of(project, &self.absent, EDITOR_JSON).flatten(),
+        );
+        {
+            let mut editor = self.handle.editor().borrow_mut();
+            let tables = port_tables(&editor.project, &reopened.files);
+            if editor.project.set_port_tables(tables) {
+                self.generation += 1;
+                *self.frame.borrow_mut() = None;
+            }
+        }
+        let nodes = node_map(project, &reopened.files);
+        if let Some(opened) = self.opened.as_mut() {
+            opened.files = reopened.files;
+            opened.read = read;
+            // Nodes the Graph made join the map once Studio holds them.
+            for (id, node) in nodes {
+                opened.nodes.entry(id).or_insert(node);
+            }
+        }
+    }
+
     /// Show the selection on the board while the Graph is the place, and
     /// stop when it isn't or nothing is selected: each fixture's
-    /// `selection` slot for what is selected in fixtures (the lab's rules,
+    /// `selection` slot for what is selected in fixtures (the Graph's rules,
     /// plan M4b), and the outputs' `highlight` slots — the Patch view's
     /// pulse — for outputs, ports and pixels.
     async fn highlight(
@@ -313,7 +456,7 @@ impl GraphController {
             (Some(opened), Some(selection)) => {
                 let editor = self.handle.editor().borrow();
                 let p = &editor.project;
-                // The lab's own rules when every fixture's firmware has the
+                // The Graph's own rules when every fixture's firmware has the
                 // `selection` slot (plan M4b); M3's `highlight` otherwise.
                 let has_slot = p.fixtures().iter().all(|n| {
                     opened
@@ -368,7 +511,7 @@ impl GraphController {
 
     /// Say on the canvas that a save didn't happen.
     fn refuse_save(&mut self, why: String) {
-        self.handle.editor().borrow_mut().notice = Some(lab_mapping_model::Notice::refused(
+        self.handle.editor().borrow_mut().notice = Some(lpa_graph::Notice::refused(
             "Couldn't save the Graph's edit",
             why,
             "the edit is still on the Graph; undo it, or try again",
@@ -432,6 +575,8 @@ impl GraphController {
         } = opened;
         {
             let mut editor = self.handle.editor().borrow_mut();
+            let mut lab: Project = lab;
+            lab.set_port_tables(port_tables(&lab, &files));
             let mut e = Editor::new(lab).with_view_of(&editor);
             // The board (or the preview host) runs the project: its
             // shaders' pictures are their own.
@@ -442,7 +587,7 @@ impl GraphController {
                 .filter(|t| e.project.exists(t))
                 .cloned()
                 .collect();
-            e.set_placement(&lab_layout::canvas_layout(&e.layout_input()));
+            e.set_placement(&lpa_graph_layout::canvas_layout(&e.layout_input()));
             if first {
                 e.fit();
             } else {
@@ -481,6 +626,7 @@ impl GraphController {
 
     fn close(&mut self) {
         self.opened = None;
+        self.deleted.clear();
         self.state = None;
         self.absent.clear();
         self.absent_root = None;
@@ -490,7 +636,7 @@ impl GraphController {
     }
 }
 
-/// The lab's nodes, as Studio's: each by the file its definition lives in.
+/// The Graph's nodes, as Studio's: each by the file its definition lives in.
 fn node_map(
     project: &ProjectController,
     files: &ProductProject,
@@ -505,7 +651,7 @@ fn node_map(
         .collect()
 }
 
-/// A lab node as `editor.json` keys it: its tree path.
+/// A Graph node as `editor.json` keys it: its tree path.
 fn address_of(
     project: &ProjectController,
     nodes: &BTreeMap<NodeId, lpc_model::NodeId>,

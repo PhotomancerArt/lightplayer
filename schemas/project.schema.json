@@ -25,7 +25,7 @@
       "type": "array"
     },
     "format": {
-      "const": 11,
+      "const": 12,
       "title": "Authored format version"
     },
     "kind": {

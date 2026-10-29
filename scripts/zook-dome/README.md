@@ -47,10 +47,11 @@ units — the per-channel lengths agree within ±1 unit.
 ## The shipped repeat form
 
 The committed document is **one gapped sector × repeat 5** (map2d
-format 2): channel 1's whole trail as a single 13-point path with
-`gaps: [6]` (the jumper), wrapped in
-`repeat { center: apex, count: 5 }`. `--repeat`'s fidelity check proves
-this against the per-channel form:
+format 6): channel 1's whole trail as a single 13-point path, part
+`sector`, whose `d` moves (`M`) instead of drawing a line across the
+jumper, wrapped in `repeat { center: apex, count: 5 }` (part `repeat1`),
+with its `start` on output `"1"` (`output.json`'s `name`). `--repeat`'s
+fidelity check proves this against the per-channel form:
 
 - The five hand-drawn sectors are true 72° rotations of sector 1 to
   within **≤ 9 units** of drawing slop (vertex-by-vertex, after rotating

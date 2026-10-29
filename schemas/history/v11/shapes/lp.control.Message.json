@@ -1,0 +1,24 @@
+{
+  "value": {
+    "shape": {
+      "editor": "plain",
+      "id": 2014621053,
+      "meta": {},
+      "ty": {
+        "struct": {
+          "fields": [
+            {
+              "name": "id",
+              "ty": "u32"
+            },
+            {
+              "name": "seq",
+              "ty": "u32"
+            }
+          ],
+          "name": "ControlMessage"
+        }
+      }
+    }
+  }
+}
