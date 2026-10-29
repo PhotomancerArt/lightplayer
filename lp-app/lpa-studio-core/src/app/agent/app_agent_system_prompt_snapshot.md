@@ -46,14 +46,14 @@ This is the project the app itself creates for a seeed/xiao-esp32-c6 board: a cl
     "clock": {
       "ref": "./clock.json"
     },
-    "playlist": {
-      "ref": "./playlist.json"
-    },
     "fixture": {
       "ref": "./fixture.json"
     },
     "output": {
       "ref": "./output.json"
+    },
+    "playlist": {
+      "ref": "./playlist.json"
     }
   }
 }
