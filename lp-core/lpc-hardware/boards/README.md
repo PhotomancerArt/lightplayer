@@ -26,6 +26,9 @@ Two profiles are checked in today: `seeed/xiao-esp32-c6.json` (RISC-V) and
 `seeed/xiao-esp32-s3-plus.json` (Xtensa). Read them alongside this document —
 they are the authoritative examples of every shape below.
 
+`seeed/xiao-esp32-s3.json`, the plain XIAO ESP32-S3 (8 MB flash, LightPlayer's
+main S3), has the Plus's D0-D10 map and leaves out the same unverified pins.
+
 ## Tooling
 
 Use `lp-cli hardware manifest` for file management:
