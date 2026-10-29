@@ -189,11 +189,12 @@ fn a_usb_connect_that_finds_the_accounts_key_reports_the_board_once() {
     assert_eq!(report.id, BOARD);
     assert_eq!(report.seen_on, crate::AccountBoardLink::Usb);
     assert_eq!(
-        report.label, "lp-b49a",
-        "no name provisioned: its LAN name, as its relay hello says it"
+        report.label, "Relay board",
+        "the board's own name, as its hello says it (one board name)"
     );
 
-    // Renamed here: the next report still says the board's own name.
+    // Renamed here: the rename is the board's own name from now on, but it
+    // reports nothing by itself.
     let target = bench.view().devices[0].id;
     let rename = bench.device_verb(target, "rename");
     bench

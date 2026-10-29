@@ -5283,26 +5283,7 @@ impl StudioController {
             }
             HomeOp::RenamePackage { uid, name } => {
                 let renamed = self.rename_package(uid.clone(), &name).await?;
-                // One name (2026-10-28): a project exactly one board plays
-                // names that board too, on the board as well.
-                let view = self.device_roster_view();
-                if let [board] = self.board_projects(&view).boards_playing(&uid)[..]
-                    && let Some(name) = lpc_wire::clean_device_name(&name)
-                    && self
-                        .devices
-                        .roster()
-                        .device(board)
-                        .map(|device| device.title())
-                        != Some(name.clone())
-                {
-                    self.fold_device_input(crate::DeviceInput::Action(
-                        crate::DeviceAction::NameBoard {
-                            device: board,
-                            name,
-                        },
-                    ));
-                    self.settle_device_records().await;
-                }
+                self.board_follows_project_rename(&uid, &name).await;
                 Ok(UiNotices::new().with_notice(UiNotice::info(format!("Renamed to {renamed}"))))
             }
             HomeOp::SetPackageTarget { uid, target } => {
@@ -7053,6 +7034,27 @@ impl StudioController {
             .summary
             .map(|summary| summary.slug)
             .unwrap_or_else(|| name.to_string()))
+    }
+
+    /// One name (2026-10-28, Q3): a project exactly one board plays names
+    /// that board too, on the board as well. Called after a project rename.
+    pub(crate) async fn board_follows_project_rename(&mut self, uid: &str, name: &str) {
+        let view = self.device_roster_view();
+        if let [board] = self.board_projects(&view).boards_playing(uid)[..]
+            && let Some(name) = lpc_wire::clean_device_name(name)
+            && self
+                .devices
+                .roster()
+                .device(board)
+                .map(|device| device.title())
+                != Some(name.clone())
+        {
+            self.fold_device_input(crate::DeviceInput::Action(crate::DeviceAction::NameBoard {
+                device: board,
+                name,
+            }));
+            self.settle_device_records().await;
+        }
     }
 
     /// A board's rename follows onto the project it plays, when it is the

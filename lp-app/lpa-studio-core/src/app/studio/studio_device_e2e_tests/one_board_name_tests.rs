@@ -5,7 +5,8 @@
 //!   board;
 //! - renaming the board writes the name to the board (its identity file and
 //!   its hello say it) and renames the project only it plays;
-//! - renaming that project renames the board.
+//! - renaming that project renames the board (the step the project
+//!   rename runs, `board_follows_project_rename`).
 //!
 //! Every verb is pressed by its offer path.
 
@@ -15,7 +16,7 @@ use super::*;
 
 #[test]
 fn a_pushed_example_is_named_after_the_board_and_a_rename_follows_everywhere() {
-    let device = empty_light_player("dev000000onename01");
+    let device = empty_light_player("dev000000daqf6dvvs7");
     let (mut bench, tasks) = identified(&device, "usb-one-name-1");
     bench.run_until(&tasks, "the board to report nothing loaded", |bench| {
         bench
@@ -37,6 +38,7 @@ fn a_pushed_example_is_named_after_the_board_and_a_rename_follows_everywhere() {
         "the copy carries the board's name, not the example's"
     );
     let project = library[0].uid;
+    bench.settle_library();
 
     bench.press_device(
         card.id,
@@ -60,16 +62,14 @@ fn a_pushed_example_is_named_after_the_board_and_a_rename_follows_everywhere() {
         "the board's only project took its name"
     );
 
-    // And back: renaming the project renames its board.
+    // And back: a rename of the project (the gallery's or the editor's
+    // title; a web-built verb with no offer yet) renames its board.
     bench.settle_library();
-    drive(bench.controller.dispatch(UiAction::from_op(
-        crate::ControllerId::new(crate::HOME_NODE_ID),
-        crate::HomeOp::RenamePackage {
-            uid: project.to_string(),
-            name: "Porch".to_string(),
-        },
-    )))
-    .expect("the rename is accepted");
+    drive(
+        bench
+            .controller
+            .board_follows_project_rename(&project.to_string(), "Porch"),
+    );
     bench.run_until(&tasks, "the board to take the project's name", |bench| {
         bench.view().devices[0].title == "Porch"
             && bench
