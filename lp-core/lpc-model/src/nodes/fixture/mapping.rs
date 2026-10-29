@@ -1,30 +1,18 @@
-use alloc::vec::Vec;
-use lp_collection::VecMap;
-
-use crate::{
-    AssetSlot, EnumSlot, LpPathBuf, MapSlot, PositiveF32, PositiveF32Slot, Slotted, ValueSlot, Xy,
-    XySlot,
-};
+use crate::{AssetSlot, LpPathBuf, Slotted};
 
 /// Fixture-to-texture mapping authored on a fixture definition.
 ///
-/// Authored mappings are `Map2d` documents (`*.map2d.json`); `PathPoints`
-/// with `PointList` paths is the RESOLVED runtime carrier those documents
-/// funnel into (and remains directly authorable for hand-placed lamps).
-/// The legacy authored variants — SVG imports and parametric ring arrays —
-/// were retired in the 2D mapping system work; the map2d document owns
-/// parametric shapes now.
+/// Authored mappings are `Map2d` documents (`*.map2d.json`, map2d format 6
+/// since project format 12): the document holds the parts, their lamps and
+/// their patching. Hand-placed lamps are a document's `points` parts; the
+/// slot-modelled `PathPoints` lamps were retired with project format 12 (its
+/// upgrade turned them into `points` parts), as the SVG imports and
+/// parametric ring arrays were before them.
 #[derive(Debug, Clone, PartialEq, Slotted)]
 pub enum MappingConfig {
     /// No authored fixture mapping has been selected yet.
     #[default]
     Unset,
-
-    /// A mapping defined by fixture paths sampled from the target texture.
-    PathPoints {
-        paths: MapSlot<u32, EnumSlot<PathSpec>>,
-        sample_diameter: PositiveF32Slot,
-    },
 
     /// An opaque 2D mapping document (`*.map2d.json`) resolved at project
     /// load. The document's contents (objects, sample diameter, canvas) are
@@ -32,49 +20,10 @@ pub enum MappingConfig {
     Map2d { source: AssetSlot },
 }
 
-/// Specifies one path for a fixture.
-#[derive(Debug, Clone, PartialEq, Slotted)]
-pub enum PathSpec {
-    /// Explicit lamp positions sampled from an authored mapping source.
-    #[default]
-    PointList {
-        first_channel: ValueSlot<u32>,
-        points: MapSlot<u32, XySlot>,
-    },
-}
-
 impl MappingConfig {
-    pub fn path_points(paths: MapSlot<u32, EnumSlot<PathSpec>>, sample_diameter: f32) -> Self {
-        Self::PathPoints {
-            paths,
-            sample_diameter: PositiveF32Slot::new(PositiveF32(sample_diameter)),
-        }
-    }
-
-    pub fn path_points_vec(paths: Vec<PathSpec>, sample_diameter: f32) -> Self {
-        let mut entries = VecMap::new();
-        for (index, path) in paths.into_iter().enumerate() {
-            entries.insert(index as u32, EnumSlot::new(path));
-        }
-        Self::path_points(MapSlot::new(entries), sample_diameter)
-    }
-
     pub fn map2d(source: impl Into<LpPathBuf>) -> Self {
         Self::Map2d {
             source: AssetSlot::path(source),
-        }
-    }
-}
-
-impl PathSpec {
-    pub fn point_list(first_channel: u32, points: impl IntoIterator<Item = [f32; 2]>) -> Self {
-        let mut entries = VecMap::new();
-        for (index, point) in points.into_iter().enumerate() {
-            entries.insert(index as u32, XySlot::new(Xy(point)));
-        }
-        Self::PointList {
-            first_channel: ValueSlot::new(first_channel),
-            points: MapSlot::new(entries),
         }
     }
 }

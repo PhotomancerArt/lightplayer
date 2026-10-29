@@ -201,7 +201,7 @@ fn a_fixture_refused_for_an_older_mapping_never_asks() {
         matches!(
             &status,
             Some(lpc_model::NodeRuntimeStatus::Error(message))
-                if message.contains(crate::nodes::fixture::fixture_node::OLDER_MAPPING_REFUSAL)
+                if message.contains("map2d format 1 is the older layout document")
         ),
         "{status:?}"
     );

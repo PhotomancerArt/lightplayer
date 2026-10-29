@@ -29,8 +29,8 @@ pub struct UiSlotMapComposite {
 
 /// Gesture facts for an enum slot row.
 ///
-/// Variant names are the RAW declared idents (`PathPoints`, not
-/// `path_points`) — slot paths address variants verbatim.
+/// Variant names are the RAW declared idents (`Map2d`, not
+/// `map2d`) — slot paths address variants verbatim.
 #[derive(Clone, Debug, PartialEq)]
 pub struct UiSlotEnumComposite {
     /// Currently active variant ident.

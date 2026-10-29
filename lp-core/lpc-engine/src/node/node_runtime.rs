@@ -36,11 +36,10 @@ pub enum AssetRefreshResult {
 
 /// One run of a producer's lamps, placed on an output's wire.
 ///
-/// The engine's word for `lpc_mapping::PatchedRange` — a resolved patch entry.
-/// It is restated here, in LAMPS like the document it came from, because the
-/// output node is never gated out while the mapping crate can be: placement is
-/// a producer-declared property, and what a producer resolved it FROM is that
-/// producer's business.
+/// What a fixture's patching gave a run of its lamps (`patching_runs.rs`),
+/// restated here, in LAMPS, because the output node is never gated out while
+/// the mapping crate can be: placement is a producer-declared property, and
+/// what a producer patched it FROM is that producer's business.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PatchedRun {
     /// First lamp of the run, in the producer's own order.
@@ -49,14 +48,14 @@ pub struct PatchedRun {
     pub count: u32,
     /// First wire lamp of the run's window.
     pub lamp: u32,
-    /// Lay the run down end-first (applied before rotation — the kernel's
-    /// canonical composition order, `lpc_mapping::patched_wire_lamp`).
+    /// Lay the run down end-first (applied before rotation: source lamp `j`
+    /// lands at window slot `(j' + offset) mod count`, `j'` being `j` laid
+    /// end-first when reversed).
     pub reversed: bool,
     /// Rotation in lamps within the run's window (0 = none).
     pub offset: u32,
-    /// The addressed output's NAME; `None` = the default output (the first
-    /// fragments-consuming output on the bus, D40).
-    pub output: Option<alloc::string::String>,
+    /// The addressed output's NAME: every run names the output it lands on.
+    pub output: alloc::string::String,
 }
 
 impl PatchedRun {
@@ -65,6 +64,16 @@ impl PatchedRun {
     #[must_use]
     pub const fn lamp_end(&self) -> u32 {
         self.lamp.saturating_add(self.count)
+    }
+
+    /// The wire lamp the run's lamp `j` (counted from its `start`) lands on:
+    /// laid end-first when reversed, then rotated by `offset` within the
+    /// window. The tests' oracle for what the output's render does.
+    #[cfg(all(test, feature = "node-fixture"))]
+    pub(crate) fn wire_lamp(&self, j: u32) -> u32 {
+        debug_assert!(j < self.count);
+        let oriented = if self.reversed { self.count - 1 - j } else { j };
+        self.lamp + ((oriented + self.offset) % self.count.max(1))
     }
 }
 
@@ -283,20 +292,19 @@ pub trait NodeRuntime {
         Revision::default()
     }
 
-    /// Where this node's control product lands on its output's wire, when the
-    /// node authored a patch for it.
+    /// Where this node's control product lands on its outputs' wires: the
+    /// runs its patching gave its lamps, each naming its output. A run may be
+    /// non-contiguous with its neighbours, or reversed, or rotated.
     ///
-    /// `None` — every node but a patched fixture — means auto-flow: the
-    /// output places this producer end-to-end after the ones ahead of it.
-    /// `Some` replaces that placement entirely with the resolved runs, which
-    /// is how a run gets to be non-contiguous, or reversed, or both.
+    /// Empty for every node but a fixture with a mapping: lamps no run
+    /// places are on no wire (nothing flows by default).
     ///
     /// Read by the output DURING its own consume, after the resolve that ran
     /// this node's `produce` — so it is this frame's answer, and an edited
-    /// patch document reaches the wire on the next tick with no cache to
+    /// mapping reaches the wire on the next tick with no cache to
     /// invalidate.
-    fn control_patch_placement(&self) -> Option<&[PatchedRun]> {
-        None
+    fn control_patch_placement(&self) -> &[PatchedRun] {
+        &[]
     }
 
     /// Moves whenever [`Self::control_patch_placement`]'s answer does. An
@@ -306,21 +314,6 @@ pub trait NodeRuntime {
     /// name). A producer whose placement never changes leaves it at 0.
     fn control_patch_generation(&self) -> u64 {
         0
-    }
-
-    /// Does this producer's patch declare MANUAL flow (`flow: "manual"`,
-    /// P5b)?
-    ///
-    /// A manual producer never auto-flows: lamps its entries do not name are
-    /// on no wire at all. That is a claim [`Self::control_patch_placement`]
-    /// cannot make on its own — an empty run list there is indistinguishable
-    /// from "unpatched", which auto-flows — so the flag rides beside it and
-    /// the output planner reads both.
-    ///
-    /// False for every node but a manually-patched fixture, which keeps
-    /// auto-flow byte-identical to what it always was.
-    fn control_patch_manual(&self) -> bool {
-        false
     }
 
     /// Render capability for nodes whose produced slots can materialize visual products.

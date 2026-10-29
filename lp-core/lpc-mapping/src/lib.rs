@@ -1,23 +1,20 @@
-//! 2D LED fixture mapping: authored document schema and the single
-//! deterministic resolver shared by the engine, the device, and Studio.
+//! 2D LED fixture mapping, shared by the engine, the device, and Studio:
+//! mapping = layout + patching.
 //!
-//! The mapping *document* ([`Map2dDoc`]) is an opaque, format-versioned JSON
-//! asset authored per fixture (e.g. `fixture.map2d.json`). It contains
-//! parametric objects — grids, multi-ring circles, sampled paths, and
-//! rotational repeats of any of those — whose vec order **is** the wiring
-//! order. [`resolve`] turns a document into the
-//! ordered lamp list (wiring-order indices plus positions in doc space);
-//! [`fit_points`] maps doc-space positions
-//! into a fixture render target without stretching.
+//! A fixture's mapping document (`fixture.map2d.json`) is map2d format 6
+//! ([`map2d6`]): its parts render a tree whose leaves are segments
+//! ([`part`]), and the patcher gives every segment its address on an
+//! output's ports ([`patching`]), saved in the same file. Project format 12
+//! holds format 6 only.
 //!
-//! The crate owns a second document: the per-fixture **patch**
-//! ([`PatchDoc`], e.g. `fixture.patch.json`), which says where a fixture's
-//! lamps land on an output's wire. Mapping answers "where is this lamp?" and
-//! is built once; patching answers "which jack did that strand end up in?"
-//! and changes on every install — so they are stored apart and
-//! [`resolve_patch`] anchors sparse entries over auto-flow.
+//! The older document ([`Map2dDoc`], formats 1–5: parametric objects whose
+//! vec order is the wiring order) stays for its resolver: [`resolve`] and
+//! [`resolve_into`] are the new model's geometry (each shape's lamps), and
+//! [`fit_points`] maps doc-space positions into a fixture render target
+//! without stretching. Studio's hidden Map tab still reads the document
+//! until it is deleted.
 //!
-//! A third document is project-level: the editor's `editor.json`
+//! A second document is project-level: the editor's `editor.json`
 //! ([`EditorMetaDoc`]) — per-node Arrange-canvas placement, for human eyes
 //! only. The engine and the device never read it, and it is never a
 //! sampling input (see the module doc in `editor_meta`).
@@ -45,16 +42,14 @@ mod map2d_error;
 mod map2d_fit;
 mod map2d_object_id;
 mod map2d_resolve;
-mod map_object_path;
 pub mod part;
-mod patch;
 pub mod patching;
+mod sorted_set;
 
 pub use editor_meta::{
     EDITOR_META_FORMAT, EditorFootprint, EditorMetaDoc, EditorMetaError, EditorNodeMeta,
     EditorSurfaceMeta, EditorTransform,
 };
-pub use map_object_path::MapObjectPath;
 pub use map2d_doc::{
     DEFAULT_SAMPLE_DIAMETER, FilledPolygonShape, GridCorner, GridRouting, GridShape, MAP2D_FORMAT,
     MAX_REPEAT_COUNT, Map2dDoc, Map2dObject, Map2dShape, PathAlign, PathShape, PolygonShape,
@@ -67,9 +62,4 @@ pub use map2d_resolve::{
     ObjectInstanceSpan, ObjectSpan, ResolvedLamp, ResolvedMap2d, Rotation2d, filled_polygon_cells,
     object_instance_spans, object_instance_spans_of, object_stride, path_gap_breaks, resolve,
     resolve_into, shape_lamp_count, shape_stride,
-};
-pub use patch::{
-    PATCH_FORMAT, PATCH_FORMAT_BASE, PATCH_FORMAT_FLOW, PATCH_FORMAT_OBJECT_GRAIN, PatchDoc,
-    PatchEntry, PatchError, PatchFlow, PatchRange, PatchResolution, PatchResolveContext,
-    PatchSource, PatchedRange, patched_wire_lamp, resolve_patch,
 };

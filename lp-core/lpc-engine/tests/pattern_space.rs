@@ -374,26 +374,33 @@ fn a_30k_lamp_serpentine_keeps_its_pitch_and_range() {
     use lpc_engine::products::visual::{
         PatternFrame, ScopeGeometry, normalized_f32_to_q16, normalized_q16_to_pixel_q16,
     };
-    use lpc_model::nodes::fixture::{MappingConfig, MappingRef, PathSpec, mapping_centers};
+    use lpc_model::nodes::fixture::{
+        MappingRef, ResolvedMappingCompact, ResolvedSpan, mapping_centers,
+    };
 
     let side = 173u32; // 29,929 lamps
     let (width, height) = (256u32, 256u32);
-    let rows: Vec<PathSpec> = (0..side)
-        .map(|row| {
-            let points: Vec<[f32; 2]> = (0..side)
-                .map(|col| {
-                    let col = if row % 2 == 0 { col } else { side - 1 - col };
-                    [
-                        (col as f32 + 0.5) / side as f32,
-                        (row as f32 + 0.5) / side as f32,
-                    ]
-                })
-                .collect();
-            PathSpec::point_list(row * side, points)
-        })
-        .collect();
-    let config = MappingConfig::path_points_vec(rows, 1.0);
-    let mapping = MappingRef::Slots(&config);
+    // One path per row, serpentine, in the compact carrier's form.
+    let mut config = ResolvedMappingCompact {
+        spans: Vec::new(),
+        points: Vec::new(),
+        sample_diameter: 1.0,
+    };
+    for row in 0..side {
+        config.spans.push(ResolvedSpan {
+            object: row,
+            first_channel: row * side,
+            count: side,
+        });
+        config.points.extend((0..side).map(|col| {
+            let col = if row % 2 == 0 { col } else { side - 1 - col };
+            [
+                (col as f32 + 0.5) / side as f32,
+                (row as f32 + 0.5) / side as f32,
+            ]
+        }));
+    }
+    let mapping = MappingRef::Compact(&config);
     let scope = ScopeGeometry::from_mapping(mapping, width, height).expect("lamps");
     assert_eq!(scope.lamp_count, side * side);
     let frame = PatternFrame::two_d(&scope);

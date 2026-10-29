@@ -7846,7 +7846,7 @@ impl ProjectController {
     /// Wire a new node's starter to the project's outputs (DD28): a new
     /// output is named the lowest free number
     /// ([`super::node::new_output_name`]), and a new fixture's mapping starts
-    /// on the first named output its control channel reaches in the scope
+    /// on the first named output its bus channel reaches in the scope
     /// `parent` holds it in ([`super::node::new_fixture_start`]); left on the
     /// starter's `"1"` when it reaches none.
     fn wire_new_node_to_outputs(

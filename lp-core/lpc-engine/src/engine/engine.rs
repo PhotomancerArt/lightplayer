@@ -22,7 +22,7 @@ use crate::dataflow::resolver::{
     EngineSession, Production, ProductionSource, QueryKey, ResolveHost, ResolveLogLevel,
     ResolveTrace, Resolver, SessionHostResolver, SessionResolveError, TickResolver,
 };
-use crate::frame_plan::{LaneTopology, PlanMode, PlanSlot};
+use crate::frame_plan::PlanMode;
 use crate::node::RuntimeNodeEntry;
 use crate::node::catch_node_panic::catch_node_panic_framed;
 use crate::node::{
@@ -186,10 +186,6 @@ pub struct Engine {
 /// The engine's frame-plan state ([`Engine::frame_plans`]).
 #[derive(Default)]
 struct EngineFramePlans {
-    /// Which output is the default for its bus channel, derived once per
-    /// structure epoch ([`LaneTopology`]). Borrowed by the tick's resolve
-    /// host for the walk.
-    lane_topology: PlanSlot<u64, LaneTopology>,
     /// The structure epoch the output sinks were last reconfigured at
     /// ([`Engine::refresh_output_sink_configs`]): an output's authored
     /// configuration changes only through an edit, and every edit moves the
@@ -924,10 +920,6 @@ impl Engine {
         &mut self,
         level: crate::node::PressureLevel,
     ) -> Result<(), EngineError> {
-        // The engine's own plans are rebuildable state too.
-        if level >= crate::node::PressureLevel::High {
-            self.frame_plans.lane_topology.clear();
-        }
         let revision = self.revision;
         for entry in self.tree.entries_mut() {
             let node_id = entry.id;
@@ -1059,7 +1051,6 @@ impl Engine {
             .with_frame_plans(&mut self.frame_plans.state);
 
         let mut producers_ticked = core::mem::take(&mut self.frame_plans.producers_ticked);
-        let lane_topology = &mut self.frame_plans.lane_topology;
         producers_ticked.clear();
         let time_s = self.frame_time.total_ms as f32 / 1000.0;
         let time_provider = self.services.time_provider();
@@ -1085,24 +1076,7 @@ impl Engine {
             services: &self.services,
             frame_revision: self.revision,
             fault: fault_tick_view(self.project_fault.as_ref(), self.fault_presentation),
-            lane_topology: None,
         };
-        // The lane plan, before the walk asks it anything: the epoch cannot
-        // move mid-walk. The host borrows it rather than holding it: the host
-        // lives on the stack under every node the walk runs.
-        let epoch = session.structure_epoch();
-        let plans = session
-            .frame_plans_mut()
-            .expect("the tick's session carries the engine's plan state");
-        let topology = lane_topology.get_or_build(epoch, plans, |plans| {
-            let topology = LaneTopology::build(host.tree.entries().map(|entry| entry.id), |id| {
-                host.is_default_fragments_consumer_uncached(id)
-            });
-            plans.counters.default_fragments_reads += host.tree.len() as u32;
-            topology
-        });
-        host.lane_topology = Some(topology);
-
         // Every demand root gets its turn: one output failing must not take
         // its siblings dark for the frame (they would keep a stale buffer on
         // the wall, and under a project fault they must paint the pattern
@@ -1252,7 +1226,6 @@ impl Engine {
             services: &self.services,
             frame_revision: self.revision,
             fault: fault_tick_view(self.project_fault.as_ref(), self.fault_presentation),
-            lane_topology: None,
         };
         // Render-scoped OOM attribution, same rationale as [`Self::tick`].
         lpc_shared::backtrace::set_oom_context("engine: render texture product");
@@ -1301,7 +1274,6 @@ impl Engine {
             services: &self.services,
             frame_revision: self.revision,
             fault: fault_tick_view(self.project_fault.as_ref(), self.fault_presentation),
-            lane_topology: None,
         };
         host.visual_node_space(product)
     }
@@ -1395,7 +1367,6 @@ impl Engine {
             services: &self.services,
             frame_revision: self.revision,
             fault: fault_tick_view(self.project_fault.as_ref(), self.fault_presentation),
-            lane_topology: None,
         };
         let result = session.resolve(&mut host, &key);
         self.resolver = resolver_tmp;
@@ -1457,7 +1428,6 @@ impl Engine {
             services: &self.services,
             frame_revision: self.revision,
             fault: fault_tick_view(self.project_fault.as_ref(), self.fault_presentation),
-            lane_topology: None,
         };
         host.render_node_control(product, request, target)
     }
@@ -1504,7 +1474,6 @@ impl Engine {
             services: &self.services,
             frame_revision: self.revision,
             fault: fault_tick_view(self.project_fault.as_ref(), self.fault_presentation),
-            lane_topology: None,
         };
         let scope = scope.or_else(|| host.tree.node_scope(host.tree.root()));
         let result = session.resolve(
@@ -1551,7 +1520,6 @@ impl Engine {
             services: &self.services,
             frame_revision: self.revision,
             fault: fault_tick_view(self.project_fault.as_ref(), self.fault_presentation),
-            lane_topology: None,
         };
         host.render_node_control_probe(product, request, target, want_display_layout)
     }
@@ -1629,7 +1597,6 @@ impl Engine {
             services: &self.services,
             frame_revision: self.revision,
             fault: fault_tick_view(self.project_fault.as_ref(), self.fault_presentation),
-            lane_topology: None,
         };
         f(&mut host)
     }
@@ -1729,10 +1696,6 @@ struct EngineResolveHost<'a> {
     /// presentation knob, stamped onto every [`TickContext`] this host
     /// builds. See [`FaultTickView`].
     fault: FaultTickView,
-    /// The engine's lane plan, lent for the walk ([`Engine::lane_topology`]).
-    /// `None` on the hosts built outside the tick (probes, texture renders),
-    /// which derive the answer fresh.
-    lane_topology: Option<&'a LaneTopology>,
 }
 
 impl EngineResolveHost<'_> {
@@ -1832,59 +1795,6 @@ impl EngineResolveHost<'_> {
             self.output_identities.remove(&id);
         }
         swept
-    }
-
-    /// Is `consumer` the DEFAULT output for its bus channel — the target of
-    /// every unaddressed patch run and of auto-flow (D40)?
-    ///
-    /// The default is the first fragments-consuming output in attach order
-    /// (lowest [`NodeId`] — the loader attaches in module `nodes` key
-    /// order, the same determinism the provider walk leans on). **Fails
-    /// safe to `true`**: a consumer whose peer set cannot be determined
-    /// (no bus binding, an unscoped or single-consumer topology) behaves
-    /// exactly as every output did before scatter existed — that identity
-    /// is what keeps single-output projects byte-stable (A1).
-    fn is_default_fragments_consumer(&self, consumer: NodeId) -> bool {
-        // Every output asks this every frame, and deriving it walks static
-        // binding topology (several Vecs, path clones): the tick's lane plan
-        // holds every node's answer for the epoch.
-        self.lane_topology
-            .and_then(|topology| topology.is_default_fragments_consumer(consumer))
-            .unwrap_or_else(|| self.is_default_fragments_consumer_uncached(consumer))
-    }
-
-    fn is_default_fragments_consumer_uncached(&self, consumer: NodeId) -> bool {
-        use crate::dataflow::resolver::ResolveHost as _;
-        let bindings = self
-            .tree
-            .bindings_for_consumed_slot(consumer, &crate::nodes::output_input_path());
-        let Some(channel) = bindings.iter().find_map(|(_, entry)| match &entry.source {
-            crate::dataflow::binding::BindingSource::BusChannel(channel) => Some(channel.clone()),
-            _ => None,
-        }) else {
-            return true;
-        };
-        let peers = match self.tree.bus_read_scope(consumer) {
-            Some(scope) => self.tree.consumers_for_bus_in_scope(scope, &channel),
-            None => self.tree.consumers_for_bus(&channel),
-        };
-        let candidates: Vec<(NodeId, lpc_model::SlotPath)> = peers
-            .iter()
-            .filter_map(|(_, entry)| match &entry.target {
-                crate::dataflow::binding::BindingTarget::ConsumedSlot { node, slot } => {
-                    Some((*node, slot.clone()))
-                }
-                _ => None,
-            })
-            .collect();
-        let first = candidates
-            .into_iter()
-            .filter(|(node, slot)| {
-                self.merge_policy_for_consumed_slot(*node, slot) == SlotMerge::Fragments
-            })
-            .map(|(node, _)| node)
-            .min();
-        first.is_none_or(|first| first == consumer)
     }
 
     #[inline(never)]
@@ -2249,67 +2159,35 @@ impl ResolveHost for EngineResolveHost<'_> {
         self.render_node_control(product, request, target)
     }
 
-    /// Read the producing node's resolved patch, AS `consumer` should see it
-    /// (D40, the scatter rule).
-    ///
-    /// The producer's runs carry output names; each consuming output
-    /// receives only the runs addressed to it — by name match, or, for
-    /// unaddressed runs, by being the DEFAULT output (the first
-    /// fragments-consuming output on the bus in attach order).
-    ///
-    /// The `Some(vec![])` / `None` distinction is load-bearing:
-    ///
-    /// - `None` = "auto-flow me" — the producer is unpatched (or its patch
-    ///   is empty), and `consumer` is the default output. The planner emits
-    ///   an auto-flow fragment.
-    /// - `Some(vec![])` = "patched, but nothing lands HERE" — either every
-    ///   run is addressed elsewhere, or the producer is unpatched and
-    ///   `consumer` is not the default. Zero runs is NOT a gap: the planner
-    ///   emits no fragment and no warning.
-    ///
-    /// A producer whose patch declares MANUAL flow (P5b) never gets the
-    /// `None` answer: its unentered lamps are meant to be on no wire, so the
-    /// default output is told "nothing lands here" like any other.
+    /// Read the producing node's runs, AS `consumer` should see it: the
+    /// ones naming `consumer`'s registered name (the scatter rule, D40).
+    /// Every run names its output; a run naming no output this one is goes
+    /// elsewhere, and a producer with no runs places nothing anywhere.
     ///
     /// Deliberately silent when the node is missing or mid-execution: this
-    /// answers "how is this producer patched", and "we could not ask right
-    /// now" means auto-flow, not a dead frame. A node whose patch failed to
-    /// parse keeps its last good placement and reports the failure as its own
-    /// runtime status.
+    /// answers "where does this producer land", and "we could not ask right
+    /// now" lands nothing this frame. A fixture whose mapping failed to read
+    /// keeps its last good runs and reports the failure as its own runtime
+    /// status.
     fn control_patch_placement(
         &self,
         product: ControlProduct,
         consumer: NodeId,
-    ) -> Option<Vec<crate::node::PatchedRun>> {
-        let entry = self.tree.get(product.node())?;
+    ) -> Vec<crate::node::PatchedRun> {
+        let Some(entry) = self.tree.get(product.node()) else {
+            return Vec::new();
+        };
         let NodeEntryState::Alive(node) = entry.state.value() else {
-            return None;
+            return Vec::new();
         };
-        let runs = node
-            .control_patch_placement()
-            .filter(|runs| !runs.is_empty());
-        let is_default = self.is_default_fragments_consumer(consumer);
-        let manual = node.control_patch_manual();
-        let Some(runs) = runs else {
-            // Unpatched producer: auto-flow on the default output only —
-            // unless it declared manual flow, which is exactly the statement
-            // "do not flow me".
-            return if is_default && !manual {
-                None
-            } else {
-                Some(Vec::new())
-            };
+        let Some(Some(consumer_name)) = self.output_identities.get(&consumer) else {
+            return Vec::new();
         };
-        let consumer_name = self.output_identities.get(&consumer).cloned().flatten();
-        let filtered: Vec<crate::node::PatchedRun> = runs
+        node.control_patch_placement()
             .iter()
-            .filter(|run| match &run.output {
-                None => is_default,
-                Some(name) => consumer_name.as_deref() == Some(name.as_str()),
-            })
+            .filter(|run| run.output == *consumer_name)
             .cloned()
-            .collect();
-        Some(filtered)
+            .collect()
     }
 
     /// Register (or refresh) an output's authored name — called by the
@@ -2366,15 +2244,6 @@ impl ResolveHost for EngineResolveHost<'_> {
             Some(NodeEntryState::Alive(node)) => node.control_patch_generation(),
             _ => 0,
         }
-    }
-
-    fn known_output_names(&self) -> (Vec<alloc::string::String>, Revision) {
-        let names = self
-            .output_identities
-            .values()
-            .filter_map(|name| name.clone())
-            .collect();
-        (names, *self.output_identity_revision)
     }
 
     /// The named outputs that gather `producer`'s product off its bus
@@ -3876,7 +3745,6 @@ pub(crate) fn resolve_with_engine_host(
         services: &eng.services,
         frame_revision: eng.revision,
         fault: fault_tick_view(eng.project_fault.as_ref(), eng.fault_presentation),
-        lane_topology: None,
     };
     let result = session
         .resolve(&mut host, &key)
@@ -3944,7 +3812,6 @@ pub(super) fn control_patch_outputs_with_engine_host(
         services: &eng.services,
         frame_revision: eng.revision,
         fault: fault_tick_view(eng.project_fault.as_ref(), eng.fault_presentation),
-        lane_topology: None,
     };
     (host.control_patch_outputs(producer), key)
 }
@@ -3988,7 +3855,6 @@ pub(super) fn resolve_twice_same_frame_with_engine_host(
         services: &eng.services,
         frame_revision: eng.revision,
         fault: fault_tick_view(eng.project_fault.as_ref(), eng.fault_presentation),
-        lane_topology: None,
     };
     let result = session.resolve(&mut host, &key).and_then(|first| {
         session

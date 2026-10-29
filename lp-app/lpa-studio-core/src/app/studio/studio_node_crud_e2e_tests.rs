@@ -664,7 +664,7 @@ fn a_new_output_is_named_the_lowest_free_number() {
 
 /// DD28: a fixture added in Studio starts on the first named output its
 /// bus channel reaches, not on the starter's `"1"`, so it lights. Here
-/// output `"1"` listens on another channel and output `"front"` on
+/// output `"1"` listens on another bus channel and output `"front"` on
 /// `control.out`, where a new fixture publishes.
 #[test]
 fn a_new_fixture_starts_on_the_first_named_output_its_channel_reaches() {
@@ -685,7 +685,7 @@ fn a_new_fixture_starts_on_the_first_named_output_its_channel_reaches() {
     assert_eq!(
         mapping.start.output,
         lpc_mapping::patching::OutputOp::Set(lpc_mapping::patching::OutputName::new("front")),
-        "the new fixture starts on the output its control channel reaches"
+        "the new fixture starts on the output its bus channel reaches"
     );
 }
 

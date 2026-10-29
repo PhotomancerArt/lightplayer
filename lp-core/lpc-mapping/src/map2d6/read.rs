@@ -1,9 +1,12 @@
 //! Reading a format-6 document into a [`Mapping`].
 //!
-//! The format is read first and on its own, as `Map2dDoc::from_json` does,
-//! so a newer document is refused as newer ("this build reads up to 6")
-//! rather than as malformed. Then the whole document, then its rules, each
-//! refusal naming what it is about:
+//! The format decides first, so a newer document is refused as newer ("this
+//! build reads up to 6") rather than as malformed: the whole document is
+//! read once, and only when that does not give a format-6 document is the
+//! format read again on its own to say which refusal it is — every input
+//! refused as reading the format first refused it, without a second pass
+//! over every document a board loads. Then its rules, each refusal naming
+//! what it is about:
 //!
 //! - a part id that breaks the id rule, holds `@` or `/`, or is used twice;
 //! - a `next` word that is no kind of part, or a counter that would mint an
@@ -20,7 +23,6 @@
 //! would misread does.
 
 use alloc::boxed::Box;
-use alloc::collections::BTreeSet;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
@@ -34,6 +36,7 @@ use crate::part::{
     Circle, IdCounters, Mapping, PART_KIND_WORDS, Part, PartId, PartKind, Path, Repeat, Ring,
     SegmentKey, Shape,
 };
+use crate::sorted_set::insert_sorted;
 
 /// The format this reader reads and the writer writes.
 pub const MAP2D6_FORMAT: u32 = 6;
@@ -58,14 +61,17 @@ fn whole<T>(json: &str, read: fn(&mut JsonText) -> Read<T>) -> Result<T, Map2d6E
 /// one caller cost the C6 engine 198 B.
 #[inline(never)]
 pub fn read(json: &str) -> Result<Mapping, Map2d6Error> {
-    match peek_format(json)? {
-        MAP2D6_FORMAT => {}
-        found @ 1..MAP2D6_FORMAT => return Err(Map2d6Error::OlderFormat { found }),
-        found => return Err(Map2d6Error::UnsupportedFormat { found }),
+    let doc = whole(json, read_doc);
+    if !matches!(&doc, Ok(doc) if doc.format == MAP2D6_FORMAT) {
+        match peek_format(json)? {
+            MAP2D6_FORMAT => {}
+            found @ 1..MAP2D6_FORMAT => return Err(Map2d6Error::OlderFormat { found }),
+            found => return Err(Map2d6Error::UnsupportedFormat { found }),
+        }
     }
-    let doc: DocText = whole(json, read_doc)?;
+    let doc: DocText = doc?;
 
-    let mut ids = BTreeSet::new();
+    let mut ids = Vec::new();
     let parts = doc
         .parts
         .into_iter()
@@ -107,9 +113,9 @@ pub fn read(json: &str) -> Result<Mapping, Map2d6Error> {
     })
 }
 
-fn read_part(doc: PartText, ids: &mut BTreeSet<String>) -> Result<Part, Map2d6Error> {
+fn read_part(doc: PartText, ids: &mut Vec<String>) -> Result<Part, Map2d6Error> {
     let id = read_part_id(&doc.id)?;
-    if !ids.insert(doc.id.clone()) {
+    if !insert_sorted(ids, doc.id.clone()) {
         return Err(Map2d6Error::DuplicatePartId { id: doc.id });
     }
     let kind = match doc.kind {
@@ -185,7 +191,7 @@ fn read_part_id(id: &str) -> Result<PartId, Map2d6Error> {
 }
 
 fn read_circle(part: &str, doc: CircleText) -> Result<Circle, Map2d6Error> {
-    let mut keys = BTreeSet::new();
+    let mut keys = Vec::with_capacity(doc.rings.len());
     let mut rings = Vec::with_capacity(doc.rings.len());
     for ring in &doc.rings {
         let refuse = |reason: &str| Map2d6Error::InvalidRingKey {
@@ -194,7 +200,7 @@ fn read_circle(part: &str, doc: CircleText) -> Result<Circle, Map2d6Error> {
             reason: reason.to_string(),
         };
         let key = SegmentKey::new(&ring.key).map_err(|reason| refuse(&reason))?;
-        if !keys.insert(ring.key.as_str()) {
+        if !insert_sorted(&mut keys, ring.key.as_str()) {
             return Err(refuse("two rings have this key"));
         }
         if let Some(n) = minted_ring_number(&ring.key) {

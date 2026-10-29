@@ -23,4 +23,5 @@ What uses it:
   fw-emu.
 - The engine heap ratchet (`just heap-budget-check`).
 
-Studio's Map, Patch and Graph tabs don't read format 6 yet (M4).
+Studio's Graph edits format 6 from mapping rebuild M4 (the Map tab is
+hidden and the Patch tab deleted since project format 12).

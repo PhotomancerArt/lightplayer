@@ -140,8 +140,38 @@ impl ServerFrame {
     pub fn hello_on_other_wire(request_id: u32, proto: u32, board_id: Option<String>) -> Self {
         Self {
             request_id,
-            body: ServerFrameBody::HelloOnOtherWire { proto, board_id },
+            body: ServerFrameBody::HelloOnOtherWire {
+                proto,
+                board_id,
+                identity: None,
+                tree_store: None,
+                update: None,
+            },
         }
+    }
+
+    /// Stamp a hello from another wire with what its update needs, as far
+    /// as it said it: who the board is (its MAC), whether its files are in
+    /// the tree store, and its board manifest. A no-op on any other frame.
+    #[must_use]
+    pub fn with_other_wire_update(
+        mut self,
+        identity: Option<PeerIdentity>,
+        tree_store: Option<bool>,
+        update: Option<UpdateFacts>,
+    ) -> Self {
+        if let ServerFrameBody::HelloOnOtherWire {
+            identity: i,
+            tree_store: t,
+            update: u,
+            ..
+        } = &mut self.body
+        {
+            *i = identity.filter(|identity| !identity.is_empty());
+            *t = tree_store;
+            *u = update;
+        }
+        self
     }
 
     pub fn other(request_id: u32, label: impl Into<String>) -> Self {
@@ -157,10 +187,9 @@ impl ServerFrame {
     pub fn identity(&self) -> Option<&PeerIdentity> {
         match &self.body {
             ServerFrameBody::Hello(hello) => Some(&hello.identity),
-            ServerFrameBody::Heartbeat { identity, .. } => identity.as_ref(),
-            ServerFrameBody::Loaded { .. }
-            | ServerFrameBody::Other { .. }
-            | ServerFrameBody::HelloOnOtherWire { .. } => None,
+            ServerFrameBody::Heartbeat { identity, .. }
+            | ServerFrameBody::HelloOnOtherWire { identity, .. } => identity.as_ref(),
+            ServerFrameBody::Loaded { .. } | ServerFrameBody::Other { .. } => None,
         }
     }
 
@@ -276,12 +305,26 @@ pub enum ServerFrameBody {
     /// wire — never the "no hello" of pre-hello firmware (G1-F1: every
     /// wire-32 C6 read "pre-hello firmware" in a wire-33 Studio). The board
     /// is what lets the card offer Update firmware for it, rather than a
-    /// pick of every board (G1 walk, 2026-10-03). Nothing else of it is
-    /// read.
+    /// pick of every board (G1 walk, 2026-10-03).
+    ///
+    /// The rest is what its firmware update needs, which rides lp-link's
+    /// update channel and never this wire: who the board is (its MAC,
+    /// `lpc_wire::hello_base_mac` — over a cable a USB serial number says
+    /// it, over a radio or the relay nothing else does), whether its files
+    /// are in the tree store (`lpc_wire::hello_on_tree_store`), and its
+    /// board manifest (`lpc_wire::hello_firmware`, the update channel's
+    /// own `M`, whose presence is the board's announcement of that
+    /// channel). Nothing else of it is read.
     HelloOnOtherWire {
         proto: u32,
         #[serde(default)]
         board_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        identity: Option<PeerIdentity>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tree_store: Option<bool>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        update: Option<UpdateFacts>,
     },
 }
 

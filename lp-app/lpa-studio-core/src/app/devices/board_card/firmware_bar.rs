@@ -492,8 +492,10 @@ fn details(
     }
 
     // 2. The facts. A board with no LightPlayer on it says what is there
-    // in the row's own words ("none", "unknown (pre-2026.07)").
-    let version = match view.firmware_face.wants_flash() {
+    // in the row's own words ("none", "unknown (pre-2026.07)"). An older
+    // LightPlayer whose board manifest named its version (its update story)
+    // says that version, as the row's name does.
+    let version = match view.firmware_face.wants_flash() && update.is_none() {
         true => face_words(&view.firmware_face).0,
         false => version.to_string(),
     };

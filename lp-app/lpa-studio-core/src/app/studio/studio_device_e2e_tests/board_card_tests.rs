@@ -1343,15 +1343,18 @@ fn a_running_sim_with_no_project_offers_add_a_project() {
 }
 
 /// The dead end of 2026-10-17 (the desk's fixture C6 on lightplayer.app): a
-/// LightPlayer on an older wire, on USB, seen here for the first time (its
-/// hello is unreadable, so it names no MAC and stays a new board). Its
-/// card says what it is and what the button does, never a black top and no
-/// button; the Project row says "not known", never a false "none"; the
-/// primary is Update firmware — Routine, since the update keeps the
-/// project and the files — and pressing it by path with a board, as the
-/// agent may, starts the flash. (A board Studio remembers, whose board
-/// resolves, gets the one-click `update-firmware` instead:
-/// `primary_action`'s and `board_surface`'s own tests.)
+/// LightPlayer on an older wire, on USB, seen here for the first time. Its
+/// hello is unreadable at this wire, but it names its MAC (read on its own,
+/// as its version and board are: `lpc_wire::hello_base_mac`), so the board
+/// is kept by it like any board that said who it is. Its card says what it
+/// is and what the button does, never a black top and no button; the
+/// Project row says "not known", never a false "none"; the primary is
+/// Update firmware — Routine, since the update keeps the project and the
+/// files — and pressing it by path, as the agent may, starts the flash: a
+/// wire-32 single image carries no board manifest, so it has no update
+/// channel to take. (A board on an older wire whose hello carries its
+/// manifest takes the update channel instead, on every link:
+/// `an_older_wire_board_is_updated_over_the_update_channel_on_every_link`.)
 #[test]
 fn an_older_lightplayers_card_updates_its_firmware_by_path() {
     const HELLO_PROTO_32: &str =
@@ -1366,15 +1369,20 @@ fn an_older_lightplayers_card_updates_its_firmware_by_path() {
         &tasks,
         "the board to read as an older LightPlayer",
         |bench| {
-            bench.view().pending.first().is_some_and(|pending| {
+            bench.view().devices.first().is_some_and(|card| {
                 matches!(
-                    pending.firmware_face,
+                    card.firmware_face,
                     lpa_devices::view::FirmwareFace::OlderLightPlayer { .. }
                 )
             })
         },
     );
-    let id = bench.view().pending[0].device;
+    let id = bench.view().devices[0].id;
+    assert_eq!(
+        bench.view().devices[0].identity_label.as_deref(),
+        Some("10:bd:a3:b0:8e:30"),
+        "kept by the MAC its hello named"
+    );
     let card = card_of(&bench, id);
     assert_eq!(card.surface.state, crate::SurfaceState::OldFirmware);
     let notice = card.surface.notice.clone().expect("the surface says it");
@@ -1390,7 +1398,7 @@ fn an_older_lightplayers_card_updates_its_firmware_by_path() {
     );
     let update = primary_offer(&card);
     assert_eq!(update.word, "Update firmware");
-    assert_eq!(update.offer.to_string(), "devices/new-1/flash");
+    assert_eq!(update.offer, bench.device_verb(id, "update-firmware"));
     assert!(
         bench.offered(&update.offer).consequence().is_routine(),
         "it keeps the project and the files: one click, the agent may press it"

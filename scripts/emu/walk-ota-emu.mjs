@@ -48,6 +48,20 @@
 //                nothing in the list, so the press reads "Look up r1"; the
 //                store finds it by version, it joins the list, arms (older)
 //                and installs on the second press. `--steps install-lookup`
+//   older-wire   a board whose JSON wire is OLDER than this Studio's (X from
+//                `WALK_OTA_X`: a published release fetched by
+//                `scripts/ota/fetch-release-image.sh`, or a desk image built at
+//                an older wire), whose hello this Studio may not even decode:
+//                the card offers the over-the-air update all the same (never
+//                "Firmware updates need USB"), and one press takes it to Y
+//                over this lane's link — the update rides lp-link's update
+//                channel, which the wire never changes. Asserts the hello's
+//                older proto (Studio's terminal) before the press, the
+//                board's own `[OTA]`/`[LOADER]` words, Studio's "over <link>"
+//                narration, the project kept, and Y's hello at this wire
+//                after. Every lane but `--tab`; not in the default steps:
+//                `WALK_OTA_X=<dir> just walk-ota-emu [--lan|--relay|--ble]
+//                --steps older-wire`
 //   install-file  "From a file…" (`install-firmware-file`, in the same
 //                details): only r2 in the store; r1's `ota/` folder
 //                (its manifest, core, engine and .z files) is put into the
@@ -55,6 +69,29 @@
 //                core checks it, r1 joins the list "from your files", arms
 //                with the custom-build copy, and installs — never asking the
 //                store for r1. `--steps install-file`
+//   cross-format  ACROSS A PROJECT-FORMAT BUMP: a board on the last PUBLISHED
+//                release before the bump (CROSS, `target/ota-cross/x-release`,
+//                `scripts/ota/fetch-release-image.sh`: the release's own bytes,
+//                never rebuilt here) holding the crossing's two format-11
+//                projects (`lp-cli/tests/fixtures/ota-cross-format/v11`,
+//                written over its own wire, the eaves its startup project):
+//                X → Y with one press, and the update ends by upgrading the
+//                board's projects with no click — backing up, updating,
+//                "Upgrading projects", up to date — while the board says
+//                engine Y refused the old eaves by name, then "Project
+//                loaded: eaves". On `?emu=`, `--lan`, `--relay`, `--ble` and
+//                `--tab`
+//   cut-upgrade  the same, with the board's power cut while the card says
+//                "Upgrading projects" (engine Y has started; the stage has
+//                not finished): it boots Y again, refuses what is still old,
+//                and the stage starts itself with no click and finishes. The
+//                step says where the cut fell (before the startup project's
+//                batch committed, or between the two). On `?emu=` and `--lan`
+//   found-older  a board already on Y (this Studio's own image) holding the
+//                same format-11 projects, seeded directly: connected, its
+//                projects are upgraded with no click and no update. `?emu=`
+//                only. None of the three is in a lane's default steps
+//                (`--steps cross-format`); `just walk-ota-emu` fetches CROSS
 //
 // Every assertion waits for the BOARD's words (its console, `[OTA]`,
 // `[LOADER]`, `[CORE]` lines) as well as its card's. The card is the board
@@ -236,12 +273,21 @@ const RELAY_LANE = ARGS.includes("--relay");
 const ON_LAN = LAN_LANE || RELAY_LANE;
 const STEPS_ARG = ARGS.includes("--steps") ? ARGS[ARGS.indexOf("--steps") + 1].split(",") : null;
 /// Every step, in the order their boards' MACs are numbered.
-const ALL_STEPS = ["update", "cut-core", "cut-engine", "engine-less", "cant-get", "crashing", "needs-usb", "phantom-core", "cut-backup", "store-backup", "install-older", "install-lookup", "install-file", "renumber", "second-client", "relay-drop"];
+const ALL_STEPS = ["update", "cut-core", "cut-engine", "engine-less", "cant-get", "crashing", "needs-usb", "phantom-core", "cut-backup", "store-backup", "install-older", "install-lookup", "install-file", "renumber", "second-client", "relay-drop", "cross-format", "cut-upgrade", "found-older", "cut-older", "older-wire"];
 const DOOR_STEPS = ["update", "cut-core", "cut-engine", "engine-less", "cant-get", "crashing", "needs-usb"];
 const TAB_STEPS = ["update", "cut-core", "engine-less"];
 const BLE_STEPS = ["update", "cut-backup", "cut-core", "phantom-core", "engine-less"];
 const LAN_STEPS = ["update", "cut-core", "cut-engine", "engine-less", "renumber", "second-client"];
 const RELAY_STEPS = ["update", "relay-drop", "cut-engine"];
+/// The crossing's steps (a project-format bump): never a lane's default.
+const CROSS_STEPS = ["cross-format", "cut-upgrade", "found-older", "cut-older"];
+/// Where each is walked.
+const CROSS_LANES = {
+  "cross-format": "every lane",
+  "cut-upgrade": "the door's ?emu= and --lan",
+  "found-older": "the door's ?emu=, --lan, --relay and --ble",
+  "cut-older": "the door's ?emu= and --lan",
+};
 const STEPS = STEPS_ARG ?? (TAB ? TAB_STEPS : BLE ? BLE_STEPS : LAN_LANE ? LAN_STEPS : RELAY_LANE ? RELAY_STEPS : DOOR_STEPS);
 /// The steps that stand r1 and r2 behind a real lp-cloud-server.
 const RELEASE_STEPS = ["install-older", "install-lookup", "install-file"].some((step) => STEPS.includes(step));
@@ -256,8 +302,8 @@ if (RELAY_LANE && (TAB || BLE || LAN_LANE)) {
   console.error("walk-ota-emu: --relay walks the door's boards through a local relay; it does not combine with --tab, --ble or --lan");
   process.exit(2);
 }
-if (RELAY_LANE && STEPS.some((step) => !RELAY_STEPS.includes(step))) {
-  console.error(`walk-ota-emu: --relay walks ${RELAY_STEPS.join(", ")}`);
+if (RELAY_LANE && STEPS.some((step) => ![...RELAY_STEPS, "cross-format", "found-older", "older-wire"].includes(step))) {
+  console.error(`walk-ota-emu: --relay walks ${[...RELAY_STEPS, "cross-format", "found-older", "older-wire"].join(", ")}`);
   process.exit(2);
 }
 if (!RELAY_LANE && STEPS.includes("relay-drop")) {
@@ -272,8 +318,12 @@ if (!LAN_LANE && STEPS.some((step) => step === "renumber" || step === "second-cl
   console.error("walk-ota-emu: renumber and second-client are Wi-Fi steps (--lan)");
   process.exit(2);
 }
-if (LAN_LANE && STEPS.some((step) => !LAN_STEPS.includes(step))) {
-  console.error(`walk-ota-emu: --lan walks ${LAN_STEPS.join(", ")}`);
+if (LAN_LANE && STEPS.some((step) => ![...LAN_STEPS, ...CROSS_STEPS, "older-wire"].includes(step))) {
+  console.error(`walk-ota-emu: --lan walks ${[...LAN_STEPS, ...CROSS_STEPS, "older-wire"].join(", ")}`);
+  process.exit(2);
+}
+if (TAB && STEPS.includes("older-wire")) {
+  console.error("walk-ota-emu: older-wire boards WALK_OTA_X on the door (USB, --ble, --lan, --relay), not --tab");
   process.exit(2);
 }
 if (TAB && BLE) {
@@ -288,6 +338,15 @@ if (S3 && (TAB || RELAY_LANE || STEPS.includes("needs-usb") || RELEASE_STEPS)) {
   process.exit(2);
 }
 for (const name of STEPS) {
+  const crossOff =
+    (S3 && CROSS_STEPS.includes(name)) ||
+    (name === "cut-upgrade" && (TAB || BLE || RELAY_LANE)) ||
+    (name === "found-older" && TAB) ||
+    (name === "cut-older" && (TAB || BLE || RELAY_LANE));
+  if (crossOff) {
+    console.error(`walk-ota-emu: ${name} is walked on ${CROSS_LANES[name]}${S3 ? " (C6 boards; not --s3)" : ""}`);
+    process.exit(2);
+  }
   if (!BLE && name === "phantom-core") {
     console.error("walk-ota-emu: phantom-core is a Bluetooth step (--ble)");
     process.exit(2);
@@ -303,6 +362,17 @@ const xr = existsSync(path.join(XR, "ota/ota-manifest.json"))
   ? JSON.parse(readFileSync(path.join(XR, "ota/ota-manifest.json"), "utf8"))
   : null;
 const MONO = path.join(IMAGES, "mono");
+/// The crossing's X: the last published release before the last
+/// project-format bump (the header's `cross-format`), fetched, never built.
+const CROSS = process.env.WALK_OTA_CROSS
+  ? path.resolve(ROOT, process.env.WALK_OTA_CROSS)
+  : path.join(ROOT, "target/ota-cross/x-release");
+/// The projects such a board holds, at that release's format.
+const CROSS_PROJECTS = path.join(ROOT, "lp-cli/tests/fixtures/ota-cross-format/v11");
+const CROSSING = CROSS_STEPS.some((step) => STEPS.includes(step));
+/// Whether a step boards the walk's own X (images/x) or the pre-update
+/// single image: every step but the crossing's.
+const NEEDS_X = STEPS.some((step) => !CROSS_STEPS.includes(step));
 /// `install-older`'s two releases (the recipe builds them).
 const R1 = path.join(IMAGES, "r1");
 const R2 = path.join(IMAGES, "r2");
@@ -393,8 +463,8 @@ const macHex = (mac) => (mac ? String(mac).replace(/:/g, "").toLowerCase() : "")
 async function main() {
   for (const [what, at] of [
     ["the release Studio bundle (just studio-web-story-build)", path.join(ROOT, "target/dx/lpa-studio-web/release/web/public")],
-    [`X's split image (scripts/ota/build-image.sh ${path.relative(ROOT, X)} a0a0a0a0)`, path.join(X, "merged.bin")],
-    ...(S3
+    ...(NEEDS_X ? [[`X's split image (scripts/ota/build-image.sh ${path.relative(ROOT, X)} a0a0a0a0)`, path.join(X, "merged.bin")]] : []),
+    ...(S3 || !NEEDS_X
       ? []
       : [["the pre-update single image (lp-cli firmware package esp32c6-4mb --single-image --out …/mono/package)", path.join(MONO, "package/manifest.json")]]),
     [`Y, this Studio's split package (lp-cli firmware package ${TARGET})`, path.join(PACKAGES, `${TARGET}/manifest.json`)],
@@ -407,6 +477,9 @@ async function main() {
         ]
       : []),
     ...(RELAY_LANE ? [["a debug lp-cloud-server (cargo build -p lp-cloud-server)", LP_CLOUD_SERVER]] : []),
+    ...(CROSSING
+      ? [[`the crossing's published release (scripts/ota/fetch-release-image.sh ${path.relative(ROOT, CROSS)} <release>)`, path.join(CROSS, "merged.bin")]]
+      : []),
   ]) {
     if (!existsSync(at)) {
       console.error(`walk-ota-emu: missing ${what}: ${at}\n  run: just walk-ota-emu (it builds what is missing)`);
@@ -425,8 +498,11 @@ async function main() {
   const stagedY = path.join(out, "firmware-y");
   stageFirmware(stagedY, PACKAGES, PARTS);
   const y = JSON.parse(readFileSync(path.join(stagedY, `${TARGET}/ota-manifest.json`), "utf8"));
-  const x = JSON.parse(readFileSync(path.join(X, "ota/ota-manifest.json"), "utf8"));
-  const xSplit = JSON.parse(readFileSync(path.join(X, "split.json"), "utf8"));
+  // X: the walk's own, or — when only the crossing's steps run — the
+  // crossing's published release (no images/x is built or seeded then).
+  const xDir = NEEDS_X ? X : CROSS;
+  const x = JSON.parse(readFileSync(path.join(xDir, "ota/ota-manifest.json"), "utf8"));
+  const xSplit = JSON.parse(readFileSync(path.join(xDir, "split.json"), "utf8"));
   // X as a fielded board: its first boot done (`lpfs` formatted and
   // mounted — a fresh chip's first hello says "formatted", a different
   // card), a project uploaded and running, its status light recorded. Then
@@ -434,11 +510,11 @@ async function main() {
   const chips = path.join(ROOT, "target/walk-ota-emu/chips");
   mkdirSync(chips, { recursive: true });
   const xChip = path.join(chips, "x.bin");
-  seedChip(path.join(X, "merged.bin"), xChip);
+  if (NEEDS_X) seedChip(path.join(X, "merged.bin"), xChip);
   const monoChip = path.join(chips, "mono.bin");
-  if (!S3) seedChip(path.join(MONO, "package/fw-esp32c6-merged.bin"), monoChip, "4s");
+  if (!S3 && NEEDS_X) seedChip(path.join(MONO, "package/fw-esp32c6-merged.bin"), monoChip, "4s");
   const xEngineLess = path.join(chips, "x-engine-less.bin");
-  {
+  if (NEEDS_X) {
     const bytes = readFileSync(xChip);
     bytes.fill(0xff, xSplit.engine.offset, xSplit.engine.offset + 0x1000);
     writeFileSync(xEngineLess, bytes);
@@ -448,7 +524,7 @@ async function main() {
   // its engine-less copy — an engine-less board can take no `wifi add`.
   const xLanChip = path.join(chips, "x-lan.bin");
   const xLanEngineLess = path.join(chips, "x-lan-engine-less.bin");
-  if (LAN_LANE) {
+  if (LAN_LANE && NEEDS_X) {
     seedChip(path.join(X, "merged.bin"), xLanChip, "60s", [
       JSON.stringify({ networkAdd: { ssid: NET.ssid, password: NET.password } }),
     ]);
@@ -462,6 +538,30 @@ async function main() {
   // chips carry its account's key), below.
   const xRelayChip = path.join(chips, "x-relay.bin");
   const chipFiles = { x: xChip, "x-engine-less": xEngineLess };
+  // The crossing's boards: CROSS holding the format-11 projects (and, on
+  // the Wi‑Fi lanes, the virtual LAN's network; the relay's below), and
+  // `found-older`'s, this Studio's own image holding the same projects.
+  const crossChip = path.join(chips, "cross.bin");
+  const crossLanChip = path.join(chips, "cross-lan.bin");
+  const crossRelayChip = path.join(chips, "cross-relay.bin");
+  const olderChip = path.join(chips, "found-older.bin");
+  const olderLanChip = path.join(chips, "found-older-lan.bin");
+  const olderRelayChip = path.join(chips, "found-older-relay.bin");
+  const OLDER = STEPS.includes("found-older") || STEPS.includes("cut-older");
+  const yMerged = path.join(PACKAGES, TARGET, `fw-${CHIP}-merged.bin`);
+  const cross = CROSSING ? JSON.parse(readFileSync(path.join(CROSS, "ota/ota-manifest.json"), "utf8")) : null;
+  const CROSS_X = STEPS.includes("cross-format") || STEPS.includes("cut-upgrade");
+  if (CROSS_X && !ON_LAN) seedCrossChip(path.join(CROSS, "merged.bin"), crossChip);
+  if (CROSS_X && LAN_LANE) {
+    seedCrossChip(path.join(CROSS, "merged.bin"), crossLanChip, [
+      JSON.stringify({ networkAdd: { ssid: NET.ssid, password: NET.password } }),
+    ]);
+  }
+  if (OLDER && !ON_LAN) seedCrossChip(yMerged, olderChip);
+  if (OLDER && LAN_LANE) {
+    seedCrossChip(yMerged, olderLanChip, [JSON.stringify({ networkAdd: { ssid: NET.ssid, password: NET.password } })]);
+  }
+  chipFiles.cross = crossChip;
   const xrChip = path.join(chips, "x-release.bin");
   if (xr && STEPS.includes("store-backup")) seedChip(path.join(XR, "merged.bin"), xrChip);
   const r2Chip = path.join(chips, "r2.bin");
@@ -521,10 +621,24 @@ async function main() {
     writeFileSync(fixturePath, `${FIXTURE}\n[[uplink]]\nname = "lightplayer.app"\nto = "127.0.0.1:${cloud.devicePort}"\n`);
     // A new account each run (mem store), so a new key: always seeded anew.
     rmSync(xRelayChip, { force: true });
-    seedChip(path.join(X, "merged.bin"), xRelayChip, "60s", [
-      JSON.stringify({ networkAdd: { ssid: NET.ssid, password: NET.password } }),
-      cloud.accessAdd,
-    ]);
+    if (STEPS.some((step) => !CROSS_STEPS.includes(step))) {
+      seedChip(path.join(X, "merged.bin"), xRelayChip, "60s", [
+        JSON.stringify({ networkAdd: { ssid: NET.ssid, password: NET.password } }),
+        cloud.accessAdd,
+      ]);
+    }
+    if (OLDER) {
+      seedCrossChip(yMerged, olderRelayChip, [
+        JSON.stringify({ networkAdd: { ssid: NET.ssid, password: NET.password } }),
+        cloud.accessAdd,
+      ]);
+    }
+    if (STEPS.some((step) => step === "cross-format" || step === "cut-upgrade")) {
+      seedCrossChip(path.join(CROSS, "merged.bin"), crossRelayChip, [
+        JSON.stringify({ networkAdd: { ssid: NET.ssid, password: NET.password } }),
+        cloud.accessAdd,
+      ]);
+    }
   }
   // A firmware store that holds nothing (every lookup 404s): X is a dev
   // build no store would have, and the walk never touches the internet. The
@@ -779,10 +893,22 @@ async function main() {
         path: pathOf(card),
         corner: cornerOf(card),
         offlineBoards: Boolean(card.closest('#home-offline-boards')),
-        firmware: bar('firmware', 'Firmware'),
+        // Since the card's one-work-in-one-place pass (5c7b786ef) the row says
+        // its verb alone ("backing up") and the surface carries the update's
+        // one number (data-surface-progress): the row's line is read with
+        // that number put back, the way CARD_LINES reads it.
+        firmware: (() => {
+          const row = bar('firmware', 'Firmware');
+          const percent = card.querySelector('[data-surface-progress]')?.getAttribute('data-surface-progress');
+          if (row && row.work === 'running' && percent && !/%/.test(row.line ?? '')) row.line = row.line + ' · ' + percent + '%';
+          return row;
+        })(),
         connection: inUse,
         offers: { 'update-firmware': face('update-firmware'), 'install-firmware': face('install-firmware'), edit: face('edit') },
         state: links.map((row) => fact(row.layer, 'State')).find(Boolean) ?? null,
+        // The update's project stage, wherever the card says it
+        // (device_update_words.rs: "Upgrading projects · 1 of 2").
+        upgrading: (words(card).match(/Upgrading (?:its )?projects(?: to the new format)?(?: [·—] \\d+ of \\d+)?/) || [null])[0],
       },
       cards: cards.map(pathOf),
     });
@@ -812,9 +938,23 @@ async function main() {
         if (match && !seen[kind]) seen[kind] = match[0].trim();
       }
     }
+    if (card.upgrading && !seen["upgrading projects"]) seen["upgrading projects"] = card.upgrading;
     const update = card.offers["update-firmware"];
     if (update?.enabled && !update.arms && card.firmware?.work !== "running") seen.available = card.firmware?.line ?? "update-firmware";
     return seen;
+  };
+  /// The first row of the terminal of the card at `cardPath` (every row:
+  /// the board's lines, the wire's reads and Studio's own) that matches
+  /// `pattern`, waited for.
+  const terminalRow = async (cardPath, pattern, what) => {
+    const deadline = Date.now() + STEP_MS;
+    for (;;) {
+      const rows = await driver.terminalLines({ board: cardPath, timeoutMs: STEP_MS }).catch(() => []);
+      const row = rows.find((line) => pattern.test(line));
+      if (row) return row;
+      if (Date.now() > deadline) throw new Error(`never saw ${what} (${pattern}) in the card's terminal`);
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
   };
   /// Studio's own lines in the board's terminal — the status corner's
   /// details (`data-board-terminal`), where `DeviceTerminal` starts each of
@@ -865,7 +1005,7 @@ async function main() {
         pageSeen = pageLines.length;
         writeFileSync(path.join(out, "page-console.log"), pageLines.join("\n"));
       }
-      const now = JSON.stringify({ card: snap.board?.path ?? null, link: snap.board?.connection?.line ?? null, lines });
+      const now = JSON.stringify({ card: snap.board?.path ?? null, link: snap.board?.connection?.line ?? null, firmware: snap.board?.firmware ?? null, lines });
       if (now !== lastTrail) {
         lastTrail = now;
         appendFileSync(trail, `${((Date.now() - began) / 1000).toFixed(1)} s ${now}\n`);
@@ -1281,7 +1421,7 @@ async function main() {
       const percent = Number(line?.match(/(\d+)%/)?.[1] ?? -1);
       // A running engine says nothing per read-back: a backup's cut has no
       // board words to wait for.
-      if ((!cut.boardSays || cut.boardSays.test(words)) && percent >= cut.atPercent) {
+      if ((!cut.boardSays || cut.boardSays.test(words)) && line && percent >= cut.atPercent) {
         cutAt = line;
         if (cut.act) {
           cutAt = `${line} (${await cut.act()})`;
@@ -1350,6 +1490,62 @@ async function main() {
       }
     });
     return { label, order, links, cutAt, cutShot, from, peakAfterCut, lowAfterCut };
+  };
+
+  /// `cut-upgrade`'s cut: the first time the page logs that a board's
+  /// project stage has started (Studio's own line, `project_stage_controller`:
+  /// "projects: …'s project stage starts"), the walk writes `power-cycle` to
+  /// the board's control channel on the door — from the browser's console
+  /// event as it arrives (CDP), so it outlives the page reloading after a
+  /// USB flash, and lands within milliseconds: the stage is a second or two
+  /// of work, too quick for the card to show it every time. `get()` says
+  /// what it saw and the door's reply.
+  const armStageCut = (board) => {
+    let cut = null;
+    driver.cdp.on("Runtime.consoleAPICalled", (params, sid) => {
+      if (cut || sid !== driver.sessionId) return;
+      const text = (params.args ?? []).map((arg) => arg.value ?? arg.description ?? "").join(" ");
+      const said = text.match(/projects: \S+ project stage starts[^\n]*/);
+      if (/project stage/.test(text)) appendFileSync(path.join(out, "cut-upgrade.log"), `${new Date().toISOString()} ${said ? "CUT" : "seen"} ${text}\n`);
+      if (!said) return;
+      cut = { words: said[0], at: Date.now(), reply: null };
+      // On the Wi‑Fi lanes the walk holds the board's control channel; on
+      // `?emu=` the page's shim does (its banner's cable verbs), so the
+      // power cut goes through the shim's own port — and, on a cable, as a
+      // USB-powered board's power cut is: the cable out (the board goes from
+      // the host), the chip power-cycled, the cable back in after
+      // DETACHED_MS. A power cycle alone keeps the shim's port open, which no
+      // USB-powered board does.
+      const id = JSON.stringify(board);
+      cut.stages = [];
+      const powerCycle = ON_LAN
+        ? doorControl(door.addr, board, "power-cycle")
+        : (async () => {
+            await driver.evaluate(`(window.__walkEmu = window.__lpEmuSerial.bus.requireLivePort(${id}).emulator, true)`);
+            cut.stages.push("held the board's emulator port");
+            const reply = await driver.evaluate(`window.__walkEmu.command("power-cycle")`, { awaitPromise: true });
+            cut.stages.push(String(reply));
+            await driver.detach(board);
+            cut.stages.push("cable out");
+            // Out until Studio has seen it go (the card no longer live), then
+            // the seconds a person takes to plug it back, as `cut-core` does.
+            await driver.waitFor(
+              `(() => { const card = JSON.parse(${snapshotExpr()}).board;
+                        if (!card || card.offlineBoards || card.corner === 'quiet') return true;
+                        return !/· (live|connected)\b|connected$/.test(card.connection?.line ?? ''); })()`,
+              { timeoutMs: STEP_MS, what: "Studio to see the cable go" },
+            );
+            await new Promise((resolve) => setTimeout(resolve, DETACHED_MS));
+            await driver.attach(board);
+            cut.stages.push("cable back in");
+            return cut.stages.join(", ");
+          })();
+      powerCycle.then(
+        (reply) => { cut.reply = String(reply ?? "(no reply)"); cut.ok = true; },
+        (error) => { cut.reply = error.message; cut.ok = false; },
+      );
+    });
+    return { get: () => cut };
   };
 
   /// Through the relay, once Y is confirmed: Y sends its picture (relay
@@ -1645,6 +1841,77 @@ async function main() {
             };
           });
           break;
+        case "older-wire": {
+          // An empty cache, so the update must back the board up first.
+          await clearEngineCache();
+          await openDoor(name, [xBoard]);
+          await step(name, `a board on an older wire → Y with one press over ${LINK_WORD}, by the update channel`, async () => {
+            await nameThisBoard();
+            await connect(board);
+            const cardPath = await liveCardPath();
+            // The board's hello, as Studio's terminal reads it: its wire is
+            // older than this Studio's (Y's). Studio's own words, the read
+            // of a board's.
+            const helloLine = await terminalRow(cardPath, /hello · proto \d+/, "the board's hello in its terminal");
+            const proto = Number(String(helloLine ?? "").match(/hello · proto (\d+)/)?.[1] ?? NaN);
+            if (!(proto < y.wireProto)) {
+              throw new Error(`the board's hello is not from an older wire than Y's ${y.wireProto}: ${JSON.stringify(helloLine)} (WALK_OTA_X=${process.env.WALK_OTA_X ?? "unset"})`);
+            }
+            const xBuild = boardWords(board).match(/\[CORE\][^\n]*build (\S+)/)?.[1] ?? `${x.version}+${x.commit.slice(0, 12)}`;
+            // What the card says before the press, once it offers the update:
+            // the over-the-air update, never "Firmware updates need USB" on
+            // its face; a hello this Studio could not read is old firmware.
+            await driver.waitOffer("update-firmware", { board: cardPath, timeoutMs: STEP_MS });
+            const face = await driver.evaluate(
+              `(document.querySelector(${JSON.stringify(`[data-board-card="${cardPath}"]`)})?.innerText || '')`,
+            );
+            const faceLines = face.split("\n").map((l) => l.trim()).filter(Boolean);
+            const surface = faceLines.slice(0, 3).join(" · ");
+            if (face.includes("Firmware updates need USB")) {
+              throw new Error(`the card's face says "Firmware updates need USB": ${JSON.stringify(faceLines.slice(0, 12))}`);
+            }
+            if (/another wire/.test(helloLine) && !face.includes("This board is running old firmware.")) {
+              throw new Error(`the card of a board on another wire does not say it runs old firmware: ${JSON.stringify(faceLines.slice(0, 12))}`);
+            }
+            const air0 = await bleStats(board);
+            const ran = await runUpdate(board);
+            const air1 = await bleStats(board);
+            await settle(board, ran.from);
+            const said = boardSaid(board, ran.from, OTA_WORDS);
+            for (const need of ["core offer", "core on trial", "core confirmed", "engine offer", "engine committed"]) {
+              if (!said[need]) throw new Error(`the board never said ${need}`);
+            }
+            if (!ran.order.some((entry) => entry.kind === "backing up")) throw new Error("the card never said Backing up");
+            // The link it rode, in Studio's own narration: an older board
+            // answers no network status on this wire, so its link rows may
+            // name no link until Y does.
+            const terminal = await terminalLines();
+            const over = terminal.find((line) => new RegExp(`^update .+ → .+ over ${LINK_WORD}$`).test(line));
+            if (!over) throw new Error(`Studio's terminal never said the update went over ${LINK_WORD}: ${JSON.stringify(terminal.slice(-20))}`);
+            const reconnects = ON_LAN
+              ? checkWifiReconnects(terminal, 2)
+              : checkReconnects(terminal, air0, air1, 0);
+            // Y says hello at this Studio's wire now.
+            const yHello = await terminalRow(
+              await liveCardPath(),
+              new RegExp(`hello · proto ${y.wireProto} `),
+              `Y's hello at wire ${y.wireProto}`,
+            ).catch(() => null);
+            const yBuild = [...boardWords(board).slice(ran.from).matchAll(/\[CORE\][^\n]*build (\S+)/g)].pop()?.[1] ?? `${y.version}+${y.commit.slice(0, 12)}`;
+            // E14: the project survived — the card runs it on Y.
+            const kept = await liveCardPath();
+            await driver.waitOffer("remove-project", { board: kept, bar: "project", timeoutMs: STEP_MS });
+            await driver.closeDetails({ board: kept });
+            const pictures = RELAY_LANE ? await picturesOnY(board) : null;
+            return {
+              summary: `X ${xBuild} said ${JSON.stringify(helloLine)}; the card read ${JSON.stringify(surface)}; ${ran.label}; ${ran.order.map((e) => e.kind).join(" → ")}; Studio: "${over}"; Y ${yBuild}${yHello ? ` said ${yHello}` : ""}; project kept${reconnects ? (reconnects.resets === undefined ? `; ${reconnects.timed.length} reconnects timed` : `; ${reconnects.resets} resets → ${reconnects.timed.length} reconnects timed`) : ""}${pictures ? `; then pictures: ${pictures.summary}` : ""}`,
+              x: { build: xBuild, hello: helloLine, proto, face: faceLines.slice(0, 12) },
+              y: { build: yBuild, hello: yHello },
+              card: ran.order, board: said, over, reconnects, pictures, air: air1,
+            };
+          });
+          break;
+        }
         case "store-backup": {
           if (!xr) throw new Error(`store-backup needs XR: scripts/ota/build-image.sh ${path.relative(ROOT, XR)} 2026.10.07-77`);
           await clearEngineCache();
@@ -2188,6 +2455,174 @@ async function main() {
           });
           break;
         }
+        case "cross-format":
+        case "cut-upgrade": {
+          const cutting = name === "cut-upgrade";
+          // An empty cache: the update backs the board up first, as a board
+          // Studio has never updated is.
+          await clearEngineCache();
+          if (TAB) {
+            await loadPage(null);
+            await seedTab("cross");
+          } else {
+            await openDoor(name, [`${board}=${RELAY_LANE ? crossRelayChip : LAN_LANE ? crossLanChip : crossChip},kind=rom-up,${mac}`]);
+          }
+          const describe = cutting
+            ? `a board on release ${cross.version} (project format 11): X → Y with one press over ${LINK_WORD}, its power cut while its projects are upgraded; it comes back and the stage finishes with no click`
+            : `a board on release ${cross.version} (project format 11) holding two format-11 projects: X → Y with one press over ${LINK_WORD}, its projects upgraded with no click, the eaves lit`;
+          await step(name, describe, async () => {
+            await nameThisBoard();
+            await connect(board);
+            await liveCardPath();
+            // What X said about its project once the port was taken (its boot
+            // words before that are not kept): a note, not a gate — X lighting
+            // the format-11 eaves is lp-cli's X1 (the decoded frames).
+            const xRan = boardWords(board).match(/Project loaded: eaves|"eaves"/)?.[0] ?? "(nothing about the eaves yet)";
+            const yId = `${y.version}+${y.commit.slice(0, 12)}`;
+            // `cut-upgrade`: the board's power is cut the moment the page says
+            // its project stage started (`armStageCut`).
+            const cutter = cutting ? armStageCut(board) : null;
+            const ran = await runUpdate(board);
+            // Then the stage: after a channel-3 update it is the update's last
+            // stage; after a USB flash (how Studio updates an older-wire board
+            // over a cable: `device_flash.rs` `firmware_verb`) it starts itself
+            // on the board's next hello. Either way the card ends running the
+            // upgraded eaves; after a cut, once the board has booted Y again.
+            const yBoots = () => (boardWords(board).slice(ran.from).match(new RegExp(`\\[CORE\\] [^\\n]*build ${literal(yId)}`, "g")) ?? []).length;
+            const firstBoots = yBoots();
+            const finish = await watchCard(
+              async (snap) => {
+                if (!snap.board?.offers.edit?.enabled || snap.board.firmware?.work === "running") return false;
+                if (!cutting) return true;
+                return cutter.get()?.ok === true && yBoots() > firstBoots;
+              },
+              cutting ? `the cut, Y booted again, and the card running the upgraded eaves (the cut: ${JSON.stringify(cutter.get())}, Y boots ${yBoots()} of ${firstBoots})` : "the card running the upgraded eaves",
+              STEP_MS,
+            );
+            const order = [...ran.order, ...finish.filter((entry) => !ran.order.some((seen) => seen.kind === entry.kind))];
+            const cut = cutter?.get() ?? null;
+            if (cutting && !cut) throw new Error("the page never said a project stage started: nothing was cut");
+            if (cutting && cut.ok !== true) throw new Error(`the power cut was not taken: ${JSON.stringify(cut)}`);
+            await settle(board, ran.from);
+            // How Studio brought Y: the update channel (the board's [OTA]
+            // words), or a USB flash (Studio's own lines in the board's
+            // terminal).
+            const kept = await liveCardPath();
+            await driver.waitOffer("remove-project", { board: kept, bar: "project", timeoutMs: UPDATE_MS });
+            await driver.closeDetails({ board: kept });
+            const rows = await driver.terminalLines({ board: kept, timeoutMs: STEP_MS });
+            const said = boardSaid(board, ran.from, OTA_WORDS);
+            const wrote = rows.find((line) => /Wrote \d+ bytes .* at 0x0/.test(line)) ?? null;
+            let route;
+            if (said["core offer"]) {
+              for (const need of ["core confirmed", "engine committed"]) {
+                if (!said[need]) throw new Error(`the board never said ${need}`);
+              }
+              checkLinkWord(ran);
+              if (!order.some((entry) => entry.kind === "backing up")) throw new Error("the card never said Backing up");
+              route = `the update channel (${LINK_WORD}): ${said["core offer"]}; ${said["engine committed"]}`;
+            } else if (wrote) {
+              route = `a USB flash (an older-wire board over a cable): ${wrote.replace(/^▸ /, "")}`;
+            } else {
+              throw new Error("neither an update over the update channel nor a USB flash: the board never said a core offer and Studio wrote nothing");
+            }
+            const core = await waitBoard(board, new RegExp(`\\[CORE\\] [^\\n]*build ${literal(yId)}[^\\n]*`), `booting Y's core (${yId})`, STEP_MS, ran.from);
+            // Studio's journal names what it upgraded.
+            const journal = rows.filter((line) => /to project format \d+/.test(line));
+            if (!journal.length) throw new Error(`Studio's terminal never said what it upgraded: ${JSON.stringify(rows.slice(-12))}`);
+            // The board's words: engine Y refused the old eaves by name, and
+            // then loaded the upgraded one, after its last refusal. The door
+            // writes the console every 2 s: one flush first.
+            await new Promise((resolve) => setTimeout(resolve, 2_500));
+            const refused = await waitBoard(board, /Boot: auto-load failed for \/projects\/eaves[^\n]*/, "engine Y refusing the format-11 eaves", STEP_MS, ran.from);
+            const lastRefusal = ran.from + boardWords(board).slice(ran.from).lastIndexOf("Boot: auto-load failed for /projects/eaves");
+            const loaded = await waitBoard(board, /Project loaded: eaves/, "the upgraded eaves loaded after its last refusal", STEP_MS, lastRefusal);
+            const after = boardWords(board).slice(ran.from);
+            const refusals = after.split("Boot: auto-load failed for /projects/eaves").length - 1;
+            let where = null;
+            if (cutting) {
+              // Where the cut fell: a second refusal of the eaves is a boot
+              // after the cut that still found it old (the cut came before
+              // its batch committed); else the eaves came back new, and the
+              // cut must have left the headband for a later stage.
+              if (refusals >= 2) where = "before the startup project's batch committed: the board came back refusing the eaves again";
+              else if (journal.length >= 2 && /headband/.test(journal[journal.length - 1])) where = "between the two projects' batches: the eaves came back new, the headband was finished after";
+              else throw new Error(`the cut fell after the stage had written everything (refusals ${refusals}, journal ${JSON.stringify(journal)}): nothing was cut inside the window`);
+            }
+            const reconnects = ON_LAN ? checkWifiReconnects(await terminalLines(), 1) : null;
+            return {
+              summary: `${cross.version} (format 11) → ${yId} by ${route}; card ${order.map((e) => e.kind).join(" → ")}; Y said "${refused.replace(/: Core error.*/, "")}" ×${refusals}, then "${loaded}"; Studio: ${journal.join(" / ")}${cutting ? `; power cut when the page said "${cut.words}", ${where}` : ""}`,
+              card: order, board: { ...said, core, refused, loaded, refusals, xRan }, route, journal, cut, where, reconnects,
+            };
+          });
+          break;
+        }
+        case "found-older":
+        case "cut-older": {
+          const cutting = name === "cut-older";
+          await openDoor(name, [`${board}=${RELAY_LANE ? olderRelayChip : LAN_LANE ? olderLanChip : olderChip},kind=rom-up,${mac}`]);
+          const describe = cutting
+            ? `a board already on Y holding format-11 projects, over ${LINK_WORD}: its power cut the moment the stage starts; it comes back and the stage finishes with no click`
+            : `a board already on Y holding format-11 projects, over ${LINK_WORD}: connected, its projects are upgraded with no click and no update`;
+          await step(name, describe, async () => {
+            await nameThisBoard();
+            const cutter = cutting ? armStageCut(board) : null;
+            // The board's boot words before a host takes its port are not
+            // kept, so its refusal is read after: the boot's line if the
+            // console has it, else the hello's `startupRefused`.
+            await connect(board);
+            // After the cut the board must be seen gone (its card no longer
+            // live) before a card running the eaves counts.
+            let wentDown = false;
+            const order = await watchCard(
+              async (snap) => {
+                if (cutting && cutter.get()?.ok === true) {
+                  const card = snap.board;
+                  const live = card && !card.offlineBoards && card.corner !== "quiet" && card.corner !== "blank"
+                    && /· (live|connected)\b|connected$/.test(card.connection?.line ?? "");
+                  if (!live) wentDown = true;
+                }
+                // Running the upgraded eaves, in the board's words (the card's
+                // Edit is not offered on every link: not through the relay).
+                const card = snap.board;
+                if (!card || card.corner === "quiet" || card.corner === "blank" || card.firmware?.work === "running") return false;
+                const words = boardWords(board);
+                const refusedAt = words.lastIndexOf("Boot: auto-load failed for /projects/eaves");
+                if (!words.slice(Math.max(0, refusedAt)).includes("Project loaded: eaves")) return false;
+                return !cutting || wentDown;
+              },
+              cutting ? `the cut, Y booted again, and the card running the upgraded eaves (${JSON.stringify(cutter?.get() ?? null)})` : "the card running the upgraded eaves",
+              STEP_MS * 2,
+            );
+            const kept = await liveCardPath();
+            await driver.waitOffer("remove-project", { board: kept, bar: "project", timeoutMs: STEP_MS });
+            await driver.closeDetails({ board: kept });
+            const rows = await driver.terminalLines({ board: kept, timeoutMs: STEP_MS });
+            const journal = rows.filter((line) => /to project format \d+/.test(line));
+            if (!journal.length) throw new Error(`Studio's terminal never said what it upgraded: ${JSON.stringify(rows.slice(-12))}`);
+            const offered = boardWords(board).includes("[OTA] offer ");
+            if (offered) throw new Error("an update ran: the board was offered a build");
+            await new Promise((resolve) => setTimeout(resolve, 2_500));
+            const refused = boardWords(board).match(/Boot: auto-load failed for \/projects\/eaves[^\n]*|"startupRefused":\{[^}]*\}/)?.[0]
+              ?? "(its boot words were said before the port was taken)";
+            const lastRefusal = boardWords(board).lastIndexOf("Boot: auto-load failed for /projects/eaves");
+            const loaded = await waitBoard(board, /Project loaded: eaves/, "the upgraded eaves loaded after its last refusal", STEP_MS, Math.max(0, lastRefusal));
+            const refusals = boardWords(board).split("Boot: auto-load failed for /projects/eaves").length - 1;
+            const cut = cutter?.get() ?? null;
+            let where = null;
+            if (cutting) {
+              if (refusals >= 2) where = "before the startup project's batch committed: the board came back refusing the eaves again";
+              else if (journal.length >= 2) where = "after the startup project's batch: the eaves came back new, the rest was finished after";
+              else throw new Error(`the cut fell after the stage had written everything (refusals ${refusals}, journal ${JSON.stringify(journal)})`);
+            }
+            const reconnects = ON_LAN ? reconnectLines(await terminalLines()) : null;
+            return {
+              summary: `Y said "${refused.replace(/: Core error.*/, "")}"${refusals > 1 ? ` ×${refusals}` : ""}, then "${loaded}" with no press; card ${order.map((e) => e.kind).join(" → ") || "(no update lines)"}; Studio: ${journal.join(" / ")}${cutting ? `; power cut when the page said "${cut.words}" (${cut.reply}), ${where}` : ""}`,
+              card: order, board: { refused, loaded, refusals }, journal, cut, where, reconnects,
+            };
+          });
+          break;
+        }
         case "crashing":
           report.steps.push({
             name,
@@ -2288,13 +2723,18 @@ function git(args) {
 /// `emulated` bounds the run (a single image never records a status light,
 /// so its seeding ends there).
 function seedChip(image, chip, emulated = "60s", requests = []) {
-  // Reused while it is newer than its image: seeding is a minute of
-  // emulated boot, and the chip never changes for the same image.
-  if (existsSync(chip) && statSync(chip).mtimeMs > statSync(image).mtimeMs) return;
+  // Reused while it was seeded from this same image, unchanged: seeding is
+  // a minute of emulated boot, and the chip never changes for the same
+  // image. The image is named in a sidecar, so a run with another X
+  // (`WALK_OTA_X`) never boards the last run's chip.
+  const from = `${path.resolve(image)} ${statSync(image).mtimeMs}`;
+  const seededFrom = existsSync(`${chip}.from`) ? readFileSync(`${chip}.from`, "utf8") : null;
+  if (existsSync(chip) && seededFrom === from) return;
   const bytes = readFileSync(image);
   const whole = Buffer.alloc(FLASH_BYTES, 0xff);
   bytes.copy(whole, 0);
   writeFileSync(chip, whole);
+  rmSync(`${chip}.from`, { force: true });
   execFileSync(
     LP_CLI,
     ["emu", "run", ...(S3 ? ["--chip", "esp32s3"] : []), "--rom-up-flash", chip, "--host-link", "--timeout", emulated, "--exit-on", "status light: GPIO",
@@ -2304,6 +2744,44 @@ function seedChip(image, chip, emulated = "60s", requests = []) {
       // its files (`device_layout_view`), a different card.
       "--request", JSON.stringify({ filesystem: { write: { path: "/.lp/device.json", data: JSON.stringify({ uid: "dev00000000000000a1", name: "Walk board" }) } } }),
       ...requests.flatMap((request) => ["--request", request])],
+    { cwd: ROOT, stdio: ["ignore", "ignore", "inherit"] },
+  );
+  writeFileSync(`${chip}.from`, from);
+}
+
+/// A crossing board's chip: `image` (a published release's merged image, or
+/// this Studio's own) booted ROM-up once under lp-cli's own host, with the
+/// crossing's format-11 projects written into its store as plain
+/// `filesystem` `write` requests — the file requests did not change across
+/// the bump, so they ride the image's own wire — then `requests`. No project
+/// is loaded: the chip's next boot loads the first by path (`eaves`), as a
+/// fielded board's does. Seeded anew every run (the fixture may change).
+function seedCrossChip(image, chip, requests = []) {
+  const bytes = readFileSync(image);
+  const whole = Buffer.alloc(FLASH_BYTES, 0xff);
+  bytes.copy(whole, 0);
+  writeFileSync(chip, whole);
+  const files = [];
+  const walk = (dir, rel) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+      const at = path.join(dir, entry.name);
+      if (entry.isDirectory()) walk(at, `${rel}/${entry.name}`);
+      else files.push([`${rel}/${entry.name}`, at]);
+    }
+  };
+  for (const project of ["eaves", "headband"]) walk(path.join(CROSS_PROJECTS, project), `/projects/${project}`);
+  const all = [
+    // A stamped identity, as Studio's flash leaves every board (seedChip).
+    JSON.stringify({ filesystem: { write: { path: "/.lp/device.json", data: JSON.stringify({ uid: "dev00000000000000a1", name: "Walk board" }) } } }),
+    ...files.map(([to, from]) => JSON.stringify({ filesystem: { write: { path: to, data: readFileSync(from, "utf8") } } })),
+    ...requests,
+  ];
+  // `--request`s are numbered from 1 000 000: stop on the last one's answer.
+  const last = 1_000_000 + all.length - 1;
+  execFileSync(
+    LP_CLI,
+    ["emu", "run", "--rom-up-flash", chip, "--host-link", "--timeout", "60s", "--exit-on", `M!{"id":${last},`,
+      ...all.flatMap((request) => ["--request", request])],
     { cwd: ROOT, stdio: ["ignore", "ignore", "inherit"] },
   );
 }

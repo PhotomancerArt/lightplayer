@@ -1202,7 +1202,7 @@ impl SlotController {
     ///   would otherwise have nowhere to render.
     ///
     /// Only the DTO nesting collapses — slot addresses and wire paths keep
-    /// the variant segment (`mapping.PathPoints.paths`) unchanged.
+    /// the variant segment (`mapping.Map2d.source`) unchanged.
     fn ui_enum_children(&self, edits: &SlotEditJoin<'_>) -> Vec<UiConfigSlot> {
         let Some(child) = self.children.first() else {
             return Vec::new();
@@ -1927,13 +1927,13 @@ mod tests {
                     },
                 )
                 .unwrap(),
-                SlotVariantShape::new("PathPoints", SlotShape::value(LpType::F32)).unwrap(),
-                SlotVariantShape::new("SvgPath", SlotShape::value(LpType::String)).unwrap(),
+                SlotVariantShape::new("Strips", SlotShape::value(LpType::F32)).unwrap(),
+                SlotVariantShape::new("Svg", SlotShape::value(LpType::String)).unwrap(),
             ],
         };
         let data = SlotData::Enum(lpc_model::SlotEnum::with_version(
             Revision::new(1),
-            SlotName::parse("PathPoints").unwrap(),
+            SlotName::parse("Strips").unwrap(),
             SlotData::Value(WithRevision::new(Revision::new(1), LpValue::F32(0.0))),
         ));
         let controller = SlotController::from_slot_data(
@@ -1949,12 +1949,8 @@ mod tests {
         assert_eq!(
             slot.composite,
             Some(UiSlotComposite::Enum(UiSlotEnumComposite {
-                active: "PathPoints".to_string(),
-                variants: vec![
-                    "Unset".to_string(),
-                    "PathPoints".to_string(),
-                    "SvgPath".to_string(),
-                ],
+                active: "Strips".to_string(),
+                variants: vec!["Unset".to_string(), "Strips".to_string(), "Svg".to_string(),],
             }))
         );
     }
@@ -2152,15 +2148,15 @@ mod tests {
         );
     }
 
-    /// Inner path enum shape mirroring `PathSpec`, for the recursive
-    /// flattening test: `RingArray` (record) / `PointList` (record).
-    fn path_spec_enum_shape() -> SlotShape {
+    /// Synthetic inner strip enum shape, for the recursive flattening test:
+    /// `Ring` (record) / `Points` (record).
+    fn strip_enum_shape() -> SlotShape {
         SlotShape::Enum {
             meta: SlotMeta::empty(),
             encoding: SlotEnumEncoding::default(),
             variants: vec![
                 SlotVariantShape::new(
-                    "RingArray",
+                    "Ring",
                     SlotShape::Record {
                         meta: SlotMeta::empty(),
                         fields: vec![
@@ -2170,7 +2166,7 @@ mod tests {
                 )
                 .unwrap(),
                 SlotVariantShape::new(
-                    "PointList",
+                    "Points",
                     SlotShape::Record {
                         meta: SlotMeta::empty(),
                         fields: vec![
@@ -2184,10 +2180,10 @@ mod tests {
         }
     }
 
-    /// Enum shape mirroring the fixture `MappingConfig`, shared by the
-    /// flattening and variant-switch revert-target tests: `Unset` (unit) /
-    /// `PathPoints` (record with a nested path-enum map) / `SvgPath`
-    /// (record).
+    /// Synthetic mapping-like enum shape, shared by the flattening and
+    /// variant-switch revert-target tests: `Unset` (unit) / `Strips` (record
+    /// with a nested strip-enum map) / `Svg` (record). No model enum carries
+    /// every one of these payload kinds, so the shape is built by hand.
     fn mapping_enum_shape() -> SlotShape {
         SlotShape::Enum {
             meta: SlotMeta::empty(),
@@ -2201,16 +2197,16 @@ mod tests {
                 )
                 .unwrap(),
                 SlotVariantShape::new(
-                    "PathPoints",
+                    "Strips",
                     SlotShape::Record {
                         meta: SlotMeta::empty(),
                         fields: vec![
                             SlotFieldShape::new(
-                                "paths",
+                                "strips",
                                 SlotShape::Map {
                                     meta: SlotMeta::empty(),
                                     key: SlotMapKeyShape::U32,
-                                    value: Box::new(path_spec_enum_shape()),
+                                    value: Box::new(strip_enum_shape()),
                                 },
                             )
                             .unwrap(),
@@ -2221,7 +2217,7 @@ mod tests {
                 )
                 .unwrap(),
                 SlotVariantShape::new(
-                    "SvgPath",
+                    "Svg",
                     SlotShape::Record {
                         meta: SlotMeta::empty(),
                         fields: vec![
@@ -2237,8 +2233,8 @@ mod tests {
         }
     }
 
-    /// `SvgPath` payload data matching [`mapping_enum_shape`].
-    fn svg_path_payload() -> SlotData {
+    /// `Svg` payload data matching [`mapping_enum_shape`].
+    fn svg_payload() -> SlotData {
         SlotData::Record(SlotRecord::with_revision(
             Revision::new(1),
             vec![
@@ -2251,15 +2247,15 @@ mod tests {
         ))
     }
 
-    /// `PathPoints` payload data matching [`mapping_enum_shape`], with one
-    /// `RingArray` path entry at key 0.
-    fn path_points_payload() -> SlotData {
-        let mut paths = SlotMapDyn::with_revision(Revision::new(1), Default::default());
-        paths.entries.insert(
+    /// `Strips` payload data matching [`mapping_enum_shape`], with one
+    /// `Ring` strip entry at key 0.
+    fn strips_payload() -> SlotData {
+        let mut strips = SlotMapDyn::with_revision(Revision::new(1), Default::default());
+        strips.entries.insert(
             SlotMapKey::U32(0),
             SlotData::Enum(lpc_model::SlotEnum::with_version(
                 Revision::new(1),
-                SlotName::parse("RingArray").unwrap(),
+                SlotName::parse("Ring").unwrap(),
                 SlotData::Record(SlotRecord::with_revision(
                     Revision::new(1),
                     vec![SlotData::Value(WithRevision::new(
@@ -2272,7 +2268,7 @@ mod tests {
         SlotData::Record(SlotRecord::with_revision(
             Revision::new(1),
             vec![
-                SlotData::Map(paths),
+                SlotData::Map(strips),
                 SlotData::Value(WithRevision::new(Revision::new(1), LpValue::F32(1.5))),
             ],
         ))
@@ -2306,13 +2302,13 @@ mod tests {
     #[test]
     fn enum_row_projects_the_variant_switch_entry_as_its_revert_target() {
         // After a variant switch round-trips, the overlay entry lives at the
-        // variant child path (`mapping.SvgPath`), never at the enum's own
+        // variant child path (`mapping.Svg`), never at the enum's own
         // path — the enum row (where the variant select sits) must still
         // offer it as its revert target. No rendered row carries the variant
         // address itself: the variant level is flattened out of the DTO.
-        let controller = mapping_enum_controller("SvgPath", svg_path_payload());
+        let controller = mapping_enum_controller("Svg", svg_payload());
         let (buffer, overlay) =
-            overlay_join(&[("mapping.SvgPath", lpc_model::SlotEditOp::EnsurePresent)]);
+            overlay_join(&[("mapping.Svg", lpc_model::SlotEditOp::EnsurePresent)]);
         let join = SlotEditJoin::new(&buffer, overlay, Default::default());
 
         let slot = controller.ui_config_slot(&join);
@@ -2324,7 +2320,7 @@ mod tests {
         );
         assert_eq!(
             slot.edit_entry_address,
-            Some(slot_address("mapping.SvgPath")),
+            Some(slot_address("mapping.Svg")),
             "the enum row's revert targets the variant-switch entry"
         );
         let fields = record_fields(&slot, "the flattened enum row");
@@ -2333,7 +2329,7 @@ mod tests {
                 .iter()
                 .map(|field| field.key.as_str())
                 .collect::<Vec<_>>(),
-            vec!["mapping.SvgPath.source", "mapping.SvgPath.sample_diameter"],
+            vec!["mapping.Svg.source", "mapping.Svg.sample_diameter"],
             "the enum row's children are the payload fields, not a variant row"
         );
         assert!(
@@ -2349,16 +2345,16 @@ mod tests {
         // Ack-to-refresh window: the view's active variant still lags the
         // acked switch, so the entry is at a non-active declared variant's
         // path — the declared-variant scan must still find it.
-        let controller = mapping_enum_controller("PathPoints", path_points_payload());
+        let controller = mapping_enum_controller("Strips", strips_payload());
         let (buffer, overlay) =
-            overlay_join(&[("mapping.SvgPath", lpc_model::SlotEditOp::EnsurePresent)]);
+            overlay_join(&[("mapping.Svg", lpc_model::SlotEditOp::EnsurePresent)]);
         let join = SlotEditJoin::new(&buffer, overlay, Default::default());
 
         let slot = controller.ui_config_slot(&join);
 
         assert_eq!(
             slot.edit_entry_address,
-            Some(slot_address("mapping.SvgPath")),
+            Some(slot_address("mapping.Svg")),
             "the pending switch is revertible from the enum row during the window"
         );
     }
@@ -2369,9 +2365,9 @@ mod tests {
         // the enum row must not offer a revert that would not revert them.
         // The edited payload FIELD row (hoisted directly under the enum row)
         // carries the exact-match dirty state and revert target itself.
-        let controller = mapping_enum_controller("SvgPath", svg_path_payload());
+        let controller = mapping_enum_controller("Svg", svg_payload());
         let (buffer, overlay) = overlay_join(&[(
-            "mapping.SvgPath.sample_diameter",
+            "mapping.Svg.sample_diameter",
             lpc_model::SlotEditOp::AssignValue(LpValue::F32(3.0)),
         )]);
         let join = SlotEditJoin::new(&buffer, overlay, Default::default());
@@ -2390,7 +2386,7 @@ mod tests {
         let fields = record_fields(&slot, "the flattened enum row");
         let diameter = fields
             .iter()
-            .find(|field| field.key == "mapping.SvgPath.sample_diameter")
+            .find(|field| field.key == "mapping.Svg.sample_diameter")
             .expect("the edited payload field row is a direct enum child");
         assert_eq!(
             diameter.state.dirty,
@@ -2399,7 +2395,7 @@ mod tests {
         );
         assert_eq!(
             diameter.edit_entry_address,
-            Some(slot_address("mapping.SvgPath.sample_diameter")),
+            Some(slot_address("mapping.Svg.sample_diameter")),
             "the payload field row reverts its own edit"
         );
     }
@@ -2409,11 +2405,11 @@ mod tests {
         // The variant level is the enum's value, not a container: a record
         // payload's fields render directly under the enum row, with their
         // full addresses (the variant segment stays in the path).
-        let controller = mapping_enum_controller("PathPoints", path_points_payload());
+        let controller = mapping_enum_controller("Strips", strips_payload());
 
         let slot = controller.ui_config_slot(&SlotEditJoin::empty());
 
-        assert_eq!(slot.detail.as_deref(), Some("variant PathPoints"));
+        assert_eq!(slot.detail.as_deref(), Some("variant Strips"));
         let fields = record_fields(&slot, "the flattened enum row");
         assert_eq!(
             fields
@@ -2421,10 +2417,10 @@ mod tests {
                 .map(|field| (field.key.as_str(), field.label.as_str()))
                 .collect::<Vec<_>>(),
             vec![
-                ("mapping.PathPoints.paths", "Paths"),
-                ("mapping.PathPoints.sample_diameter", "Sample diameter"),
+                ("mapping.Strips.strips", "Strips"),
+                ("mapping.Strips.sample_diameter", "Sample diameter"),
             ],
-            "no row is emitted for the PathPoints variant itself"
+            "no row is emitted for the Strips variant itself"
         );
     }
 
@@ -2452,24 +2448,24 @@ mod tests {
 
     #[test]
     fn nested_enum_in_map_entry_flattens_recursively() {
-        // Mapping → Paths → 0 → ring fields: the map entry row IS the inner
-        // path enum row (its dropdown says RingArray), and its children are
-        // the RingArray payload fields — the same flattening, one level down.
-        let controller = mapping_enum_controller("PathPoints", path_points_payload());
+        // Mapping → Strips → 0 → ring fields: the map entry row IS the inner
+        // path enum row (its dropdown says Ring), and its children are
+        // the Ring payload fields — the same flattening, one level down.
+        let controller = mapping_enum_controller("Strips", strips_payload());
 
         let slot = controller.ui_config_slot(&SlotEditJoin::empty());
 
         let fields = record_fields(&slot, "the flattened enum row");
-        let paths = &fields[0];
-        let entries = record_fields(paths, "the paths map row");
+        let strips = &fields[0];
+        let entries = record_fields(strips, "the strips map row");
         assert_eq!(entries.len(), 1);
         let entry = &entries[0];
-        assert_eq!(entry.key, "mapping.PathPoints.paths[0]");
+        assert_eq!(entry.key, "mapping.Strips.strips[0]");
         assert_eq!(
             entry.composite,
             Some(UiSlotComposite::Enum(UiSlotEnumComposite {
-                active: "RingArray".to_string(),
-                variants: vec!["RingArray".to_string(), "PointList".to_string()],
+                active: "Ring".to_string(),
+                variants: vec!["Ring".to_string(), "Points".to_string()],
             })),
             "the map entry row is the inner enum row"
         );
@@ -2478,7 +2474,7 @@ mod tests {
                 .iter()
                 .map(|field| field.key.as_str())
                 .collect::<Vec<_>>(),
-            vec!["mapping.PathPoints.paths[0].RingArray.diameter"],
+            vec!["mapping.Strips.strips[0].Ring.diameter"],
             "the inner variant level flattens away too"
         );
     }

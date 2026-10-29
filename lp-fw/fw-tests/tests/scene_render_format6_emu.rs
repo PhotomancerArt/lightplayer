@@ -36,7 +36,7 @@ use lpa_client::TokioLpClient;
 use lpc_mapping::map2d6;
 use lpc_mapping::part::render;
 use lpc_mapping::patching::{OutputName, OutputPorts, Port, PortKey, patch_mapping};
-use lpc_model::{AsLpPath, ControlExtent, ControlProduct, NodeId};
+use lpc_model::{AsLpPath, ControlExtent, ControlProduct, NodeId, NodeRuntimeStatus};
 use lpc_view::{ApplyStatus, ProjectReadApplier, ProjectView};
 use lpc_wire::{
     ControlProductProbeRequest, ControlProductProbeResult, NodeReadQuery, ProjectProbeRequest,
@@ -137,6 +137,37 @@ async fn lanes_6x128_6_lights_every_output_as_its_twin_on_fw_emu() {
     }
 }
 
+/// A map2d the device can't read is refused in one generic sentence (DD25),
+/// the same document the host's reader refuses by name.
+#[tokio::test]
+#[test_log::test]
+async fn a_map2d_the_board_cant_read_is_refused_in_one_sentence_on_fw_emu() {
+    let name = "circular-display-6";
+    let text = std::fs::read_to_string(project_dir(name).join("fixture.map2d.json"))
+        .expect("read the map2d");
+    // Trailing characters after the document.
+    let bad = format!("{text}x");
+    let host = map2d6::read(&bad)
+        .expect_err("the host refuses it")
+        .to_string();
+    assert!(host.contains("trailing characters"), "{host}");
+
+    let board = Board::boot();
+    let project = board
+        .upload_with(name, &[("fixture.map2d.json", bad.as_bytes())])
+        .await;
+    board.settle();
+    let refusal = format!("{:?}", board.status(project, "/fixture.fixture").await);
+    assert!(
+        refusal.contains(map2d6::DEVICE_REFUSAL),
+        "the board's one sentence: {refusal}"
+    );
+    assert!(
+        !refusal.contains("trailing characters"),
+        "the words are the host's: {refusal}"
+    );
+}
+
 // --- the board ------------------------------------------------------------------
 
 /// One emulated fw-emu board and the client talking to it.
@@ -175,6 +206,11 @@ impl Board {
 
     /// Write a `projects/test/` project's files to the board and load it.
     async fn upload(&self, name: &str) -> WireProjectHandle {
+        self.upload_with(name, &[]).await
+    }
+
+    /// [`Self::upload`], with some files' bytes replaced.
+    async fn upload_with(&self, name: &str, replaced: &[(&str, &[u8])]) -> WireProjectHandle {
         let dir = project_dir(name);
         let mut files: Vec<PathBuf> = std::fs::read_dir(&dir)
             .expect("read project dir")
@@ -184,7 +220,10 @@ impl Board {
         files.sort();
         for path in files {
             let file = path.file_name().expect("name").to_string_lossy();
-            let content = std::fs::read(&path).expect("read project file");
+            let content = match replaced.iter().find(|(replaced, _)| *replaced == file) {
+                Some((_, bytes)) => bytes.to_vec(),
+                None => std::fs::read(&path).expect("read project file"),
+            };
             self.client
                 .fs_write(format!("/projects/{name}/{file}").as_path(), content)
                 .await
@@ -200,6 +239,15 @@ impl Board {
     }
 
     async fn node(&self, handle: WireProjectHandle, suffix: &str) -> NodeId {
+        self.entry(handle, suffix).await.0
+    }
+
+    /// The runtime status of the node whose path ends in `suffix`.
+    async fn status(&self, handle: WireProjectHandle, suffix: &str) -> NodeRuntimeStatus {
+        self.entry(handle, suffix).await.1
+    }
+
+    async fn entry(&self, handle: WireProjectHandle, suffix: &str) -> (NodeId, NodeRuntimeStatus) {
         let events = self
             .client
             .project_read(
@@ -221,7 +269,7 @@ impl Board {
             .nodes
             .iter()
             .find(|(_, entry)| entry.path.to_string().ends_with(suffix))
-            .map(|(id, _)| *id)
+            .map(|(id, entry)| (*id, entry.status.clone()))
             .unwrap_or_else(|| panic!("no node ending in {suffix}"))
     }
 

@@ -9703,7 +9703,8 @@ impl StudioController {
     /// Gather every fixture's mapping points (union, labeled by fixture
     /// name — plan decision: v1 targets all fixtures) plus the compact
     /// fixture summary for the system prompt. Unreadable or unparsable
-    /// fixture defs are skipped; SvgPath mappings contribute no points.
+    /// fixture defs are skipped; a fixture's lamps are its map2d's, read and
+    /// rendered as the engine renders them ([`Self::agent_map2d_points`]).
     async fn agent_fixture_context(
         &mut self,
     ) -> (Vec<lps_probe::LedPoint>, Option<lpa_agent::FixtureSummary>) {
@@ -9720,7 +9721,13 @@ impl StudioController {
                 continue;
             };
             let mapping = fixture.mapping.value();
-            let points = lpc_model::nodes::fixture::generate_mapping_points(mapping, 1, 1);
+            let points = match mapping {
+                lpc_model::nodes::fixture::MappingConfig::Map2d { source } => {
+                    self.agent_map2d_points(&def_artifact, source, fixture)
+                        .await
+                }
+                lpc_model::nodes::fixture::MappingConfig::Unset => Vec::new(),
+            };
             summaries.push(lpa_agent::FixtureSummary {
                 name: label.clone(),
                 led_count: points.len() as u32,
@@ -9734,6 +9741,41 @@ impl StudioController {
         }
         let summary = fold_fixture_summaries(summaries);
         (led_points, summary)
+    }
+
+    /// One fixture's lamps for the agent: the map2d its def names (resolved
+    /// against the def file, overlay-aware), read as format 6 and rendered
+    /// into the fixture's render size the way the engine renders it
+    /// (`render_parts_carrier`). A map2d that can't be found, read or
+    /// rendered contributes no lamps.
+    async fn agent_map2d_points(
+        &mut self,
+        def_artifact: &lpc_model::ArtifactLocation,
+        source: &lpc_model::AssetSlot,
+        fixture: &lpc_model::nodes::fixture::FixtureDef,
+    ) -> Vec<lpc_model::nodes::fixture::MappingPoint> {
+        let Some(spec) = source.artifact_value() else {
+            return Vec::new();
+        };
+        let Ok(path) =
+            lpc_model::resolve_artifact_specifier(def_artifact.file_path().as_path(), spec)
+        else {
+            return Vec::new();
+        };
+        let map2d = lpc_model::ArtifactLocation::file(path);
+        let Ok(Some(text)) = self.agent_asset_text(&map2d).await else {
+            return Vec::new();
+        };
+        let Ok(mapping) = lpc_mapping::map2d6::read(&text) else {
+            return Vec::new();
+        };
+        let (width, height) = (fixture.render_width(), fixture.render_height());
+        let Ok(carrier) = lpc_engine::nodes::fixture::parts_carrier::render_parts_carrier(
+            &mapping, width, height,
+        ) else {
+            return Vec::new();
+        };
+        lpc_model::nodes::fixture::generate_mapping_points(&carrier, width, height)
     }
 
     async fn execute_node_revert_op(&mut self, op: NodeRevertOp) -> UiResult {
@@ -10667,7 +10709,6 @@ fn mapping_kind_label(mapping: &lpc_model::nodes::fixture::MappingConfig) -> &'s
     use lpc_model::nodes::fixture::MappingConfig;
     match mapping {
         MappingConfig::Unset => "unset",
-        MappingConfig::PathPoints { .. } => "path points",
         MappingConfig::Map2d { .. } => "map2d document",
     }
 }
@@ -10938,7 +10979,10 @@ fn board_on_tree_store(evidence: &lpa_devices::Evidence) -> Option<bool> {
     // not hold it back (since the tree-store cutover such a board is almost
     // always a tree board, and a tree core on a littlefs one holds its files
     // for the USB migration, AD3); an automatic start waits for the hello.
-    let hello = evidence.classification.hello()?;
+    // A hello from another wire says it in its own words (`fs.tree`, `fs`).
+    let Some(hello) = evidence.classification.hello() else {
+        return evidence.other_wire_tree_store();
+    };
     Some(
         (hello.tree_store || hello.fs == BoardFs::TreeStoreHeld) && hello.fs != BoardFs::LegacyHeld,
     )

@@ -3,12 +3,10 @@
 //! Wiring order is primary: lamps are numbered end-to-end across objects in
 //! document order, and that zero-based index is a lamp's one address here.
 //!
-//! Manual patching layers on top and never touches the wiring order: it lives
-//! in the fixture's own patch document ([`crate::PatchDoc`]), addressing runs
-//! of lamps by their position in THIS order. Placing a run on an output's
-//! port is the patch/output layer's job — the resolver deliberately derives
-//! no wire-side addresses, and "universe"/"channel" (real 512-limited DMX
-//! terms) stay out of its vocabulary entirely (D45).
+//! Patching never touches the wiring order: placing a run on an output's
+//! port is map2d format 6's patching ([`crate::patching`]) — the resolver
+//! deliberately derives no wire-side addresses, and "universe"/"channel"
+//! (real 512-limited DMX terms) stay out of its vocabulary entirely (D45).
 
 use alloc::string::ToString;
 use alloc::vec::Vec;
@@ -743,9 +741,10 @@ fn point_bounds(points: &[[f32; 2]]) -> [f32; 4] {
 /// stable id, when the object has one), which repeat-instance chain, and
 /// the fixture-relative lamp range it occupies.
 ///
-/// This is the table [`crate::resolve_patch`] lowers [`crate::MapObjectPath`]
-/// entries through — the bridge between "/sector/2" and "lamps 60..90".
-/// Strand order matches [`ResolvedMap2d::spans`] exactly.
+/// The bridge between an object path like "/sector/2" and "lamps 60..90"
+/// (what the patch documents of formats 1 to 5 lowered their rows through;
+/// Studio's Map tab draws instances with it). Strand order matches
+/// [`ResolvedMap2d::spans`] exactly.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ObjectInstanceSpan {
     /// The owning object's index in `doc.objects` — always present: the

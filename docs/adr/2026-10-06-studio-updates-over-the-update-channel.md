@@ -328,6 +328,43 @@ the words did: a version that upgrades the board's projects says so before
 it is pressed (from the release index's `projectFormat`), and installing an
 older version that would strand them says so in its Lasting copy.
 
+## Amendment (2026-10-28): a board on an older wire
+
+Plan `lp2025/2026-10-27-0114-mapping-rebuild` (`ota-older-wire-update.md`),
+found by that plan's M3 P12 walks: a board whose JSON wire is older than
+Studio's, and whose hello Studio therefore cannot decode, was offered no
+update over Wi‑Fi, Bluetooth or the relay ("Firmware updates need USB"),
+and only the USB flash over a cable
+(`docs/defects/2026-10-28-an-older-wire-board-could-only-be-updated-by-cable.md`).
+
+- **The update needs nothing from channel 1.** The board's manifest and
+  its decision come over channel 3, and the tier is the link's own. So a
+  hello that does not decode keeps what the update needs: its manifest
+  (`firmware`, read by `lpc_update::BoardManifest`'s own reader, the same
+  JSON as `M`), its MAC and device uid (who the board is: over a radio or
+  the relay nothing else says it), and whether its files are in the tree
+  store (`lpc_wire::hello_firmware`, `hello_base_mac`, `hello_device_uid`,
+  `hello_on_tree_store`, each read on its own beside `hello_proto` and
+  `hello_board_id`). The manifest is DS9's announcement, as a decoded
+  hello's `firmware` is.
+- **The card stays an older LightPlayer's** ("This board is running old
+  firmware. Update the firmware to connect and edit."), and §5's route
+  decides as for any board: over the air on every link, USB included, when
+  the board and this Studio's build can; the USB flash keeps a board with
+  no update-capable core. The press is Routine, as any newer update is.
+- **A hello that does decode at an older wire** (wire 44 at 45: the hello's
+  shape did not change) already took this path; the gap was only the
+  undecodable hello, which a required hello field makes at every such bump.
+- **Walked, emulated** (`lp-emu:esp32c6:t1`, `+net=lan` on the Wi‑Fi lanes;
+  `just walk-ota-emu [--lan|--relay|--ble] --steps older-wire` with
+  `WALK_OTA_X`): a desk X at wire 44 whose hello does not decode at 45,
+  over USB, the LAN, the relay and `?ble=emu`; and the published release
+  `2026.10.25-1` (wire 44, its hello decodes at 45, fetched by
+  `scripts/ota/fetch-release-image.sh`) over the LAN, the relay and
+  `?ble=emu`. Each ends on Y with its project kept; the board's own
+  `[OTA]`/`[LOADER]` words are in the walk's report. Nothing here is a
+  hardware or a radio claim.
+
 ## References
 
 - `docs/adr/2026-10-06-ota-update-protocol.md` (ADR 2: the protocol and

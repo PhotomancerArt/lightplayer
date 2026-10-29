@@ -16,14 +16,12 @@
 //! crate README's "The frame plan".
 
 mod frame_plan_counters;
-mod lane_topology;
 mod plan_host;
 mod plan_mode;
 mod plan_slot;
 mod planned_read;
 
 pub use frame_plan_counters::FramePlanCounters;
-pub(crate) use lane_topology::LaneTopology;
 pub use plan_host::{FramePlanState, PlanHost};
 pub use plan_mode::PlanMode;
 pub use plan_slot::PlanSlot;

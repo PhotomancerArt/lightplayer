@@ -4,9 +4,9 @@
 //!
 //! **Positions live once.** [`render`] writes every lamp into one
 //! exact-size buffer; [`Tree::take_positions`] moves that buffer out and the
-//! fit rewrites it in place, the way `mapping_from_map2d_doc` carries a
-//! map2d document's (`docs/reports/2026-09-02-per-lamp-memory-table.md`).
-//! The rest of the tree is dropped: the patcher renders its own for each
+//! fit rewrites it in place, with no copy
+//! (`docs/reports/2026-09-02-per-lamp-memory-table.md`).
+//! The rest of the tree is dropped: the patcher lays out its own for each
 //! patch (`parts_patch.rs`).
 //!
 //! [`Tree::take_positions`]: lpc_mapping::part::Tree::take_positions

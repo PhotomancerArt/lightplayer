@@ -1011,33 +1011,25 @@ pub(crate) fn enum_variant_switched() -> Element {
     rsx! {
         ConfigSlotRow {
             slot: UiConfigSlot::record(
-                "mapping",
-                "Mapping",
+                "consume",
+                "Consume",
                 vec![
-                    UiConfigSlot::record("mapping.PathPoints.paths", "Paths", vec![])
-                        .with_address(story_slot_address("mapping.PathPoints.paths"))
-                        .with_composite(UiSlotComposite::Map(UiSlotMapComposite {
-                            key_kind: UiSlotMapKeyKind::U32,
-                            suggested_key: "0".to_string(),
+                    UiConfigSlot::record("consume.Policy.from_1d", "From 1D", vec![])
+                        .with_address(story_slot_address("consume.Policy.from_1d"))
+                        .with_composite(UiSlotComposite::Enum(UiSlotEnumComposite {
+                            active: "Project".to_string(),
+                            variants: vec!["Project".to_string()],
                         }))
                         .with_state(UiSlotFieldState::editable()),
-                    UiConfigSlot::value(
-                        "mapping.PathPoints.sample_diameter",
-                        "Sample diameter",
-                        UiSlotValue::f32(1.5),
-                    )
-                    .with_address(story_slot_address("mapping.PathPoints.sample_diameter"))
-                    .with_state(UiSlotFieldState::editable()),
+                    UiConfigSlot::value("consume.Policy.force", "Force", UiSlotValue::bool(false))
+                        .with_address(story_slot_address("consume.Policy.force"))
+                        .with_state(UiSlotFieldState::editable()),
                 ],
             )
-            .with_address(story_slot_address("mapping"))
+            .with_address(story_slot_address("consume"))
             .with_composite(UiSlotComposite::Enum(UiSlotEnumComposite {
-                active: "PathPoints".to_string(),
-                variants: vec![
-                    "Unset".to_string(),
-                    "PathPoints".to_string(),
-                    "SvgPath".to_string(),
-                ],
+                active: "Policy".to_string(),
+                variants: vec!["Auto".to_string(), "Policy".to_string()],
             }))
             .with_state(UiSlotFieldState::editable().with_dirty(UiNodeDirtyState::Dirty)),
             depth: 0,

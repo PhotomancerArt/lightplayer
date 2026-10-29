@@ -139,7 +139,7 @@ fn push_runs(runs: &mut Vec<PatchedRun>, laid: &SegmentPatch, first: u32, lamp: 
         return;
     }
     let reversed = laid.direction.is_reverse();
-    let output = Some(alloc::string::String::from(laid.address.output.as_str()));
+    let output = alloc::string::String::from(laid.address.output.as_str());
     let reach = laid.limit.map_or(n, |limit| limit.min(n));
     if reach == n {
         push_run(
@@ -234,7 +234,6 @@ mod tests {
     use alloc::vec;
     use lpc_mapping::part::{Mapping, Part, PartId, PartKind, Path, Shape, render};
     use lpc_mapping::patching::{Address, Direction, OutputName, PortKey};
-    use lpc_mapping::{PatchedRange, patched_wire_lamp};
 
     use crate::node::OutputPortSlice;
 
@@ -277,21 +276,13 @@ mod tests {
                         let id = TreeId::of(&pid("path1"));
                         let mut wire: Vec<Option<u32>> = vec![None; n as usize];
                         for run in &placed.runs {
-                            let range = PatchedRange {
-                                start: run.start,
-                                count: run.count,
-                                lamp: run.lamp,
-                                reversed: run.reversed,
-                                offset: run.offset,
-                                output: run.output.clone(),
-                            };
                             for j in 0..run.count {
                                 let source = (run.start + j) as usize;
                                 assert!(
                                     wire[source].is_none(),
                                     "lamp {source} placed twice (n {n} offset {offset} limit {limit:?} {direction:?})"
                                 );
-                                wire[source] = Some(patched_wire_lamp(&range, j));
+                                wire[source] = Some(run.wire_lamp(j));
                             }
                         }
                         for (j, placed) in wire.iter().enumerate() {
@@ -353,21 +344,14 @@ mod tests {
         let patching = laid(vec![a, b]);
         let placed = patching_runs(&patching, &tree, &[main_table()], ColorOrder::Rgb);
         assert_eq!(placed.runs, vec![run(0, 9, 10, true, 0, "main")]);
-        let range = PatchedRange {
-            start: 0,
-            count: 9,
-            lamp: 10,
-            reversed: true,
-            offset: 0,
-            output: Some(String::from("main")),
-        };
+        let range = &placed.runs[0];
         for (segment, first) in [("path1", 0u32), ("path2", 4)] {
             let id = TreeId::of(&pid(segment));
             let n = patching.segment(&id).unwrap().lamps;
             for j in 0..n {
                 let landed = patching.landing(&id, j).unwrap();
                 assert_eq!(
-                    patched_wire_lamp(&range, first + j),
+                    range.wire_lamp(first + j),
                     (30 + landed.channel) / 3,
                     "{segment} lamp {j}"
                 );
@@ -408,8 +392,8 @@ mod tests {
             seg("path2", "other", 0, 0, 5),
         ]);
         let placed = patching_runs(&patching, &tree, &[main_table(), other], ColorOrder::Rgb);
-        let outputs: Vec<Option<&str>> = placed.runs.iter().map(|r| r.output.as_deref()).collect();
-        assert_eq!(outputs, [Some("main"), Some("other")]);
+        let outputs: Vec<&str> = placed.runs.iter().map(|r| r.output.as_str()).collect();
+        assert_eq!(outputs, ["main", "other"]);
     }
 
     /// A segment part-way into a lamp is not placed, and the fixture says
@@ -554,7 +538,7 @@ mod tests {
             lamp,
             reversed,
             offset,
-            output: Some(String::from(output)),
+            output: String::from(output),
         }
     }
 }

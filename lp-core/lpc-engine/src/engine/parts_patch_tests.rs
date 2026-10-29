@@ -219,18 +219,18 @@ fn nothing_flows_across_fixtures() {
     assert_eq!(rig.lit("out_main"), 20);
 }
 
-/// A format-6 fixture never lands on an output it doesn't name, even the
-/// default one.
+/// A fixture never lands on an output it doesn't name, even the first one
+/// on its channel.
 #[test]
 fn a_format_6_fixture_never_lands_on_an_output_it_doesnt_name() {
     let mapping = strip("strip", 10, Start::at("b", 0, Amount::lamps(0)));
-    // `a` is attached first: the default output, where an unpatched
-    // fixture would flow.
+    // `a` is attached first: where auto-flow (gone with project format 12)
+    // used to put an unpatched fixture.
     let outputs = vec![Out::named("a", &[None]), Out::named("b", &[None])];
     let mut rig = Rig::load(vec![Fix::parts("strip", mapping.clone())], outputs);
     rig.settle();
     rig.assert_lands("strip", &mapping);
-    assert_eq!(rig.lit("out_a"), 0, "nothing lands on the default output");
+    assert_eq!(rig.lit("out_a"), 0, "nothing lands on the first output");
     assert_eq!(rig.lit("out_b"), 10);
 }
 
@@ -768,7 +768,7 @@ impl Rig {
             let id = node_id(&rt, node);
             let runtime = FixtureNode::new(
                 id,
-                MappingConfig::path_points_vec(Vec::new(), 1.0),
+                MappingConfig::Unset,
                 FixtureSamplingConfig::Direct,
                 Revision::new(1),
             )

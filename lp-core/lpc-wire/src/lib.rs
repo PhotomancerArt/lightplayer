@@ -122,7 +122,8 @@ pub use server::{
     LinkCounters, LinkResets, LoadedProject, MemoryStats, NetworkScan, NetworkStatus,
     ProjectFaultWire, RelayRefusal, RelayState, SampleStats, SavedNetworkInfo, ServerConfig,
     ServerHello, ServerMsgBody, StartupRefusal, StationFailure, StationState, WIRE_PROTO_VERSION,
-    hello_board_id, hello_proto,
+    hello_base_mac, hello_board_id, hello_device_uid, hello_firmware, hello_on_tree_store,
+    hello_proto,
 };
 pub use slot::{
     WireSlotChange, WireSlotData, WireSlotFullSync, WireSlotPatch, WireSlotRootSnapshot,

@@ -683,8 +683,8 @@ mod tests {
     use alloc::string::ToString;
 
     use crate::{
-        BindingRef, ConsumerCell2, LpValue, MappingConfig, PathSpec, ShaderSpace,
-        SlotShapeRegistry, SpaceAnswer2, TextureDef, VisualConsumerSpace,
+        BindingRef, ConsumerCell2, LpValue, MappingConfig, ShaderSpace, SlotShapeRegistry,
+        SpaceAnswer2, TextureDef, VisualConsumerSpace,
     };
 
     #[test]
@@ -717,17 +717,14 @@ mod tests {
             r#"{
   "kind": "Fixture",
   "render_size": { "width": 8, "height": 8 },
-  "mapping": { "kind": "PathPoints" }
+  "mapping": { "kind": "Unset" }
 }"#,
         )
         .expect("fixture");
         let NodeDef::Fixture(fixture) = fixture else {
             panic!("expected fixture");
         };
-        assert!(matches!(
-            fixture.mapping.value(),
-            MappingConfig::PathPoints { .. }
-        ));
+        assert!(matches!(fixture.mapping.value(), MappingConfig::Unset));
 
         let fixture = NodeDef::read_json(
             &registry,
@@ -750,44 +747,6 @@ mod tests {
         assert_eq!(
             source.artifact_value().unwrap().to_string(),
             "sign.map2d.json"
-        );
-    }
-
-    #[test]
-    fn node_def_round_trips_point_list_fixture_json() {
-        let registry = registry();
-        let fixture = crate::FixtureDef {
-            mapping: EnumSlot::new(MappingConfig::path_points_vec(
-                alloc::vec![PathSpec::point_list(
-                    3,
-                    alloc::vec![[0.0, 0.25], [1.0, 0.75]],
-                )],
-                2.0,
-            )),
-            ..crate::FixtureDef::default()
-        };
-        let text = NodeDef::Fixture(fixture)
-            .write_json(&registry)
-            .expect("write fixture");
-        let read = NodeDef::read_json(&registry, &text).expect("read fixture");
-        let NodeDef::Fixture(read) = read else {
-            panic!("expected fixture");
-        };
-        let MappingConfig::PathPoints { paths, .. } = read.mapping.value() else {
-            panic!("expected PathPoints");
-        };
-        let PathSpec::PointList {
-            first_channel,
-            points,
-        } = paths.entries.get(&0).expect("path").value();
-        assert_eq!(*first_channel.value(), 3);
-        assert_eq!(
-            points.entries.get(&0).expect("point").value().0,
-            [0.0, 0.25]
-        );
-        assert_eq!(
-            points.entries.get(&1).expect("point").value().0,
-            [1.0, 0.75]
         );
     }
 
@@ -1083,7 +1042,7 @@ mod tests {
             r#"{
   "kind": "Fixture",
   "render_size": { "width": 8, "height": 8 },
-  "mapping": { "kind": "PathPoints" }
+  "mapping": { "kind": "Unset" }
 }"#,
         )
         .expect("fixture");
@@ -1114,13 +1073,7 @@ mod tests {
     fn node_def_json_round_trip_is_byte_stable() {
         let registry = registry();
         let fixture = crate::FixtureDef {
-            mapping: EnumSlot::new(MappingConfig::path_points_vec(
-                alloc::vec![PathSpec::point_list(
-                    3,
-                    alloc::vec![[0.0, 0.25], [1.0, 0.75]],
-                )],
-                2.0,
-            )),
+            mapping: EnumSlot::new(MappingConfig::map2d("sign.map2d.json")),
             ..crate::FixtureDef::default()
         };
         let first = NodeDef::Fixture(fixture)

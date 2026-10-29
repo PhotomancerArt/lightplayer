@@ -7,11 +7,13 @@ use core::sync::atomic::{AtomicU32, Ordering};
 
 use crate::dataflow::binding::{BindingDraft, BindingPriority, BindingSource, BindingTarget};
 use crate::engine::default_demand_input_path;
+use crate::engine::placed_fixture_test_support::{PlacedFixture, bind_output_name};
 use crate::node::test_placeholder_spine;
 use crate::node::{
     DestroyCtx, MemPressureCtx, NodeError, NodeRuntime, PressureLevel, ProduceResult,
     RenderContext, RenderNode, RuntimeStateShape, TickContext,
 };
+use crate::nodes::fixture::fixture_node::{compact_paths, test_path};
 use crate::nodes::{
     FixtureNode, OutputNode, fixture_input_path, output_input_path, shader_output_path,
 };
@@ -22,7 +24,7 @@ use lp_gfx::{
     TextureData, TextureHandle,
 };
 use lp_gfx_lpvm::TargetLpvmGraphics;
-use lpc_model::nodes::fixture::{ColorOrder, MappingConfig, PathSpec};
+use lpc_model::nodes::fixture::ColorOrder;
 use lpc_model::nodes::output::OutputDef;
 use lpc_model::{
     Dim2u, HwEndpointSpec, Kind, LpValue, Revision, ShaderState, SlotAccess, SlotPath,
@@ -422,12 +424,15 @@ fn attach_idle_output_sink(
     (out_id, sink)
 }
 
+/// Bind `out_id` to the fixture's product and name it `out`, the output
+/// the fixture's one run lands on ([`PlacedFixture`]).
 fn bind_output_to_fixture(
     rt: &mut Engine,
     out_id: lpc_model::NodeId,
     fix_id: lpc_model::NodeId,
     frame: Revision,
 ) {
+    bind_output_name(rt, out_id, "out", frame);
     rt.add_binding(
         BindingDraft {
             source: BindingSource::ProducedSlot {
@@ -491,7 +496,7 @@ fn engine_output_sink_flush_writes_expected_rgb_via_memory_provider() {
     )
     .unwrap();
 
-    let mapping = MappingConfig::path_points_vec(vec![PathSpec::point_list(0, [[0.5, 0.5]])], 2.0);
+    let mapping = compact_paths(vec![test_path(0, [[0.5, 0.5]])], 2.0);
 
     let fix_id = rt
         .tree_mut()
@@ -509,11 +514,15 @@ fn engine_output_sink_flush_writes_expected_rgb_via_memory_provider() {
 
     rt.attach_runtime_node(
         fix_id,
-        Box::new(FixtureNode::new(
-            fix_id,
-            mapping,
-            lpc_model::FixtureSamplingConfig::TextureArea,
-            frame,
+        Box::new(PlacedFixture::new(
+            FixtureNode::new(
+                fix_id,
+                mapping,
+                lpc_model::FixtureSamplingConfig::TextureArea,
+                frame,
+            ),
+            1,
+            "out",
         )),
         frame,
     )
@@ -605,7 +614,7 @@ fn engine_output_idle_registered_sink_skips_second_pin() {
     )
     .unwrap();
 
-    let mapping = MappingConfig::path_points_vec(vec![PathSpec::point_list(0, [[0.5, 0.5]])], 2.0);
+    let mapping = compact_paths(vec![test_path(0, [[0.5, 0.5]])], 2.0);
 
     let fix_id = rt
         .tree_mut()
@@ -623,11 +632,15 @@ fn engine_output_idle_registered_sink_skips_second_pin() {
 
     rt.attach_runtime_node(
         fix_id,
-        Box::new(FixtureNode::new(
-            fix_id,
-            mapping,
-            lpc_model::FixtureSamplingConfig::TextureArea,
-            frame,
+        Box::new(PlacedFixture::new(
+            FixtureNode::new(
+                fix_id,
+                mapping,
+                lpc_model::FixtureSamplingConfig::TextureArea,
+                frame,
+            ),
+            1,
+            "out",
         )),
         frame,
     )
@@ -724,7 +737,7 @@ fn output_demand_marks_output_buffer_dirty_same_frame_before_flush() {
     )
     .unwrap();
 
-    let mapping = MappingConfig::path_points_vec(vec![PathSpec::point_list(0, [[0.5, 0.5]])], 2.0);
+    let mapping = compact_paths(vec![test_path(0, [[0.5, 0.5]])], 2.0);
 
     let fix_id = rt
         .tree_mut()
@@ -742,11 +755,15 @@ fn output_demand_marks_output_buffer_dirty_same_frame_before_flush() {
 
     rt.attach_runtime_node(
         fix_id,
-        Box::new(FixtureNode::new(
-            fix_id,
-            mapping,
-            lpc_model::FixtureSamplingConfig::TextureArea,
-            frame,
+        Box::new(PlacedFixture::new(
+            FixtureNode::new(
+                fix_id,
+                mapping,
+                lpc_model::FixtureSamplingConfig::TextureArea,
+                frame,
+            ),
+            1,
+            "out",
         )),
         frame,
     )

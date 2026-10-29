@@ -4,17 +4,21 @@ The LED fixture mapping domain, shared by the engine, the device and Studio:
 **mapping = layout + patching**. A fixture's mapping says where each lamp is
 and where on the hardware its data goes.
 
-The crate holds two generations side by side until M3 (project format 12)
-of the mapping rebuild (planning `lp2025/2026-10-27-0114-mapping-rebuild`;
+The mapping rebuild (planning `lp2025/2026-10-27-0114-mapping-rebuild`;
 ADR `docs/adr/2026-10-27-mapping-model-parts-segments-patcher.md`):
 
 - **The mapping model and map2d format 6** (`part`, `patching`, `map2d6`):
-  parts, segments and the patcher, in one file. Built in M1. Since M2 the
-  engine runs it for every fixture whose map2d is format 6 (the test
-  projects `projects/test/*-6`), beside today's path for formats 1–5;
-  every project moves onto it in M3, Studio's Graph in M4.
-- **Today's documents** (map2d formats 1–5, the patch document): what the
-  engine, the device and Studio run until M3 retires them (below).
+  parts, segments and the patcher, in one file. Built in M1; since M3
+  (project format 12) the engine runs it for every fixture, and its patching
+  is the engine's one patching path. Studio's Graph moves onto it in M4.
+- **The older map2d document** (formats 1–5, `Map2dDoc`): its resolver is
+  also the new model's geometry (each shape's lamps come from
+  `resolve_into` on a one-object document), and Studio's Map tab, hidden
+  since M3, still reads it until M4 deletes the tab. Nothing that runs a
+  project reads it: the engine reads format 6 only. The patch document
+  (`patch.rs`, `PatchDoc`) and `MapObjectPath` were deleted in M3; projects
+  were upgraded into format 6 by `lpa-upgrade`, which keeps its own frozen
+  copy of the old readers.
 
 ## The mapping model
 
@@ -105,24 +109,33 @@ circular display as soldered:
   and `offset` (lamps). One naming no node is kept.
 - Counters: `next` (per kind word), `next_ring` (per circle). Format 6
   saves no lamp facts; the lamp-model plan adds them with its own bump.
-- The format is peeked first: a newer document is refused as newer, 1–5
-  go to today's reader. Writing gives one canonical form, so a document
-  read and written back is the same bytes.
+- `read` takes format 6 only. A newer document is refused as newer, and
+  1–5 as "the older layout document" (the upgrade is the host's,
+  `lpa-upgrade`). Without `std` (the device), every error's text is one
+  sentence, `map2d6::DEVICE_REFUSAL`: the device runs every check a host
+  runs and drops only the words, so a board accepts exactly what a host
+  accepts. Writing gives one canonical form, so a document read and written
+  back is the same bytes.
 
 ## Modules
 
 | Module | What |
 |---|---|
-| `part/` | The parts, the rendered tree, ids, segments, `render`, `Tree::take_positions` (the engine's carrier takes the positions), `Mapping::same_layout` (a patching-only edit renders nothing) |
+| `part/` | The parts, the rendered tree, ids, segments, `render`, `render_layout` (the same tree with no lamp placed: what a patch walks), `Tree::take_positions` (the engine's carrier takes the positions), `Mapping::same_layout` (a patching-only edit renders nothing) |
 | `patching/` | Starts, flows, overrides, the cursor, `patch_mapping`, `patch_mapping_placed` (no walk record: the engine's), spans, problems |
-| `map2d6/` | Format 6: its document structs, path data, `read`, `write` |
-| `map2d_doc`, `map2d_resolve`, `map2d_fit`, `map2d_object_id` | Today's document and resolver; the resolver is also the new model's geometry |
-| `patch` | Today's patch document (until M3) |
+| `map2d6/` | Format 6: its document structs, a small JSON reader (`json_text`, no serde on the read path), path data, `read`, `write`, `DEVICE_REFUSAL` |
+| `edit/` (feature `edit`) | Edits that rewrite references (insert, move, rename, wrap in a repeat, expand, rings, starts, flows, overrides): Studio's Graph; never compiled into firmware |
+| `sorted_set` | Sorted-`Vec` id sets the reader, render and patcher check ids with (smaller on the C6 than a B-tree) |
+| `map2d_doc`, `map2d_resolve`, `map2d_fit`, `map2d_object_id`, `map2d_error` | The older document (formats 1–5) and its resolver; the resolver is also the new model's geometry |
 | `editor_meta` | Studio's `editor.json` |
-| `import/` | SVG import into today's document |
-| `corpus` | Shared test scenes |
+| `import/` | SVG import into the older document (the Map tab's) |
+| `corpus` | Shared test scenes in the older document (the Map tab's, until M4) |
 
-## Today's map2d document (formats 1–5, until M3)
+## The older map2d document (formats 1–5)
+
+What follows describes `Map2dDoc`, which no project at format 12 holds: the
+upgrade rewrote every one into format 6. It stays for the resolver (the new
+model's geometry) and the hidden Map tab until M4.
 
 A mapping document (`fixture.map2d.json`) is a format-versioned JSON asset,
 opaque to the slot system, holding parametric objects whose order **is** the
@@ -234,42 +247,6 @@ not a runtime source of truth. CLI form:
 ```sh
 cargo run -p lpc-mapping --example svg_to_map2d -- path/to/mapping.svg > fixture.map2d.json
 ```
-
-## The patch document (until M3)
-
-Format 6 retires it: its rows become starts and overrides in the map2d file
-(M3). Until then: mapping says where a lamp *is*; **patching** says which physical jack the
-strand ended up in. A fixture is mapped once and re-patched on every install,
-so the patch is its own document (`fixture.patch.json`) beside the mapping —
-clearing a patch never disturbs a lamp position.
-
-```json
-{
-  "format": 1,
-  "entries": [
-    { "range": { "start": 0,  "count": 22 }, "at": { "channel": 0 } },
-    { "range": { "start": 22, "count": 22 }, "at": { "channel": 34 },
-      "reversed": true }
-  ]
-}
-```
-
-`range` is fixture-relative — lamp indices in the wiring order above — and
-`at.channel` is the lamp offset on the output's wire. Omitting `count` means
-"to the end of the fixture", so a patched tail survives the fixture growing.
-`reversed` lays a run down end-first (the strand fed from its far end); it is
-a placement bit, unrelated to a fixture's own `wire_reversed` sampling.
-
-Patches are **sparse**: `resolve_patch` anchors the entries and reflows every
-unclaimed lamp after the highest anchored end, in fixture order. So no patch,
-an empty patch, and a patch that anchors nothing all resolve to what auto-flow
-would have produced — clearing restores the default rather than going dark, and
-partial patching is the ordinary case. Two entries of one fixture claiming the
-same lamp, or the same wire channel, are a document error (two *different*
-fixtures colliding on one output is a runtime condition the engine degrades and
-reports). Format 2 added rows by object path (`/id/k`), outputs by name and
-a rotation offset; format 3 a `flow` (`auto` or `manual`); `PatchDoc`'s
-module doc holds the full form.
 
 ## Boundary
 

@@ -244,6 +244,164 @@ fn an_update_over_bluetooth_comes_back_by_itself_across_each_reset_and_ends_on_y
     );
 }
 
+/// A board on an older wire (its hello does not decode here) is updated
+/// over the update channel on every link — a cable, Bluetooth, the LAN and
+/// the relay — never told "Firmware updates need USB": its update rides
+/// channel 3, which the wire never changes. One press of the card's
+/// `update-firmware`, by path; the board ends on Y, which speaks this
+/// Studio's wire, and its card is a LightPlayer's again.
+#[test]
+fn an_older_wire_board_is_updated_over_the_update_channel_on_every_link() {
+    for (endpoint, link) in [
+        ("serial:model-board", UpdateLink::Usb),
+        ("ble:QkxFLWlk", UpdateLink::Bluetooth),
+        ("lan:ws://192.168.1.40/link", UpdateLink::Wifi),
+        (RELAY_ENDPOINT, UpdateLink::Relay),
+    ] {
+        let mut bench = Bench::new(
+            Board::older_wire(endpoint, &x_late(), &y_late()),
+            Some(y_late()),
+        );
+        bench.cache_engine(&x_late());
+        let device = bench.connect_device();
+        assert!(
+            matches!(
+                bench.firmware_face(device),
+                lpa_devices::view::FirmwareFace::OlderLightPlayer { .. }
+            ),
+            "[{endpoint}] the premise: an older LightPlayer, {:?}",
+            bench.firmware_face(device)
+        );
+        bench.run_until("the card to offer Update", |bench| {
+            matches!(bench.standing(device), UpdateStanding::Available { .. })
+        });
+        let path = bench.controller.device_verb(device, "update-firmware");
+        let offer = bench.controller.offered(&path);
+        assert_eq!(
+            offer.consequence(),
+            &ActionConsequence::Routine,
+            "[{endpoint}] over the air, one press: {offer:?}"
+        );
+        assert!(
+            offer.is_enabled(),
+            "[{endpoint}] not \"Firmware updates need USB\": {offer:?}"
+        );
+        bench.press(device, "update-firmware", OfferArgs::new());
+
+        let mut rode = false;
+        // The card's Firmware row says the update's work as it goes (its
+        // verb; the surface carries the number).
+        let mut work = Vec::new();
+        for n in 0..MAX_STEPS {
+            bench.step();
+            rode |= matches!(
+                bench.standing(device),
+                UpdateStanding::Updating { link: l, .. } if l == link
+            );
+            if n % 50 == 0
+                && let Some(words) = bench.firmware_work(device)
+                && !work.iter().any(|seen: &String| seen == &words)
+            {
+                work.push(words);
+            }
+            if bench.outcome(device).is_some() {
+                break;
+            }
+        }
+        bench.run_until_update_ends(device);
+        bench.assert_runs(&y_late());
+        assert_eq!(
+            bench.outcome(device),
+            Some(UpdateOutcomeFacts::UpToDate),
+            "[{endpoint}]"
+        );
+        assert!(rode, "[{endpoint}] the update rode {link:?}");
+        assert!(
+            work.iter().any(|seen| seen.starts_with("updating")),
+            "[{endpoint}] the Firmware row never said updating: {work:?}"
+        );
+        assert!(
+            bench.said(&format!(
+                "update v2026.10.09-1 → v2026.10.09-2 over {}",
+                link.word()
+            )),
+            "[{endpoint}]"
+        );
+        bench.run_until("the card is a LightPlayer's on this wire", |bench| {
+            matches!(
+                bench.firmware_face(device),
+                lpa_devices::view::FirmwareFace::LightPlayer { .. }
+            )
+        });
+    }
+}
+
+/// An older-wire board's card says what will happen: its firmware is old,
+/// and updating it is how to edit — and the way is the update channel, not
+/// a cable. Over Wi‑Fi the surface's press is the over-the-air update.
+#[test]
+fn an_older_wire_boards_card_says_to_update_it_and_offers_it_over_wifi() {
+    let mut bench = Bench::new(
+        Board::older_wire("lan:ws://192.168.1.40/link", &x_late(), &y_late()),
+        Some(y_late()),
+    );
+    let device = bench.connect_device();
+    bench.run_until("the card to offer Update", |bench| {
+        matches!(bench.standing(device), UpdateStanding::Available { .. })
+    });
+    let card = bench
+        .controller
+        .view()
+        .home
+        .expect("the home view")
+        .devices
+        .cards
+        .into_iter()
+        .find(|card| card.device == device)
+        .expect("a card");
+    assert_eq!(
+        card.surface.state,
+        crate::SurfaceState::OldFirmware,
+        "{:?}",
+        card.surface
+    );
+    let words = format!("{:?}", card.surface);
+    assert!(
+        words.contains("This board is running old firmware."),
+        "{words}"
+    );
+    assert!(
+        words.contains("Update the firmware to connect and edit."),
+        "{words}"
+    );
+    assert!(!words.contains("Firmware updates need USB"), "{words}");
+    // The Firmware row names the version the board runs and offers the
+    // update over the air (the flash and Factory reset keep their own
+    // "needs USB" reason in the details, as on every board over Wi‑Fi).
+    let firmware = card.bar(crate::BarLayer::Firmware);
+    assert_eq!(firmware.summary, "v2026.10.09-1", "{firmware:?}");
+    let action = firmware.action.as_ref().expect("the row's Update");
+    assert!(
+        action.offer.to_string().ends_with("/update-firmware") && action.refused.is_none(),
+        "{action:?}"
+    );
+    let version_line = format!("{:?}", firmware.details);
+    assert!(
+        version_line.contains(r#"label: "Version", value: "v2026.10.09-1""#),
+        "the details name the version its manifest gave: {version_line}"
+    );
+    match &card.name_bar.primary {
+        Some(crate::UiPrimary::Offer(action)) => {
+            assert!(
+                action.offer.to_string().ends_with("/update-firmware"),
+                "{action:?}"
+            );
+            assert!(action.refused.is_none(), "{action:?}");
+        }
+        other => panic!("the primary is the update, not {other:?}"),
+    }
+}
+
 /// A Studio serves several targets' builds: a board is offered its own
 /// target's, wherever that target sits in the list. Holding only the first
 /// served build (the C6's, on lightplayer.app) left an S3 with nothing to
@@ -1614,6 +1772,12 @@ struct Board {
     /// The board speaks channel 3 (`false`: pre-update firmware — no `M`,
     /// no manifest in its hello).
     announces: bool,
+    /// While it runs this version, the board's hello is from an older wire
+    /// whose shape this Studio cannot decode: what `lpa-link`'s demux makes
+    /// of it ([`ServerFrame::hello_on_other_wire`], its MAC, tree-store fact
+    /// and manifest read beside its version). The build it updates to
+    /// speaks this Studio's wire.
+    older_wire_version: Option<String>,
     /// The board's resets keep the port open, as an lp-link transport that
     /// does not re-enumerate sees them (the emulator's door, a classic's
     /// UART): the link's SESSION resets — a link-reset note, then the new
@@ -1683,6 +1847,7 @@ impl Board {
             opens_while_dropped: 0,
             ignores_updates: false,
             announces: true,
+            older_wire_version: None,
             silent_socket_secs: None,
             pending_close: None,
             redial_secs: 1.0,
@@ -1692,6 +1857,21 @@ impl Board {
 
     fn running_x() -> Self {
         Self::with_catalog(vec![x(), y()])
+    }
+
+    /// A board running `x` on an older wire this Studio cannot decode,
+    /// reached at `endpoint`: a cable, Bluetooth, the LAN or the relay.
+    fn older_wire(endpoint: &str, x: &ModelBuild, y: &ModelBuild) -> Self {
+        let mut board = Self::with_catalog(vec![x.clone(), y.clone()]);
+        board.older_wire_version = Some(x.version.clone());
+        board.endpoint = endpoint.to_string();
+        board.reconnects_itself = endpoint.starts_with("ble:")
+            || endpoint.starts_with("lan:")
+            || endpoint.starts_with("relay:");
+        if endpoint.starts_with("relay:") {
+            board.trust = LinkTrust::Relayed(Some(lpc_access::Tier::Edit));
+        }
+        board
     }
 
     /// A board running `catalog[0]`, able to boot every build in `catalog`.
@@ -1832,6 +2012,17 @@ impl Board {
                     _ => None,
                 })
         });
+        if self.older_wire_version.as_deref() == Some(version.as_str()) {
+            self.events.push_back(LinkEvent::Frame(
+                ServerFrame::hello_on_other_wire(
+                    request_id,
+                    lpc_wire::WIRE_PROTO_VERSION - 1,
+                    Some("seeed/xiao-esp32-c6".to_string()),
+                )
+                .with_other_wire_update(Some(Self::mac()), Some(true), update),
+            ));
+            return;
+        }
         self.events.push_back(LinkEvent::Frame(ServerFrame::hello(
             request_id,
             HelloFacts {
@@ -2599,6 +2790,30 @@ impl Bench {
             .pending()
             .first()
             .map(lpa_devices::PendingLink::device_id)
+    }
+
+    /// The words of the work the card's Firmware row shows, when any.
+    fn firmware_work(&self, device: DeviceId) -> Option<String> {
+        let home = self.controller.view().home?;
+        let card = home
+            .devices
+            .cards
+            .into_iter()
+            .find(|card| card.device == device)?;
+        card.bar(crate::BarLayer::Firmware)
+            .work
+            .as_ref()
+            .map(|work| work.words.clone())
+    }
+
+    fn firmware_face(&self, device: DeviceId) -> lpa_devices::view::FirmwareFace {
+        let view = self.controller.device_roster_view();
+        view.roster
+            .devices
+            .iter()
+            .find(|card| card.id == device)
+            .map(|card| card.firmware_face.clone())
+            .unwrap_or_default()
     }
 
     fn standing(&self, device: DeviceId) -> UpdateStanding {

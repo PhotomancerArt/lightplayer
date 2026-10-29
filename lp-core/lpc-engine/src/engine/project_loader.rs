@@ -55,10 +55,6 @@ use crate::nodes::OutputNode;
 use crate::nodes::PowerButtonNode;
 #[cfg(feature = "node-texture")]
 use crate::nodes::TextureNode;
-#[cfg(feature = "node-fixture")]
-use crate::nodes::fixture::fixture_node::OLDER_MAPPING_REFUSAL;
-#[cfg(feature = "node-fixture")]
-use crate::nodes::fixture::map2d_document::{Map2dDocument, read_map2d_document};
 #[cfg(feature = "node-shader")]
 use crate::nodes::{ComputeShaderNode, ShaderNode};
 #[cfg(feature = "node-fixture")]
@@ -1358,15 +1354,13 @@ enum FixtureMappingRead {
     },
 }
 
-/// Read a fixture's mapping. A map2d document goes to the reader its
-/// format names (`map2d_document.rs`); one this build can't read, or whose
-/// lamps don't resolve, fails the fixture's load in the reader's words.
-///
-/// Project format 12 holds every mapping as map2d format 6. A map2d of
-/// format 5 or older, or hand-placed `PathPoints` lamps, inside a format-12
-/// project (a hand edit, or an older writer) fails the fixture's load by
-/// name ([`OLDER_MAPPING_REFUSAL`], lean Q67): the upgrade is Studio's and
-/// lp-cli's, never the board's.
+/// Read a fixture's mapping: a map2d document of format 6
+/// (`lpc_mapping::map2d6`). One this build can't read fails the fixture's
+/// load in the reader's words (a host's; a device says one sentence,
+/// `map2d6::DEVICE_REFUSAL`); that includes a map2d of format 5 or older
+/// inside a format-12 project (a hand edit, or an older writer), refused as
+/// the older layout document: the upgrade is Studio's and lp-cli's, never
+/// the board's.
 #[cfg(feature = "node-fixture")]
 fn resolve_fixture_mapping(
     fs: &dyn LpFs,
@@ -1395,15 +1389,9 @@ fn resolve_fixture_mapping(
                 render_width: config.render_width(),
                 render_height: config.render_height(),
             };
-            match read_map2d_document(&text.text).map_err(|e| refused(&e))? {
-                Map2dDocument::Layout => Err(refused(&OLDER_MAPPING_REFUSAL)),
-                Map2dDocument::Parts(mapping) => Ok(FixtureMappingRead::Parts { mapping, source }),
-            }
+            let mapping = lpc_mapping::map2d6::read(&text.text).map_err(|e| refused(&e))?;
+            Ok(FixtureMappingRead::Parts { mapping, source })
         }
-        MappingConfig::PathPoints { .. } => Err(ProjectLoadError::InvalidProjectReference {
-            path: node_label(node),
-            reason: format!("resolve fixture mapping: {OLDER_MAPPING_REFUSAL}"),
-        }),
         MappingConfig::Unset => Ok(FixtureMappingRead::Unset {
             mapping: FixtureMapping::Slots(MappingConfig::Unset),
         }),
@@ -2701,8 +2689,9 @@ mod tests {
     /// Device-side loud refusal: a mapping written by a newer LightPlayer —
     /// unknown parts and all — fails the fixture with the honest
     /// "unsupported format" message naming the newest this build reads (6),
-    /// not an opaque parse error. The format peek (`map2d_document.rs`) is
-    /// what makes that true; this pins the message a user sees on the device.
+    /// not an opaque parse error. The reader's format peek
+    /// (`lpc_mapping::map2d6::read`) is what makes that true; this pins the
+    /// message a user sees on the device.
     ///
     /// Feature-gated because the expected message names
     /// `lpc_mapping::map2d6::MAP2D6_FORMAT`, and the crate is only linked
@@ -2738,8 +2727,8 @@ mod tests {
         );
     }
 
-    /// A format-6 fixture loads: its runtime holds the parts, places itself
-    /// (it is never auto-flowed) and says nothing is wrong.
+    /// A format-6 fixture loads: its runtime holds the parts and says
+    /// nothing is wrong.
     #[cfg(feature = "node-fixture")]
     #[test]
     fn a_format_6_fixture_loads() {
@@ -2756,7 +2745,6 @@ mod tests {
         let NodeEntryState::Alive(runtime) = entry.state.value() else {
             panic!("the fixture is alive");
         };
-        assert!(runtime.control_patch_manual(), "it places itself");
         assert_eq!(runtime.runtime_status(), None);
     }
 
@@ -2807,10 +2795,10 @@ mod tests {
     }
 
     /// A map2d of format 5 or older inside a format-12 project (a hand edit,
-    /// or an older writer) fails the fixture's load by name (lean Q67).
+    /// or an older writer) fails the fixture's load in the reader's words.
     #[cfg(feature = "node-fixture")]
     #[test]
-    fn an_older_map2d_in_a_format_12_project_is_refused_by_name() {
+    fn an_older_map2d_in_a_format_12_project_is_refused_in_the_readers_words() {
         let fs = fixture_project_fs();
         write_fixture_def(&fs, None);
         fs.write_file(
@@ -2824,15 +2812,16 @@ mod tests {
         let rt = ProjectLoader::load_from_root(&fs, services).expect("load");
         assert_fixture_node_error(
             &rt,
-            "this mapping is from an older LightPlayer; open the project in Studio to upgrade it",
+            "map2d format 5 is the older layout document; this reader reads format 6",
         );
     }
 
     /// Hand-placed `PathPoints` lamps inside a format-12 project (they became
-    /// a map2d of `points` parts) fail the fixture's load by the same name.
+    /// a map2d of `points` parts): format 12 has no such mapping, so the
+    /// fixture def does not parse.
     #[cfg(feature = "node-fixture")]
     #[test]
-    fn hand_placed_path_points_in_a_format_12_project_are_refused_by_name() {
+    fn hand_placed_path_points_in_a_format_12_project_do_not_parse() {
         let fs = fixture_project_fs();
         fs.write_file(
             "/fixture.json".as_path(),
@@ -2845,10 +2834,7 @@ mod tests {
 
         let services = EngineServices::new(TreePath::parse("/svg_fixture.show").expect("path"));
         let rt = ProjectLoader::load_from_root(&fs, services).expect("load");
-        assert_fixture_node_error(
-            &rt,
-            "this mapping is from an older LightPlayer; open the project in Studio to upgrade it",
-        );
+        assert_fixture_node_error(&rt, "PathPoints");
     }
 
     /// A one-path format-6 document: three lamps from lamp 0 of `main`.
@@ -3925,20 +3911,7 @@ mod tests {
     }
   },
   "mapping": {
-    "kind": "PathPoints",
-    "sample_diameter": 2.0,
-    "paths": {
-      "0": {
-        "kind": "PointList",
-        "first_channel": 0,
-        "points": {
-          "0": [
-            0.5,
-            0.5
-          ]
-        }
-      }
-    }
+    "kind": "Unset"
   }
 }
 "#,
@@ -4390,20 +4363,7 @@ mod tests {
     }
   },
   "mapping": {
-    "kind": "PathPoints",
-    "sample_diameter": 2.0,
-    "paths": {
-      "0": {
-        "kind": "PointList",
-        "first_channel": 0,
-        "points": {
-          "0": [
-            0.5,
-            0.5
-          ]
-        }
-      }
-    }
+    "kind": "Unset"
   }
 }
 "#,
@@ -4463,20 +4423,7 @@ mod tests {
     }
   },
   "mapping": {
-    "kind": "PathPoints",
-    "sample_diameter": 2.0,
-    "paths": {
-      "0": {
-        "kind": "PointList",
-        "first_channel": 0,
-        "points": {
-          "0": [
-            0.5,
-            0.5
-          ]
-        }
-      }
-    }
+    "kind": "Unset"
   }
 }
 "#,
