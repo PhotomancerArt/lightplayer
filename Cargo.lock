@@ -5698,6 +5698,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "lab-presets-model"
+version = "40.0.0"
+
+[[package]]
 name = "lazy-js-bundle"
 version = "0.7.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"

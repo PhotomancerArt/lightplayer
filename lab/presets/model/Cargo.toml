@@ -1,0 +1,17 @@
+[package]
+name = "lab-presets-model"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+description = "Presets lab: presets, activations and schedules as a toy model (pure, no product crates)"
+
+# The fence, as in lab/mapping: this crate depends on NO product crate and on
+# nothing at all. It is a toy for testing the model against the requirements
+# before any product code exists. See lab/presets/README.md.
+[dependencies]
+
+[lints]
+workspace = true
