@@ -34,6 +34,10 @@ pub const DISPLAY_MANIFEST_SOURCES: &[(&str, &str)] = &[
         include_str!("../../../lp-core/lpc-hardware/boards/seeed/xiao-esp32-c6.display.json"),
     ),
     (
+        "seeed/xiao-esp32-s3",
+        include_str!("../../../lp-core/lpc-hardware/boards/seeed/xiao-esp32-s3.display.json"),
+    ),
+    (
         "seeed/xiao-esp32-s3-plus",
         include_str!("../../../lp-core/lpc-hardware/boards/seeed/xiao-esp32-s3-plus.display.json"),
     ),

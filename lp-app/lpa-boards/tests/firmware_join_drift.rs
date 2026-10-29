@@ -30,6 +30,7 @@ const EXPECTED_COMPATIBILITY: &[(&str, &[&str])] = &[
     ("quinled/dig-uno", &["esp32v3-4mb"]),
     ("quinled/dig2go", &["esp32v3-4mb"]),
     ("seeed/xiao-esp32-c6", &["esp32c6-4mb"]),
+    ("seeed/xiao-esp32-s3", &["esp32s3-8mb"]),
     ("seeed/xiao-esp32-s3-plus", &["esp32s3-8mb"]),
 ];
 
