@@ -1,5 +1,5 @@
 ---
-status: open
+status: fixed
 found: 2026-10-22      # how: hardware-walk (the S3 radio plan's M4 desk walk, sittings 1 and 2, FS3)
 area: lp-fw/fw-esp32s3 `wifi` image × esp-radio's station on the S3 (lp-fw/fw-esp32-radio/src/net/esp_station.rs)
 class: untested-path   # the S3's station had only ever scanned on silicon (M1's probe) and joined in the emulator, where the network seam stands in for the radio
@@ -108,3 +108,27 @@ boards need the cap.
 (`fw-esp32s3/src/net/net_chip.rs`, `MAX_TX_POWER_QDBM`), applied before
 every join; the C6 keeps the blob's 20 dBm. The station's log now names more
 disconnect reasons and says whether the AP was heard.
+
+**2026-10-29, the control: the plain XIAO ESP32-S3 (XS1) joins at either
+power.** XS1 (`xiao-s3-1`, 44:BD:8D:76:CD:A0, ESP32-S3R8, 8 MB GigaDevice
+flash, antenna on its U.FL), this PR merged with main (`ae8e52352`, `wifi`
+on, Bluetooth advertising, Skirt 620 five loaded), `lp-bench-ap` heard at
+−34 dBm. Ten reboots each, a join being an address within 50 s:
+
+| image | joins | first attempt | associated in | address after boot |
+|---|---:|---:|---|---|
+| the 15 dBm cap (this PR) | 10/10 | 10/10 | 713–828 ms | 1.6–6.9 s |
+| 20 dBm (the cap removed, an uncommitted control build) | 10/10 | 10/10 | ~730 ms | 1.8–7.2 s |
+
+XS1's crystal reads **+7.2 ± 1.2 ppm** against the Mac (126 heartbeats over
+626 s, the same method as FS3's +13.5). So the 20 dBm failure belongs to
+FS3, not to the S3: one Plus unit, revision unknown, possibly that unit
+alone. The cap stays on every S3 for now. It is harmless on XS1, and FS3
+needs it.
+
+**What the cap costs:** 5 dB less transmit power is roughly 40 % less
+free-space range. That does not show at −34 dBm on the desk, but it matters
+for a board across a house from its access point. Restoring 20 dBm where it
+works is a follow-up: a Plus-only board quirk keyed off the stamped board
+ref, or an adaptive step-down after an "authentication expired" ending
+(auto-queue `2026-10-29-s3-wifi-tx-power-cap`).
