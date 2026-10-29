@@ -363,6 +363,7 @@ fn a_failed_wifi_connect_goes_quiet_once_the_board_is_plugged_in() {
             .iter()
             .any(|card| card.id == target && card.status == crate::DeviceStatus::Offline)
     });
+    super::past_the_reconnect_grace(&mut bench, &tasks);
     assert_eq!(
         home_card(&bench, target).surface.state,
         crate::SurfaceState::OfflineReachable

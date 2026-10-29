@@ -591,6 +591,7 @@ mod tests {
             detail: None,
             freshness_label: None,
             heard_age_ms: None,
+            detached_age_ms: None,
             identity_label: None,
             detected_chip: chip.map(str::to_string),
             board_id: board.map(str::to_string),

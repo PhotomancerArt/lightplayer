@@ -233,6 +233,7 @@ fn account_board_view(cloud: &crate::UiCloudBoard) -> DeviceView {
         detail: None,
         freshness_label: None,
         heard_age_ms: None,
+        detached_age_ms: None,
         identity_label: None,
         detected_chip: None,
         board_id: cloud.model.clone(),

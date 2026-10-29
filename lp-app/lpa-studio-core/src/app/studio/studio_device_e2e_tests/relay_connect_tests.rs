@@ -366,6 +366,7 @@ pub(super) fn unplug(bench: &mut DeviceBench, tasks: &TaskPool, target: crate::D
             .iter()
             .any(|card| card.id == target && card.status == crate::DeviceStatus::Offline)
     });
+    super::past_the_reconnect_grace(bench, tasks);
 }
 
 /// A LightPlayer board with a base MAC (its relay id).

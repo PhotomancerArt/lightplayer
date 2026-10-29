@@ -82,6 +82,23 @@ pub struct RegisteredDevice {
     /// it appears (the model's `Intent::autoconnect`).
     #[serde(default, skip_serializing_if = "core::ops::Not::not")]
     pub autoconnect: bool,
+    /// When this browser first met the board, f64 epoch seconds
+    /// (`DeviceRecord.added_at`): the home page lists boards first added
+    /// first, so a card keeps its place while the board is set up. Kept as
+    /// the earliest any write knew; never moved by a sighting. Additive: a
+    /// row written before it existed loads with `None`, and the model puts
+    /// it before every board added since.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub added_at: Option<f64>,
+}
+
+/// The earlier of two first-added times; `None` (not known) never wins over
+/// a time.
+fn earliest_added(a: Option<f64>, b: Option<f64>) -> Option<f64> {
+    match (a, b) {
+        (Some(a), Some(b)) => Some(a.min(b)),
+        (a, b) => a.or(b),
+    }
 }
 
 /// Load/save wrapper over the store.
@@ -160,6 +177,7 @@ impl DeviceRegistry {
             existing.firmware = device.firmware;
         }
         existing.autoconnect = device.autoconnect;
+        existing.added_at = earliest_added(existing.added_at, device.added_at);
         self.save(&file)
     }
 
@@ -323,6 +341,7 @@ fn merge_registered_devices(
             .clone()
             .or_else(|| other.device_name.clone()),
         autoconnect: old_row.autoconnect || new_row.autoconnect,
+        added_at: earliest_added(old_row.added_at, new_row.added_at),
     }
 }
 
@@ -716,6 +735,27 @@ mod tests {
         assert_eq!(row.board_id.as_deref(), Some("seeed/xiao-esp32-c6"));
         assert_eq!(row.chip.as_deref(), Some("esp32c6"));
         assert_eq!(row.firmware.as_deref(), Some("fw-esp32c6 abc1234"));
+    }
+
+    /// A board's first-added time is the earliest any write knew: a later
+    /// sighting, or a write from before the time was kept, never moves the
+    /// board's place on the home page.
+    #[test]
+    fn a_model_upsert_keeps_the_earliest_added_time() {
+        let fs: Rc<RefCell<dyn LpFs>> = Rc::new(RefCell::new(LpFsMemory::new()));
+        let registry = DeviceRegistry::new(fs);
+        let row = |added_at| RegisteredDevice {
+            uid: "dev0000000000000001".to_string(),
+            added_at,
+            ..RegisteredDevice::default()
+        };
+        registry.upsert_model_fields(row(Some(20.0))).unwrap();
+        registry.upsert_model_fields(row(Some(10.0))).unwrap();
+        registry.upsert_model_fields(row(Some(30.0))).unwrap();
+        registry.upsert_model_fields(row(None)).unwrap();
+
+        let saved = registry.list().unwrap().pop().expect("one row");
+        assert_eq!(saved.added_at, Some(10.0));
     }
 
     /// The additive fields serialize only when they carry something, so a

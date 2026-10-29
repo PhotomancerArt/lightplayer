@@ -20,6 +20,7 @@
 //! | `board_id` (learned, never cleared) | `board_id` (additive — the SAME field a provisioning-flow board pick also writes) |
 //! | `chip` (learned, never cleared) | `chip` (additive) |
 //! | `firmware` (learned, never cleared) | `firmware` (additive) |
+//! | `added_at` (millis, earliest kept) | `added_at` (epoch seconds, additive) |
 //!
 //! **`identity.endpoint` is deliberately NOT persisted.** A browser Web
 //! Serial endpoint id is minted per page load from a counter
@@ -130,6 +131,7 @@ pub fn registry_row_from_record(record: &DeviceRecord) -> Option<RegisteredDevic
         device_id: Some(record.device.0),
         device_name: record.identity.name.clone(),
         autoconnect: record.autoconnect,
+        added_at: record.added_at.map(|added| added.0 as f64 / 1_000.0),
     })
 }
 
@@ -218,6 +220,9 @@ pub fn record_from_registry_row(row: &RegisteredDevice, fallback_device_id: u64)
         // chooser (BLE M6).
         last_over_bluetooth: row.transport
             == transport_label_for_endpoint(super::sim_record::BLE_ENDPOINT_PREFIX),
+        added_at: row
+            .added_at
+            .map(|added| Millis((added * 1_000.0).round().max(0.0) as u64)),
     }
 }
 
@@ -241,6 +246,7 @@ mod tests {
             chip: Some("esp32c6".to_string()),
             firmware: Some("fw-esp32c6 abc1234".to_string()),
             last_over_bluetooth: false,
+            added_at: Some(Millis(1_000)),
         }
     }
 
@@ -258,6 +264,10 @@ mod tests {
         assert_eq!(back.name, original.name);
         assert!(back.autoconnect);
         assert_eq!(back.last_seen, original.last_seen);
+        assert_eq!(
+            back.added_at, original.added_at,
+            "the board keeps its place"
+        );
         assert_eq!(
             back.board_id, original.board_id,
             "the learned board id survives a full app restart"
