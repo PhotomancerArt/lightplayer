@@ -554,11 +554,9 @@ fn an_actions_result_is_published_before_the_batchs_tick() {
     let (actor, studio_handle) = StudioActor::new(controller, never_timer());
     let StudioHandle { tx, mut view, .. } = studio_handle;
 
-    // One batch: an action whose outcome changes the view (it is refused,
-    // and the refusal is a console line), then the tick.
-    tx.send(StudioCommand::Action(
-        crate::DeviceRestoreFromFileOp::action_for(crate::DeviceId(1)),
-    ));
+    // One batch: an action whose outcome changes the view (the project has
+    // edit is not sent, and that is a console line), then the tick.
+    tx.send(set_value_action("speed", 1.0));
     tx.send(StudioCommand::RefreshTick);
     let waker = Waker::from(Arc::new(NoopWake));
     let mut cx = StdContext::from_waker(&waker);
@@ -574,7 +572,7 @@ fn an_actions_result_is_published_before_the_batchs_tick() {
             .console
             .entries
             .iter()
-            .any(|entry| entry.message.contains("pick a backup file")),
+            .any(|entry| entry.message.contains("was not sent")),
         "the refusal is in the published view: {:?}",
         published.console.entries
     );
