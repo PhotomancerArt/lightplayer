@@ -575,7 +575,6 @@ claude-launch-json mode="":
         ;;
       *) echo "unknown mode: {{ mode }} (want empty | bench)" >&2; exit 2 ;;
     esac
-    lab_port="$(scripts/dev-port.sh --query lab-mapping)"
     mkdir -p .claude
     cat > .claude/launch.json <<EOF
     {
@@ -587,27 +586,11 @@ claude-launch-json mode="":
           "runtimeArgs": ["${recipe}"],
           "port": ${port},
           "autoPort": false
-        },
-        {
-          "name": "lab-mapping",
-          "runtimeExecutable": "just",
-          "runtimeArgs": ["lab-mapping"],
-          "port": ${lab_port},
-          "autoPort": false
         }
       ]
     }
     EOF
-    echo "wrote .claude/launch.json (${recipe} port ${port}, lab-mapping port ${lab_port})"
-
-# The mapping design lab (lab/mapping/README.md): the editor canvas on its
-# own, no device and no Studio. Port from dev-port.sh like every dev server.
-lab-mapping: install-wasm32-target
-    #!/usr/bin/env bash
-    set -euo pipefail
-    port="$(scripts/dev-port.sh lab-mapping)"
-    echo "Serving the mapping lab at http://127.0.0.1:${port}/"
-    dx serve --web -p lpa-graph-web --bin lpa-graph-lab --port "${port}" --addr 127.0.0.1 --open false
+    echo "wrote .claude/launch.json (${recipe} port ${port})"
 
 # studio-dev on a reserved bench-block port, so the standing WebSerial
 # grant (`just serial-grant`, Google Chrome only) covers the origin and the

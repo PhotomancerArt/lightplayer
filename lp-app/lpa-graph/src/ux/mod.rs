@@ -24,7 +24,6 @@ pub mod patch_section;
 pub mod patching;
 pub mod pick;
 pub mod pixel_grid;
-pub mod port_grouping;
 pub mod port_rows;
 pub mod presentation_b;
 pub mod problem_words;

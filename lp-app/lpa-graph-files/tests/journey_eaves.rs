@@ -31,7 +31,7 @@ fn seans_eaves() {
     assert_eq!(span(p, &side), Some(("1".into(), 0, 49)));
     assert!(p.effective_patch().walked(&side).unwrap().wrapped);
     assert!(!p.effective_patch().walked(&front).unwrap().wrapped);
-    let truth = Piece::of(p, "the house");
+    let truth = Piece::of(p);
 
     // 2. Hand the front's direction back to its rule: it runs as drawn,
     //    0 to 59, and the piece says that is the one difference — the

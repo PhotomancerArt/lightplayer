@@ -1,5 +1,0 @@
-{
-  "kind": "PowerButton",
-  "endpoint": "button:local:D0",
-  "mode": "switch"
-}

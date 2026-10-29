@@ -2,12 +2,12 @@
 //!
 //! Patching by hand is about the gap between the model and the install:
 //! "which panel is on this port, which way does its data run, where does it
-//! enter?" The lab's board is simulated, so in the lab that gap is made on
-//! purpose: the piece is wired by a **truth**, a patch the person can't
-//! see — in the lab, the project's patch as it was opened. What the piece
-//! shows is the board's pixels through the truth: each lamp takes the
-//! colour of the pixel it is really on. Studio needs none of this; there
-//! the piece is the real thing.
+//! enter?" With a simulated board that gap is made on purpose (the
+//! hand-patching journeys): the piece is wired by a **truth**, a patch the
+//! person can't see. Looking at the piece is the board's pixels through
+//! the truth: each lamp takes the colour of the pixel it is really on
+//! ([`Piece::lamp`]). Studio needs none of this; there the piece is the
+//! real thing.
 //!
 //! The truth also says when a hand patch is done: when the project's patch
 //! puts every lamp where the truth does ([`Piece::matches`]).
@@ -27,9 +27,6 @@ pub struct Piece {
     truth: EffectivePatch,
     /// Each object's spans in `truth`.
     by_object: HashMap<TreeRef, Vec<usize>>,
-    /// Where the truth came from, in words: `dome.patch.json when it
-    /// opened`.
-    pub wired_as: String,
 }
 
 /// One object the project's patch puts somewhere the piece doesn't.
@@ -53,21 +50,17 @@ pub enum DifferenceKind {
 
 impl Piece {
     /// A piece wired as `truth` says.
-    pub fn wired(truth: EffectivePatch, wired_as: impl Into<String>) -> Self {
+    pub fn wired(truth: EffectivePatch) -> Self {
         let mut by_object: HashMap<TreeRef, Vec<usize>> = HashMap::new();
         for (i, s) in truth.pixel_runs.iter().enumerate() {
             by_object.entry(s.segment.clone()).or_default().push(i);
         }
-        Piece {
-            truth,
-            by_object,
-            wired_as: wired_as.into(),
-        }
+        Piece { truth, by_object }
     }
 
     /// A piece wired as the project's patch is now.
-    pub fn of(project: &Project, wired_as: impl Into<String>) -> Self {
-        Self::wired(project.effective_patch().clone(), wired_as)
+    pub fn of(project: &Project) -> Self {
+        Self::wired(project.effective_patch().clone())
     }
 
     /// A piece wired the way an install really is when nobody wrote it
@@ -75,12 +68,7 @@ impl Piece {
     /// across those same places, each running a random way round and
     /// entering at a random lamp. Seeded, so a test and a person at the
     /// gate get the same install.
-    pub fn scrambled(
-        project: &Project,
-        output: &NodeId,
-        seed: u64,
-        wired_as: impl Into<String>,
-    ) -> Self {
+    pub fn scrambled(project: &Project, output: &NodeId, seed: u64) -> Self {
         let patch = project.effective_patch();
         // Each object on the output, and where its first span starts.
         let mut objects: Vec<TreeRef> = Vec::new();
@@ -109,7 +97,7 @@ impl Piece {
             let n = wired.segment(o).map_or(1, |o| o.lamps.len() as u64).max(1);
             wired.turn_placement(o, (rng.next() % n) as i64);
         }
-        Self::wired(wired.effective_patch().clone(), wired_as)
+        Self::wired(wired.effective_patch().clone())
     }
 
     /// Where one of an object's lamps really is.

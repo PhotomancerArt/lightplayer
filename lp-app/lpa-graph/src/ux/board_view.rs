@@ -20,13 +20,6 @@ impl Editor {
         }
     }
 
-    /// Whether the board's pixels move on their own right now (a selection's
-    /// pattern, a drawing in progress), so the page knows to keep ticking.
-    /// The stand-in patterns hold still (`pattern.rs`).
-    pub fn board_animates(&self) -> bool {
-        !self.selection.is_empty() || self.drawing() || self.armed.is_some()
-    }
-
     /// A circle being dragged out, or a path being clicked out.
     pub fn drawing(&self) -> bool {
         matches!(self.gesture, Gesture::Drawing { .. })

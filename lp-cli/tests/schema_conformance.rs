@@ -146,10 +146,6 @@ const OLD_MAPPING_DOCUMENTS: &[(&str, &str)] = &[
         "lp-cli/tests/fixtures/ota-cross-format/",
         "the crossing walk's format-11 projects, as a board on the last format-11 release holds them before its update",
     ),
-    (
-        "lab/mapping/fixtures-v11/",
-        "the mapping lab's frozen format-11 copies, which it reads until M4 retires it",
-    ),
 ];
 
 /// Directories the walk never enters: build output, dependencies, and VCS.

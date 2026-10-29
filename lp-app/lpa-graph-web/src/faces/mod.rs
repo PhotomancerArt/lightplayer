@@ -42,7 +42,7 @@ pub fn emphasis_class(e: Emphasis) -> &'static str {
 }
 
 /// How much of itself something with this emphasis shows, on a canvas
-/// where classes don't reach. Matches `lab.css`.
+/// where classes don't reach. Matches `graph.css`.
 pub fn emphasis_alpha(e: Emphasis) -> f64 {
     match e {
         Emphasis::Dimmed => 0.3,

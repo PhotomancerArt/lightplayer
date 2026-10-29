@@ -18,7 +18,6 @@ use crate::domain::target::Target;
 use crate::ux::debug_flags::Presentation;
 use crate::ux::editor::Editor;
 use crate::ux::patching::Armed;
-use crate::ux::port_grouping::PortGrouping;
 use crate::ux::ui::LayoutKind;
 
 /// What the nodes and their faces depend on (`Editor::view_nodes`).
@@ -32,7 +31,6 @@ pub struct NodesKey {
     pinning: bool,
     layout: LayoutKind,
     armed: Option<Armed>,
-    grouping: PortGrouping,
     /// A card says its fixture's problems, which the host's port tables
     /// decide as much as what the project holds.
     tables: Tables,
@@ -86,7 +84,6 @@ impl PartialEq for NodesKey {
             && self.pinning == o.pinning
             && self.layout == o.layout
             && self.armed == o.armed
-            && self.grouping == o.grouping
             && same_tables(&self.tables, &o.tables)
     }
 }
@@ -114,7 +111,6 @@ impl Editor {
             pinning: self.debug.pinning,
             layout: self.layout(),
             armed: self.armed.clone(),
-            grouping: self.grouping,
             tables: self.project.port_tables.0.clone(),
         }
     }

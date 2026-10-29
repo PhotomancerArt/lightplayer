@@ -6,7 +6,7 @@
 //!
 //! A card (an output, a shader, a plain node) is filled; a module and a
 //! fixture are see-through frames whose title tabs sit in the overlay at
-//! one size. A relayout eases each node to its new place (`lab.css`).
+//! one size. A relayout eases each node to its new place (`graph.css`).
 
 use dioxus::prelude::*;
 use lpa_graph::{BoardFrame, DetailLevel, FrameKind, Rect, UiCanvasNode, UiNodeFace, Vec2};

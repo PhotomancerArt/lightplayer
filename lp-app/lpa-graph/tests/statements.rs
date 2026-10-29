@@ -453,7 +453,7 @@ fn a_fixtures_title_selects_it() {
 
 /// The layout places every node by itself (D64): dragging a node by its
 /// title selects it and moves nothing, U unpins nothing, and the hint bar
-/// says pinning is under Debug.
+/// says the layout places it.
 #[test]
 fn the_layout_places_every_node_while_pinning_is_off() {
     let mut e = editor();
@@ -467,7 +467,7 @@ fn the_layout_places_every_node_while_pinning_is_off() {
     assert!(
         e.notice
             .as_ref()
-            .is_some_and(|n| n.text.contains("pinning is under Debug")),
+            .is_some_and(|n| n.text.contains("dragging one moves nothing")),
         "{:?}",
         e.notice
     );
@@ -1827,7 +1827,6 @@ fn the_board_shows_the_pattern_on_patched_pixels_only() {
             .all(|px| px.is_black()),
         "nothing is drawn in the scarf yet"
     );
-    assert!(!e.board_animates(), "nothing moves on its own");
 }
 
 /// Selecting a lamp lights exactly its pixel; every other patched pixel
@@ -1837,7 +1836,6 @@ fn selecting_a_lamp_lights_exactly_its_pixel() {
     let mut e = editor();
     let plain = e.board_frame(CREST);
     e.select(vec![lamp(&e, "strip:path1", "", 4)]);
-    assert!(e.board_animates());
     let frame = e.board_frame(CREST);
     let main = node_id(&e, "main");
     let d1 = frame.port(&main, "1").unwrap();
@@ -1939,7 +1937,6 @@ fn drawing_into_the_scarf_lights_the_drafts_pixels() {
     click_at(&mut e, at, none());
     let b = e.camera.to_screen(place(&e, "scarf", 64.0, 15.0));
     e.pointer_move(b, none());
-    assert!(e.board_animates());
     let frame = e.board_frame(0.0);
     let d10 = frame.port(&scarf_out, "0").unwrap();
     let lit: Vec<usize> = (0..d10.len()).filter(|i| !d10[*i].is_black()).collect();

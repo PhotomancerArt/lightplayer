@@ -9,14 +9,12 @@ use crate::domain::geom::{Vec2, along_polyline, polyline_length};
 use crate::domain::node::{Node, NodeId, NodeKind};
 use crate::domain::part_ref::TreeRef;
 use crate::domain::placement::Frame;
-use crate::domain::port_runs::PortRun;
 use crate::domain::project::Project;
 use crate::domain::target::Target;
 use crate::ux::card_geometry::{CARD_WIDTH, card_row};
 use crate::ux::editor::{Editor, Tool};
 use crate::ux::patching::PairEnd;
 use crate::ux::pixel_grid::PixelGrid;
-use crate::ux::port_grouping::PortGrouping;
 use crate::ux::port_rows::{lamps_words, pixels_of};
 use crate::ux::ui::{
     Emphasis, FixtureLook, UiFixtureFace, UiNodeFace, UiObject, UiOutputFace, UiPlainFace,
@@ -146,34 +144,6 @@ impl Editor {
         }
     }
 
-    /// A port's runs as the card groups them (`port_grouping.rs`).
-    fn grouped_runs(&self, id: &NodeId, key: &str, size: u32) -> Vec<PortRun> {
-        let runs = self.project.port_runs(id, key);
-        match self.grouping {
-            PortGrouping::Objects => runs,
-            PortGrouping::Pixels => runs.into_iter().filter(|r| r.segment.is_some()).collect(),
-            PortGrouping::Groups => runs
-                .into_iter()
-                .flat_map(|r| match r.segment {
-                    Some(_) => vec![r],
-                    None => {
-                        let mut out = Vec::new();
-                        let mut at = r.pixels.start;
-                        while at < r.pixels.end {
-                            let end = (at + size.max(1)).min(r.pixels.end);
-                            out.push(PortRun {
-                                pixels: at..end,
-                                segment: None,
-                            });
-                            at = end;
-                        }
-                        out
-                    }
-                })
-                .collect(),
-        }
-    }
-
     fn output_face(&self, id: &NodeId, cx: &FaceContext) -> UiOutputFace {
         let p = &self.project;
         let patch = p.effective_patch();
@@ -199,14 +169,13 @@ impl Editor {
         // While a patch is armed, the candidate in focus is lit (an object)
         // or ringed (a free segment), as a hover would be.
         let candidate = self.focused_candidate();
-        let size = self.segment_size();
         let ports = output
             .ports
             .iter()
             .enumerate()
             .filter_map(|(i, port)| {
                 let row = card_row(i, width);
-                let port_runs = self.grouped_runs(id, &port.key, size);
+                let port_runs = p.port_runs(id, &port.key);
                 let pixels = p.port_pixels(id, &port.key);
                 let starts = port_runs.iter().skip(1).map(|r| r.pixels.start).collect();
                 let grid = PixelGrid::in_row(row, pixels, starts);

@@ -142,7 +142,6 @@ pub use ux::patch_section::{PatchField, PatchInput, PatchOption};
 pub use ux::patching::{ArmVerb, Armed, PairEnd};
 pub use ux::pick::{PickMode, pick};
 pub use ux::pixel_grid::PixelGrid;
-pub use ux::port_grouping::PortGrouping;
 pub use ux::port_rows::{PortRow, RowOverlap, RowSpan};
 pub use ux::problem_words::ProblemLine;
 pub use ux::props::{Prop, PropDesc, PropEdit, PropKind, PropValue, common_props};

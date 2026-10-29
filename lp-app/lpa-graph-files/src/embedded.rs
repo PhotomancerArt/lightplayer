@@ -1,5 +1,6 @@
-//! The test projects, baked into the binary: the page runs in a browser
-//! with no disk, so it opens these (fit-check §7).
+//! The test projects, baked into the binary: Studio's Graph stories run in
+//! a browser with no disk, so they open these (fit-check §7); the tests
+//! and the scale bench open them too.
 //!
 //! Each is the repo's own project, at project format 12 with its mappings
 //! in map2d format 6, read straight from where it lives:
@@ -13,23 +14,19 @@
 //!   22,000 lamps, 10 outputs × 32 ports, patched by hand.
 //!
 //! - Sean's eaves (`projects/test/eaves`): two runs turning their
-//!   corners on jumpers, end to end across D10 and D9; its piece is wired
-//!   as `eaves-wired` says (the house: the front run reversed on D10, the
-//!   side run on D9), for the hand-patching walk.
+//!   corners on jumpers, end to end across D10 and D9; `eaves-wired` is the
+//!   house as it is wired (the front run reversed on D10, the side run on
+//!   D9), the truth for the hand-patching walk.
 //!
-//! Only what the lab reads is baked in: the JSON, and each shader's GLSL,
-//! which the inspector shows (the lab never runs it).
+//! Only what the Graph reads is baked in: the JSON, and each shader's
+//! GLSL, which the inspector shows (the Graph never runs it).
 
 use crate::source::MemFiles;
 
-/// One test project: what the picker calls it, and its files.
+/// One test project: its key, and its files.
 pub struct Embedded {
     pub key: &'static str,
-    pub title: &'static str,
     files: &'static [(&'static str, &'static str)],
-    /// Another project whose patch wires the piece (the install as it
-    /// really is), when it isn't this one's own as it opens.
-    pub wired_as: Option<&'static Embedded>,
 }
 
 impl Embedded {
@@ -46,102 +43,82 @@ macro_rules! files {
 
 pub const CHOKER: Embedded = Embedded {
     key: "playful-choker",
-    title: "PLAYFUL choker",
     files: files!("../../../catalog/projects/playful-choker":
         "project.json", "module.json", "clock.json", "fixture.json", "output.json",
         "power.json", "shader.json", "shader.glsl", "playful.map2d.json"),
-    wired_as: None,
 };
 
 pub const ZOOK_DOME: Embedded = Embedded {
     key: "zook-dome",
-    title: "Zook dome",
     files: files!("../../../catalog/projects/zook-dome":
         "project.json", "module.json", "clock.json", "fixture.json", "fixture.map2d.json",
         "output.json", "shader.json", "shader.glsl"),
-    wired_as: None,
 };
 
 pub const RADIANCE_DOME: Embedded = Embedded {
     key: "radiance-dome",
-    title: "Radiance dome",
     files: files!("../../../projects/test/radiance-dome":
         "project.json", "module.json", "clock.json", "shader.json", "shader.glsl", "dome.json",
         "dome.map2d.json", "out_1.json", "out_2.json", "out_3.json",
         "out_4.json", "out_5.json", "out_6.json", "out_7.json", "out_8.json", "out_9.json",
         "out_10.json"),
-    wired_as: None,
 };
 
 pub const EAVES: Embedded = Embedded {
     key: "eaves",
-    title: "Sean's eaves",
     files: files!("../../../projects/test/eaves":
         "project.json", "module.json", "clock.json", "fixture.json", "fixture.map2d.json",
         "output.json", "effect/module.json", "effect/shader.json", "effect/shader.glsl"),
-    wired_as: Some(&EAVES_WIRED),
 };
 
-/// The eaves as the house is wired: the piece for [`EAVES`].
+/// The eaves as the house is wired: the truth for [`EAVES`]'s walk.
 pub const EAVES_WIRED: Embedded = Embedded {
     key: "eaves-wired",
-    title: "Sean's eaves, as wired",
     files: files!("../../../projects/test/eaves-wired":
         "project.json", "module.json", "clock.json", "fixture.json", "fixture.map2d.json",
         "output.json", "effect/module.json", "effect/shader.json",
         "effect/shader.glsl"),
-    wired_as: None,
 };
 
 /// The plasma pattern (`catalog/patterns/plasma`): a one-lamp grid and a
-/// disc of eight rings on one strand. Not in the picker; Studio's Graph
-/// stories open it.
+/// disc of eight rings on one strand. Studio's Graph stories open it.
 pub const PLASMA: Embedded = Embedded {
     key: "plasma",
-    title: "Plasma",
     files: files!("../../../catalog/patterns/plasma":
         "project.json", "module.json", "clock.json", "fixture.json", "fixture.map2d.json",
         "output.json", "effect/module.json", "effect/shader.json", "effect/shader.glsl"),
-    wired_as: None,
 };
 
 /// The fiber headband (`catalog/projects/fiber-headband`): hand-placed
-/// lamps, a points part. Not in the picker; Studio's Graph stories open it.
+/// lamps, a points part. Studio's Graph stories open it.
 pub const FIBER_HEADBAND: Embedded = Embedded {
     key: "fiber-headband",
-    title: "Fiber headband",
     files: files!("../../../catalog/projects/fiber-headband":
         "project.json", "module.json", "clock.json", "fixture.json", "fixture.map2d.json",
         "output.json", "shader.json", "shader.glsl"),
-    wired_as: None,
 };
 
 /// The circular display as soldered (`projects/test/circular-display-6`):
 /// one circle of four rings and a centre lamp, ring 3 on port 1 and
-/// reversed, two ports of 64. Not in the picker; Studio's Graph stories
-/// open it.
+/// reversed, two ports of 64. Studio's Graph stories open it.
 pub const CIRCULAR_DISPLAY: Embedded = Embedded {
     key: "circular-display-6",
-    title: "Circular display",
     files: files!("../../../projects/test/circular-display-6":
         "project.json", "module.json", "fixture.json", "fixture.map2d.json", "output.json",
         "shader.json", "shader.glsl"),
-    wired_as: None,
 };
 
 /// The circular display's walk project (`projects/test/circular-display-walk`):
 /// a new board's project with the display's five ports of 64 on its output
-/// (`1`), its starter strip still in place. Not in the picker;
-/// Studio's Graph stories map the display from nothing in it.
+/// (`1`), its starter strip still in place. Studio's Graph stories map the
+/// display from nothing in it.
 pub const CIRCULAR_DISPLAY_WALK: Embedded = Embedded {
     key: "circular-display-walk",
-    title: "Circular display, from nothing",
     files: files!("../../../projects/test/circular-display-walk":
         "project.json", "module.json", "clock.json", "playlist.json", "fixture.json",
         "fixture.map2d.json", "output.json", "effect/module.json", "effect/render.json",
         "effect/render.glsl", "effect/sim.json", "effect/sim.glsl"),
-    wired_as: None,
 };
 
-/// Every baked-in project, in the picker's order.
+/// The projects the scale bench times.
 pub const ALL: [&Embedded; 4] = [&CHOKER, &ZOOK_DOME, &RADIANCE_DOME, &EAVES];

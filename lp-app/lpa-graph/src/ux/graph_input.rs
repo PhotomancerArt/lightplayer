@@ -17,7 +17,6 @@ use crate::ux::editor::{Button, Editor, Key, Mods, Tool};
 use crate::ux::graph_edit::GraphEdit;
 use crate::ux::graph_verb::GraphVerb;
 use crate::ux::patch_section::PatchInput;
-use crate::ux::port_grouping::PortGrouping;
 use crate::ux::props::PropEdit;
 use crate::ux::ui::{LayoutKind, SizeClass};
 
@@ -96,10 +95,6 @@ pub enum GraphInput {
     MoveDraw(bool),
     Undo,
     Redo,
-    /// Debug's Pinning.
-    Pinning(bool),
-    /// Debug's Size.
-    ForceSizeClass(Option<SizeClass>),
     /// Debug's Presentation: how the inspector shows a start against its
     /// flow (view state; the page remembers it per browser).
     Presentation(Presentation),
@@ -111,8 +106,6 @@ pub enum GraphInput {
     /// `GraphEdit::RemoveOverride`): made as one undo step by the same
     /// function its offer and its rows run (`graph_edit.rs`).
     Edit(GraphEdit),
-    /// How output cards group a port's pixels.
-    Grouping(PortGrouping),
     /// The inspector's Patch section edited the selection's placements.
     Patch(PatchInput),
 }
@@ -148,13 +141,10 @@ impl Editor {
             GraphInput::MoveDraw(on) => self.set_move_draw(on),
             GraphInput::Undo => self.undo(),
             GraphInput::Redo => self.redo(),
-            GraphInput::Pinning(on) => self.set_pinning(on),
-            GraphInput::ForceSizeClass(class) => self.force_size_class(class),
             GraphInput::Presentation(presentation) => self.debug.presentation = presentation,
             GraphInput::CursorOps(on) => self.debug.cursor_ops = on,
             GraphInput::Verb(verb) => return self.press(verb),
             GraphInput::Edit(edit) => return self.edit(&[edit]).is_ok(),
-            GraphInput::Grouping(g) => self.grouping = g,
             GraphInput::Patch(input) => self.patch_input(input),
         }
         true

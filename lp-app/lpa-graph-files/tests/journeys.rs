@@ -27,7 +27,7 @@ use lpa_graph_files::embedded::{EAVES, EAVES_WIRED, RADIANCE_DOME};
 fn j1_the_dome_one_panel_at_a_time() {
     let mut e = editor_of(open(&RADIANCE_DOME).project);
     let box1 = e.project.outputs()[0].id.clone();
-    let piece = Piece::scrambled(&e.project, &box1, 7, "the first box, scrambled");
+    let piece = Piece::scrambled(&e.project, &box1, 7);
     let panels = truly_on(&piece, &e.project, &box1);
     let ports = e.project.output(&box1).unwrap().ports.len();
     assert!(panels.len() >= 19, "the box carries its panels");
@@ -128,7 +128,7 @@ fn j1_the_dome_one_panel_at_a_time() {
 /// is patched onto D9 by hand, and then D10 can grow without moving it.
 #[test]
 fn j2_seans_eaves_across_two_ports() {
-    let piece = Piece::of(&open(&EAVES_WIRED).project, "the house");
+    let piece = Piece::of(&open(&EAVES_WIRED).project);
     let mut e = editor_of(open(&EAVES).project);
     let fixture = e.project.fixtures()[0].id.clone();
     let output = e.project.outputs()[0].id.clone();

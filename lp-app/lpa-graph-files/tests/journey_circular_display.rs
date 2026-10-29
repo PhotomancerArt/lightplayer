@@ -36,7 +36,7 @@ fn the_circular_display() {
     assert_eq!(span(p, &ring("r4")), Some(("1".into(), 12, 19)));
     assert_eq!(span(p, &ring("r5")), Some(("1".into(), 20, 20)));
     assert!(p.effective_patch().problems.is_empty());
-    let truth = Piece::of(p, "as soldered");
+    let truth = Piece::of(p);
 
     // 2. The centre is one lamp, at the circle's centre.
     let centre = p.segment(&ring("r5")).unwrap();

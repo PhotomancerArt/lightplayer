@@ -24,9 +24,9 @@
 //! eases every card to its new place while the world's own transform eases
 //! from the camera to the stack's, and the edges fade for the move.
 //!
-//! The colours are the host's: it hands in the board's frame. The lab
-//! simulates one (`board_clock.rs`); Studio builds one from the board's
-//! own output frames.
+//! The colours are the host's: it hands in the board's frame. Studio builds
+//! one from the board's own output frames, and from the simulated board
+//! (`Editor::board_frame`) while a drawing is in progress.
 
 use std::collections::BTreeMap;
 
@@ -44,7 +44,7 @@ use crate::world_layer::WorldLayer;
 /// How long a relayout's cards take to ease to their new places (the CSS
 /// transition on `.node`), plus a frame: edges fade out for it.
 const SETTLE_MS: u32 = 200;
-/// How long switching layouts takes (`.world.switching` in `lab.css`).
+/// How long switching layouts takes (`.world.switching` in `graph.css`).
 const SWITCH_MS: u32 = 320;
 
 /// The stack's fixed zoom: card text (3.9 world units) at 13 px.

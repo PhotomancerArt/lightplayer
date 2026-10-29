@@ -9,7 +9,7 @@ thread_local! {
     static CONTEXT: RefCell<Option<web_sys::CanvasRenderingContext2d>> = const { RefCell::new(None) };
 }
 
-/// The labels' font: the page's own sans (`--font` in `lab.css`).
+/// The labels' font: the page's own sans (`--font` in `graph.css`).
 const FONT_FAMILY: &str =
     "Inter, ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", sans-serif";
 

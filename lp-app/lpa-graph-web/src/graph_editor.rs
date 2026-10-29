@@ -1,8 +1,8 @@
 //! The page's hold on an editor it does not own.
 //!
 //! The components in this crate draw an [`Editor`] and say what happened
-//! to it, but the editor belongs to the host: the lab keeps its own, and
-//! Studio's core keeps the Graph's. A [`GraphEditor`] is that seam:
+//! to it, but the editor belongs to the host: Studio's core keeps the
+//! Graph's. A [`GraphEditor`] is that seam:
 //!
 //! - **reading:** [`GraphEditor::read`] borrows the editor and subscribes
 //!   the reading component to its tick, so it draws again when the editor
@@ -46,17 +46,6 @@ impl GraphEditor {
         Self { editor, tick, sink }
     }
 
-    /// An editor the page owns outright, as the lab's does: each input is
-    /// applied to it at once.
-    pub fn owned(editor: Rc<RefCell<Editor>>, tick: Signal<u64>) -> Self {
-        let held = editor.clone();
-        Self::new(
-            editor,
-            tick,
-            Rc::new(move |input| held.borrow_mut().input(input)),
-        )
-    }
-
     /// The editor, and draw again when it changes.
     pub fn read(&self) -> Ref<'_, Editor> {
         let _ = self.tick.read();
@@ -80,10 +69,5 @@ impl GraphEditor {
     pub fn changed(&self) {
         let mut tick = self.tick;
         tick += 1;
-    }
-
-    /// The editor itself, for a host that changes it directly.
-    pub fn editor(&self) -> &Rc<RefCell<Editor>> {
-        &self.editor
     }
 }

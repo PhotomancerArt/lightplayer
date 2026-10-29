@@ -63,14 +63,6 @@ impl SizeClass {
             SizeClass::Md | SizeClass::Lg => LayoutKind::Canvas,
         }
     }
-
-    pub fn word(self) -> &'static str {
-        match self {
-            SizeClass::Sm => "sm",
-            SizeClass::Md => "md",
-            SizeClass::Lg => "lg",
-        }
-    }
 }
 
 /// Which layout the canvas is in (architecture §5).

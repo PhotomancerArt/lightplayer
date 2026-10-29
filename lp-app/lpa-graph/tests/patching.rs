@@ -825,7 +825,7 @@ fn the_piece_shows_the_truth() {
     let (a, b) = (&segments[0], &segments[1]);
     p.patch_segment(a, &out, "0", 0).unwrap();
     p.patch_segment(b, &out, "0", 10).unwrap();
-    let piece = Piece::of(&p, "the test");
+    let piece = Piece::of(&p);
     // The model now has them the wrong way round.
     p.swap_placements(a, b).unwrap();
     // Select a: on the board, a's run (pixels 10–12 now) runs its start
@@ -854,7 +854,7 @@ fn a_hand_patch_matches_the_piece_when_done() {
     p.patch_segment(b, &out, "0", 0).unwrap();
     p.reverse_placement(b).unwrap();
     p.turn_placement(b, 2).unwrap();
-    let piece = Piece::of(&p, "the test");
+    let piece = Piece::of(&p);
     p.unpatch_all(&f);
     let kinds = |p: &Project| {
         piece

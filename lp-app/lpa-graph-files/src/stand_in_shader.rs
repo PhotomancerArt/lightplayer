@@ -32,7 +32,7 @@ pub fn glsl(src: &RenderSource) -> String {
         Pattern::Rings => "hue(0.05 + 0.05 * cos(length(uv - 0.5) * 18.0)) * 0.5",
     };
     format!(
-        "// Written by the mapping lab: a stand-in for its \"{words}\" pattern.\n\
+        "// Written by Studio's Graph: a stand-in for its \"{words}\" pattern.\n\
          \n\
          layout(binding = 0) uniform vec2 outputSize;\n\
          \n\

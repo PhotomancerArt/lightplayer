@@ -539,7 +539,7 @@ fn node_facts(p: &Project, t: &Target, runs_for_real: bool) -> Option<Vec<UiSect
                 )));
                 if !runs_for_real {
                     facts.push(fact(format!(
-                        "The lab doesn't run GLSL: it shows a stand-in, the {} pattern",
+                        "The Graph doesn't run GLSL: it shows a stand-in, the {} pattern",
                         src.pattern.words()
                     )));
                 }

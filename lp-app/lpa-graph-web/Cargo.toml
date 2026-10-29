@@ -6,16 +6,10 @@ edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 publish = false
-description = "The Graph — Studio's project canvas: its Dioxus web components (the canvas and its panels, over lpa-graph), and the lab's page"
+description = "The Graph — Studio's project canvas: its Dioxus web components (the canvas and its panels, over lpa-graph)"
 
-# The library is the canvas and its panels, which any host mounts (the lab's
-# page, Studio's Graph tab); the bin is the lab's own page around it.
 [lib]
 path = "src/lib.rs"
-
-[[bin]]
-name = "lpa-graph-lab"
-path = "src/main.rs"
 
 [dependencies]
 dioxus = { version = "0.7", features = ["web"] }
@@ -25,7 +19,7 @@ lpa-graph-arrows = { path = "../lpa-graph-arrows" }
 lpa-graph-files = { path = "../lpa-graph-files" }
 lpa-graph-layout = { path = "../lpa-graph-layout" }
 wasm-bindgen = "0.2"
-web-sys = { version = "0.3", features = ["Window", "Document", "Element", "DomRect", "MouseEvent", "EventTarget", "Performance", "HtmlCanvasElement", "CanvasRenderingContext2d", "TextMetrics", "ImageData", "Storage"] }
+web-sys = { version = "0.3", features = ["Window", "Document", "Element", "DomRect", "MouseEvent", "EventTarget", "HtmlCanvasElement", "CanvasRenderingContext2d", "TextMetrics", "ImageData", "Storage"] }
 
 [lints]
 workspace = true

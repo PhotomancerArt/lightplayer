@@ -127,17 +127,11 @@ impl Editor {
         UiToolbar {
             tool: self.tool,
             move_draw: self.move_draw,
-            can_undo: self.can_undo(),
-            can_redo: self.can_redo(),
             layout: self.layout(),
             layout_chosen: self.layout_chosen(),
-            size_class: self.size_class(),
             forced_size_class: self.debug.size_class,
-            pinning: self.debug.pinning,
             presentation: self.debug.presentation,
             cursor_ops: self.debug.cursor_ops,
-            grouping: self.grouping,
-            group_size: self.segment_size(),
         }
     }
 
