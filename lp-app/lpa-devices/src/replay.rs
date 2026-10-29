@@ -455,7 +455,7 @@ impl Step {
         self
     }
 
-    /// Make a `hello` step name the board (its own name, wire 46).
+    /// Make a `hello` step name the board (its own name, wire 47).
     pub fn named(mut self, value: &str) -> Self {
         match &mut self {
             Self::Hello { name, .. } => *name = Some(value.to_string()),
@@ -563,6 +563,8 @@ impl Step {
                         fs: Default::default(),
                         version: None,
                         update: update.map(update_facts),
+                        project_format: None,
+                        startup_refused: false,
                     },
                 )),
             ),

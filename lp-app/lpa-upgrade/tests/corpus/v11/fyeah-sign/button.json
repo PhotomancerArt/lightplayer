@@ -1,0 +1,11 @@
+{
+  "kind": "Button",
+  "bindings": {
+    "down": {
+      "target": "bus:trigger"
+    }
+  },
+  "endpoint": "button:local:D9",
+  "id": 1,
+  "stable_ms": 30
+}

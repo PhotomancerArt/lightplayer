@@ -2,6 +2,10 @@
 
 Captured 2026-08-21 (Yona, walk-up patching G1).
 
+**2026-10-28:** the Patching view this page names is gone; the Graph,
+Studio's one project canvas, replaced it and is where a sign is patched
+now. The use case stands.
+
 Lamps arranged into something that reads: letters, a logo, a shape.
 Between one and about five ports. The whole point of the piece is that a
 particular lamp is at a particular place, so **per-lamp placement

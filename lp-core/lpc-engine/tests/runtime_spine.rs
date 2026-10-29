@@ -178,7 +178,7 @@ fn project_apply_added_node_use_preserves_existing_runtime_node() {
         .node_id(&clock_use)
         .expect("clock runtime node");
 
-    fs.write_file_mut(LpPath::new("/project.json"), b"{\n  \"format\": 11\n}\n")
+    fs.write_file_mut(LpPath::new("/project.json"), b"{\n  \"format\": 12\n}\n")
         .expect("write container manifest");
     fs.write_file_mut(
         LpPath::new("/module.json"),
@@ -312,9 +312,10 @@ fn project_apply_map2d_body_change_refreshes_existing_fixture_node() {
     fs.write_file_mut(
         LpPath::new("/sign.map2d.json"),
         br#"{
-  "format": 1,
-  "objects": [
-    { "name": "panel", "shape": { "grid": { "origin": [0, 0], "cols": 5, "rows": 4, "pitch": 10 } } }
+  "format": 6,
+  "view_box": [0.0, 0.0, 40.0, 30.0],
+  "parts": [
+    { "id": "panel", "kind": { "grid": { "origin": [0, 0], "cols": 5, "rows": 4, "pitch": 10 } } }
   ]
 }"#,
     )
@@ -446,7 +447,7 @@ fn project_apply_remove_node_op_tears_down_runtime_node() {
 
 fn fixture_map2d_project_fs() -> LpFsMemory {
     let mut fs = LpFsMemory::new();
-    fs.write_file_mut(LpPath::new("/project.json"), b"{\n  \"format\": 11\n}\n")
+    fs.write_file_mut(LpPath::new("/project.json"), b"{\n  \"format\": 12\n}\n")
         .expect("write container manifest");
     fs.write_file_mut(
         LpPath::new("/module.json"),
@@ -477,9 +478,10 @@ fn fixture_map2d_project_fs() -> LpFsMemory {
     fs.write_file_mut(
         LpPath::new("/sign.map2d.json"),
         br#"{
-  "format": 1,
-  "objects": [
-    { "name": "panel", "shape": { "grid": { "origin": [0, 0], "cols": 4, "rows": 4, "pitch": 10 } } }
+  "format": 6,
+  "view_box": [0.0, 0.0, 30.0, 30.0],
+  "parts": [
+    { "id": "panel", "kind": { "grid": { "origin": [0, 0], "cols": 4, "rows": 4, "pitch": 10 } } }
   ]
 }"#,
     )
@@ -489,7 +491,7 @@ fn fixture_map2d_project_fs() -> LpFsMemory {
 
 fn clock_project_fs() -> LpFsMemory {
     let mut fs = LpFsMemory::new();
-    fs.write_file_mut(LpPath::new("/project.json"), b"{\n  \"format\": 11\n}\n")
+    fs.write_file_mut(LpPath::new("/project.json"), b"{\n  \"format\": 12\n}\n")
         .expect("write container manifest");
     fs.write_file_mut(
         LpPath::new("/module.json"),
@@ -522,7 +524,7 @@ fn clock_project_fs() -> LpFsMemory {
 
 fn shader_project_fs() -> LpFsMemory {
     let mut fs = LpFsMemory::new();
-    fs.write_file_mut(LpPath::new("/project.json"), b"{\n  \"format\": 11\n}\n")
+    fs.write_file_mut(LpPath::new("/project.json"), b"{\n  \"format\": 12\n}\n")
         .expect("write container manifest");
     fs.write_file_mut(
         LpPath::new("/module.json"),

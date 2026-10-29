@@ -130,6 +130,7 @@ mod tests {
         for json in [
             include_str!("../../boards/espressif/esp32-c6-devkitc-1.json"),
             include_str!("../../boards/espressif/esp32-s3-devkitc-1.json"),
+            include_str!("../../boards/seeed/xiao-esp32-s3.json"),
             include_str!("../../boards/quinled/dig2go.json"),
         ] {
             let manifest = crate::HardwareManifestFile::read_json(json)

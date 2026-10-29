@@ -1,4 +1,4 @@
-//! Journey: Sean's eaves (`lab/mapping/projects/eaves`, `eaves-wired`): two
+//! Journey: Sean's eaves (`projects/test/eaves`, `eaves-wired`): two
 //! long runs, `front` (60 lamps) and `side` (50), on port 0 (60 lamps) and
 //! port 1 (takes the rest). The side doesn't fit what is left of port 0, so
 //! it starts port 1; the house's real wiring (the front fed from its far

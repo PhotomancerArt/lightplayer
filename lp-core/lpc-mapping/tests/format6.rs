@@ -86,7 +86,7 @@ fn a_move_inside_a_path_is_the_jumper() {
     let m = map2d6::read(&example("eaves")).unwrap();
     let tree = render(&m).unwrap();
     let today = resolve(&today_doc(
-        "lab/mapping/projects/eaves-wired/fixture.map2d.json",
+        "lp-app/lpa-upgrade/tests/corpus/v11/eaves-wired/fixture.map2d.json",
     ))
     .unwrap();
     assert_eq!(bits(tree.positions()), bits(&today.positions()));
@@ -161,7 +161,7 @@ fn path_data_that_isnt_a_path_is_refused() {
 #[test]
 fn an_absent_start_field_is_keep() {
     let m = map2d6::read(
-        r#"{"format": 6, "next": {"path": 2}, "start": {"port": {"set": 1}},
+        r#"{"format": 6, "view_box": [0, 0, 10, 10], "next": {"path": 2}, "start": {"port": {"set": 1}},
             "parts": [{"id": "path1", "start": {"channel": {"add": {"lamps": 2}}},
                        "kind": {"path": {"d": "M 0 0 L 9 0", "count": 2}}}]}"#,
     )
@@ -185,7 +185,7 @@ fn an_absent_start_field_is_keep() {
 fn an_amount_says_its_unit() {
     let landing = |amount: &str| {
         let m = map2d6::read(&format!(
-            r#"{{"format": 6, "next": {{"path": 2}},
+            r#"{{"format": 6, "view_box": [0, 0, 10, 10], "next": {{"path": 2}},
                 "start": {{"output": {{"set": "out"}}, "port": {{"set": 0}},
                           "channel": {{"set": {amount}}}}},
                 "parts": [{{"id": "path1", "kind": {{"path": {{"d": "M 0 0 L 9 0", "count": 3}}}}}}]}}"#
@@ -233,11 +233,45 @@ fn an_overrides_keep_is_not_absent() {
 
 // ---- refusals ----------------------------------------------------------------
 
+/// A format-6 document without a `view_box` is refused, naming it: every
+/// fixture has a coordinate system (fixture-space theory, D11).
+#[test]
+fn a_document_without_a_view_box_is_refused_naming_it() {
+    let error = map2d6::read(r#"{"format": 6, "parts": []}"#).unwrap_err();
+    assert!(
+        matches!(&error, Map2d6Error::Parse(reason) if reason.contains(r#""view_box""#)),
+        "{error:?}"
+    );
+    // A `canvas` is not a view box: format 6 never had one by that name.
+    let canvas = r#"{"format": 6, "canvas": [0, 0, 10, 10], "parts": []}"#;
+    assert!(matches!(
+        map2d6::read(canvas),
+        Err(Map2d6Error::Parse(reason)) if reason.contains(r#""view_box""#)
+    ));
+}
+
+/// A format-6 document that gives a `sample_diameter` is refused, naming
+/// it: lamps have no size field (fixture-space theory, D28).
+#[test]
+fn a_sample_diameter_is_refused_naming_it() {
+    let text = r#"{"format": 6, "view_box": [0, 0, 10, 10], "sample_diameter": 2.0, "parts": []}"#;
+    let error = map2d6::read(text).unwrap_err();
+    assert!(
+        matches!(&error, Map2d6Error::Parse(reason) if reason.contains(r#""sample_diameter""#)),
+        "{error:?}"
+    );
+    // An older document with one is still an older document.
+    assert_eq!(
+        map2d6::read(r#"{"format": 5, "sample_diameter": 2.0, "objects": []}"#),
+        Err(Map2d6Error::OlderFormat { found: 5 })
+    );
+}
+
 /// A repeated id, an `@` or `/` in a part id, or a counter below an
 /// existing id is refused, naming it.
 #[test]
 fn a_bad_id_or_counter_is_refused_naming_it() {
-    let two = r#"{"format": 6, "parts": [
+    let two = r#"{"format": 6, "view_box": [0, 0, 10, 10], "parts": [
         {"id": "front", "kind": {"path": {"d": "M 0 0 L 1 0", "count": 2}}},
         {"id": "g", "kind": {"group": {"parts": [
             {"id": "front", "kind": {"path": {"d": "M 0 0 L 1 0", "count": 2}}}]}}}]}"#;
@@ -250,7 +284,7 @@ fn a_bad_id_or_counter_is_refused_naming_it() {
 
     for (id, mark) in [("panel@2", "'@'"), ("circle1/r3", "'/'")] {
         let json = format!(
-            r#"{{"format": 6, "parts": [{{"id": "{id}", "kind": {{"path": {{"d": "M 0 0 L 1 0", "count": 2}}}}}}]}}"#
+            r#"{{"format": 6, "view_box": [0, 0, 10, 10], "parts": [{{"id": "{id}", "kind": {{"path": {{"d": "M 0 0 L 1 0", "count": 2}}}}}}]}}"#
         );
         let error = map2d6::read(&json).unwrap_err();
         assert!(
@@ -259,7 +293,7 @@ fn a_bad_id_or_counter_is_refused_naming_it() {
         );
     }
 
-    let low = r#"{"format": 6, "next": {"path": 3}, "parts": [
+    let low = r#"{"format": 6, "view_box": [0, 0, 10, 10], "next": {"path": 3}, "parts": [
         {"id": "path3", "kind": {"path": {"d": "M 0 0 L 1 0", "count": 2}}}]}"#;
     assert_eq!(
         map2d6::read(low),
@@ -402,19 +436,28 @@ fn counters_are_written_honest() {
 
 // ---- parity with today's documents (A2, A4) ----------------------------------
 
-/// Every layout in the catalog, the test projects and the lab's projects,
+/// Every layout in the catalog and the test projects,
 /// written as format 6 and read back, renders today's lamps bit for bit:
-/// ring sets as circles split one, gaps as moves.
+/// ring sets as circles split one, gaps as moves. A document already at
+/// format 6 (the engine's test projects, `projects/test/*-6`) has no
+/// "today's lamps": it reads, renders, and writes back byte for byte.
 #[test]
 fn every_layout_through_format_6_renders_todays_lamps_bit_for_bit() {
     let mut files = Vec::new();
-    for dir in ["catalog", "projects", "lab/mapping/projects"] {
+    for dir in ["catalog", "projects"] {
         collect_map2d(&root().join(dir), &mut files);
     }
     files.sort();
     assert!(files.len() >= 100, "found {} documents", files.len());
     for file in files {
-        let doc = Map2dDoc::from_json(&std::fs::read_to_string(&file).unwrap()).unwrap();
+        let source = std::fs::read_to_string(&file).unwrap();
+        if map2d6::peek_format(&source) == Ok(map2d6::MAP2D6_FORMAT) {
+            let m = map2d6::read(&source).unwrap_or_else(|e| panic!("{}: {e}", file.display()));
+            render(&m).unwrap_or_else(|e| panic!("{}: {e}", file.display()));
+            assert_eq!(map2d6::write(&m).unwrap(), source, "{}", file.display());
+            continue;
+        }
+        let doc = Map2dDoc::from_json(&source).unwrap();
         let today = resolve(&doc).unwrap();
         let text = map2d6::write(&today_as_mapping(&doc)).unwrap();
         let m = map2d6::read(&text).unwrap_or_else(|e| panic!("{}: {e}", file.display()));
@@ -425,8 +468,9 @@ fn every_layout_through_format_6_renders_todays_lamps_bit_for_bit() {
             "{}",
             file.display()
         );
-        assert_eq!(m.canvas, doc.canvas);
-        assert_eq!(m.sample_diameter.to_bits(), doc.sample_diameter.to_bits());
+        if let Some(canvas) = doc.canvas {
+            assert_eq!(m.view_box, canvas, "{}", file.display());
+        }
     }
 }
 
@@ -435,7 +479,7 @@ fn every_layout_through_format_6_renders_todays_lamps_bit_for_bit() {
 /// with an override on every copy.
 #[test]
 fn zooks_dome_is_small_in_format_6() {
-    let file = "catalog/projects/zook-dome/fixture.map2d.json";
+    let file = "lp-app/lpa-upgrade/tests/corpus/v11/zook-dome/fixture.map2d.json";
     let today_bytes = std::fs::read_to_string(root().join(file)).unwrap().len();
     let as_flowing = example("dome_slice");
     let mut every_copy = map2d6::read(&as_flowing).unwrap();
@@ -476,7 +520,7 @@ fn the_chokers_document_patches_as_its_journey_ends() {
     assert_eq!(lamp("l2"), Some((0, 65)));
     assert!(p.problems.is_empty(), "{:?}", p.problems);
     let today = resolve(&today_doc(
-        "catalog/projects/playful-choker/playful.map2d.json",
+        "lp-app/lpa-upgrade/tests/corpus/v11/playful-choker/playful.map2d.json",
     ))
     .unwrap();
     assert_eq!(
@@ -524,7 +568,10 @@ fn the_dome_slices_document_patches_one_per_port() {
         assert_eq!((first.port.0, first.channel), (k, 0), "copy {k}");
     }
     assert!(p.problems.is_empty(), "{:?}", p.problems);
-    let today = resolve(&today_doc("catalog/projects/zook-dome/fixture.map2d.json")).unwrap();
+    let today = resolve(&today_doc(
+        "lp-app/lpa-upgrade/tests/corpus/v11/zook-dome/fixture.map2d.json",
+    ))
+    .unwrap();
     assert_eq!(
         bits(render(&m).unwrap().positions()),
         bits(&today.positions())
@@ -557,6 +604,10 @@ fn example(name: &str) -> String {
     std::fs::read_to_string(path).unwrap()
 }
 
+/// A format-5-or-older document of the workspace. The repo's own projects
+/// are at map2d format 6 since project format 12, so "today's" documents are
+/// the upgrade corpus's format-11 copies of them
+/// (`lp-app/lpa-upgrade/tests/corpus/v11/`).
 fn today_doc(rel: &str) -> Map2dDoc {
     Map2dDoc::from_json(&std::fs::read_to_string(root().join(rel)).unwrap()).unwrap()
 }
@@ -565,7 +616,7 @@ fn today_doc(rel: &str) -> Map2dDoc {
 /// after), holding this kind.
 fn part_kind_json(kind: &str) -> String {
     format!(
-        r#"{{"format": 6, "next": {{"path": 2}}, "parts": [{{"id": "path1", "kind": {kind}}}]}}"#
+        r#"{{"format": 6, "view_box": [0, 0, 10, 10], "next": {{"path": 2}}, "parts": [{{"id": "path1", "kind": {kind}}}]}}"#
     )
 }
 
@@ -604,8 +655,7 @@ fn span(p: &Patching, id: &str) -> Option<(u32, u32, u32)> {
 /// kind of override field.
 fn every_construct() -> Mapping {
     let mut m = Mapping::new();
-    m.sample_diameter = 1.25;
-    m.canvas = Some([-1.5, 0.0, 300.0, 120.25]);
+    m.view_box = [-1.5, 0.0, 300.0, 120.25];
 
     let mut split = Path::of(
         vec![

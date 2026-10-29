@@ -24,7 +24,7 @@ of its first loaded project, and every Studio push lands in the folder
 editor's Details menu.
 
 **Fix** — one name (ADR 2026-10-28): a person's rename is written to the
-board (`ClientRequest::SetDeviceName`, wire 46, into `/.lp/device.json`'s
+board (`ClientRequest::SetDeviceName`, wire 47, into `/.lp/device.json`'s
 `name`), reported in its hello and advertised as `LP-<name>` without a
 reboot. A pushed example or library project lands as a copy named after
 the board; a board rename renames the project only it plays, and back. The

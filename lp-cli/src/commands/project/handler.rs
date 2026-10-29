@@ -83,7 +83,12 @@ pub fn classify_and_upgrade(dir: &Path, apply: bool) -> Result<UpgradeOutcome> {
 
             if apply {
                 write_changed(dir, &working, &report)?;
-                println!("applied: wrote {} file(s)", report.changed_files.len());
+                println!(
+                    "applied: wrote {} file(s), added {}, removed {}",
+                    report.changed_files.len(),
+                    report.added_files.len(),
+                    report.removed_files.len()
+                );
                 Ok(UpgradeOutcome::Applied(report))
             } else {
                 println!("dry run — no files written; pass --apply to write these changes");
@@ -107,6 +112,12 @@ fn print_report(report: &UpgradeReport) {
         for file in &report.changed_files {
             println!("changed: {file}");
         }
+    }
+    for file in &report.added_files {
+        println!("added: {file}");
+    }
+    for file in &report.removed_files {
+        println!("removed: {file}");
     }
     for note in &report.notes {
         println!("note: {note}");
@@ -152,18 +163,30 @@ fn collect_files(root: &Path, current: &Path, files: &mut ProjectFiles) -> Resul
     Ok(())
 }
 
-/// Write only `report.changed_files` back to `dir`. Everything else in
-/// `files` is left untouched on disk, matching the "minimum churn" contract.
+/// Write `report.changed_files` and `report.added_files` back to `dir`, and
+/// delete `report.removed_files` from it (a step may add a file and retire
+/// one, v11→v12). Everything else on disk is left untouched, matching the
+/// "minimum churn" contract.
 fn write_changed(dir: &Path, files: &ProjectFiles, report: &UpgradeReport) -> Result<()> {
-    for path in &report.changed_files {
+    for path in report.changed_files.iter().chain(&report.added_files) {
         let bytes = files
             .get(path)
-            .with_context(|| format!("upgraded project is missing changed file {path}"))?;
+            .with_context(|| format!("upgraded project is missing written file {path}"))?;
         let dest = dir.join(path);
         if let Some(parent) = dest.parent() {
             fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
         }
         fs::write(&dest, bytes).with_context(|| format!("writing {}", dest.display()))?;
+    }
+    for path in &report.removed_files {
+        let dest = dir.join(path);
+        match fs::remove_file(&dest) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(error).with_context(|| format!("removing {}", dest.display()));
+            }
+        }
     }
     Ok(())
 }
@@ -246,6 +269,51 @@ mod tests {
 
         let reclassified = classify(&after);
         assert_eq!(reclassified, FormatClass::Current);
+    }
+
+    /// The v11→v12 step retires a patch document and adds a map2d for
+    /// hand-placed lamps: `--apply` deletes the one and writes the other, as
+    /// the report names them (lean Q60).
+    #[test]
+    fn apply_adds_and_removes_the_files_the_report_names() {
+        let temp = TempDir::new().expect("temp dir");
+        for (path, text) in [
+            ("project.json", r#"{"format":11,"name":"Demo"}"#),
+            (
+                "module.json",
+                r#"{"kind":"Module","nodes":{"strip":{"ref":"./strip.json"},"lamps":{"ref":"./lamps.json"},"out":{"ref":"./out.json"}}}"#,
+            ),
+            (
+                "strip.json",
+                r#"{"kind":"Fixture","mapping":{"kind":"Map2d","source":"strip.map2d.json"},"patch":{"kind":"File","source":"strip.patch.json"}}"#,
+            ),
+            (
+                "strip.map2d.json",
+                r#"{"format":3,"objects":[{"id":"a","shape":{"path":{"points":[[0,0],[10,0]],"count":4}}}]}"#,
+            ),
+            (
+                "strip.patch.json",
+                r#"{"format":2,"entries":[["/a",-1,0]]}"#,
+            ),
+            (
+                "lamps.json",
+                r#"{"kind":"Fixture","render_size":{"width":4,"height":4},"mapping":{"kind":"PathPoints","paths":{"0":{"kind":"PointList","first_channel":0,"points":{"0":[0.25,0.25],"1":[0.75,0.75]}}},"sample_diameter":1.0}}"#,
+            ),
+            ("out.json", r#"{"kind":"Output","ports":{"0":{}}}"#),
+        ] {
+            fs::write(temp.path().join(path), text).expect("write project file");
+        }
+
+        let outcome = classify_and_upgrade(temp.path(), true).expect("classify_and_upgrade");
+        let UpgradeOutcome::Applied(report) = outcome else {
+            panic!("expected Applied");
+        };
+        assert_eq!(report.removed_files, vec!["strip.patch.json"]);
+        assert_eq!(report.added_files, vec!["lamps.map2d.json"]);
+        assert!(!temp.path().join("strip.patch.json").exists());
+        assert!(temp.path().join("lamps.map2d.json").is_file());
+        let after = read_project_files(temp.path()).expect("read project again");
+        assert_eq!(classify(&after), FormatClass::Current);
     }
 
     #[test]

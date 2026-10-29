@@ -396,12 +396,14 @@ mod tests {
                 commit: "unknown".to_string(),
                 dirty: false,
                 profile: "release-esp32".to_string(),
+                project_format: lpc_model::PROJECT_FORMAT_VERSION,
             },
             hardware: HardwareFacts::default(),
             device_uid: None,
             device_name: None,
             pack_format,
             auth: crate::HelloAuth::TRUSTED,
+            startup_refused: None,
             firmware: None,
         };
         WireServerMessage::new(0, ServerMsgBody::Hello(hello))

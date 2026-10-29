@@ -126,6 +126,9 @@ pub struct UpdateFixture {
     pub lookups: StoreLookups,
     /// A custom build picked from files ([`Self::with_file_build`]).
     pub file: Option<HostBuildFacts>,
+    /// The project format the board's engine reads, as its hello says
+    /// ([`Self::with_board_project_format`]); `None`: it has not said.
+    pub board_project_format: Option<u32>,
 }
 
 impl UpdateFixture {
@@ -211,7 +214,14 @@ impl UpdateFixture {
             }),
             lookups: StoreLookups::default(),
             file: None,
+            board_project_format: None,
         }
+    }
+
+    /// The same board, its hello saying its engine reads project `format`.
+    pub fn with_board_project_format(mut self, format: u32) -> Self {
+        self.board_project_format = Some(format);
+        self
     }
 
     /// The same board, with the custom build `version` picked from files.
@@ -266,6 +276,8 @@ impl UpdateFixture {
             store_releases: self.releases.as_ref(),
             store_lookups: Some(&self.lookups),
             file_build: self.file.as_ref(),
+            projects: None,
+            board_project_format: self.board_project_format,
         }
     }
 
@@ -496,6 +508,12 @@ pub fn with_update_intent(
     view
 }
 
+/// The wire language the older sample releases speak: older than this
+/// Studio's, and from before the hello said its engine's project format, so
+/// such a release reads at most format 11 (`engine_project_format`).
+const OLDER_WIRE: u32 =
+    crate::app::devices::engine_project_format::FIRST_WIRE_SAYING_PROJECT_FORMAT - 1;
+
 /// The store's release index for the sample target: fourteen releases,
 /// newest first, from `2026.10.07-4` (the newer board's) down to
 /// `2026.10.02-1`, X and Y among them. The five oldest speak the wire
@@ -526,8 +544,9 @@ pub fn release_index() -> ReleaseIndex {
             commit: format!("{}{}", commit_for(version), "0".repeat(28)),
             wire_proto: match at {
                 0..9 => lpc_wire::WIRE_PROTO_VERSION,
-                _ => lpc_wire::WIRE_PROTO_VERSION - 1,
+                _ => OLDER_WIRE,
             },
+            project_format: None,
             requires: Requires {
                 fs_tree: false,
                 layout: 1,
@@ -546,7 +565,8 @@ pub fn looked_up_release(version: &str) -> StoreLookup {
     StoreLookup::Found(ReleaseIndexEntry {
         version: version.to_string(),
         commit: format!("{}{}", commit_for(version), "0".repeat(28)),
-        wire_proto: lpc_wire::WIRE_PROTO_VERSION - 1,
+        wire_proto: OLDER_WIRE,
+        project_format: None,
         requires: Requires {
             fs_tree: false,
             layout: 1,
@@ -580,6 +600,7 @@ pub fn ota_manifest_for(version: &str, core: &[u8], engine: &[u8]) -> OtaManifes
         version: version.to_string(),
         commit: format!("{}{}", commit_for(version), "0".repeat(28)),
         wire_proto: lpc_wire::WIRE_PROTO_VERSION,
+        project_format: None,
         requires: Requires {
             fs_tree: false,
             layout: 1,

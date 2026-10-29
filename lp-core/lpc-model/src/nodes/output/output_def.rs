@@ -29,8 +29,8 @@ pub struct OutputDef {
     #[slot(consumed, merge = "fragments", default_bind = "bus:control.out")]
     pub input: ControlProductSlot,
     /// Optional authored display name (D39): how patch entries and the
-    /// studio refer to this output — "Box 5", "1". Auto-assigned a numeric
-    /// default the first time a patch names this output; user-editable;
+    /// studio refer to this output — "Box 5", "1". Studio names an output it
+    /// creates with the lowest free number; user-editable;
     /// never hardware identity. Project-unique among outputs (validated at
     /// resolve, like node-name collisions).
     pub name: OptionSlot<ValueSlot<OutputName>>,

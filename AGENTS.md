@@ -77,7 +77,11 @@ afterwards. Sort every action by what a wrong call costs:
 - **Lasting — ask.** A revert cannot put it back:
   - persisted bytes: project/package files and `PROJECT_FORMAT_VERSION`,
     the cloud store, stamped device identity, the access and network files
-    (see "Persisted-format compatibility");
+    (see "Persisted-format compatibility"). A project-format bump is still
+    an ask, but a cheap one, asked in one line: "bump for X; the step does
+    Y; the corpus shows behaviour unchanged" — a revert can't un-upgrade
+    files already rewritten on boards and in libraries
+    (`docs/adr/2026-10-28-project-format-policy.md`);
   - the never-break pins: lp-link's plain, secure and update-channel
     goldens, `lpc-update`'s v1 golden, the LAN endpoint contract,
     `RELAY_PROTO_VERSION` and the relay goldens;
@@ -488,7 +492,21 @@ the app through the same view model and presses the same actions. See
   corpus goldens, and migrate `catalog/` + `projects/` in the same change.
   The v5→v6 step (`lp-app/lpa-upgrade/src/steps/v5_to_v6.rs`) is the
   worked example — value-preserving transcode, keyed off shape, never off
-  field names.
+  field names. A step may add and remove files (`UpgradeReport`'s
+  `added_files`/`removed_files`; every caller applies them), and a step
+  whose meaning lives in arithmetic (where a lamp lands) is proven against
+  goldens the live engine recorded *before* the bump, never re-blessed —
+  v11→v12's landing goldens (`lp-app/lpa-upgrade/README.md`).
+- **A project-format bump is also an update-time upgrade.** The next
+  firmware update (or flash) upgrades each board's stored projects as its
+  last stage, through the same `lpa-upgrade` step, rewritten by the host
+  over the board's link — so a new step needs no new device machinery.
+  Migrations live in hosts (Studio, lp-cli), never in firmware, and the
+  model keeps one current shape: no aliases, no dual reads. Before a bump,
+  run the crossing walk: `just test-emu-c6-ota` with its cross-format
+  scenarios and `just walk-ota-emu --steps cross-format`. See
+  `docs/adr/2026-10-28-firmware-updates-upgrade-the-boards-projects.md`
+  and `docs/adr/2026-10-28-project-format-policy.md`.
 - The tell to watch for in review: a serde `Serialize`/`Deserialize`/
   `Display`/`FromStr` change in a type that appears in `schemas/` or in any
   `*.json` a user's library can hold. If old bytes would no longer round-
@@ -525,6 +543,12 @@ are four ADRs, which cross-link each other:
   growth is the flash cost that counts. Watch the distance to the core's next
   32 KiB page, not only the headroom; the ledger and the growth table are in
   `docs/adr/2026-07-28-esp32c6-flash-budget.md`.
+- **An update ends by upgrading the board's stored projects** to the format
+  its new engine reads, with no click
+  (`docs/adr/2026-10-28-firmware-updates-upgrade-the-boards-projects.md`).
+  So a project-format bump ships with nothing extra for fielded boards: the
+  host drives it (one atomic write per project), and the engine must refuse
+  an older project cleanly — by name, no reset, still serving files.
 - **Updates follow whatever link reaches the board**, the relay included. Who
   may flash is the link's tier (a key's, or "Anyone" on an open board, never
   through the relay): if you can edit, you can flash. A missing engine is
@@ -625,7 +649,7 @@ runtime.
 | `lpvm-native`    | LPIR → custom RV32 machine code        | yes              |
 | `lpvm-cranelift` | LPIR → Cranelift → machine code        | yes              |
 | `lp-engine`      | Shader runtime, node graph             | yes              |
-| `lpc-mapping`    | Mapping = layout + patching: one model (parts render a tree whose leaves are segments) and one patcher (a cursor gives each segment its address), for engine, firmware and Studio alike; map2d format 6 holds both in one file. Today's map2d ≤ 5 and patch documents run the engine until the mapping rebuild's M2–M3 move it over (`docs/adr/2026-10-27-mapping-model-parts-segments-patcher.md`) | yes |
+| `lpc-mapping`    | Mapping = layout + patching: one model (parts render a tree whose leaves are segments) and one patcher (a cursor gives each segment its address), for engine, firmware and Studio alike; map2d format 6 holds both in one file, and it is all the engine reads (`docs/adr/2026-10-27-mapping-model-parts-segments-patcher.md`). Feature `edit` = the part-tree edits (rename, repeat/unrepeat/expand, counts, rings, overrides, starts and flows): `lpa-graph` enables it, no firmware does | yes |
 | `lpc-access`     | Access core: secrets, tiers, HMAC login, backoff, the device network file and the write-only predicate (sans-IO) | yes |
 | `lp-server`      | Project management, client connections | yes              |
 | `lpc-relay`      | The cloud relay's device-leg protocol (`lp-core/`): framing, the board's hello, the account-key proof, `RELAY_PROTO_VERSION` (version-and-refuse), the board's relay client state machine (sans-IO); relay protocol 2: the picture, the project report by keyed tags, the picture schedule | yes |
@@ -635,6 +659,8 @@ runtime.
 | `lp-link`        | Sans-IO link layer under the device wire: framing, CRC-32C, channels, selective-repeat ARQ, session handshake (`lp-base/`, generic; one crate on both ends). Runs the product's USB, classic-UART0, BLE and Wi-Fi links (board, host, Studio, tools; Wi-Fi is the C6's LAN WebSocket and the relay carrying the same link); only fw-emu is still the pre-lp-link `M!` framing. Optional `secure` feature: Noise NNpsk0 inside the SYN + sealed frames, the key match as the login (`LinkTrust::Keyed`); on for the C6's LAN link and the relay's routes (`ws()` preset), the only secure product links | yes |
 | `lp-ws281x`      | The WS281x transmitters, chip-free (`lp-fw/`, MIT): the RMT refill state machine (`RmtHw`, bit cursor, guard word, the classic's wire pusher) every RMT backend implements, and `parallel`, lockstep lanes on a byte-wide DMA'd bus (the S3's default WS281x backend over LCD_CAM, feature `lcd-ws281x` — `docs/adr/2026-10-22-s3-parallel-ws281x-output.md`) | yes |
 | `lpa-devices`    | Device model: event fold, no IO, no UI | no (host + wasm) |
+| `lpa-graph`      | The Graph, Studio's one project canvas and mapping editor: the editor model that decides (nodes and fixtures on `lpc-mapping`'s parts and patcher, selection, `GraphVerb`s offered at `project/graph/<verb>`, hints, the inspector's rows, the keys); no IO | no (host + wasm) |
+| `lpa-graph-web`  | The Graph's humble Dioxus web: draws what `lpa-graph` decides (canvas, inspector, tree, hint bar); Studio mounts it in `graph_view.rs` | no (host + wasm) |
 | `lpc-firmware-release` | Released firmware's formats: `ota-manifest.json` format 1, `<target>.<file>` asset names, the `/firmware/<target>/<release>/<file>` grammar (reserved words), verification. Producer lp-cli, consumers lp-cloud-server and Studio. Depends on no update-protocol crate; `lpa-update` depends on it | yes |
 | `lpa-firmware-store` | Studio's engine cache seam (index, LRU 64 MiB + `held`), the firmware store client over an injected fetch, the USB-install keep (`keep_installed_engine`) — sans-IO. Never depends on `lpa-update`/`lpc-update`, nor they on it: the update host emits cache/store effects the edge answers with this crate | no (host + wasm) |
 | `lpc-update`     | OTA update protocol v1 (channel 3): codec, board manifest, progress record, and the board's sans-IO update session | yes |

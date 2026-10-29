@@ -24,6 +24,10 @@ pub enum EditError {
     NotARepeat(PartId),
     NotACircle(PartId),
     NotAPath(PartId),
+    /// Neither a grid nor a filled polygon.
+    NotALattice(PartId),
+    /// A lattice change that can't be made (why, in words).
+    BadLattice(String),
     /// A repeat holds exactly one part: that part can't be removed or moved
     /// out on its own (unrepeat the repeat, or remove it).
     HeldByRepeat(PartId),
@@ -38,6 +42,10 @@ pub enum EditError {
     BadCount(u32),
     /// A ring that can't be drawn (why, in words).
     BadRing(String),
+    /// A part holds at least one lamp.
+    NoLamps(PartId),
+    /// The part has no lamp count of its own (a group, a repeat, a grid…).
+    NoLampCount(PartId),
     /// The circle has no ring with this key.
     NoSuchRing {
         part: PartId,
@@ -69,6 +77,8 @@ impl core::fmt::Display for EditError {
             Self::NotARepeat(id) => write!(f, "{id} isn't a repeat"),
             Self::NotACircle(id) => write!(f, "{id} isn't a circle"),
             Self::NotAPath(id) => write!(f, "{id} isn't a path"),
+            Self::NotALattice(id) => write!(f, "{id} isn't a grid or a filled polygon"),
+            Self::BadLattice(reason) => write!(f, "{reason}"),
             Self::HeldByRepeat(id) => write!(
                 f,
                 "{id} is what its repeat repeats: unrepeat or remove the repeat instead"
@@ -83,6 +93,8 @@ impl core::fmt::Display for EditError {
                 crate::MAX_REPEAT_COUNT
             ),
             Self::BadRing(reason) => write!(f, "{reason}"),
+            Self::NoLamps(id) => write!(f, "{id} holds at least one lamp"),
+            Self::NoLampCount(id) => write!(f, "{id} has no lamp count of its own"),
             Self::NoSuchRing { part, key } => write!(f, "{part} has no ring {key}"),
             Self::WouldRetarget { part, overrides } => {
                 write!(f, "that would change which copies of {part} ")?;

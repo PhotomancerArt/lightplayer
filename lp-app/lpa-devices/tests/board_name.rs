@@ -31,24 +31,24 @@ fn a_rename_on_a_current_board_is_written_to_it_and_confirmed() {
 #[test]
 fn an_older_board_is_never_sent_the_name_and_gets_it_once_current() {
     let config = RosterConfig {
-        expected_proto: 46,
+        expected_proto: 47,
         ..RosterConfig::default()
     };
     let mut replay = Replay::new(config);
     replay.step(Millis(0), Step::attach(1, "usb-1"));
     replay.step(Millis(20), Step::opened(1));
-    replay.step(Millis(200), Step::hello(1).uid("dev_2f8a").proto(45));
+    replay.step(Millis(200), Step::hello(1).uid("dev_2f8a").proto(46));
     let device = first_device(&replay);
 
     let commands = replay.feed(Millis(1_000), rename(device, "Porch"));
-    assert!(sent_names(&commands).is_empty(), "wire 45 does not know it");
+    assert!(sent_names(&commands).is_empty(), "wire 46 does not know it");
     assert!(replay.roster().devices()[0].intent.name_unsent);
 
     // The board is updated: its next hello is at this Studio's wire.
     replay.step(Millis(2_000), Step::detach(1));
     replay.step(Millis(3_000), Step::attach(2, "usb-1"));
     replay.step(Millis(3_020), Step::opened(2));
-    let commands = replay.step(Millis(3_200), Step::hello(2).uid("dev_2f8a").proto(46));
+    let commands = replay.step(Millis(3_200), Step::hello(2).uid("dev_2f8a").proto(47));
     assert_eq!(sent_names(&commands), ["Porch"]);
 }
 

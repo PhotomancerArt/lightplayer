@@ -6,11 +6,10 @@
 //! next path be `path3` again: whatever pointed at the old one (an override)
 //! must never quietly point at the new one (D6, D12).
 
-use alloc::collections::BTreeMap;
 use alloc::format;
-use alloc::string::String;
 
 use crate::part::part_id::PartId;
+use crate::sorted_set::{WordNumbers, find_word, set_word};
 
 /// The words a part's id is minted from, one per kind.
 pub const PART_KIND_WORDS: [&str; 8] = [
@@ -20,7 +19,9 @@ pub const PART_KIND_WORDS: [&str; 8] = [
 /// The next number per kind: `{"path": 4, "circle": 2}`.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct IdCounters {
-    next: BTreeMap<String, u32>,
+    /// By kind word, sorted (eight words at most: a sorted `Vec`, which the
+    /// device links in a fraction of a map's flash).
+    next: WordNumbers,
 }
 
 impl IdCounters {
@@ -33,7 +34,9 @@ impl IdCounters {
     /// ever minted).
     #[must_use]
     pub fn next(&self, word: &str) -> u32 {
-        self.next.get(word).copied().unwrap_or(1).max(1)
+        find_word(&self.next, word)
+            .map_or(1, |at| self.next[at].1)
+            .max(1)
     }
 
     /// Every counter, by kind word.
@@ -45,7 +48,7 @@ impl IdCounters {
     /// never goes down: a lower number than the one held is ignored.
     pub fn raise(&mut self, word: &str, next: u32) {
         let held = self.next(word);
-        self.next.insert(String::from(word), held.max(next));
+        set_word(&mut self.next, word, held.max(next));
     }
 
     /// Mint the next id for a kind of part, skipping any id `taken` says the
@@ -69,7 +72,7 @@ impl IdCounters {
                 break id;
             }
         };
-        self.next.insert(String::from(word), n);
+        set_word(&mut self.next, word, n);
         id
     }
 }

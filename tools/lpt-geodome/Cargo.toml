@@ -7,4 +7,5 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+libm = "0.2"
 lpc-mapping = { path = "../../lp-core/lpc-mapping" }

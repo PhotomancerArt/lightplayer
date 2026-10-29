@@ -8,8 +8,12 @@ use lpa_client::{CancelSignal, ProgressDeadline};
 use crate::app::project::agent_support::{
     AgentShaderBinding, AgentShaderTarget, param_upsert_edits, space_declaration_edits,
 };
+use crate::app::project::asset::def_body_slot_edits::{
+    canonical_def_text, materialize_def_text, slot_edits_for_body,
+};
+use crate::app::project::asset::held_body::HeldBody;
 use crate::app::project::device_bind::{BindOutcome, PulledPackage, RunningPackage};
-use crate::app::project::edit_journal::{EditJournal, EditStep};
+use crate::app::project::edit_journal::EditJournal;
 use crate::app::project::node::node_face_builder;
 use crate::app::project::slot::{
     AssetEditEntry, AssetEditKey, AssetEditState, BindingFactEditOp, BindingFactOverrides,
@@ -131,6 +135,11 @@ pub struct ProjectController {
     /// invalidated after commit acks (save rewrites files) and overlay
     /// clears (revert).
     asset_base_bodies: BTreeMap<ArtifactLocation, Vec<u8>>,
+    /// Node files whose pending whole-file body the board holds as slot
+    /// edits, so a slot edit (a Debug slot's, a value the slot editor sets)
+    /// sits beside it instead of dropping it ([`Self::hold_body_as_slots`]):
+    /// what each file reads as until Save writes it.
+    held_bodies: BTreeMap<ArtifactLocation, HeldBody>,
     /// The connected project's **server** filesystem root (e.g.
     /// `/projects/studio`), from the connect flow. Artifact locations are
     /// project-relative; the base-body fetch ([`Self::asset_content`])
@@ -154,28 +163,9 @@ pub struct ProjectController {
     /// `ProjectEditorOp::NodeUi`, overlaid onto the editor DTOs at view
     /// build, pruned with the loaded project.
     node_card_ui: BTreeMap<String, NodeCardUiState>,
-    /// The patch surface's session-local undo/redo stacks (D42): one step
-    /// per verb gesture, each a set of (artifact, prior bytes) snapshots
-    /// stamped with `(edit_seq, node, mode)` (unified-editor P2). Bounded
-    /// like the map editor's (UNDO_CAP idiom); cleared with the
-    /// controller, never persisted.
-    patch_undo: Vec<EditStep>,
-    patch_redo: Vec<EditStep>,
-    /// The Arrange canvas's session-local undo/redo stacks over
-    /// `editor.json` bytes — a SEPARATE stack because ⌘Z is mode-scoped
-    /// (ratified v1): arrange gestures never pop patch verbs and vice
-    /// versa. Same step shape, same stamps.
-    arrange_undo: Vec<EditStep>,
-    arrange_redo: Vec<EditStep>,
     /// The undo-correlation substrate: the session-global `edit_seq`
     /// source and the bounded event journal (see [`edit_journal`]).
     edit_journal: EditJournal,
-    /// The `editor.json` fetch settled as "no such file" — a project that
-    /// has never been arranged. Reads then resolve to the empty document
-    /// and the first arrange write creates the file. Distinct from "not
-    /// yet fetched", which blocks arrange writes instead of inventing an
-    /// empty doc over unseen data.
-    editor_meta_absent: bool,
     /// The patch surface's one shared selection (D36; core-owned so e2e
     /// can drive it and the P6 verbs can read it).
     patch_selection: crate::UiSelection,
@@ -244,17 +234,6 @@ pub struct ProjectController {
     /// it on the view to raise the one-line fork toast (a state transition
     /// alone can't distinguish "forked" from "opened another project").
     transient_fork_generation: u64,
-}
-
-/// The local `editor.json` answer, three ways (unified-editor P2): the
-/// document is readable (absent files and empty bodies read as the empty
-/// document), not yet fetched (pages dispatch
-/// [`crate::EditorMetaFetchOp`]), or present but refused (newer format /
-/// parse error — arrange writes block; refuse-don't-rewrite).
-enum EditorMetaReadState {
-    Ready(lpc_mapping::EditorMetaDoc, Vec<u8>),
-    Unfetched,
-    Refused(String),
 }
 
 /// Memoized export-lint state (see [`ProjectController::export_lint`]).
@@ -452,6 +431,11 @@ pub(crate) enum TransientOrigin {
     SharedView { parent_project: String },
 }
 
+/// Why a slot edit to a node file wasn't sent: the file holds an unsaved
+/// whole-file change the edit would drop, and it can't be kept beside it.
+const UNHELD_BODY: &str =
+    "this file has an unsaved change Studio can't keep beside this edit; save first, then edit it";
+
 impl ProjectController {
     pub const NODE_ID: &'static str = "studio|project";
 
@@ -475,18 +459,14 @@ impl ProjectController {
             selected_fixtures: BTreeSet::new(),
             verdict_chase_ticks: 0,
             asset_base_bodies: BTreeMap::new(),
+            held_bodies: BTreeMap::new(),
             project_fs_root: None,
             def_artifacts: BTreeMap::new(),
             slot_shapes: SlotShapeRegistry::default(),
             root_shape_ids: BTreeMap::new(),
             node_card_ui: BTreeMap::new(),
             patch_selection: crate::UiSelection::empty(),
-            patch_undo: Vec::new(),
-            patch_redo: Vec::new(),
-            arrange_undo: Vec::new(),
-            arrange_redo: Vec::new(),
             edit_journal: EditJournal::default(),
-            editor_meta_absent: false,
             next_mutation_cmd_id: 1,
             staged_removals: BTreeMap::new(),
             pending_focus: None,
@@ -1666,6 +1646,12 @@ impl ProjectController {
                     ))
                 })?
         };
+        if !self.hold_body_as_slots(server, &def_artifact).await? {
+            return Ok((
+                ProjectEditRun::notice(UiNotice::warning(UNHELD_BODY)),
+                Some(UNHELD_BODY.to_string()),
+            ));
+        }
         let batch = MutationCmdBatch::new(
             edits
                 .into_iter()
@@ -1725,6 +1711,12 @@ impl ProjectController {
                 .cloned()
                 .ok_or_else(|| UiError::Project(format!("no def artifact is known for {node}")))?
         };
+        if !self.hold_body_as_slots(server, &def_artifact).await? {
+            return Ok((
+                ProjectEditRun::notice(UiNotice::warning(UNHELD_BODY)),
+                Some(UNHELD_BODY.to_string()),
+            ));
+        }
         let batch = MutationCmdBatch::new(
             edits
                 .into_iter()
@@ -2626,25 +2618,6 @@ impl ProjectController {
         // onto the faces (bays + fixture rows) plus each fixture's own
         // map2d body — built here so the two can never disagree.
         let surface = self.build_patch_surface(&nodes);
-        // The surface's verbs (M6b) publish off the surface they write
-        // through, so a subject or a port is an option exactly when the
-        // surface lists it; the history's only while it has a step.
-        if let Some(surface) = &surface {
-            super::patch_verb_offers::publish_patch_verb_offers(
-                offers,
-                surface,
-                self.patch_selection.single(),
-                !self.patch_undo.is_empty(),
-                !self.patch_redo.is_empty(),
-            );
-            // The arrange canvas's commits (M6e), off the same surface.
-            super::arrange_offers::publish_arrange_offers(
-                offers,
-                surface,
-                !self.arrange_undo.is_empty(),
-                !self.arrange_redo.is_empty(),
-            );
-        }
         // Every playlist's live verbs (M6e), off the facts its Pattern
         // instrument derives from.
         self.publish_playlist_offers(&nodes, offers);
@@ -4401,21 +4374,6 @@ impl ProjectController {
                     .and_then(|editor| editor.content.as_ref())
                     .and_then(|content| content.text());
                 let mapping_loaded = body.is_some();
-                let patch_body = fixture
-                    .patch_editor
-                    .as_ref()
-                    .and_then(|editor| editor.content.as_ref())
-                    .and_then(|content| content.text());
-                let patch_loaded = fixture
-                    .patch_editor
-                    .as_ref()
-                    .is_some_and(|editor| editor.content.is_some());
-                // The flow flag off the same bytes the verbs transform (P5b).
-                // A body that has not landed — or one this build cannot read
-                // — is AUTO: manual is a claim a document makes.
-                let manual_flow = patch_body
-                    .and_then(|text| lpc_mapping::PatchDoc::from_json(text).ok())
-                    .is_some_and(|doc| doc.flow == lpc_mapping::PatchFlow::Manual);
                 let mut instances = body
                     .map(super::ui_patch_surface::instances_from_map2d)
                     .unwrap_or_default();
@@ -4436,15 +4394,8 @@ impl ProjectController {
                         .mapping_editor
                         .as_ref()
                         .map(|editor| editor.artifact.clone()),
-                    patch_artifact: fixture
-                        .patch_editor
-                        .as_ref()
-                        .map(|editor| editor.artifact.clone()),
                     mapping_loaded,
-                    patch_loaded,
-                    manual_flow,
                     instances,
-                    arrange: None,
                     module: None,
                 });
             }
@@ -4499,52 +4450,15 @@ impl ProjectController {
         for output in &mut surface.outputs {
             output.module = enclosing(output.address.as_deref());
         }
-        // The editor.json facts (unified-editor P2): the loaded-flag pair
-        // pages drive the editor-meta prefetch from, and each fixture's
-        // arrange placement once the document has settled.
-        let editor_artifact = super::editor_meta_op::editor_meta_artifact();
-        surface.editor_meta_artifact = Some(editor_artifact);
-        match self.editor_meta_state() {
-            EditorMetaReadState::Ready(doc, _) => {
-                surface.editor_meta_loaded = true;
-                for fixture in &mut surface.fixtures {
-                    let entry = fixture.address.as_deref().and_then(|address| {
-                        super::editor_meta_op::editor_meta_surface(&doc, address)
-                    });
-                    fixture.arrange = Some(match entry {
-                        None => crate::UiArrangeMeta::default(),
-                        Some(entry) => crate::UiArrangeMeta {
-                            arranged: true,
-                            transform: crate::UiArrangeTransform {
-                                t: entry.transform.t,
-                                r: entry.transform.r,
-                                s: entry.transform.s,
-                            },
-                            footprint: entry.footprint.map(|fp| crate::UiArrangeFootprint {
-                                bbox: fp.bbox,
-                                lamps: fp.lamps,
-                            }),
-                        },
-                    });
-                }
-            }
-            // Unfetched stays loaded=false with no error (pages dispatch
-            // the fetch); a present-but-refused document is loaded=true
-            // with the refusal surfaced (arrange edits block on it too).
-            EditorMetaReadState::Unfetched => {}
-            EditorMetaReadState::Refused(reason) => {
-                surface.editor_meta_loaded = true;
-                surface.editor_meta_error = Some(reason);
-            }
-        }
         // Prebuild the name auto-assign for unnamed outputs (D39): the
         // first verb naming one applies this alongside its patch write.
         // Numeric defaults skip names already in use ANYWHERE on the
         // surface, including other pending assigns this pass hands out.
-        let mut known: Vec<String> = surface
+        let mut known: Vec<lpc_model::OutputName> = surface
             .outputs
             .iter()
-            .filter_map(|output| output.name.clone())
+            .filter_map(|output| output.name.as_deref())
+            .filter_map(|name| lpc_model::OutputName::parse(name).ok())
             .collect();
         for output in &mut surface.outputs {
             if output.name.is_some() {
@@ -4553,15 +4467,9 @@ impl ProjectController {
             let Some(Ok(node)) = output.address.as_deref().map(ProjectNodeAddress::parse) else {
                 continue;
             };
-            let mut candidate = 1u32;
-            let name = loop {
-                let text = candidate.to_string();
-                if !known.iter().any(|used| *used == text) {
-                    break text;
-                }
-                candidate += 1;
-            };
+            let name = lpc_model::next_output_name(known.iter());
             known.push(name.clone());
+            let name = name.as_str().to_string();
             output.name_assign = Some((
                 ProjectSlotAddress::new(
                     node,
@@ -4571,15 +4479,6 @@ impl ProjectController {
                 name,
             ));
         }
-        // THE unmapped-selection chase (Q9), computed once for every view:
-        // the panel strip and the canvas sprites both paint these colors,
-        // riding the lens's own frame clock so they advance together and
-        // freeze together. Last, because it reads the finished fixtures.
-        surface.chase_preview = super::patch_preview::chase_preview(
-            &surface,
-            self.patch_selection.single(),
-            self.sync.as_ref().map_or(0, |sync| sync.frames_seen()),
-        );
         (!surface.outputs.is_empty()).then_some(surface)
     }
 
@@ -6409,6 +6308,7 @@ impl ProjectController {
         self.edit_buffer.clear();
         self.asset_edit_buffer.clear();
         self.asset_base_bodies.clear();
+        self.held_bodies.clear();
         self.project_fs_root = None;
         self.def_artifacts.clear();
         self.slot_shapes = SlotShapeRegistry::default();
@@ -6635,7 +6535,9 @@ impl ProjectController {
     /// with Clear — one selection, one pulse, never a trail. `None` (or a
     /// subject no wire carries) clears everything. The writes are ordinary
     /// Debug-slot overlay edits, so they reach whatever runs the engine and
-    /// never touch dirty/save accounting.
+    /// never touch dirty/save accounting. An output whose file holds a
+    /// pending whole-file body has it said as slot edits first
+    /// ([`Self::hold_body_as_slots`]), so the highlight sits beside it.
     pub async fn apply_patch_pulse(
         &mut self,
         server: &mut StudioServerClient,
@@ -6677,6 +6579,7 @@ impl ProjectController {
             }
             _ => Vec::new(),
         };
+        let writes = self.keep_bodies_beside(server, writes).await?;
 
         let written: BTreeSet<NodeId> = writes.iter().map(|(node, _)| *node).collect();
         let stale: Vec<NodeId> = self
@@ -6726,12 +6629,15 @@ impl ProjectController {
     /// fixture overrides on the board, plan M4b) and clear the ones the last
     /// write set and this one doesn't. Like [`Self::apply_patch_pulse`]: one
     /// selection, never a trail; ordinary Debug-slot overlay edits, so they
-    /// reach whatever runs the engine and are never saved.
+    /// reach whatever runs the engine and are never saved. A fixture whose
+    /// file holds a pending whole-file body has it said as slot edits first
+    /// ([`Self::hold_body_as_slots`]).
     pub(crate) async fn apply_fixture_selection(
         &mut self,
         server: &mut StudioServerClient,
         writes: Vec<(NodeId, String)>,
     ) -> Result<(), UiError> {
+        let writes = self.keep_bodies_beside(server, writes).await?;
         let written: BTreeSet<NodeId> = writes.iter().map(|(node, _)| *node).collect();
         let stale: Vec<NodeId> = self
             .selected_fixtures
@@ -6759,6 +6665,393 @@ impl ProjectController {
         }
         self.selected_fixtures = written;
         Ok(())
+    }
+
+    /// The Debug writes whose node files can take a slot edit without
+    /// losing a pending whole-file body: each file's body is said as slot
+    /// edits first ([`Self::hold_body_as_slots`]). A node whose body can't
+    /// be (a file not on disk yet, a body of another kind) is left out:
+    /// its lamps don't breathe or chase on the board until Save.
+    async fn keep_bodies_beside(
+        &mut self,
+        server: &mut StudioServerClient,
+        writes: Vec<(NodeId, String)>,
+    ) -> Result<Vec<(NodeId, String)>, UiError> {
+        let mut kept = Vec::with_capacity(writes.len());
+        for (node, text) in writes {
+            let held = match self.def_artifacts.get(&node).cloned() {
+                Some(artifact) => self.hold_body_as_slots(server, &artifact).await?,
+                None => true,
+            };
+            if held {
+                kept.push((node, text));
+            }
+        }
+        Ok(kept)
+    }
+
+    /// Ready a node file for slot edits without losing a pending whole-file
+    /// body. The board's overlay holds, per file, slot edits or a body,
+    /// never both, so a slot edit (a Debug slot's `highlight` or
+    /// `selection`, a value the slot editor sets) would replace the body
+    /// the Graph wrote (an output it named) and Save would write nothing
+    /// of it (docs/defects/2026-10-28-the-graph-names-an-output-the-board-
+    /// keeps-it-unnamed.md). When the board holds a body for `artifact`,
+    /// it is said as the slot edits that make the file on disk read as it
+    /// ([`slot_edits_for_body`]): the board then holds both, Save writes
+    /// what the body said, and Studio reads the file as the body
+    /// ([`Self::held_bodies`]). `false` when the body can't be said as slot
+    /// edits; the board still holds it, and a slot edit would drop it.
+    async fn hold_body_as_slots(
+        &mut self,
+        server: &mut StudioServerClient,
+        artifact: &ArtifactLocation,
+    ) -> Result<bool, UiError> {
+        let body = match self
+            .sync
+            .as_ref()
+            .and_then(|sync| sync.overlay_asset_edit_at(artifact))
+        {
+            Some(AssetBodyOverlay::ReplaceBody(body)) => body.clone(),
+            _ => return Ok(true),
+        };
+        let handle_id = self.ready_handle_id()?;
+        let Some(base) = self.base_body(server, artifact).await else {
+            log::info!(
+                "{}: not on disk yet, so its pending body stays whole",
+                artifact.file_path().as_str()
+            );
+            return Ok(false);
+        };
+        let edits = match slot_edits_for_body(&base, &body, &SlotShapeRegistry::default()) {
+            Ok(edits) => edits,
+            Err(why) => {
+                log::warn!(
+                    "{}: its pending body can't be said as slot edits: {why}",
+                    artifact.file_path().as_str()
+                );
+                return Ok(false);
+            }
+        };
+        let held = !edits.is_empty();
+        let mutations: Vec<MutationOp> = match held {
+            // The body says what the file on disk says.
+            false => vec![MutationOp::ClearArtifact {
+                artifact: artifact.clone(),
+            }],
+            true => edits
+                .into_iter()
+                .map(|edit| MutationOp::PutSlotEdit {
+                    artifact: artifact.clone(),
+                    edit,
+                })
+                .collect(),
+        };
+        let batch = MutationCmdBatch::new(
+            mutations
+                .into_iter()
+                .map(|mutation| MutationCmd {
+                    id: self.allocate_mutation_cmd_id(),
+                    mutation,
+                })
+                .collect(),
+        );
+        let mutation = server
+            .project_overlay_mutate(handle_id, batch.clone())
+            .await?;
+        let rejections = self.apply_mutation_acks(&batch, &mutation, &[]);
+        if !rejections.is_empty() {
+            log::warn!(
+                "{}: the board refused its body as slot edits: {}",
+                artifact.file_path().as_str(),
+                rejections
+                    .iter()
+                    .map(rejection_text)
+                    .collect::<Vec<_>>()
+                    .join("; ")
+            );
+            return Ok(false);
+        }
+        if held {
+            self.held_bodies
+                .insert(artifact.clone(), HeldBody { base, text: body });
+        }
+        Ok(true)
+    }
+
+    /// Write `bytes` as a node file's pending body when the board holds
+    /// Debug slot edits on it (a selected output's `highlight`): as slot
+    /// edits, with the Debug ones put back beside them, so writing the body
+    /// doesn't stop the highlight ([`Self::hold_body_as_slots`]'s other
+    /// direction). `None` when the file has no Debug slot edits, or the
+    /// body can't be said as slot edits: write it whole.
+    async fn write_body_beside_debug_slots(
+        &mut self,
+        server: &mut StudioServerClient,
+        handle_id: u32,
+        artifact: &ArtifactLocation,
+        bytes: &[u8],
+    ) -> Result<Option<ProjectEditRun>, UiError> {
+        let debug = self.debug_slot_edits_at(artifact);
+        if debug.is_empty() {
+            return Ok(None);
+        }
+        let Some(base) = self.base_body(server, artifact).await else {
+            return Ok(None);
+        };
+        let edits = match slot_edits_for_body(&base, bytes, &SlotShapeRegistry::default()) {
+            Ok(edits) => edits,
+            Err(why) => {
+                log::warn!(
+                    "{}: its body can't be said as slot edits, so it is written whole: {why}",
+                    artifact.file_path().as_str()
+                );
+                return Ok(None);
+            }
+        };
+        let held = !edits.is_empty();
+        let mut mutations = vec![MutationOp::ClearArtifact {
+            artifact: artifact.clone(),
+        }];
+        mutations.extend(
+            edits
+                .into_iter()
+                .chain(debug)
+                .map(|edit| MutationOp::PutSlotEdit {
+                    artifact: artifact.clone(),
+                    edit,
+                }),
+        );
+        let batch = MutationCmdBatch::new(
+            mutations
+                .into_iter()
+                .map(|mutation| MutationCmd {
+                    id: self.allocate_mutation_cmd_id(),
+                    mutation,
+                })
+                .collect(),
+        );
+        self.asset_edit_buffer.remove(artifact);
+        let mutation = server
+            .project_overlay_mutate(handle_id, batch.clone())
+            .await?;
+        let rejections = self.apply_mutation_acks(&batch, &mutation, &[]);
+        if rejections.is_empty() {
+            if held {
+                self.held_bodies.insert(
+                    artifact.clone(),
+                    HeldBody {
+                        base,
+                        text: bytes.to_vec(),
+                    },
+                );
+            }
+            self.verdict_chase_ticks = VERDICT_CHASE_TICKS;
+        }
+        Ok(Some(ProjectEditRun {
+            notices: rejection_notices(&rejections),
+            logs: mutation.logs,
+        }))
+    }
+
+    /// Before a Save: each body held as slot edits goes back to the board
+    /// whole, so the commit writes the body's own bytes (what the Graph
+    /// read stays what the file says, and its undo stays). Returns the
+    /// Debug slot edits that sat beside them, for
+    /// [`Self::put_back_debug_edits`] once the commit is done: a selected
+    /// node breathes again after Save with no selection change.
+    async fn unhold_bodies_for_save(
+        &mut self,
+        server: &mut StudioServerClient,
+        handle_id: u32,
+    ) -> Result<Vec<(ArtifactLocation, SlotEdit)>, UiError> {
+        if self.held_bodies.is_empty() {
+            return Ok(Vec::new());
+        }
+        let held: Vec<(ArtifactLocation, Vec<u8>)> = self
+            .held_bodies
+            .iter()
+            .map(|(artifact, held)| (artifact.clone(), held.text.clone()))
+            .collect();
+        let mut debug = Vec::new();
+        for (artifact, _) in &held {
+            debug.extend(
+                self.debug_slot_edits_at(artifact)
+                    .into_iter()
+                    .map(|edit| (artifact.clone(), edit)),
+            );
+        }
+        let batch = MutationCmdBatch::new(
+            held.into_iter()
+                .map(|(artifact, text)| MutationCmd {
+                    id: self.allocate_mutation_cmd_id(),
+                    mutation: MutationOp::SetArtifactBody {
+                        artifact,
+                        edit: AssetBodyOverlay::ReplaceBody(text),
+                    },
+                })
+                .collect(),
+        );
+        let mutation = server
+            .project_overlay_mutate(handle_id, batch.clone())
+            .await?;
+        for rejection in self.apply_mutation_acks(&batch, &mutation, &[]) {
+            log::warn!(
+                "a held body wasn't put back whole before Save: {}",
+                rejection_text(&rejection)
+            );
+        }
+        Ok(debug)
+    }
+
+    /// After a Save: the Debug slot edits [`Self::unhold_bodies_for_save`]
+    /// took off, put back on their (now saved) files.
+    async fn put_back_debug_edits(
+        &mut self,
+        server: &mut StudioServerClient,
+        handle_id: u32,
+        debug: Vec<(ArtifactLocation, SlotEdit)>,
+    ) -> Result<(), UiError> {
+        if debug.is_empty() {
+            return Ok(());
+        }
+        let batch = MutationCmdBatch::new(
+            debug
+                .into_iter()
+                .map(|(artifact, edit)| MutationCmd {
+                    id: self.allocate_mutation_cmd_id(),
+                    mutation: MutationOp::PutSlotEdit { artifact, edit },
+                })
+                .collect(),
+        );
+        let mutation = server
+            .project_overlay_mutate(handle_id, batch.clone())
+            .await?;
+        self.apply_mutation_acks(&batch, &mutation, &[]);
+        Ok(())
+    }
+
+    /// The Debug (transient) slot edits the board holds on a node file.
+    fn debug_slot_edits_at(&self, artifact: &ArtifactLocation) -> Vec<SlotEdit> {
+        let Some(slots) = self
+            .sync
+            .as_ref()
+            .and_then(|sync| sync.overlay().artifact(artifact))
+            .and_then(|overlay| overlay.as_slot())
+        else {
+            return Vec::new();
+        };
+        let Some(node) = self
+            .def_artifacts
+            .iter()
+            .find(|(_, def)| *def == artifact)
+            .map(|(node, _)| *node)
+        else {
+            return Vec::new();
+        };
+        let root = ProjectSlotRoot::def();
+        slots
+            .edits
+            .iter()
+            .filter(|(path, _)| {
+                self.persistence_at(node, root.name(), path) == SlotPersistence::Transient
+            })
+            .map(|(path, op)| SlotEdit {
+                path: path.clone(),
+                op: op.clone(),
+            })
+            .collect()
+    }
+
+    /// A file's bytes on the board's disk, fetched once and cached with the
+    /// asset editor's base bodies; `None` when the board has no such file.
+    async fn base_body(
+        &mut self,
+        server: &mut StudioServerClient,
+        artifact: &ArtifactLocation,
+    ) -> Option<Vec<u8>> {
+        if let Some(bytes) = self.asset_base_bodies.get(artifact) {
+            return Some(bytes.clone());
+        }
+        let root = self.project_fs_root.as_ref()?;
+        let server_path = root.join(artifact.file_path().as_str().trim_start_matches('/'));
+        let read = server.fs_read(&server_path).await.ok()?;
+        self.asset_base_bodies
+            .insert(artifact.clone(), read.data.clone());
+        Some(read.data)
+    }
+
+    /// Keep [`Self::held_bodies`] in step with what the board took: a body
+    /// written whole, a file cleared or the whole overlay cleared lets go
+    /// of it; a slot edit to a held file reads it again from its slot
+    /// edits — the same text when only a Debug slot moved, else what the
+    /// edit made of it.
+    fn follow_held_bodies(&mut self, accepted: &[(MutationCmd, MutationEffect)]) {
+        if self.held_bodies.is_empty() {
+            return;
+        }
+        let mut touched = BTreeSet::new();
+        for (command, _) in accepted {
+            match &command.mutation {
+                MutationOp::Clear => {
+                    self.held_bodies.clear();
+                    return;
+                }
+                MutationOp::SetArtifactBody { artifact, .. }
+                | MutationOp::ClearArtifact { artifact } => {
+                    self.held_bodies.remove(artifact);
+                    touched.remove(artifact);
+                }
+                MutationOp::PutSlotEdit { artifact, .. }
+                | MutationOp::RemoveSlotEdit { artifact, .. }
+                | MutationOp::MoveSlotEntry { artifact, .. } => {
+                    touched.insert(artifact.clone());
+                }
+            }
+        }
+        for artifact in touched {
+            self.reread_held_body(&artifact);
+        }
+    }
+
+    /// Read a held file again from the board's slot edits on it.
+    fn reread_held_body(&mut self, artifact: &ArtifactLocation) {
+        let Some(held) = self.held_bodies.get(artifact) else {
+            return;
+        };
+        let shapes = SlotShapeRegistry::default();
+        let now = self
+            .sync
+            .as_ref()
+            .and_then(|sync| sync.overlay().artifact(artifact))
+            .and_then(|overlay| overlay.as_slot())
+            .map(|overlay| materialize_def_text(&held.base, overlay, &shapes));
+        let on_disk = canonical_def_text(&held.base, &shapes).ok();
+        let was = canonical_def_text(&held.text, &shapes).ok();
+        match now {
+            // Nothing left, or only what the disk says: nothing to hold.
+            None => {
+                self.held_bodies.remove(artifact);
+            }
+            Some(Ok(now)) if Some(&now) == on_disk.as_ref() => {
+                self.held_bodies.remove(artifact);
+            }
+            // Only a Debug slot moved: the file reads as it did, in the
+            // body's own bytes.
+            Some(Ok(now)) if Some(&now) == was.as_ref() => {}
+            Some(Ok(now)) => {
+                if let Some(held) = self.held_bodies.get_mut(artifact) {
+                    held.text = now;
+                }
+            }
+            Some(Err(why)) => {
+                log::warn!(
+                    "{}: its slot edits no longer read: {why}",
+                    artifact.file_path().as_str()
+                );
+                self.held_bodies.remove(artifact);
+            }
+        }
     }
 
     /// Whether a fixture's firmware has the `selection` Debug slot (the
@@ -7071,6 +7364,7 @@ impl ProjectController {
         server: &mut StudioServerClient,
     ) -> Result<ProjectEditRun, UiError> {
         let handle_id = self.ready_handle_id()?;
+        let debug = self.unhold_bodies_for_save(server, handle_id).await?;
         let commit = server.project_overlay_commit(handle_id).await?;
         let mut logs = commit.logs;
         let read = server.project_overlay_read(handle_id).await?;
@@ -7080,6 +7374,10 @@ impl ProjectController {
         // The commit rewrote persisted artifacts, so every cached base body
         // is suspect; drop them all and let the next editor open re-fetch.
         self.asset_base_bodies.clear();
+        // A body held as slot edits went whole before the commit, and is on
+        // disk now; its Debug slots come back on it.
+        self.held_bodies.clear();
+        self.put_back_debug_edits(server, handle_id, debug).await?;
         // Staged node removals materialized (files deleted); the records
         // backing their save-panel rows are done.
         self.staged_removals.clear();
@@ -7158,6 +7456,7 @@ impl ProjectController {
         let handle_id = self.ready_handle_id()?;
         self.edit_buffer.clear();
         self.asset_edit_buffer.clear();
+        self.held_bodies.clear();
         // Every artifact's overlay entry clears with the batch, so cached
         // base bodies re-fetch on the next editor open (invalidate-on-clear).
         self.asset_base_bodies.clear();
@@ -7426,12 +7725,13 @@ impl ProjectController {
 
         // Starter bytes: the kind's starter template (bare default when the
         // table has no entry), stem-substituted, canonically serialized.
-        let starter = starter_for_kind(kind)
+        let mut starter = starter_for_kind(kind)
             .unwrap_or_else(|| NodeStarter {
                 def: lpc_model::NodeDef::default_for_kind(kind),
                 assets: Vec::new(),
             })
             .for_stem(&name);
+        self.wire_new_node_to_outputs(&mut starter, &parent)?;
         let body = starter.def.write_json(&self.slot_shapes).map_err(|err| {
             UiError::Project(format!("cannot serialize the new node definition: {err}"))
         })?;
@@ -7457,6 +7757,61 @@ impl ProjectController {
         let shape_guided = kind == NodeKind::Fixture;
         self.run_create_request(server, request, parent, expected_name, name, shape_guided)
             .await
+    }
+
+    /// Wire a new node's starter to the project's outputs (DD28): a new
+    /// output is named the lowest free number
+    /// ([`super::node::new_output_name`]), and a new fixture's mapping starts
+    /// on the first named output its bus channel reaches in the scope
+    /// `parent` holds it in ([`super::node::new_fixture_start`]); left on the
+    /// starter's `"1"` when it reaches none.
+    fn wire_new_node_to_outputs(
+        &self,
+        starter: &mut NodeStarter,
+        parent: &ProjectNodeAddress,
+    ) -> Result<(), UiError> {
+        use super::node::new_fixture_start::{first_reached_output_name, map2d_starting_on};
+        use super::node::new_output_name::new_output_name;
+
+        match &mut starter.def {
+            lpc_model::NodeDef::Output(output) => {
+                output.name = lpc_model::OptionSlot::some(lpc_model::ValueSlot::new(
+                    new_output_name(&self.root_nodes),
+                ));
+            }
+            lpc_model::NodeDef::Fixture(_) => {
+                let reached =
+                    self.binding_graph()
+                        .zip(self.node(parent))
+                        .and_then(|(graph, scope)| {
+                            first_reached_output_name(
+                                &self.root_nodes,
+                                graph,
+                                scope.target().node_id,
+                            )
+                        });
+                let Some(output) = reached else {
+                    return Ok(());
+                };
+                for (file, bytes) in &mut starter.assets {
+                    if !file.ends_with(".map2d.json") {
+                        continue;
+                    }
+                    let text = core::str::from_utf8(bytes).map_err(|_| {
+                        UiError::Project("the starter mapping is not text".to_string())
+                    })?;
+                    *bytes = map2d_starting_on(text, &output)
+                        .map_err(|err| {
+                            UiError::Project(format!(
+                                "cannot start the new fixture on {output}: {err}"
+                            ))
+                        })?
+                        .into_bytes();
+                }
+            }
+            _ => {}
+        }
+        Ok(())
     }
 
     /// Vendor one pattern export — a library package's, or a built-in
@@ -7879,6 +8234,32 @@ impl ProjectController {
                         envelope.label
                     ))));
                 }
+            }
+        }
+
+        // A pasted output is a new output: it keeps its name where no output
+        // here carries it, and otherwise (or unnamed) gets the lowest free
+        // number, as a created one does — output names are project-unique.
+        if let Ok(text) = core::str::from_utf8(&body)
+            && let Ok(lpc_model::NodeDef::Output(mut output)) =
+                lpc_model::NodeDef::from_json_str(text)
+        {
+            let taken = super::node::new_output_name::output_names(&self.root_nodes);
+            if output
+                .output_name()
+                .is_none_or(|pasted| taken.contains(pasted))
+            {
+                output.name = lpc_model::OptionSlot::some(lpc_model::ValueSlot::new(
+                    lpc_model::next_output_name(taken.iter()),
+                ));
+                body = lpc_model::NodeDef::Output(output)
+                    .write_json(&self.slot_shapes)
+                    .map_err(|err| {
+                        UiError::Project(format!(
+                            "cannot serialize the pasted node definition: {err}"
+                        ))
+                    })?
+                    .into_bytes();
             }
         }
 
@@ -8399,6 +8780,21 @@ impl ProjectController {
                 ))));
             }
         };
+        match self.hold_body_as_slots(server, &artifact).await {
+            Ok(true) => {}
+            Ok(false) => {
+                let reason = UNHELD_BODY.to_string();
+                self.fail_pending_edit(&address, reason.clone());
+                return Ok(ProjectEditRun::notice(UiNotice::warning(format!(
+                    "Edit on {} was not sent: {reason}",
+                    address.path
+                ))));
+            }
+            Err(error) => {
+                self.fail_pending_edit(&address, error.to_string());
+                return Err(error);
+            }
+        }
 
         let cmd_id = self.allocate_mutation_cmd_id();
         if let Some(edit) = self.edit_buffer.get_mut(&address) {
@@ -8552,6 +8948,7 @@ impl ProjectController {
         {
             sync.apply_acked_edits(&accepted, mutation.overlay_revision);
         }
+        self.follow_held_bodies(&accepted);
         // A stored `bindings[…]` edit changes which facts read as authored,
         // and the synced slot tree only learns that on the next passive read
         // — re-derive the per-slot binding presentation from the updated
@@ -8595,307 +8992,6 @@ impl ProjectController {
 
     /// Execute an [`AssetEditOp`] against the loaded project's overlay — the
     /// asset counterpart of [`Self::apply_slot_edit`].
-    /// Apply one patch-surface verb (D42): load the cached documents,
-    /// transform, kernel-validate, snapshot for undo, write. See
-    /// [`crate::PatchVerbOp`] for the contract; failures return an honest
-    /// notice and write nothing.
-    pub async fn apply_patch_verb(
-        &mut self,
-        server: &mut StudioServerClient,
-        op: crate::app::project::patch_verb_op::PatchVerbOp,
-    ) -> Result<ProjectEditRun, UiError> {
-        use super::patch_verbs::{self, PatchSubject, PatchVerbContext, PortWindow};
-        use crate::app::project::patch_verb_op::PatchVerbKind;
-
-        let blocked = |reason: String| {
-            Ok(ProjectEditRun::notice(UiNotice::warning(format!(
-                "Patch edit blocked: {reason}"
-            ))))
-        };
-
-        // Undo / redo replay the snapshot stacks and need nothing else.
-        match &op.verb {
-            PatchVerbKind::Undo => {
-                let Some(step) = self.patch_undo.pop() else {
-                    return blocked("nothing to undo".into());
-                };
-                for (artifact, before, _) in &step.writes {
-                    self.apply_asset_body(server, artifact.clone(), before.clone())
-                        .await?;
-                }
-                self.record_edit(step.node, crate::UiEditorMode::Patching);
-                self.patch_redo.push(step);
-                return Ok(ProjectEditRun {
-                    notices: UiNotices::new(),
-                    logs: Vec::new(),
-                });
-            }
-            PatchVerbKind::Redo => {
-                let Some(step) = self.patch_redo.pop() else {
-                    return blocked("nothing to redo".into());
-                };
-                for (artifact, _, after) in &step.writes {
-                    self.apply_asset_body(server, artifact.clone(), after.clone())
-                        .await?;
-                }
-                self.record_edit(step.node, crate::UiEditorMode::Patching);
-                self.patch_undo.push(step);
-                return Ok(ProjectEditRun {
-                    notices: UiNotices::new(),
-                    logs: Vec::new(),
-                });
-            }
-            _ => {}
-        }
-
-        // The subject, in kernel terms.
-        let subject = if let Some(path) = &op.subject.path {
-            match lpc_mapping::MapObjectPath::parse(path) {
-                Ok(path) => PatchSubject::Path(path),
-                Err(error) => return blocked(error),
-            }
-        } else if let Some((start, count)) = op.subject.range {
-            PatchSubject::Range { start, count }
-        } else {
-            PatchSubject::Fixture
-        };
-
-        // Per-fixture cached facts: patch doc + span table. A body the
-        // cache has not resolved yet blocks honestly (the surface prefetches
-        // both artifacts, so this is a race, not a state).
-        let load =
-            |controller: &Self, fixture: &crate::app::project::patch_verb_op::PatchVerbFixture| {
-                let text = controller
-                    .asset_content_cached(&fixture.patch_artifact)
-                    .and_then(|content| content.text().map(|text| text.to_string()))
-                    .ok_or_else(|| "the patch document is still loading".to_string())?;
-                let doc = lpc_mapping::PatchDoc::from_json(&text).map_err(|e| e.to_string())?;
-                let spans = fixture
-                    .mapping_artifact
-                    .as_ref()
-                    .and_then(|artifact| controller.asset_content_cached(artifact))
-                    .and_then(|content| content.text().map(|text| text.to_string()))
-                    .and_then(|text| {
-                        let doc = lpc_mapping::Map2dDoc::from_json(&text).ok()?;
-                        let resolved = lpc_mapping::resolve(&doc).ok()?;
-                        Some(lpc_mapping::object_instance_spans(&doc, &resolved))
-                    })
-                    .unwrap_or_default();
-                Ok::<_, String>((doc, spans))
-            };
-
-        // EnsureIds is the one MAPPING write: transform the map2d doc.
-        if matches!(op.verb, PatchVerbKind::EnsureIds) {
-            let Some(fixture) = op
-                .fixtures
-                .iter()
-                .find(|fixture| Some(fixture.node) == op.subject_fixture)
-            else {
-                return blocked("select a fixture to assign ids".into());
-            };
-            let Some(mapping) = fixture.mapping_artifact.clone() else {
-                return blocked("this fixture has no map2d document".into());
-            };
-            let Some(text) = self
-                .asset_content_cached(&mapping)
-                .and_then(|content| content.text().map(|text| text.to_string()))
-            else {
-                return blocked("the mapping document is still loading".into());
-            };
-            let mut doc = match lpc_mapping::Map2dDoc::from_json(&text) {
-                Ok(doc) => doc,
-                Err(error) => return blocked(error.to_string()),
-            };
-            if !lpc_mapping::ensure_object_ids(&mut doc) {
-                return Ok(ProjectEditRun {
-                    notices: UiNotices::new(),
-                    logs: Vec::new(),
-                });
-            }
-            doc.normalize_format();
-            let bytes = format!("{}\n", doc.to_json_pretty()).into_bytes();
-            let seq = self.record_edit(op.subject_fixture, crate::UiEditorMode::Patching);
-            self.patch_undo.push(EditStep {
-                seq,
-                node: op.subject_fixture,
-                mode: crate::UiEditorMode::Patching,
-                writes: vec![(mapping.clone(), text.into_bytes(), bytes.clone())],
-            });
-            self.patch_redo.clear();
-            return self.apply_asset_body(server, mapping, bytes).await;
-        }
-
-        // The write set: subject verbs touch one fixture; port verbs sweep
-        // every fixture with entries in the windows.
-        let mut writes: Vec<(ArtifactLocation, String, String)> = Vec::new(); // (artifact, before, after)
-        match &op.verb {
-            PatchVerbKind::SwapPorts { a, b } => {
-                let a = PortWindow {
-                    output: a.output_name.clone(),
-                    start: a.start,
-                    lamps: a.lamps,
-                };
-                let b = PortWindow {
-                    output: b.output_name.clone(),
-                    start: b.start,
-                    lamps: b.lamps,
-                };
-                for fixture in &op.fixtures {
-                    let (doc, spans) = match load(self, fixture) {
-                        Ok(loaded) => loaded,
-                        Err(reason) => return blocked(reason),
-                    };
-                    let ctx = PatchVerbContext {
-                        fixture_lamp_count: fixture.lamp_count,
-                        object_spans: &spans,
-                    };
-                    match patch_verbs::swap_ports(&ctx, &doc, &a, &b) {
-                        Ok(next) if next != doc => writes.push((
-                            fixture.patch_artifact.clone(),
-                            doc.to_json_pretty(),
-                            next.to_json_pretty(),
-                        )),
-                        Ok(_) => {}
-                        Err(error) => return blocked(error.0),
-                    }
-                }
-            }
-            PatchVerbKind::ShiftPort { window, delta } => {
-                let window = PortWindow {
-                    output: window.output_name.clone(),
-                    start: window.start,
-                    lamps: window.lamps,
-                };
-                for fixture in &op.fixtures {
-                    let (doc, spans) = match load(self, fixture) {
-                        Ok(loaded) => loaded,
-                        Err(reason) => return blocked(reason),
-                    };
-                    let ctx = PatchVerbContext {
-                        fixture_lamp_count: fixture.lamp_count,
-                        object_spans: &spans,
-                    };
-                    match patch_verbs::shift_port(&ctx, &doc, &window, *delta) {
-                        Ok(next) if next != doc => writes.push((
-                            fixture.patch_artifact.clone(),
-                            doc.to_json_pretty(),
-                            next.to_json_pretty(),
-                        )),
-                        Ok(_) => {}
-                        Err(error) => return blocked(error.0),
-                    }
-                }
-            }
-            verb => {
-                let Some(fixture) = op
-                    .fixtures
-                    .iter()
-                    .find(|fixture| Some(fixture.node) == op.subject_fixture)
-                else {
-                    return blocked("the selection names no fixture on the surface".into());
-                };
-                let (doc, spans) = match load(self, fixture) {
-                    Ok(loaded) => loaded,
-                    Err(reason) => return blocked(reason),
-                };
-                let ctx = PatchVerbContext {
-                    fixture_lamp_count: fixture.lamp_count,
-                    object_spans: &spans,
-                };
-                let result = match verb {
-                    PatchVerbKind::Assign { output_name, lamp } => {
-                        patch_verbs::assign(&ctx, &doc, &subject, output_name.clone(), *lamp)
-                    }
-                    PatchVerbKind::ReAnchor { lamp } => {
-                        patch_verbs::re_anchor(&ctx, &doc, &subject, *lamp)
-                    }
-                    PatchVerbKind::Reverse => patch_verbs::reverse(&ctx, &doc, &subject),
-                    PatchVerbKind::Rotate { steps, stride } => {
-                        patch_verbs::rotate(&ctx, &doc, &subject, *steps, *stride)
-                    }
-                    PatchVerbKind::Clear => patch_verbs::clear(&ctx, &doc, &subject),
-                    // Fixture-grain verbs: the selection picked the fixture,
-                    // not the thing inside it.
-                    PatchVerbKind::SetFlow { manual } => patch_verbs::set_flow(&ctx, &doc, *manual),
-                    PatchVerbKind::UnmapAll => patch_verbs::unmap_all(&ctx, &doc),
-                    _ => unreachable!("port/undo verbs handled above"),
-                };
-                match result {
-                    Ok(next) if next != doc => writes.push((
-                        fixture.patch_artifact.clone(),
-                        doc.to_json_pretty(),
-                        next.to_json_pretty(),
-                    )),
-                    Ok(_) => {
-                        return Ok(ProjectEditRun {
-                            notices: UiNotices::new(),
-                            logs: Vec::new(),
-                        });
-                    }
-                    Err(error) => return blocked(error.0),
-                }
-            }
-        }
-        if writes.is_empty() {
-            return Ok(ProjectEditRun {
-                notices: UiNotices::new(),
-                logs: Vec::new(),
-            });
-        }
-
-        // One undo step for the whole gesture, across every doc it touched
-        // (plus the name auto-assign's slot edit riding alongside — the
-        // slot edit is NOT snapshotted: names are additive and renaming is
-        // its own affordance).
-        let seq = self.record_edit(op.subject_fixture, crate::UiEditorMode::Patching);
-        self.patch_undo.push(EditStep {
-            seq,
-            node: op.subject_fixture,
-            mode: crate::UiEditorMode::Patching,
-            writes: writes
-                .iter()
-                .map(|(artifact, before, after)| {
-                    (
-                        artifact.clone(),
-                        format!("{before}\n").into_bytes(),
-                        format!("{after}\n").into_bytes(),
-                    )
-                })
-                .collect(),
-        });
-        self.patch_redo.clear();
-
-        if let Some((address, name)) = op.assign_output_name.clone() {
-            self.apply_slot_edit(
-                server,
-                SlotEditOp::EnsurePresent {
-                    address: address.clone(),
-                },
-            )
-            .await?;
-            self.apply_slot_edit(
-                server,
-                SlotEditOp::SetValue {
-                    address,
-                    value: lpc_model::LpValue::String(name),
-                },
-            )
-            .await?;
-        }
-        let mut last = ProjectEditRun {
-            notices: UiNotices::new(),
-            logs: Vec::new(),
-        };
-        for (artifact, _, after) in writes {
-            // Files end with a newline: the written bytes must be the ones
-            // a hand editor would save, byte for byte (the G1 diff).
-            last = self
-                .apply_asset_body(server, artifact, format!("{after}\n").into_bytes())
-                .await?;
-        }
-        Ok(last)
-    }
-
     pub async fn apply_asset_edit(
         &mut self,
         server: &mut StudioServerClient,
@@ -8909,17 +9005,10 @@ impl ProjectController {
         }
     }
 
-    // --- editor.json: the Arrange canvas's document (unified-editor P2) ------
+    // --- the undo-correlation journal (unified-editor P2) ---------------------
 
-    /// Record an Edit event in the correlation journal, minting its
-    /// `edit_seq` (every undo step's stamp comes from here).
-    fn record_edit(&mut self, node: Option<lpc_model::NodeId>, mode: crate::UiEditorMode) -> u64 {
-        self.edit_journal
-            .record(crate::UiEditJournalEvent::Edit, node, mode)
-    }
-
-    /// Record a shell-observed journal event (node/mode switches, and the
-    /// mapping session's step commits stamped at the glue layer — P5).
+    /// Record a surface-observed journal event (an edit, a node switch or
+    /// a mode switch).
     pub fn record_journal_event(
         &mut self,
         event: crate::UiEditJournalEvent,
@@ -8940,245 +9029,6 @@ impl ProjectController {
     #[must_use]
     pub fn edit_seq(&self) -> u64 {
         self.edit_journal.seq()
-    }
-
-    /// Settle the `editor.json` loaded-flag ([`crate::EditorMetaFetchOp`]):
-    /// list the project root, fetch the file when present, record "absent"
-    /// when not. Absence is a normal state (most projects have never been
-    /// arranged), so it must never surface as a read error.
-    pub async fn fetch_editor_meta(
-        &mut self,
-        server: &mut StudioServerClient,
-        artifact: &ArtifactLocation,
-    ) -> Result<Vec<UiLogDraft>, UiError> {
-        if self.asset_content_cached(artifact).is_some() || self.editor_meta_absent {
-            return Ok(Vec::new());
-        }
-        let root = self.project_fs_root.clone().ok_or_else(|| {
-            UiError::Project(
-                "the connected project's filesystem root is unknown; cannot look for editor.json"
-                    .to_string(),
-            )
-        })?;
-        let file_name = artifact.file_path().as_str().trim_start_matches('/');
-        let listing = server.fs_list_dir(&root, false).await?;
-        let present = listing
-            .entries
-            .iter()
-            .any(|entry| entry.as_str().trim_end_matches('/').ends_with(file_name));
-        if present {
-            let run = self.asset_content(server, artifact).await?;
-            Ok(run.logs)
-        } else {
-            self.editor_meta_absent = true;
-            Ok(listing.logs)
-        }
-    }
-
-    /// The effective `editor.json` from LOCAL state — see
-    /// [`EditorMetaReadState`] for the three-way answer.
-    fn editor_meta_state(&self) -> EditorMetaReadState {
-        let artifact = super::editor_meta_op::editor_meta_artifact();
-        match self.asset_content_cached(&artifact) {
-            Some(content) => {
-                let Some(text) = content.text() else {
-                    return EditorMetaReadState::Refused("editor.json is not text".to_string());
-                };
-                if text.trim().is_empty() {
-                    let doc = lpc_mapping::EditorMetaDoc::new();
-                    let bytes = format!("{}\n", doc.to_json_pretty()).into_bytes();
-                    return EditorMetaReadState::Ready(doc, bytes);
-                }
-                match lpc_mapping::EditorMetaDoc::from_json(text) {
-                    Ok(doc) => EditorMetaReadState::Ready(doc, text.as_bytes().to_vec()),
-                    Err(error) => EditorMetaReadState::Refused(error.to_string()),
-                }
-            }
-            None if self.editor_meta_absent => {
-                let doc = lpc_mapping::EditorMetaDoc::new();
-                let bytes = format!("{}\n", doc.to_json_pretty()).into_bytes();
-                EditorMetaReadState::Ready(doc, bytes)
-            }
-            None => EditorMetaReadState::Unfetched,
-        }
-    }
-
-    /// [`Self::editor_meta_state`] narrowed for a WRITE: the parsed doc
-    /// plus its current canonical bytes (the undo snapshot's "before"
-    /// side). `Err` while unfetched or refused — an arrange write must
-    /// never invent an empty document over unseen or refused data.
-    fn editor_meta_read(&self) -> Result<(lpc_mapping::EditorMetaDoc, Vec<u8>), String> {
-        match self.editor_meta_state() {
-            EditorMetaReadState::Ready(doc, bytes) => Ok((doc, bytes)),
-            EditorMetaReadState::Unfetched => Err("editor.json is still loading".to_string()),
-            EditorMetaReadState::Refused(reason) => Err(reason),
-        }
-    }
-
-    /// A fixture's CURRENT doc-space footprint from its cached map2d body:
-    /// tight lamp bounds + lamp count. `None` when the body is not cached
-    /// or does not resolve — footprints refresh opportunistically, never
-    /// block a write.
-    fn arrange_footprint(
-        &self,
-        mapping_artifact: Option<&ArtifactLocation>,
-    ) -> Option<lpc_mapping::EditorFootprint> {
-        let text_content = self.asset_content_cached(mapping_artifact?)?;
-        let text = text_content.text()?;
-        let doc = lpc_mapping::Map2dDoc::from_json(text).ok()?;
-        let resolved = lpc_mapping::resolve(&doc).ok()?;
-        let points: Vec<[f32; 2]> = resolved.lamps.iter().map(|lamp| lamp.pos).collect();
-        let bounds = lpc_mapping::bounds_of_points(&points)?;
-        Some(lpc_mapping::EditorFootprint {
-            bbox: [
-                f64::from(bounds.min_x),
-                f64::from(bounds.min_y),
-                f64::from(bounds.width),
-                f64::from(bounds.height),
-            ],
-            lamps: resolved.lamps.len() as u32,
-        })
-    }
-
-    /// Apply one Arrange gesture ([`crate::EditorMetaOp`]): load the cached
-    /// `editor.json`, set the transform, refresh stale footprints for
-    /// every fixture whose map2d body is cached, snapshot both sides onto
-    /// the arrange stack, write via the overlay. Undo/redo replay the
-    /// stack. Refused documents block — refuse-don't-rewrite.
-    pub async fn apply_editor_meta(
-        &mut self,
-        server: &mut StudioServerClient,
-        op: crate::EditorMetaOp,
-    ) -> Result<ProjectEditRun, UiError> {
-        let blocked = |reason: String| {
-            Ok(ProjectEditRun::notice(UiNotice::warning(format!(
-                "Arrange edit blocked: {reason}"
-            ))))
-        };
-        match &op.verb {
-            crate::EditorMetaVerb::Undo => {
-                let Some(step) = self.arrange_undo.pop() else {
-                    return blocked("nothing to undo".into());
-                };
-                for (artifact, before, _) in &step.writes {
-                    self.apply_asset_body(server, artifact.clone(), before.clone())
-                        .await?;
-                }
-                self.record_edit(step.node, crate::UiEditorMode::Arrange);
-                self.arrange_redo.push(step);
-                Ok(ProjectEditRun {
-                    notices: UiNotices::new(),
-                    logs: Vec::new(),
-                })
-            }
-            crate::EditorMetaVerb::Redo => {
-                let Some(step) = self.arrange_redo.pop() else {
-                    return blocked("nothing to redo".into());
-                };
-                for (artifact, _, after) in &step.writes {
-                    self.apply_asset_body(server, artifact.clone(), after.clone())
-                        .await?;
-                }
-                self.record_edit(step.node, crate::UiEditorMode::Arrange);
-                self.arrange_undo.push(step);
-                Ok(ProjectEditRun {
-                    notices: UiNotices::new(),
-                    logs: Vec::new(),
-                })
-            }
-            crate::EditorMetaVerb::Set {
-                node_key,
-                node,
-                transform,
-            } => {
-                let entries = vec![crate::EditorMetaSet {
-                    node_key: node_key.clone(),
-                    node: *node,
-                    transform: *transform,
-                }];
-                self.apply_editor_meta_set(server, &op, &entries).await
-            }
-            crate::EditorMetaVerb::SetMany { entries } => {
-                if entries.is_empty() {
-                    return blocked("nothing to arrange".into());
-                }
-                let entries = entries.clone();
-                self.apply_editor_meta_set(server, &op, &entries).await
-            }
-        }
-    }
-
-    /// The shared Set/SetMany body: every entry's transform lands in ONE
-    /// document round-trip and ONE byte-stack snapshot, so a multi-fixture
-    /// gesture is exactly one undo step (unified-selection P3).
-    async fn apply_editor_meta_set(
-        &mut self,
-        server: &mut StudioServerClient,
-        op: &crate::EditorMetaOp,
-        entries: &[crate::EditorMetaSet],
-    ) -> Result<ProjectEditRun, UiError> {
-        let (mut doc, before) = match self.editor_meta_read() {
-            Ok(loaded) => loaded,
-            Err(reason) => {
-                return Ok(ProjectEditRun::notice(UiNotice::warning(format!(
-                    "Arrange edit blocked: {reason}"
-                ))));
-            }
-        };
-        for entry in entries {
-            // Keys are stored PROJECT-RELATIVE (the DTO sends the runtime
-            // address; the root segment is the host's mount) — see
-            // `editor_meta_node_key`. A legacy rooted entry is left in
-            // place; the relative key wins on read.
-            let key = super::editor_meta_op::editor_meta_node_key(&entry.node_key);
-            let surface = doc.mapping_surface_mut(key);
-            surface.transform = lpc_mapping::EditorTransform {
-                t: entry.transform.t,
-                r: entry.transform.r,
-                s: entry.transform.s,
-            };
-        }
-        // Opportunistic footprint refresh: every fixture whose map2d
-        // is locally cached gets its cached footprint trued up as
-        // part of this write (never an unprompted write). Only
-        // ARRANGED fixtures get entries — a footprint alone must not
-        // arrange a node.
-        for fixture in &op.fixtures {
-            let fresh = self.arrange_footprint(fixture.mapping_artifact.as_ref());
-            let Some(fresh) = fresh else { continue };
-            let key = super::editor_meta_op::editor_meta_node_key(&fixture.node_key);
-            let entry_exists = entries
-                .iter()
-                .any(|entry| super::editor_meta_op::editor_meta_node_key(&entry.node_key) == key)
-                || doc.mapping_surface(key).is_some();
-            if entry_exists {
-                let surface = doc.mapping_surface_mut(key);
-                if surface.footprint != Some(fresh) {
-                    surface.footprint = Some(fresh);
-                }
-            }
-        }
-        doc.normalize_format();
-        let after = format!("{}\n", doc.to_json_pretty()).into_bytes();
-        if after == before {
-            return Ok(ProjectEditRun {
-                notices: UiNotices::new(),
-                logs: Vec::new(),
-            });
-        }
-        let node = entries.first().and_then(|entry| entry.node);
-        let seq = self.record_edit(node, crate::UiEditorMode::Arrange);
-        self.arrange_undo.push(EditStep {
-            seq,
-            node,
-            mode: crate::UiEditorMode::Arrange,
-            writes: vec![(op.artifact.clone(), before, after.clone())],
-        });
-        self.arrange_redo.clear();
-        // The file exists (in the overlay) from here on.
-        self.editor_meta_absent = false;
-        self.apply_asset_body(server, op.artifact.clone(), after)
-            .await
     }
 
     /// Stage `bytes` as the pending body for `artifact` and send it as a
@@ -9209,6 +9059,15 @@ impl ProjectController {
             self.asset_edit_buffer
                 .insert(artifact, PendingAssetEdit::failed(bytes, reason));
             return Ok(ProjectEditRun::notice(UiNotice::warning(notice)));
+        }
+
+        // A selected node's file: the body goes as slot edits, beside its
+        // Debug slot, so the highlight doesn't stop.
+        if let Some(run) = self
+            .write_body_beside_debug_slots(server, handle_id, &artifact, &bytes)
+            .await?
+        {
+            return Ok(run);
         }
 
         // apply → Pending: stage the body so DTOs reflect it (and a stale
@@ -9256,6 +9115,36 @@ impl ProjectController {
     /// awaits its compile verdict; `None` outside the chase window.
     pub(crate) fn verdict_chase_interval(&self) -> Option<Duration> {
         (self.verdict_chase_ticks > 0).then_some(VERDICT_CHASE_INTERVAL)
+    }
+
+    /// Delete the file `artifact` from the project, as a pending edit like
+    /// any other: one `SetArtifactBody` (`Delete`) mutation, folded into the
+    /// overlay mirror on ack, so the file reads as deleted, Save removes it
+    /// and Revert brings it back. Any body staged for it is dropped. A
+    /// later [`Self::apply_asset_body`] for the same file replaces the
+    /// delete (the Graph's undo of a node it deleted).
+    pub async fn apply_asset_delete(
+        &mut self,
+        server: &mut StudioServerClient,
+        artifact: ArtifactLocation,
+    ) -> Result<ProjectEditRun, UiError> {
+        let handle_id = self.ready_handle_id()?;
+        self.asset_edit_buffer.remove(&artifact);
+        let batch = MutationCmdBatch::new(vec![MutationCmd {
+            id: self.allocate_mutation_cmd_id(),
+            mutation: MutationOp::SetArtifactBody {
+                artifact: artifact.clone(),
+                edit: AssetBodyOverlay::Delete,
+            },
+        }]);
+        let mutation = server
+            .project_overlay_mutate(handle_id, batch.clone())
+            .await?;
+        let rejections = self.apply_asset_mutation_acks(&batch, &mutation, &[]);
+        Ok(ProjectEditRun {
+            notices: rejection_notices(&rejections),
+            logs: mutation.logs,
+        })
     }
 
     /// Discard the pending asset edit for `artifact`: the local entry clears
@@ -9336,6 +9225,7 @@ impl ProjectController {
         {
             sync.apply_acked_edits(&accepted, mutation.overlay_revision);
         }
+        self.follow_held_bodies(&accepted);
         // A `ClearArtifact` drops the artifact's whole mirror entry — slot
         // edits included when the artifact carried them — so binding
         // presentation re-derives here exactly like on slot-edit acks.
@@ -9407,6 +9297,9 @@ impl ProjectController {
             .unwrap_or_default();
         if let Some(pending) = self.asset_edit_buffer.get(artifact) {
             return Some(UiAssetContent::from_bytes(&pending.bytes, true, revision));
+        }
+        if let Some(held) = self.held_bodies.get(artifact) {
+            return Some(UiAssetContent::from_bytes(&held.text, true, revision));
         }
         if let Some(body) = self
             .sync
@@ -9804,7 +9697,10 @@ fn without_unheld_inputs(mut group: crate::UiPanelGroup, inputs: &[String]) -> c
     group
 }
 
-fn def_slot_value<'a>(node: &'a NodeController, path: &[&str]) -> Option<&'a lpc_model::LpValue> {
+pub(in crate::app::project) fn def_slot_value<'a>(
+    node: &'a NodeController,
+    path: &[&str],
+) -> Option<&'a lpc_model::LpValue> {
     fn descend<'a>(slots: &'a [SlotController], path: &[&str]) -> Option<&'a SlotController> {
         let (head, rest) = path.split_first()?;
         let slot = slots.iter().find(|slot| {

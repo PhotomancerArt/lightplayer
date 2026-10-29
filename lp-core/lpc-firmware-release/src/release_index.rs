@@ -81,6 +81,12 @@ pub struct ReleaseIndexEntry {
     pub commit: String,
     /// The device wire protocol version the release speaks.
     pub wire_proto: u32,
+    /// The project format the release's engine reads, as its
+    /// `ota-manifest.json` says it. Additive (format 1): absent for a release
+    /// whose manifest predates the field, which a reader takes as "not said"
+    /// and may guess from `wireProto` instead.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_format: Option<u32>,
     /// What a board must have to take the release without USB.
     pub requires: Requires,
     /// When the release was published (RFC 3339, UTC), as GitHub reports
@@ -183,13 +189,15 @@ impl ReleaseIndex {
 
 impl ReleaseIndexEntry {
     /// The entry for a release, from its `ota-manifest.json`: `version`,
-    /// `commit`, `wireProto` and `requires` copied as they are, and when it
-    /// was published. The one way an entry is built from a release.
+    /// `commit`, `wireProto`, `projectFormat` and `requires` copied as they
+    /// are, and when it was published. The one way an entry is built from a
+    /// release.
     pub fn from_manifest(manifest: &OtaManifest, published_at: Option<String>) -> Self {
         Self {
             version: manifest.version.clone(),
             commit: manifest.commit.clone(),
             wire_proto: manifest.wire_proto,
+            project_format: manifest.project_format,
             requires: manifest.requires,
             published_at,
         }
@@ -304,6 +312,31 @@ mod tests {
         );
     }
 
+    /// DD31: an entry says the project format its release's engine reads
+    /// when the release's manifest does, and stays format 1 — absent (every
+    /// release before the field) it writes no key and reads `None`, and an
+    /// index that has it still reads in a reader that ignores it.
+    #[test]
+    fn an_entry_says_the_project_format_its_manifest_says() {
+        let mut manifest = sample_manifest();
+        assert_eq!(
+            ReleaseIndexEntry::from_manifest(&manifest, None).project_format,
+            None
+        );
+        manifest.project_format = Some(12);
+        let e = ReleaseIndexEntry::from_manifest(&manifest, None);
+        assert_eq!(e.project_format, Some(12));
+        let target = TargetName::parse("esp32c6-4mb").unwrap();
+        let index = ReleaseIndex::newest_first(&target, vec![e, entry("2026.10.04-1")]);
+        let bytes = index.to_json_bytes();
+        let text = String::from_utf8(bytes.clone()).unwrap();
+        assert_eq!(text.matches("\"projectFormat\": 12").count(), 1, "{text}");
+        assert_eq!(text.matches("projectFormat").count(), 1, "{text}");
+        let back = ReleaseIndex::parse_valid(&bytes).unwrap();
+        assert_eq!(back.format, RELEASE_INDEX_FORMAT);
+        assert_eq!(back, index);
+    }
+
     #[test]
     fn other_formats_are_refused_before_their_shape() {
         assert_eq!(
@@ -325,6 +358,7 @@ mod tests {
             version: version.to_string(),
             commit: "736d72856d243fce519c9f461f369f59fcbf175a".into(),
             wire_proto: 39,
+            project_format: None,
             requires: Requires {
                 fs_tree: false,
                 layout: 1,

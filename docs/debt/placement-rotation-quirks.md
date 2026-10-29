@@ -1,5 +1,5 @@
 ---
-status: carried
+status: retired     # 2026-10-28: the canvas was deleted with the Map tab
 since: 2026-08-13 # accepted at the one-project-canvas plan's Q6 ruling
 logged: 2026-08-13
 area: lpa-mapping-editor/canvas
@@ -38,6 +38,9 @@ placement.
 
 **Incident log** — 2026-08-13: filed at acceptance (one-project-canvas
 P5); no user reports yet.
+2026-10-28: the canvas this entry is about was deleted with Studio's Map
+tab. The Graph, Studio's one project canvas, replaced it and places no
+fixture rotated, so neither quirk exists any more. Retired.
 
 **Exit criteria** — Marquee drags screen-axis-aligned over a rotated
 placement (rotated-rect containment in doc space), and wiring numbers

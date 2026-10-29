@@ -170,9 +170,8 @@ impl EditorMetaDoc {
         }
     }
 
-    /// Parse and format-gate a document. Two-stage like
-    /// [`crate::PatchDoc::from_json`]: `format` alone first, so a newer
-    /// document reports as newer rather than as malformed.
+    /// Parse and format-gate a document. Two-stage: `format` alone first, so
+    /// a newer document reports as newer rather than as malformed.
     pub fn from_json(json: &str) -> Result<Self, EditorMetaError> {
         #[derive(Deserialize)]
         struct FormatPeek {
@@ -207,9 +206,8 @@ impl EditorMetaDoc {
     }
 
     /// The lowest `format` that can represent this document — there is only
-    /// one format so far, so this is constant; the method exists to mirror
-    /// [`crate::PatchDoc::required_format`] and keep the writer honest when
-    /// format 2 arrives.
+    /// one format so far, so this is constant; the method exists to keep the
+    /// writer honest when format 2 arrives.
     #[must_use]
     pub fn required_format(&self) -> u32 {
         EDITOR_META_FORMAT

@@ -134,7 +134,7 @@ impl UpdateNarration {
             UpdateStageFacts::Restoring | UpdateStageFacts::Finishing => {
                 self.engine.note(now_ms, total)
             }
-            UpdateStageFacts::Waiting => {}
+            UpdateStageFacts::Waiting | UpdateStageFacts::UpgradingProjects => {}
         }
         if self.last_stage.replace(stage) == Some(stage) {
             return None;
@@ -142,6 +142,9 @@ impl UpdateNarration {
         match stage {
             UpdateStageFacts::BackingUp => {
                 Some("backing up current firmware from the board".to_string())
+            }
+            UpdateStageFacts::UpgradingProjects => {
+                Some("upgrading its projects to the new format".to_string())
             }
             _ => None,
         }

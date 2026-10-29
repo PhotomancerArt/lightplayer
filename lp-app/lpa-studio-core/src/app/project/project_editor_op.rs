@@ -29,9 +29,8 @@ pub enum ProjectEditorOp {
         selection: crate::UiSelection,
     },
     /// Record an event into the undo-correlation journal (unified-editor
-    /// P2): node/mode switches, and the mapping session's step commits
-    /// observed at the shell layer (P5's glue — `lpa-mapping-editor`
-    /// stays project-unaware). Applied synchronously.
+    /// P2): an edit, a node switch or a mode switch a surface observed.
+    /// Applied synchronously.
     EditorJournal {
         event: crate::UiEditJournalEvent,
         node: Option<lpc_model::NodeId>,

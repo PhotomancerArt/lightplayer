@@ -172,7 +172,7 @@ mod tests {
 
     /// The hello as the board packs it (typed, through `ser_learned_to`),
     /// named and unnamed, decodes back to its JSON on the host — twice on
-    /// one table, as a link's boot hello and a requested one do (wire 46).
+    /// one table, as a link's boot hello and a requested one do (wire 47).
     #[cfg(feature = "std")]
     #[test]
     fn a_typed_hello_packs_and_decodes_named_or_not() {
@@ -187,6 +187,7 @@ mod tests {
                     commit: "abc123456789".to_string(),
                     dirty: false,
                     profile: "release-esp32".to_string(),
+                    project_format: lpc_model::PROJECT_FORMAT_VERSION,
                 },
                 hardware: HardwareFacts::default(),
                 device_uid: None,
@@ -194,6 +195,7 @@ mod tests {
                 auth: HelloAuth::TRUSTED,
                 firmware: None,
                 device_name: name,
+                startup_refused: None,
             };
             let msg = WireServerMessage::new(100, crate::server::ServerMsgBody::Hello(hello));
             let json = crate::json::to_string(&msg).unwrap();

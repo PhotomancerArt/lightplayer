@@ -11,6 +11,7 @@ use lpc_mapping::part::{Circle, Colors, Mapping, PartKind, Path, Repeat, Shape, 
 use lpc_mapping::patching::{
     Address, Amount, ChannelOp, Direction, Flow, OutputName, OutputPorts, Override, PatchTarget,
     Patching, PortKey, PortOp, Problem, Span, Start, StepSource, patch_mapping,
+    patch_mapping_placed,
 };
 
 /// A fixture with no start patches nothing, and says so.
@@ -231,6 +232,25 @@ fn reverse_and_offset_land_as_today() {
     );
     let p = patch(&m, &ports(&[Some(60)]));
     assert_eq!(lamps(&p, &a), [11, 10, 14, 13, 12]);
+}
+
+/// An offset is a segment's alone: an offset on a container (a circle's own
+/// node) offsets none of its rings.
+#[test]
+fn an_offset_on_a_container_offsets_nothing() {
+    let mut m = Mapping::new();
+    circle(&mut m, &[(40.0, 8), (20.0, 4)]);
+    m.start = Start::at("out", 0, Amount::lamps(0));
+    m.overrides.insert(
+        id("circle1"),
+        Override {
+            offset: Some(3),
+            ..Override::default()
+        },
+    );
+    let p = patch(&m, &ports(&[Some(60)]));
+    assert_eq!(lamps(&p, &id("circle1/r1")), (0..8).collect::<Vec<_>>());
+    assert_eq!(lamps(&p, &id("circle1/r2")), [8, 9, 10, 11]);
 }
 
 /// An override for a node that's gone is kept and reported, never moved to
@@ -464,6 +484,38 @@ fn an_order_that_doesnt_fit_is_reported() {
     m.start = Start::at("out", 0, Amount::lamps(0));
     let p = patch(&m, &ports(&[Some(60)]));
     assert_eq!(p.problems, [Problem::OrderMismatch { segment: a }]);
+}
+
+/// Patching without the walk's record gives the same segments, spans and
+/// problems, and records no walk.
+#[test]
+fn patching_without_the_walk_gives_the_same_segments_spans_and_problems() {
+    let mut m = Mapping::new();
+    circle(&mut m, &[(40.0, 6), (30.0, 5), (20.0, 4), (10.0, 3)]);
+    let spoke = m.new_part(PartKind::Shape(Shape::Path(Path::through(
+        &[[50.0, 40.0], [50.0, 4.0]],
+        8,
+    ))));
+    let repeat = m.new_part(PartKind::Repeat(Repeat::new(spoke, [50.0, 50.0], 6)));
+    m.parts.push(repeat);
+    m.start = Start::at("out", 0, Amount::lamps(0));
+    m.overrides.insert(id("circle1/r3"), at_port(1, 0));
+    m.overrides.insert(id("gone9"), Override::default());
+    let tree = render(&m).unwrap();
+    let outputs = ports(&[Some(20), Some(20)]);
+
+    let full = patch_mapping(&m, &tree, &outputs);
+    let placed = patch_mapping_placed(&m, &tree, &outputs);
+    assert!(!full.walked.is_empty());
+    assert!(!full.problems.is_empty(), "past the last port, a gone node");
+    assert!(placed.walked.is_empty());
+    assert_eq!(
+        placed,
+        Patching {
+            walked: Vec::new(),
+            ..full
+        }
+    );
 }
 
 // ---- helpers --------------------------------------------------------------

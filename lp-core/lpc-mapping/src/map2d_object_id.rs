@@ -2,11 +2,11 @@
 //!
 //! An id is a **sticky slug**: assigned once — derived from the object's
 //! authored `name` at assignment time — and never rewritten by rename.
-//! Patch documents address objects by id path (`/sector/2`, see
-//! [`crate::PatchDoc`]), and the editor's document-in/edits-out boundary
-//! cannot reach sibling patch files to fix the references a rewrite would
-//! break, so a renamed object simply keeps its id. A diverged id is a
-//! visible property, not an error.
+//! The patch documents of formats 1 to 5 addressed objects by id path
+//! (`/sector/2`), and the editor's document-in/edits-out boundary could not
+//! reach sibling patch files to fix the references a rewrite would break, so
+//! a renamed object simply keeps its id. A diverged id is a visible
+//! property, not an error.
 
 use alloc::collections::BTreeSet;
 use alloc::format;

@@ -1,5 +1,11 @@
 //! Why a format-6 document was refused, or a mapping could not be written.
-//! Each refusal names the part, node or field it is about.
+//! Each refusal names the part, node or field it is about — on a host.
+//!
+//! **A device says one sentence** (DD25, 2026-10-28): without `std` every
+//! refusal reads [`DEVICE_REFUSAL`]. Studio and lp-cli wrote the file and
+//! check it with the named refusals before it reaches a board; the board
+//! refuses exactly what a host refuses, without the words (they cost the
+//! C6's engine flash for a message nobody at a board can act on).
 
 use alloc::string::String;
 
@@ -46,6 +52,17 @@ pub enum Map2d6Error {
     NotWritable { reason: String },
 }
 
+/// Every refusal's words on a device (no `std`): see the module doc.
+pub const DEVICE_REFUSAL: &str = "this map2d file can't be read";
+
+#[cfg(not(feature = "std"))]
+impl core::fmt::Display for Map2d6Error {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str(DEVICE_REFUSAL)
+    }
+}
+
+#[cfg(feature = "std")]
 impl core::fmt::Display for Map2d6Error {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
@@ -98,6 +115,7 @@ impl core::fmt::Display for Map2d6Error {
 impl core::error::Error for Map2d6Error {}
 
 /// What an SVG path command letter draws, in words.
+#[cfg(feature = "std")]
 fn command_name(command: char) -> &'static str {
     match command.to_ascii_uppercase() {
         'Z' => "close",

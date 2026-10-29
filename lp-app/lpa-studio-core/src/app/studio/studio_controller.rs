@@ -433,6 +433,9 @@ pub struct StudioController {
     access: crate::app::access::AccessController,
     /// Each board's Wi‑Fi status and the Wi‑Fi offers' changes.
     network: crate::app::network::NetworkController,
+    /// Each board's project stage (M3 P11): its stored projects brought to
+    /// the format its engine reads, with no click.
+    project_stages: crate::ProjectStageController,
 }
 
 /// Which device an open lands on — the model half of the URL's `?on=`
@@ -646,6 +649,7 @@ impl StudioController {
             agent: crate::AgentController::new(),
             access: crate::app::access::AccessController::new(),
             network: crate::app::network::NetworkController::new(),
+            project_stages: crate::ProjectStageController::new(),
         }
     }
 
@@ -1620,6 +1624,7 @@ impl StudioController {
             .set_spawner(move |future| shared(future));
         self.wifi_spawner = Some(Rc::clone(&spawner));
         self.network.set_spawner(Rc::clone(&spawner));
+        self.project_stages.set_spawner(Rc::clone(&spawner));
         self.access.set_spawner(spawner);
     }
 
@@ -1641,6 +1646,7 @@ impl StudioController {
         // same queue.
         self.wifi_tx = Some(tx.clone());
         self.network.set_command_sender(tx.clone());
+        self.project_stages.set_command_sender(tx.clone());
         self.access.set_command_sender(tx);
     }
 
@@ -1754,6 +1760,71 @@ impl StudioController {
             |device| access.granted_tier(device),
         );
         self.mark_dirty();
+    }
+
+    /// Start the project stages due now: an update's last stage, or one a
+    /// board found with older projects needs (M3 P11, Q107).
+    pub(crate) fn drive_project_stages(&mut self) {
+        let updates = self.devices.effects().update_host().projects_wanted();
+        let now_ms = self.device_now().0;
+        let access = &self.access;
+        let follow_ups = self.project_stages.drive(
+            self.devices.roster(),
+            self.devices.effects(),
+            |device| access.granted_tier(device),
+            &updates,
+            now_ms,
+        );
+        for follow_up in follow_ups {
+            self.project_stage_follow_up(follow_up);
+        }
+    }
+
+    /// Apply one command from a project stage (its progress, its end).
+    pub fn apply_project_stage_command(&mut self, command: crate::ProjectStageCommand) {
+        if let Some(follow_up) = self.project_stages.apply(command, self.devices.roster()) {
+            self.project_stage_follow_up(follow_up);
+        }
+        self.mark_dirty();
+    }
+
+    fn project_stage_follow_up(
+        &mut self,
+        follow_up: crate::app::devices::project_stage_controller::ProjectStageFollowUp,
+    ) {
+        use crate::app::devices::project_stage_controller::ProjectStageFollowUp;
+        match follow_up {
+            ProjectStageFollowUp::UpdateDone { device, lines } => {
+                self.devices
+                    .effects()
+                    .update_host()
+                    .projects_done(device, lines);
+            }
+            ProjectStageFollowUp::UpdateProgress {
+                device,
+                done,
+                total,
+            } => {
+                self.devices
+                    .effects()
+                    .update_host()
+                    .projects_progress(device, done, total);
+            }
+            ProjectStageFollowUp::Say { device, lines } => {
+                for label in lines {
+                    self.fold_device_input(crate::DeviceInput::Event(
+                        lpa_devices::event::Event::ActivityMarker {
+                            device,
+                            effect: None,
+                            marker: lpa_devices::event::ActivityMarker::Progress {
+                                label,
+                                percent: None,
+                            },
+                        },
+                    ));
+                }
+            }
+        }
     }
 
     /// Run a Wi‑Fi step the network controller parked because the editor
@@ -2003,6 +2074,8 @@ impl StudioController {
                 // An automatic start waits for the hello: an unknown board
                 // is never started on its own.
                 board_tree_store: board_on_tree_store(evidence).unwrap_or(false),
+                projects: None,
+                board_project_format: None,
             };
             let verdict = auto_start::auto_update_for_standing(&crate::update_standing(&inputs));
             actions.extend(auto_start::auto_action(&host, device.id, evidence, verdict));
@@ -2109,6 +2182,10 @@ impl StudioController {
             store_lookups: Some(self.update_build_facts.store_lookups()),
             file_build: self.update_build_facts.file_build(),
             board_tree_store: evidence.and_then(board_on_tree_store).unwrap_or(true),
+            projects: self.project_stages.status(view.id),
+            board_project_format: evidence
+                .and_then(|evidence| evidence.classification.hello())
+                .and_then(|hello| hello.project_format),
         };
         crate::UpdateOfferFacts::read(
             &inputs,
@@ -2194,6 +2271,10 @@ impl StudioController {
         // A board waiting for its engine, or holding this Studio's
         // interrupted update, is restored or finished with no click (DS4).
         self.drive_device_updates();
+        // A board whose engine reads a newer project format than projects
+        // it stores has them upgraded with no click, and an update waiting
+        // in its project stage runs it (M3 P11).
+        self.drive_project_stages();
         // A chooser an agent card's press opened has answered: that is the
         // press's outcome, and the run it resumes reads the roster after it.
         if let Some((link, answer)) = grant_answer
@@ -5049,18 +5130,6 @@ impl StudioController {
                 let op = action.into_op::<AssetContentFetchOp>()?;
                 return self.execute_asset_content_fetch(op).await;
             }
-            if action.op_as::<crate::PatchVerbOp>().is_some() {
-                let op = action.into_op::<crate::PatchVerbOp>()?;
-                return self.execute_patch_verb_op(op).await;
-            }
-            if action.op_as::<crate::EditorMetaOp>().is_some() {
-                let op = action.into_op::<crate::EditorMetaOp>()?;
-                return self.execute_editor_meta_op(op).await;
-            }
-            if action.op_as::<crate::EditorMetaFetchOp>().is_some() {
-                let op = action.into_op::<crate::EditorMetaFetchOp>()?;
-                return self.execute_editor_meta_fetch(op).await;
-            }
             if action.op_as::<NodeRevertOp>().is_some() {
                 let op = action.into_op::<NodeRevertOp>()?;
                 return self.execute_node_revert_op(op).await;
@@ -5075,9 +5144,13 @@ impl StudioController {
             }
             if action.op_as::<crate::app::graph::GraphOp>().is_some() {
                 let op = action.into_op::<crate::app::graph::GraphOp>()?;
-                self.graph.press(op.verb);
+                let done = self.graph.press(op);
                 self.mark_dirty();
-                return Ok(crate::core::notice::UiNotices::new());
+                return Ok(match done {
+                    Ok(_) => crate::core::notice::UiNotices::new(),
+                    Err(why) => crate::core::notice::UiNotices::new()
+                        .with_notice(crate::UiNotice::warning(why)),
+                });
             }
             if action.op_as::<PlaylistPickOp>().is_some() {
                 let op = action.into_op::<PlaylistPickOp>()?;
@@ -7135,6 +7208,21 @@ impl StudioController {
         let (staged, migration_notice) = self
             .prepare_push(&op.source, board_name.as_deref(), plays.as_deref())
             .await;
+        // A board whose engine reads an older project format would refuse
+        // the project only after the push stopped and cleared it: refused
+        // here, before the board is touched (Q111). The card's Update offer
+        // stands beside the words.
+        let staged = staged.and_then(|payload| {
+            let hello = self
+                .devices
+                .roster()
+                .device(op.device)
+                .and_then(|device| device.evidence.classification.hello());
+            match crate::app::devices::push_format_gate::push_refusal(&payload.files, hello) {
+                Some(refusal) => Err(refusal),
+                None => Ok(payload),
+            }
+        });
         match &staged {
             Ok(payload) => {
                 self.sending.insert(op.device, payload.label.clone());
@@ -8586,38 +8674,6 @@ impl StudioController {
         self.record_project_edit_run(run)
     }
 
-    /// One patch-surface verb (D42): kernel-validated document transforms
-    /// through the normal ApplyBody path, with the session-local undo
-    /// stack. Routed like asset edits — the verb writes assets.
-    async fn execute_patch_verb_op(&mut self, op: crate::PatchVerbOp) -> UiResult {
-        let run = {
-            let server = self.pool.lens_session_mut()?.client_mut()?;
-            self.project.apply_patch_verb(server, op).await
-        };
-        self.record_project_edit_run(run)
-    }
-
-    /// One Arrange gesture over `editor.json` (unified-editor P2): routed
-    /// like the patch verbs — the op writes an asset.
-    async fn execute_editor_meta_op(&mut self, op: crate::EditorMetaOp) -> UiResult {
-        let run = {
-            let server = self.pool.lens_session_mut()?.client_mut()?;
-            self.project.apply_editor_meta(server, op).await
-        };
-        self.record_project_edit_run(run)
-    }
-
-    /// Settle the `editor.json` loaded-flag: presence via a root listing,
-    /// then the normal content fetch — absence is a state, not an error.
-    async fn execute_editor_meta_fetch(&mut self, op: crate::EditorMetaFetchOp) -> UiResult {
-        let logs = {
-            let server = self.pool.lens_session_mut()?.client_mut()?;
-            self.project.fetch_editor_meta(server, &op.artifact).await?
-        };
-        self.record_logs(logs);
-        Ok(UiNotices::new())
-    }
-
     /// Resolve (and cache) an asset's effective editor content so the next
     /// emitted view embeds it. Quiet on success — the refreshed view is the
     /// outcome; server log lines join the ring like any edit run's.
@@ -9771,7 +9827,8 @@ impl StudioController {
     /// Gather every fixture's mapping points (union, labeled by fixture
     /// name — plan decision: v1 targets all fixtures) plus the compact
     /// fixture summary for the system prompt. Unreadable or unparsable
-    /// fixture defs are skipped; SvgPath mappings contribute no points.
+    /// fixture defs are skipped; a fixture's lamps are its map2d's, read and
+    /// rendered as the engine renders them ([`Self::agent_map2d_points`]).
     async fn agent_fixture_context(
         &mut self,
     ) -> (Vec<lps_probe::LedPoint>, Option<lpa_agent::FixtureSummary>) {
@@ -9788,7 +9845,13 @@ impl StudioController {
                 continue;
             };
             let mapping = fixture.mapping.value();
-            let points = lpc_model::nodes::fixture::generate_mapping_points(mapping, 1, 1);
+            let points = match mapping {
+                lpc_model::nodes::fixture::MappingConfig::Map2d { source } => {
+                    self.agent_map2d_points(&def_artifact, source, fixture)
+                        .await
+                }
+                lpc_model::nodes::fixture::MappingConfig::Unset => Vec::new(),
+            };
             summaries.push(lpa_agent::FixtureSummary {
                 name: label.clone(),
                 led_count: points.len() as u32,
@@ -9802,6 +9865,41 @@ impl StudioController {
         }
         let summary = fold_fixture_summaries(summaries);
         (led_points, summary)
+    }
+
+    /// One fixture's lamps for the agent: the map2d its def names (resolved
+    /// against the def file, overlay-aware), read as format 6 and rendered
+    /// into the fixture's render size the way the engine renders it
+    /// (`render_parts_carrier`). A map2d that can't be found, read or
+    /// rendered contributes no lamps.
+    async fn agent_map2d_points(
+        &mut self,
+        def_artifact: &lpc_model::ArtifactLocation,
+        source: &lpc_model::AssetSlot,
+        fixture: &lpc_model::nodes::fixture::FixtureDef,
+    ) -> Vec<lpc_model::nodes::fixture::MappingPoint> {
+        let Some(spec) = source.artifact_value() else {
+            return Vec::new();
+        };
+        let Ok(path) =
+            lpc_model::resolve_artifact_specifier(def_artifact.file_path().as_path(), spec)
+        else {
+            return Vec::new();
+        };
+        let map2d = lpc_model::ArtifactLocation::file(path);
+        let Ok(Some(text)) = self.agent_asset_text(&map2d).await else {
+            return Vec::new();
+        };
+        let Ok(mapping) = lpc_mapping::map2d6::read(&text) else {
+            return Vec::new();
+        };
+        let (width, height) = (fixture.render_width(), fixture.render_height());
+        let Ok(carrier) = lpc_engine::nodes::fixture::parts_carrier::render_parts_carrier(
+            &mapping, width, height,
+        ) else {
+            return Vec::new();
+        };
+        lpc_model::nodes::fixture::generate_mapping_points(&carrier, width, height)
     }
 
     async fn execute_node_revert_op(&mut self, op: NodeRevertOp) -> UiResult {
@@ -10735,7 +10833,6 @@ fn mapping_kind_label(mapping: &lpc_model::nodes::fixture::MappingConfig) -> &'s
     use lpc_model::nodes::fixture::MappingConfig;
     match mapping {
         MappingConfig::Unset => "unset",
-        MappingConfig::PathPoints { .. } => "path points",
         MappingConfig::Map2d { .. } => "map2d document",
     }
 }

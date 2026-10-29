@@ -27,6 +27,12 @@ pub enum PowerWakeLevel {
 pub struct PowerOffRequest {
     pub endpoint: HwEndpointSpec,
     pub wake_level: PowerWakeLevel,
+    /// The pin already sits at its non-wake level: a switch that was turned
+    /// off. Its wake level coming back before the device sleeps is then a
+    /// wake, and the platform starts again instead of sleeping. False for a
+    /// held button, which is still at its wake level when it asks: the
+    /// platform waits for its release first.
+    pub pin_at_rest: bool,
 }
 
 /// Power-off service handed to runtime nodes.

@@ -1,0 +1,19 @@
+{
+  "kind": "Module",
+  "nodes": {
+    "body_glow": {
+      "ref": "./body_glow.json"
+    },
+    "peach_body": {
+      "ref": "./peach_body.json"
+    }
+  },
+  "exports": {
+    "control.out": "bus:control.out"
+  },
+  "provenance": {
+    "author": "Yona Appletree",
+    "version": "1",
+    "license": "CC0-1.0"
+  }
+}

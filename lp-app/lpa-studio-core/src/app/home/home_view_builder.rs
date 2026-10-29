@@ -433,7 +433,7 @@ mod tests {
                 "Basic",
                 &[(
                     "project.json".to_string(),
-                    br#"{"format":11,"name":"Basic"}"#.to_vec(),
+                    br#"{"format":12,"name":"Basic"}"#.to_vec(),
                 )],
                 PackageProvenance::SeededFrom {
                     source: "catalog/fyeah-sign".to_string(),

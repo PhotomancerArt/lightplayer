@@ -1,6 +1,5 @@
 {
   "kind": "Module",
-  "uid": "mod_0aB3cD5eF7gH9jK1",
   "nodes": {
     "clock": {
       "ref": "./clock.json"

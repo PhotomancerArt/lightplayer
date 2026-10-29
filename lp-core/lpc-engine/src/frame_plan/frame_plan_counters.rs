@@ -15,15 +15,11 @@ pub struct FramePlanCounters {
     /// Checks whose rebuilt plan differed from the replayed one: missed
     /// invalidations.
     pub check_mismatches: u32,
-    /// Times the default-fragments topology (which output an unaddressed
-    /// patch run lands on) was derived from the binding graph — the work
-    /// [`super::LaneTopology`] keeps, counted so a steady frame shows none.
-    pub default_fragments_reads: u32,
 }
 
 impl FramePlanCounters {
-    /// Work only an edit should cause: plans built and topology derived.
+    /// Work only an edit should cause: plans built.
     pub fn structural_work(&self) -> u32 {
-        self.builds + self.default_fragments_reads
+        self.builds
     }
 }

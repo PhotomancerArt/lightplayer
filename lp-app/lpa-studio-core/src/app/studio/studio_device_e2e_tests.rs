@@ -1278,6 +1278,9 @@ impl DeviceBench {
                     crate::StudioCommand::Network(command) => {
                         self.controller.apply_network_command(command);
                     }
+                    crate::StudioCommand::ProjectStage(command) => {
+                        self.controller.apply_project_stage_command(command);
+                    }
                     // The hold edge's answers (one tab holds a board).
                     crate::StudioCommand::HoldEdge(event) => {
                         self.controller.on_hold_edge_event(event);
@@ -5833,6 +5836,62 @@ fn a_refused_push_lands_on_an_honest_face_with_the_picker_re_offered() {
     );
 }
 
+/// Q111 (M3 P11): a board whose engine reads an older project format than
+/// this Studio's projects is refused the push before it is touched — no
+/// stop, no clear, no write — with words that say why and what to do, and
+/// the card's picker (and its firmware row's Update) still there.
+#[test]
+fn a_push_to_a_board_reading_an_older_project_format_is_refused_before_the_board_is_touched() {
+    let device = FakeEsp32Device::new(FakeDeviceScript::new(FakeBootState::LightPlayer(
+        FakeLightPlayerState::new()
+            .with_identity(FakeDeviceIdentity::new(
+                "dev000000daqf6dvvr9",
+                "Bench board",
+            ))
+            .with_base_mac("60:55:f9:0a:0b:0c")
+            .with_heartbeat_interval(Duration::from_millis(20))
+            .with_project_format(lpc_model::PROJECT_FORMAT_VERSION - 1),
+    )));
+    let (mut bench, tasks) = identified(&device, "usb-push-older-format");
+    bench.run_until(&tasks, "the board to report nothing loaded", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.loaded_project == lpa_devices::view::LoadedProject::Empty)
+    });
+    let device_id = bench.view().devices[0].id;
+
+    bench.push_gesture(device_id, bundled_example());
+    bench.run_until(&tasks, "the refusal to settle", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.activity.is_none() && card.last_outcome.is_some())
+    });
+
+    let card = &bench.view().devices[0];
+    let outcome = card.last_outcome.as_ref().expect("an outcome");
+    assert!(!outcome.ok, "{outcome:?}");
+    assert!(
+        outcome.summary.contains(&format!(
+            "This board's firmware reads projects up to format {}. Update it to push this \
+             project.",
+            lpc_model::PROJECT_FORMAT_VERSION - 1
+        )),
+        "{outcome:?}"
+    );
+    assert!(
+        bench.pushed.borrow().is_empty(),
+        "nothing reached the board's wire"
+    );
+    assert!(
+        card.can_receive_project && card.loaded_project == lpa_devices::view::LoadedProject::Empty,
+        "the board is as it was, the picker re-offered: {card:?}"
+    );
+}
+
 /// A source the app cannot prepare fails the SAME way a refused wire does:
 /// on the card, with the reason, and with the picker still there. (A
 /// generate for a board this build has no catalog entry for is the real
@@ -8535,10 +8594,10 @@ fn pushing_an_old_format_library_project_sends_the_current_format() {
             .is_some_and(|card| card.loaded_project == lpa_devices::view::LoadedProject::Empty)
     });
 
-    // A real v10 fixture from the upgrader's corpus, installed as-is.
+    // A real fixture one format behind, from the upgrader's corpus, installed as-is.
     let old = PROJECT_FORMAT_VERSION - 1;
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join(format!("../lpa-upgrade/tests/corpus/v{old}/button-sign"));
+        .join(format!("../lpa-upgrade/tests/corpus/v{old}/quad-strips-v3"));
     let mut files = Vec::new();
     for entry in std::fs::read_dir(&dir).expect("the corpus fixture exists") {
         let entry = entry.unwrap();
@@ -8616,7 +8675,7 @@ fn pushing_an_old_format_library_project_shows_the_upgrade_notice() {
     // The same real v10 fixture as the test above, installed as-is.
     let old = PROJECT_FORMAT_VERSION - 1;
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join(format!("../lpa-upgrade/tests/corpus/v{old}/button-sign"));
+        .join(format!("../lpa-upgrade/tests/corpus/v{old}/quad-strips-v3"));
     let mut files = Vec::new();
     for entry in std::fs::read_dir(&dir).expect("the corpus fixture exists") {
         let entry = entry.unwrap();

@@ -1,0 +1,37 @@
+//! p1, the domain: what is stored, and the logic over it.
+
+pub mod bindings;
+pub mod board;
+pub mod breath;
+pub mod channel;
+pub mod circular_display;
+pub mod color_order;
+pub mod control_product;
+pub mod derived;
+pub mod drawn_segment;
+pub mod fixture;
+pub mod fixture_overrides;
+pub mod geom;
+pub mod node;
+pub mod notice;
+pub mod other_node;
+pub mod output;
+pub mod output_naming;
+pub mod output_overrides;
+pub mod part_geometry;
+pub mod part_ref;
+pub mod patch;
+pub mod patch_edits;
+pub mod pattern;
+pub mod picture;
+pub mod piece;
+pub mod placement;
+pub mod port_runs;
+pub mod port_tables;
+pub mod project;
+pub mod render_product;
+pub mod render_source;
+pub mod rgb;
+pub mod span;
+pub mod target;
+pub mod walked;

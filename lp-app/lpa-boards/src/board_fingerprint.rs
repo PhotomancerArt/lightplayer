@@ -154,6 +154,7 @@ mod tests {
 
     const XIAO_C6: &str = "seeed/xiao-esp32-c6";
     const DEVKIT_C6: &str = "espressif/esp32-c6-devkitc-1";
+    const XIAO_S3: &str = "seeed/xiao-esp32-s3";
     const XIAO_S3_PLUS: &str = "seeed/xiao-esp32-s3-plus";
     const DEVKIT_S3: &str = "espressif/esp32-s3-devkitc-1";
 
@@ -196,10 +197,17 @@ mod tests {
             fingerprint("esp32s3", Some(16), None).board_id.as_deref(),
             Some(XIAO_S3_PLUS)
         );
-        assert_eq!(
-            fingerprint("esp32s3", Some(8), None).board_id.as_deref(),
-            Some(DEVKIT_S3)
-        );
+    }
+
+    #[test]
+    fn an_8_mb_s3_is_asked_between_the_devkit_and_the_xiao() {
+        // The plain XIAO and the DevKitC-1 are both 8 MB on Espressif's
+        // native USB: nothing a probe reads tells them apart, so the card asks.
+        for usb_vendor in [None, Some(0x303a)] {
+            let m = fingerprint("esp32s3", Some(8), usb_vendor);
+            assert_eq!(m.board_id, None);
+            assert_eq!(sorted(m.candidates), vec![DEVKIT_S3, XIAO_S3]);
+        }
     }
 
     #[test]

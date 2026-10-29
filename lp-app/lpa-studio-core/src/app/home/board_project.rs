@@ -143,10 +143,13 @@ pub fn generate_board_project(
         ("module.json".to_string(), ROOT_MODULE.into()),
         ("clock.json".to_string(), CLOCK.into()),
         ("playlist.json".to_string(), PLAYLIST.into()),
-        ("fixture.json".to_string(), fixture_json().into_bytes()),
+        (
+            "fixture.json".to_string(),
+            fixture_json(DEFAULT_STRIP_PIXELS).into_bytes(),
+        ),
         (
             "fixture.map2d.json".to_string(),
-            strip_map2d_json().into_bytes(),
+            strip_map2d_json(DEFAULT_STRIP_PIXELS).into_bytes(),
         ),
         (
             "output.json".to_string(),
@@ -186,21 +189,23 @@ fn meteor_export_files() -> impl Iterator<Item = (&'static str, &'static [u8])> 
         .filter(|(path, _)| path.starts_with(METEOR_EXPORT))
 }
 
-/// Root module: the four fixed nodes of a first project.
+/// Root module: the four fixed nodes of a first project, in the order the
+/// canonical writer puts them (by name), so a generated project rewrites
+/// byte-identically (`lp-cli`'s `examples_valid`).
 const ROOT_MODULE: &[u8] = br#"{
   "kind": "Module",
   "nodes": {
     "clock": {
       "ref": "./clock.json"
     },
-    "playlist": {
-      "ref": "./playlist.json"
-    },
     "fixture": {
       "ref": "./fixture.json"
     },
     "output": {
       "ref": "./output.json"
+    },
+    "playlist": {
+      "ref": "./playlist.json"
     }
   }
 }
@@ -233,12 +238,13 @@ const PLAYLIST: &[u8] = br#"{
 }
 "#;
 
-fn fixture_json() -> String {
+/// The starter fixture's definition, its texture `pixels` wide.
+pub(crate) fn fixture_json(pixels: u32) -> String {
     format!(
         r#"{{
   "kind": "Fixture",
   "render_size": {{
-    "width": {DEFAULT_STRIP_PIXELS},
+    "width": {pixels},
     "height": {STRIP_TEXTURE_ROWS}
   }},
   "bindings": {{
@@ -263,39 +269,39 @@ fn fixture_json() -> String {
     )
 }
 
-/// A one-row grid in a canvas the same shape as the fixture texture, so a
+/// The output name the strip's mapping starts on: map2d format 6 has no
+/// default output, so the fixture's start names the board's one output.
+const OUTPUT_NAME: &str = "1";
+
+/// A one-row grid in a view box the same shape as the fixture texture, so a
 /// lamp is one texel wide and the row sits on the texture's centre line.
-fn strip_map2d_json() -> String {
-    let centre = f64::from(STRIP_TEXTURE_ROWS) / 2.0;
-    format!(
-        r#"{{
-  "format": 1,
-  "sample_diameter": 1.0,
-  "canvas": [
-    0.0,
-    0.0,
-    {DEFAULT_STRIP_PIXELS}.0,
-    {STRIP_TEXTURE_ROWS}.0
-  ],
-  "objects": [
-    {{
-      "name": "strip",
-      "shape": {{
-        "grid": {{
-          "origin": [
-            0.5,
-            {centre}
-          ],
-          "cols": {DEFAULT_STRIP_PIXELS},
-          "rows": 1,
-          "pitch": 1.0
-        }}
-      }}
-    }}
-  ]
-}}
-"#
-    )
+/// Map2d format 6 through `lpc-mapping`'s writer: one part, `strip`,
+/// starting at port 0, lamp 0 of the output [`OUTPUT_NAME`].
+pub(crate) fn strip_map2d_json(pixels: u32) -> String {
+    use lpc_mapping::part::{Mapping, Part, PartId, PartKind, Shape};
+    use lpc_mapping::patching::{Amount, Start};
+    use lpc_mapping::{GridCorner, GridRouting, GridShape};
+
+    let rows = STRIP_TEXTURE_ROWS as f32;
+    let mut strip = Part::new(
+        PartId::new("strip").expect("a valid part id"),
+        PartKind::Shape(Shape::Grid(GridShape {
+            origin: [0.5, rows / 2.0],
+            cols: pixels,
+            rows: 1,
+            pitch: 1.0,
+            routing: GridRouting::Snake,
+            start_corner: GridCorner::default(),
+        })),
+    );
+    strip.name = "strip".to_string();
+    let mapping = Mapping {
+        view_box: [0.0, 0.0, pixels as f32, rows],
+        parts: vec![strip],
+        start: Start::at(OUTPUT_NAME, 0, Amount::lamps(0)),
+        ..Mapping::default()
+    };
+    lpc_mapping::map2d6::write(&mapping).expect("the strip's mapping writes")
 }
 
 /// One port, no count: the single-wire degenerate case of the ports
@@ -305,6 +311,7 @@ fn output_json(endpoint: &str) -> String {
     format!(
         r#"{{
   "kind": "Output",
+  "name": "{OUTPUT_NAME}",
   "ports": {{
     "0": {{
       "endpoint": "{endpoint}"
@@ -432,10 +439,73 @@ mod tests {
     #[test]
     fn the_strip_is_the_default_pixel_count() {
         let project = generate_board_project("quinled/dig-uno", None).expect("dig-uno");
-        let doc = lpc_mapping::Map2dDoc::from_json(&file_text(&project, "fixture.map2d.json"))
-            .expect("the generated mapping parses");
-        let resolved = lpc_mapping::resolve(&doc).expect("and resolves");
-        assert_eq!(resolved.lamps.len(), DEFAULT_STRIP_PIXELS as usize);
+        let mapping = lpc_mapping::map2d6::read(&file_text(&project, "fixture.map2d.json"))
+            .expect("the generated mapping reads as format 6");
+        let tree = lpc_mapping::part::render(&mapping).expect("and renders");
+        assert_eq!(tree.positions().len(), DEFAULT_STRIP_PIXELS as usize);
+    }
+
+    /// Every lamp of the strip lands, in order, from port 0 of the output
+    /// the project names: lamp k on channel 3k.
+    #[test]
+    fn the_strip_lights_every_lamp_in_order_from_port_0() {
+        use lpc_mapping::patching::{OutputPorts, patch_mapping};
+
+        let project = generate_board_project("seeed/xiao-esp32-c6", None).expect("xiao");
+        let output = file_text(&project, "output.json");
+        assert!(
+            output.contains(&format!("\"name\": \"{OUTPUT_NAME}\"")),
+            "the output carries the name the mapping starts on: {output}"
+        );
+        let mapping = lpc_mapping::map2d6::read(&file_text(&project, "fixture.map2d.json"))
+            .expect("format 6");
+        let tree = lpc_mapping::part::render(&mapping).expect("renders");
+        let ports = [OutputPorts::of_lamps(OUTPUT_NAME, &[None], 3)];
+        let patching = patch_mapping(&mapping, &tree, &ports);
+        assert!(patching.problems.is_empty(), "{:?}", patching.problems);
+        let segments = tree.segments();
+        assert_eq!(segments.len(), 1, "one strip, one segment");
+        for lamp in 0..DEFAULT_STRIP_PIXELS {
+            let address = patching
+                .landing(&segments[0].id, lamp)
+                .unwrap_or_else(|| panic!("lamp {lamp} lands"));
+            assert_eq!(
+                (address.output.as_str(), address.port.0, address.channel),
+                (OUTPUT_NAME, 0, lamp * 3),
+                "lamp {lamp}"
+            );
+        }
+    }
+
+    /// The agent's board goldens (`tests/fixtures/app_agent/golden/*`) are
+    /// generated boards with the strip resized, carried to format 12 by the
+    /// upgrade: the generator writes, at each golden's lamp count, the same
+    /// mapping bytes the upgrade wrote, and its output carries the name the
+    /// upgrade gave.
+    #[test]
+    fn the_strip_mapping_is_the_bytes_the_upgrade_wrote_for_each_golden() {
+        let golden = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/app_agent/golden");
+        let mut compared = 0;
+        for entry in std::fs::read_dir(&golden).expect("the goldens") {
+            let dir = entry.expect("an entry").path();
+            let text = std::fs::read_to_string(dir.join("fixture.map2d.json"))
+                .unwrap_or_else(|e| panic!("{}: {e}", dir.display()));
+            let mapping = lpc_mapping::map2d6::read(&text).expect("format 6");
+            let lamps = lpc_mapping::part::render(&mapping)
+                .expect("renders")
+                .positions()
+                .len() as u32;
+            assert_eq!(strip_map2d_json(lamps), text, "{}", dir.display());
+            let output = std::fs::read_to_string(dir.join("output.json")).expect("output");
+            assert!(
+                output.contains(&format!("\"name\": \"{OUTPUT_NAME}\"")),
+                "{}",
+                dir.display()
+            );
+            compared += 1;
+        }
+        assert!(compared >= 12, "only {compared} goldens");
     }
 
     fn file_bytes<'a>(project: &'a GeneratedProject, path: &str) -> &'a [u8] {

@@ -180,7 +180,7 @@ fn write_pipeline(fs: &LpFsMemory, prefix: &str, clock_transport: &str, endpoint
 }
 
 fn write_shared_assets(fs: &LpFsMemory) {
-    write(fs, "/project.json", "{ \"format\": 11 }\n");
+    write(fs, "/project.json", "{ \"format\": 12 }\n");
     write(
         fs,
         "/shader.glsl",
@@ -191,11 +191,10 @@ fn write_shared_assets(fs: &LpFsMemory) {
         "/map.json",
         r#"
 {
-  "format": 1,
-  "sample_diameter": 2.0,
-  "canvas": [0.0, 0.0, 100.0, 100.0],
-  "objects": [
-    { "name": "grid", "shape": { "grid": { "origin": [50, 50], "cols": 2, "rows": 2, "pitch": 10 } } }
+  "format": 6,
+  "view_box": [0.0, 0.0, 100.0, 100.0],
+  "parts": [
+    { "id": "grid", "kind": { "grid": { "origin": [50, 50], "cols": 2, "rows": 2, "pitch": 10 } } }
   ]
 }
 "#,

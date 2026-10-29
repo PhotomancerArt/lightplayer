@@ -27,6 +27,7 @@ use lpc_wire::WireEncoding;
 use crate::client::HostSpecifier;
 use crate::client::board_password::board_password_from_env;
 use crate::client::client_connect::client_connect;
+use crate::client::device_not_ready::DeviceNotReady;
 use crate::client::relay_session::{account_link_keys, cloud_session_from_env};
 use crate::client::serial_port::detect_serial_port;
 
@@ -175,11 +176,8 @@ pub async fn cli_connect_with_password(
             .map_err(|error| anyhow::anyhow!("failed to open device session: {error}"))?;
             let state = session.wait_ready().await;
             if !state.is_ready() {
-                let message = state
-                    .unavailable_message()
-                    .unwrap_or_else(|| format!("{state:?}"));
                 let _ = session.close().await;
-                anyhow::bail!("device did not become ready: {message}");
+                return Err(DeviceNotReady::new(state).into());
             }
             Ok(CliConnection::Device(session))
         }

@@ -575,7 +575,6 @@ claude-launch-json mode="":
         ;;
       *) echo "unknown mode: {{ mode }} (want empty | bench)" >&2; exit 2 ;;
     esac
-    lab_port="$(scripts/dev-port.sh --query lab-mapping)"
     mkdir -p .claude
     cat > .claude/launch.json <<EOF
     {
@@ -587,27 +586,11 @@ claude-launch-json mode="":
           "runtimeArgs": ["${recipe}"],
           "port": ${port},
           "autoPort": false
-        },
-        {
-          "name": "lab-mapping",
-          "runtimeExecutable": "just",
-          "runtimeArgs": ["lab-mapping"],
-          "port": ${lab_port},
-          "autoPort": false
         }
       ]
     }
     EOF
-    echo "wrote .claude/launch.json (${recipe} port ${port}, lab-mapping port ${lab_port})"
-
-# The mapping design lab (lab/mapping/README.md): the editor canvas on its
-# own, no device and no Studio. Port from dev-port.sh like every dev server.
-lab-mapping: install-wasm32-target
-    #!/usr/bin/env bash
-    set -euo pipefail
-    port="$(scripts/dev-port.sh lab-mapping)"
-    echo "Serving the mapping lab at http://127.0.0.1:${port}/"
-    dx serve --web -p lab-mapping-web --port "${port}" --addr 127.0.0.1 --open false
+    echo "wrote .claude/launch.json (${recipe} port ${port})"
 
 # studio-dev on a reserved bench-block port, so the standing WebSerial
 # grant (`just serial-grant`, Google Chrome only) covers the origin and the
@@ -3434,12 +3417,11 @@ build-xt-fixtures:
 # without it that module is not compiled and its tests silently do not run.
 # CI gates this recipe on studio paths (the feature-unified Dioxus rebuild is
 # the single most expensive test compile); locally it is part of `test-rust`.
-# The mapping lab's crates ride along: Studio's Graph mounts them, they are
-# not default members, and nothing else runs their statements. Not
-# `lab-mapping-fit-tests` (slow, and retired with the old patch path).
+# The Graph's crates (`lpa-graph`, `-files`, `-layout`, `-arrows`) are default
+# members, so `test-rust-core` runs their statements; `lpa-graph-web` has no
+# tests of its own and is built here, under Studio.
 test-studio-host:
-    cargo test -p lpa-studio-web -p lpa-studio-web-story-macros --features lpa-studio-web/stories \
-        -p lab-mapping-model -p lab-mapping-files -p lab-layout -p lab-arrows
+    cargo test -p lpa-studio-web -p lpa-studio-web-story-macros --features lpa-studio-web/stories
 
 # The browser CPU tier's shader frontend, on the engine's own palette suite.
 #
@@ -3864,7 +3846,12 @@ test-emu-c6-split-boot scenarios="": install-rv32-target
 #   read-back equals engine.bin · U14 a host gone mid-core, resumed by the
 #   next · U15 a corrupted raw chunk fails its piece, sent again · U16 the
 #   update light (dark yellow / dark red) off the pad · U17 the board's `M`
-#   equals its package's ota-manifest.json. U7 is a named skip.
+#   equals its package's ota-manifest.json. U7 is a named skip. Across a
+#   project-format bump (the update's project stage): X1 a board on the last
+#   published format-11 release, holding format-11 projects, updated to this
+#   tree lights the same frames after; X2 a power cut before every request of
+#   the stage is finished by the next host. Their X is fetched (needs the
+#   network once), and only the `lp` door boots it.
 #
 # NOT in CI (DM26): four packaged split builds (X, Y, Y with
 # `fixture-trial-dies`, X with `fixture-usb-untrusted`; ~2 min each on an
@@ -3882,6 +3869,13 @@ test-emu-c6-ota scenarios="" filter="": install-rv32-target
         scripts/ota/build-image.sh "$out/y" b1b1b1b1
         scripts/ota/build-image.sh "$out/y-dies" c1c1c1c1 esp32c6,server,fixture-trial-dies
         scripts/ota/build-image.sh "$out/x-untrusted" a0a0a0a0 esp32c6,server,fixture-usb-untrusted
+    fi
+    # X1/X2, the crossing: the newest PUBLISHED release before the last
+    # project-format bump (2026.10.27-5 is format 11; bump this with the next
+    # format), fetched from the firmware store, never rebuilt here.
+    release="${LP_OTA_CROSS_RELEASE:-2026.10.27-5}"
+    if [[ "$(jq -r .version "$out/x-release/ota/ota-manifest.json" 2>/dev/null)" != "$release" ]]; then
+        scripts/ota/fetch-release-image.sh "$out/x-release" "$release"
     fi
     # Through both front doors, as test-emu-c6-split-boot.
     for door in lp idf; do
@@ -5802,6 +5796,11 @@ walk-drop-emu *args:
 # relay protocol 1 commit, updated through the relay to this build, which
 # then sends pictures (`WALK_OTA_X=target/walk-ota-emu/images/x-p1 just
 # walk-ota-emu --relay --steps update`; pictures-through-the-cloud plan P6).
+# Across a project-format bump (not default steps): `--steps cross-format`
+# and `cut-upgrade` board the last PUBLISHED format-11 release (fetched by
+# scripts/ota/fetch-release-image.sh, `LP_OTA_CROSS_RELEASE`) holding
+# format-11 projects; `found-older` and `cut-older` a board already on this
+# build holding them. docs/reports/2026-10-28-ota-project-upgrade-walk.md.
 walk-ota-emu *args: install-rv32-target
     #!/usr/bin/env bash
     set -euo pipefail
@@ -5839,10 +5838,27 @@ walk-ota-emu *args: install-rv32-target
         exit 0
     fi
     images=target/walk-ota-emu/images
-    if [[ -z "${WALK_OTA_X:-}" && ! -f "${images}/x/merged.bin" ]]; then
+    # The crossing's steps (cross-format, cut-upgrade, found-older,
+    # cut-older) board the last PUBLISHED release before the last
+    # project-format bump, fetched (never built here); a run of only those
+    # steps needs no images/x and no single image.
+    crossing_only=0
+    if [[ " {{ args }} " =~ --steps\ ([a-z,-]+) ]]; then
+        crossing_only=1
+        for s in ${BASH_REMATCH[1]//,/ }; do
+            case "$s" in cross-format|cut-upgrade|found-older|cut-older) ;; *) crossing_only=0 ;; esac
+        done
+    fi
+    if [[ " {{ args }} " == *cross-format* || " {{ args }} " == *cut-upgrade* ]]; then
+        release="${LP_OTA_CROSS_RELEASE:-2026.10.27-5}"
+        if [[ -z "${WALK_OTA_CROSS:-}" && "$(jq -r .version target/ota-cross/x-release/ota/ota-manifest.json 2>/dev/null)" != "$release" ]]; then
+            scripts/ota/fetch-release-image.sh target/ota-cross/x-release "$release"
+        fi
+    fi
+    if [[ "$crossing_only" == 0 && -z "${WALK_OTA_X:-}" && ! -f "${images}/x/merged.bin" ]]; then
         scripts/ota/build-image.sh "${images}/x" a0a0a0a0
     fi
-    if [[ ! -f "${images}/mono/package/manifest.json" ]]; then
+    if [[ "$crossing_only" == 0 && ! -f "${images}/mono/package/manifest.json" ]]; then
         ./target/debug/lp-cli firmware package esp32c6-4mb --single-image --out "${images}/mono/package"
     fi
     # install-older's (and install-lookup's) two releases (they differ only

@@ -3,10 +3,11 @@
 //!
 //! The `output` section is the fixture's "one home" (2D mapping plan D9):
 //! the control product's LED sample points rendered full-bleed on the lamp
-//! canvas — and, when the mapping is a `Map2d` document, an `edit` toggle
-//! that flips the same section into the in-place mapping editor, synced
-//! through the asset pipeline (whole-body apply / project save). No
-//! separate pane.
+//! canvas, in its mapped shape. The mapping is edited on the Graph, the
+//! project's one canvas: when the fixture has a map, the bar carries a
+//! pencil that is a plain link to the current lens's Graph ("Edit
+//! mapping"). It selects nothing by address; outside a workbench frame
+//! (stories) there is no address and no pencil.
 //!
 //! The bar above that hero carries the product's own chrome at its head —
 //! name, the publish chip when the control output is wired to a bus
@@ -21,16 +22,9 @@
 //! header row of its own: two near-empty bars stacked over the lamp field
 //! is precisely the chrome two words and two buttons have not earned.
 //!
-//! The toggle bar is stable across the flip: the pencil keeps its spot at
-//! the head of the instrument cluster (click again to leave edit mode) and
-//! the shared view state feeds whichever renderer is showing, including
-//! live output colors. What the
-//! bar *offers* is not stable, and should not be: the wiring instruments
-//! (numbers, arrows) are authoring tools, so they appear
-//! only in edit mode, and view mode's bar carries the live toggle alone.
-//! Edit mode also adds the texture-frame toggle and a full-page expand
-//! (fixed-position in place; the section never leaves the DOM). Toggle +
-//! edit-mode state are view-local for now, same as the drawer open-state (a
+//! The toggle bar carries the live toggle; the wiring instruments
+//! (numbers, arrows) are authoring tools and stay off the face. Toggle
+//! state is view-local for now, same as the drawer open-state (a
 //! CardUiState re-home is an existing follow-up).
 //!
 //! Between the output and the settings sits the `space` section — the
@@ -55,11 +49,14 @@ use lpa_studio_core::{
     NodeCardDrawer, NodeUiOp, UiAction, UiFixtureFace as UiFixtureFaceData, UiProductKind,
 };
 
+use crate::app::node::face::fixture_shape_moment::EDIT_MAPPING;
 use crate::app::node::face::{FixturePatchRow, FixtureShapeMoment, node_ui_action};
 use crate::app::node::map_view::{MapViewOptions, MapViewToggles};
 use crate::app::node::{
     NodeCardSection, PanelControl, ProductIdentity, ProductPreview, SlotDetailButton,
 };
+use crate::app::workbench::WorkbenchView;
+use crate::app::workbench::view_links::use_view_href;
 
 use super::space_section::{SPACE_SECTION_LABEL, SpaceSection, space_section_summary};
 
@@ -96,14 +93,13 @@ pub fn FixtureFace(
     // below settings).
     let mut space_open = use_signal(move || space_initially_open);
     let preview = face.preview.clone();
-    // One view state for both faces of the section: the same toggle bar
-    // (and its state) survives the view ⇄ edit flip, and the toggles drive
-    // the editor canvas exactly like the display renderer.
-    let mut view = use_signal(move || initial_map_view.unwrap_or_default().into_editor());
+    // The toggle bar's state, view-local (see module doc).
+    let mut view = use_signal(move || initial_map_view.unwrap_or_default());
     let show_toggles = preview.kind == UiProductKind::Control;
-    // The mapping edits in the workbench's Mapping view now (the R1
-    // ruling deleted the in-place embed); the pencil is a doorway.
-    let editable = face.mapping_editor.is_some();
+    // The mapping is edited on the Graph: a fixture with a map links there
+    // (a link, not an action — it navigates and changes nothing).
+    let graph_href = use_view_href(WorkbenchView::Graph);
+    let mapping_href = graph_href.filter(|_| face.mapping_editor.is_some());
 
     rsx! {
         NodeCardSection { label: "output", first: true,
@@ -115,25 +111,26 @@ pub fn FixtureFace(
                     // two near-empty bars stacked over the lamp field is
                     // exactly the chrome the style rules refuse.
                     ProductIdentity { product: preview.clone() }
-                    div { class: "lpme-spacer" }
-                    if editable {
-                        button {
+                    div { class: "tw:flex-1" }
+                    if let Some(href) = mapping_href.clone() {
+                        a {
                             class: "ux-map-toggle",
-                            title: "edit the mapping (opens the Mapping view)",
-                            onclick: move |_| open_mapping_view(),
+                            href: "{href}",
+                            title: EDIT_MAPPING,
+                            aria_label: EDIT_MAPPING,
+                            // The bar sits in the card; opening the Graph
+                            // must never double as the card's own click.
+                            onclick: move |event: MouseEvent| event.stop_propagation(),
                             Pencil { size: 13 }
                         }
                     }
                     if show_toggles {
                         MapViewToggles {
-                            value: view().into(),
-                            on_change: move |next: MapViewOptions| {
-                                next.apply_to_editor(&mut view.write());
-                            },
+                            value: view(),
+                            on_change: move |next: MapViewOptions| view.set(next),
                             bare: true,
-                            // The wiring instruments moved to the Mapping
-                            // view with the editor; the face shows the
-                            // product.
+                            // The wiring instruments are authoring tools;
+                            // the face shows the product.
                             wiring: false,
                         }
                     }
@@ -192,8 +189,7 @@ pub fn FixtureFace(
                 FixtureShapeMoment {
                     presets: face.shape_presets.clone().expect("checked above"),
                     node: node.clone(),
-                    on_open_mapping: editable
-                        .then_some(EventHandler::new(move |()| open_mapping_view())),
+                    mapping_href: mapping_href.clone(),
                     on_action,
                 }
             }
@@ -276,11 +272,4 @@ fn PowerReadout(
             }
         }
     }
-}
-
-/// The pencil's doorway since the in-place embed was deleted (R1): jump
-/// to the current project's Mapping view, where the one editor lives.
-fn open_mapping_view() {
-    let route = crate::router::current_route().with_view(crate::router::ProjectView::Mapping);
-    crate::router::navigate_push(&route);
 }

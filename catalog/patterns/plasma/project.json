@@ -1,5 +1,5 @@
 {
-  "format": 11,
+  "format": 12,
   "name": "Plasma",
   "description": "Soft rainbow plasma: blobs of every colour flowing into one another. One shader, three knobs: speed, scale and palette. Also the docs' live figure.",
   "kind": "pattern",

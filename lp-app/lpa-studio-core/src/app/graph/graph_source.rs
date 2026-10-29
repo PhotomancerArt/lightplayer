@@ -1,6 +1,6 @@
-//! The open project's files, as the mapping lab's files crate reads them.
+//! The open project's files, as lpa-graph-files reads them.
 //!
-//! `lab_mapping_files::Opened::open` walks a project from `project.json`
+//! `lpa_graph_files::Opened::open` walks a project from `project.json`
 //! and asks for each file it needs by path. Studio holds a file's text
 //! once something has fetched it (the project controller's asset cache:
 //! an edit not yet saved, the overlay, or the saved body). A file not
@@ -12,7 +12,7 @@
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 
-use lab_mapping_files::Source;
+use lpa_graph_files::Source;
 use lpc_model::ArtifactLocation;
 
 use crate::app::project::ProjectController;

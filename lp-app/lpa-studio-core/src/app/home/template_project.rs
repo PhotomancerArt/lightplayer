@@ -106,11 +106,11 @@ mod tests {
                 .iter()
                 .find(|(name, _)| name == path)
                 .unwrap_or_else(|| panic!("template ships {path}"));
-            let doc = lpc_mapping::Map2dDoc::from_json(std::str::from_utf8(bytes).unwrap())
-                .unwrap_or_else(|e| panic!("{path} parses: {e}"));
-            let resolved =
-                lpc_mapping::resolve(&doc).unwrap_or_else(|e| panic!("{path} resolves: {e}"));
-            assert_eq!(resolved.lamps.len(), expected, "{path}");
+            let mapping = lpc_mapping::map2d6::read(std::str::from_utf8(bytes).unwrap())
+                .unwrap_or_else(|e| panic!("{path} reads as format 6: {e}"));
+            let tree = lpc_mapping::part::render(&mapping)
+                .unwrap_or_else(|e| panic!("{path} renders: {e}"));
+            assert_eq!(tree.positions().len(), expected, "{path}");
         }
     }
 }

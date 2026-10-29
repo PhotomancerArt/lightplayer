@@ -36,7 +36,7 @@ none.
    A name-only file is a named, unstamped board.
 2. **The wire:** `ClientRequest::SetDeviceName { name }` (edit tier) and its
    answer `ServerMsgBody::SetDeviceName { name }`; the hello carries
-   `deviceName`. `WIRE_PROTO_VERSION` 46. Every end cleans a name the same
+   `deviceName`. `WIRE_PROTO_VERSION` 47. Every end cleans a name the same
    way (`lpc_wire::clean_device_name`: controls dropped, whitespace
    collapsed, 64 characters at most).
 3. **When Studio writes it:** a rename (the name bar, the push picker's

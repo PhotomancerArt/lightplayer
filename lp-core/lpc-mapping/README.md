@@ -4,16 +4,28 @@ The LED fixture mapping domain, shared by the engine, the device and Studio:
 **mapping = layout + patching**. A fixture's mapping says where each lamp is
 and where on the hardware its data goes.
 
-The crate holds two generations side by side until M3 (project format 12)
-of the mapping rebuild (planning `lp2025/2026-10-27-0114-mapping-rebuild`;
+The mapping rebuild (planning `lp2025/2026-10-27-0114-mapping-rebuild`;
 ADR `docs/adr/2026-10-27-mapping-model-parts-segments-patcher.md`):
 
 - **The mapping model and map2d format 6** (`part`, `patching`, `map2d6`):
-  parts, segments and the patcher, in one file. Built in M1; nothing outside
-  the crate calls it yet. The engine moves onto it in M2, every project in
-  M3, Studio's Graph in M4.
-- **Today's documents** (map2d formats 1–5, the patch document): what the
-  engine, the device and Studio run until M3 retires them (below).
+  parts, segments and the patcher, in one file. Built in M1; since M3
+  (project format 12) the engine runs it for every fixture, and its patching
+  is the engine's one patching path. Studio's Graph edits it too.
+- **Edits** (`edit`, behind the `edit` feature): the part-tree edits an
+  editor makes. Below, "The `edit` feature".
+- **The older map2d document** (formats 1–5, `Map2dDoc`): its resolver is
+  also the new model's geometry (each shape's lamps come from
+  `resolve_into` on a one-object document). Nothing that runs a project
+  reads it: the engine reads format 6 only. What still reads it: the
+  logo-sign and small-dome generators (`lpa-studio-web`'s
+  `logo_sign_gen.rs`, `tools/lpt-geodome`) build their geometry with it
+  before they write format 6; Studio's fixture-face stories draw the
+  `corpus` scenes; and the format-12 upgrade's statements
+  (`lpa-upgrade/tests/step_v11_to_v12.rs`) check lamps against its
+  resolver. Studio's Map tab, which edited it, is gone (2026-10-28). The patch document
+  (`patch.rs`, `PatchDoc`) and `MapObjectPath` were deleted in M3; projects
+  were upgraded into format 6 by `lpa-upgrade`, which keeps its own frozen
+  copy of the old readers.
 
 ## The mapping model
 
@@ -74,6 +86,7 @@ circular display as soldered:
 ```json
 {
   "format": 6,
+  "view_box": [0.0, 0.0, 100.0, 100.0],
   "next": { "circle": 2 },
   "start": { "output": { "set": "main" }, "port": { "set": 0 },
              "channel": { "set": { "lamps": 0 } } },
@@ -90,6 +103,12 @@ circular display as soldered:
 }
 ```
 
+- `view_box` (required): the fixture's coordinate system, `[min_x, min_y,
+  width, height]` in the layout's units, y down, as an SVG `viewBox`; the
+  fit frames it (a box of no width or height frames the lamps' own
+  bounds). A document without one is refused by name. Lamps have no size:
+  a `sample_diameter` is refused by name (fixture-space theory, D7, D11,
+  D28).
 - Kinds: `path` (`d`: SVG path data, `M` and `L`; `H`/`V` read as lines;
   `Z`, curves and arcs refused by name until built; a move inside a path is
   the jumper; `split: "subpaths"`), `polygon`, `grid`, `filled_polygon`
@@ -104,24 +123,59 @@ circular display as soldered:
   and `offset` (lamps). One naming no node is kept.
 - Counters: `next` (per kind word), `next_ring` (per circle). Format 6
   saves no lamp facts; the lamp-model plan adds them with its own bump.
-- The format is peeked first: a newer document is refused as newer, 1–5
-  go to today's reader. Writing gives one canonical form, so a document
-  read and written back is the same bytes.
+- `read` takes format 6 only. A newer document is refused as newer, and
+  1–5 as "the older layout document" (the upgrade is the host's,
+  `lpa-upgrade`). Without `std` (the device), every error's text is one
+  sentence, `map2d6::DEVICE_REFUSAL`: the device runs every check a host
+  runs and drops only the words, so a board accepts exactly what a host
+  accepts. Writing gives one canonical form, so a document read and written
+  back is the same bytes.
+
+## The `edit` feature
+
+`edit/` holds the edits an editor makes to a `part::Mapping`, each one
+function that keeps the document whole: add, insert, move, remove and
+rename a part; wrap a part in a repeat, unrepeat it, expand a repeat into
+its copies; set a repeat's count or a shape's lamps; add and remove
+rings, set a ring's radius, a circle's way round and split, a path's
+split, where a shape is drawn from, a lattice; set starts and flows; set
+and clear override fields. Every editor gets the same answers: Studio's
+Graph, the app agent through the Graph's offers, and someday `lp-cli`.
+
+Some edits change which ids exist (a rename, a wrap in a repeat, an
+expand, fewer copies). Overrides are keyed by id and are never
+retargeted: an edit carries an override to its node's new id, or keeps
+it as it was for the patcher to report as gone. An edit that could keep
+one only by pointing it at a different node is refused, and a refused
+edit changes nothing.
+
+The feature is off by default. `lpa-graph` (Studio's Graph) turns it on.
+No firmware does, and neither does `lpc-engine`, so the C6 image never
+compiles it. Its statements are `tests/edit.rs`:
+
+```sh
+cargo test -p lpc-mapping --features edit
+```
 
 ## Modules
 
 | Module | What |
 |---|---|
-| `part/` | The parts, the rendered tree, ids, segments, `render` |
-| `patching/` | Starts, flows, overrides, the cursor, `patch_mapping`, spans, problems |
-| `map2d6/` | Format 6: its document structs, path data, `read`, `write` |
-| `map2d_doc`, `map2d_resolve`, `map2d_fit`, `map2d_object_id` | Today's document and resolver; the resolver is also the new model's geometry |
-| `patch` | Today's patch document (until M3) |
+| `part/` | The parts, the rendered tree, ids, segments, `render`, `render_layout` (the same tree with no lamp placed: what a patch walks), `Tree::take_positions` (the engine's carrier takes the positions), `Mapping::same_layout` (a patching-only edit renders nothing) |
+| `patching/` | Starts, flows, overrides, the cursor, `patch_mapping`, `patch_mapping_placed` (no walk record: the engine's), spans, problems |
+| `map2d6/` | Format 6: its document structs, a small JSON reader (`json_text`, no serde on the read path), path data, `read`, `write`, `DEVICE_REFUSAL` |
+| `edit/` (feature `edit`) | Edits that rewrite references (insert, move, rename, wrap in a repeat, expand, rings, starts, flows, overrides): Studio's Graph; never compiled into firmware |
+| `sorted_set` | Sorted-`Vec` id sets the reader, render and patcher check ids with (smaller on the C6 than a B-tree) |
+| `map2d_doc`, `map2d_resolve`, `map2d_fit`, `map2d_object_id`, `map2d_error` | The older document (formats 1–5) and its resolver; the resolver is also the new model's geometry |
 | `editor_meta` | Studio's `editor.json` |
-| `import/` | SVG import into today's document |
-| `corpus` | Shared test scenes |
+| `import/` | SVG import into the older document (the logo-sign generator uses it) |
+| `corpus` | Shared test scenes in the older document (Studio's fixture-face stories) |
 
-## Today's map2d document (formats 1–5, until M3)
+## The older map2d document (formats 1–5)
+
+What follows describes `Map2dDoc`, which no project at format 12 holds: the
+upgrade rewrote every one into format 6. It stays for the resolver (the new
+model's geometry) and the readers named at the top.
 
 A mapping document (`fixture.map2d.json`) is a format-versioned JSON asset,
 opaque to the slot system, holding parametric objects whose order **is** the
@@ -234,42 +288,6 @@ not a runtime source of truth. CLI form:
 cargo run -p lpc-mapping --example svg_to_map2d -- path/to/mapping.svg > fixture.map2d.json
 ```
 
-## The patch document (until M3)
-
-Format 6 retires it: its rows become starts and overrides in the map2d file
-(M3). Until then: mapping says where a lamp *is*; **patching** says which physical jack the
-strand ended up in. A fixture is mapped once and re-patched on every install,
-so the patch is its own document (`fixture.patch.json`) beside the mapping —
-clearing a patch never disturbs a lamp position.
-
-```json
-{
-  "format": 1,
-  "entries": [
-    { "range": { "start": 0,  "count": 22 }, "at": { "channel": 0 } },
-    { "range": { "start": 22, "count": 22 }, "at": { "channel": 34 },
-      "reversed": true }
-  ]
-}
-```
-
-`range` is fixture-relative — lamp indices in the wiring order above — and
-`at.channel` is the lamp offset on the output's wire. Omitting `count` means
-"to the end of the fixture", so a patched tail survives the fixture growing.
-`reversed` lays a run down end-first (the strand fed from its far end); it is
-a placement bit, unrelated to a fixture's own `wire_reversed` sampling.
-
-Patches are **sparse**: `resolve_patch` anchors the entries and reflows every
-unclaimed lamp after the highest anchored end, in fixture order. So no patch,
-an empty patch, and a patch that anchors nothing all resolve to what auto-flow
-would have produced — clearing restores the default rather than going dark, and
-partial patching is the ordinary case. Two entries of one fixture claiming the
-same lamp, or the same wire channel, are a document error (two *different*
-fixtures colliding on one output is a runtime condition the engine degrades and
-reports). Format 2 added rows by object path (`/id/k`), outputs by name and
-a rotation offset; format 3 a `flow` (`auto` or `manual`); `PatchDoc`'s
-module doc holds the full form.
-
 ## Boundary
 
 Schema + pure geometry only: `no_std + alloc`, sans-IO, no engine types, no
@@ -313,10 +331,10 @@ document therefore declares what it *needs*, not what wrote it — strip the las
 newer construct out and it drops back to the older format, readable by older
 firmware again.
 
-**Editors refuse to edit what they cannot parse, and never rewrite it.** Both
-Studio hosts (the fixture face and the standalone `#/mapping` page) render the
-refusal in place of the editor: nothing mounts, no body is emitted, no autosave
-is overwritten, and the stored document survives open → close byte-identical.
+**Editors refuse to edit what they cannot parse, and never rewrite it.**
+Studio's Graph (`/graph`; the old `#/mapping` page and the Map tab are gone)
+refuses a mapping it cannot read by name and writes nothing: the stored
+document survives open → close byte-identical.
 
 ## Corpus
 

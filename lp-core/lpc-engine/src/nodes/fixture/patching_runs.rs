@@ -12,6 +12,13 @@
 //! (F9, `limit`) lands only the lamps whose place is inside the port; those
 //! are one or two runs with no rotation.
 //!
+//! **Contiguous segments are one run.** A segment whose run continues the
+//! one before it (the same output and direction, no rotation in either, the
+//! fixture's next lamps on the next wire lamps) extends that run instead of
+//! adding one: 64 spokes of 8 lamps laid end to end are one run, so one
+//! output fragment, not 64 (M2 P6). Every lamp lands where it did; only the
+//! number of records changes.
+//!
 //! **Refused, per segment** (lean Q41, D2): a start part-way into a lamp, a
 //! lamp other than RGB, an order other than the fixture's. A refused segment
 //! makes no run, but the patcher already laid it, so it keeps its room on the
@@ -132,17 +139,20 @@ fn push_runs(runs: &mut Vec<PatchedRun>, laid: &SegmentPatch, first: u32, lamp: 
         return;
     }
     let reversed = laid.direction.is_reverse();
-    let output = Some(alloc::string::String::from(laid.address.output.as_str()));
+    let output = alloc::string::String::from(laid.address.output.as_str());
     let reach = laid.limit.map_or(n, |limit| limit.min(n));
     if reach == n {
-        runs.push(PatchedRun {
-            start: first,
-            count: n,
-            lamp,
-            reversed,
-            offset: laid.offset % n,
-            output,
-        });
+        push_run(
+            runs,
+            PatchedRun {
+                start: first,
+                count: n,
+                lamp,
+                reversed,
+                offset: laid.offset % n,
+                output,
+            },
+        );
         return;
     }
     // Clipped (F9): wire places `0..reach` only. Wire place `w` holds the
@@ -167,14 +177,53 @@ fn push_runs(runs: &mut Vec<PatchedRun>, laid: &SegmentPatch, first: u32, lamp: 
         } else {
             oriented
         };
-        runs.push(PatchedRun {
-            start: first + start,
-            count,
-            lamp: lamp + place,
-            reversed,
-            offset: 0,
-            output: output.clone(),
-        });
+        push_run(
+            runs,
+            PatchedRun {
+                start: first + start,
+                count,
+                lamp: lamp + place,
+                reversed,
+                offset: 0,
+                output: output.clone(),
+            },
+        );
+    }
+}
+
+/// Add `run`, or extend the last run with it when it continues that run.
+fn push_run(runs: &mut Vec<PatchedRun>, run: PatchedRun) {
+    if let Some(last) = runs.last_mut()
+        && continues(last, &run)
+    {
+        if run.reversed {
+            // Laid end-first: the merged run's window starts at the later
+            // run's, which sits just before the earlier one on the wire.
+            last.lamp = run.lamp;
+        }
+        last.count += run.count;
+        return;
+    }
+    runs.push(run);
+}
+
+/// Does `next` continue `last`: the same output and direction, neither
+/// rotated, the fixture's next lamps, laid on the wire lamps right after
+/// `last`'s (forward) or right before them (reversed, laid end-first)? Then
+/// one run of both places every lamp where the two did.
+fn continues(last: &PatchedRun, next: &PatchedRun) -> bool {
+    if last.output != next.output
+        || last.reversed != next.reversed
+        || last.offset != 0
+        || next.offset != 0
+        || last.start.checked_add(last.count) != Some(next.start)
+    {
+        return false;
+    }
+    if next.reversed {
+        next.lamp.checked_add(next.count) == Some(last.lamp)
+    } else {
+        last.lamp.checked_add(last.count) == Some(next.lamp)
     }
 }
 
@@ -185,7 +234,6 @@ mod tests {
     use alloc::vec;
     use lpc_mapping::part::{Mapping, Part, PartId, PartKind, Path, Shape, render};
     use lpc_mapping::patching::{Address, Direction, OutputName, PortKey};
-    use lpc_mapping::{PatchedRange, patched_wire_lamp};
 
     use crate::node::OutputPortSlice;
 
@@ -228,21 +276,13 @@ mod tests {
                         let id = TreeId::of(&pid("path1"));
                         let mut wire: Vec<Option<u32>> = vec![None; n as usize];
                         for run in &placed.runs {
-                            let range = PatchedRange {
-                                start: run.start,
-                                count: run.count,
-                                lamp: run.lamp,
-                                reversed: run.reversed,
-                                offset: run.offset,
-                                output: run.output.clone(),
-                            };
                             for j in 0..run.count {
                                 let source = (run.start + j) as usize;
                                 assert!(
                                     wire[source].is_none(),
                                     "lamp {source} placed twice (n {n} offset {offset} limit {limit:?} {direction:?})"
                                 );
-                                wire[source] = Some(patched_wire_lamp(&range, j));
+                                wire[source] = Some(run.wire_lamp(j));
                             }
                         }
                         for (j, placed) in wire.iter().enumerate() {
@@ -256,6 +296,65 @@ mod tests {
                         }
                     }
                 }
+            }
+        }
+    }
+
+    /// Segments laid end to end on one output are one run; a gap, another
+    /// output, a rotation or a change of direction starts a new one.
+    #[test]
+    fn segments_laid_end_to_end_are_one_run() {
+        let tree = tree_of(&[4, 5, 3, 2, 2, 6]);
+        let mut rotated = seg("path4", "main", 1, 42, 2);
+        rotated.offset = 1;
+        let patching = laid(vec![
+            seg("path1", "main", 1, 0, 4),
+            seg("path2", "main", 1, 12, 5),
+            // A one-lamp gap after path2.
+            seg("path3", "main", 1, 30, 3),
+            rotated,
+            seg("path5", "other", 0, 0, 2),
+            seg("path6", "other", 0, 6, 6),
+        ]);
+        let other = OutputPortTable {
+            name: String::from("other"),
+            ports: vec![port(0, 0, None)],
+        };
+        let placed = patching_runs(&patching, &tree, &[main_table(), other], ColorOrder::Rgb);
+        assert_eq!(
+            placed.runs,
+            vec![
+                run(0, 9, 10, false, 0, "main"),
+                run(9, 3, 20, false, 0, "main"),
+                run(12, 2, 24, false, 1, "main"),
+                run(14, 8, 0, false, 0, "other"),
+            ]
+        );
+    }
+
+    /// Reversed segments laid end-first one before the other are one run,
+    /// and every lamp lands where `Patching::landing` says.
+    #[test]
+    fn reversed_segments_laid_end_first_are_one_run() {
+        let tree = tree_of(&[4, 5]);
+        let mut a = seg("path1", "main", 1, 15, 4);
+        a.direction = Direction::Reverse;
+        let mut b = seg("path2", "main", 1, 0, 5);
+        b.direction = Direction::Reverse;
+        let patching = laid(vec![a, b]);
+        let placed = patching_runs(&patching, &tree, &[main_table()], ColorOrder::Rgb);
+        assert_eq!(placed.runs, vec![run(0, 9, 10, true, 0, "main")]);
+        let range = &placed.runs[0];
+        for (segment, first) in [("path1", 0u32), ("path2", 4)] {
+            let id = TreeId::of(&pid(segment));
+            let n = patching.segment(&id).unwrap().lamps;
+            for j in 0..n {
+                let landed = patching.landing(&id, j).unwrap();
+                assert_eq!(
+                    range.wire_lamp(first + j),
+                    (30 + landed.channel) / 3,
+                    "{segment} lamp {j}"
+                );
             }
         }
     }
@@ -293,8 +392,8 @@ mod tests {
             seg("path2", "other", 0, 0, 5),
         ]);
         let placed = patching_runs(&patching, &tree, &[main_table(), other], ColorOrder::Rgb);
-        let outputs: Vec<Option<&str>> = placed.runs.iter().map(|r| r.output.as_deref()).collect();
-        assert_eq!(outputs, [Some("main"), Some("other")]);
+        let outputs: Vec<&str> = placed.runs.iter().map(|r| r.output.as_str()).collect();
+        assert_eq!(outputs, ["main", "other"]);
     }
 
     /// A segment part-way into a lamp is not placed, and the fixture says
@@ -439,7 +538,7 @@ mod tests {
             lamp,
             reversed,
             offset,
-            output: Some(String::from(output)),
+            output: String::from(output),
         }
     }
 }

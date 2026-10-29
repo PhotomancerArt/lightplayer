@@ -147,8 +147,7 @@ impl OutputFrameCache {
     /// output, so it counts engine frames rather than reads: a repeated
     /// revision (a patch edit re-cutting the wire without republishing) is
     /// not a frame. Zero means no frame has EVER arrived, which is the
-    /// state every story renders in — see
-    /// [`super::patch_preview::preview_phase`].
+    /// state every story renders in.
     pub fn frames_seen(&self) -> u64 {
         self.frames_seen
     }

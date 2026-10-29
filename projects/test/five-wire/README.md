@@ -33,8 +33,9 @@ frame"* is a statement about the machine rather than about when it was
 sampled. Add a clock and a per-frame checksum comparison stops meaning
 anything.
 
-**Five distinct wires.** The five paths sample five different rows of the
-render, so the five wires carry five different byte strings. A routing
+**Five distinct wires.** The five rows of lamps (five `points` parts in
+`fixture.map2d.json`, one per port, end to end from the fixture's start on
+output `"1"`) sample five different rows of the render, so the five wires carry five different byte strings. A routing
 mix-up — two pads driven from one channel, a slot handed to the wrong wire —
 then shows up as two wires with the same checksum, which is exactly the
 failure the second wave can cause. Give every row the same colour and that
@@ -58,3 +59,9 @@ is a function of the project alone.
 It is not a demo. Sixteen lamps a wire is deliberately small: the whole point
 is the slot arithmetic, and a wire long enough to be pretty costs emulated
 seconds without changing what is being measured.
+
+Until project format 12 the lamps were listed inline in `fixture.json`
+(a `PathPoints` mapping, auto-flowed onto the output). The upgrade wrote
+them into `fixture.map2d.json` with every lamp where it was; to land every
+number exactly, its canvas is `[0, 0, 1, 0.24414062]` and the y values sit
+7/64 of the height lower than the old ones (mapping rebuild DD19).

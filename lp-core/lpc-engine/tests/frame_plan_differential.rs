@@ -415,14 +415,15 @@ fn edit_remove_and_restore_node(s: &mut Session) {
     s.write_json("node add", path, &original);
 }
 
-/// A mapping change: the first map's sample diameter.
+/// A mapping change: the first map's view box, half as wide again.
 fn edit_mapping(s: &mut Session) {
     let Some(path) = files(&s.fs)
         .into_iter()
         .filter(|p| p.ends_with(".json"))
         .find(|p| {
             s.read_json(p)
-                .get("sample_diameter")
+                .get("view_box")
+                .and_then(|b| b.get(2))
                 .and_then(Value::as_f64)
                 .is_some()
         })
@@ -430,8 +431,8 @@ fn edit_mapping(s: &mut Session) {
         return;
     };
     let mut map = s.read_json(&path);
-    let d = map["sample_diameter"].as_f64().expect("number");
-    map["sample_diameter"] = Value::from(d * 1.5);
+    let width = map["view_box"][2].as_f64().expect("number");
+    map["view_box"][2] = Value::from(width * 1.5);
     s.write_json("mapping", &path, &map);
 }
 

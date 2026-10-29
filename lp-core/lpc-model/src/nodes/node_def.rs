@@ -439,8 +439,8 @@ fn playlist_entry_node_path(base: &SlotPath, key: u32) -> Option<SlotPath> {
     )
 }
 
-/// A fixture references up to two sibling documents — its mapping and its
-/// patch — and they are independent: either, both, or neither.
+/// A fixture references at most one sibling document: its mapping (which,
+/// since project format 12, holds its patching too).
 fn assets_for_fixture(
     fixture: &FixtureDef,
     containing_file: &LpPath,
@@ -451,13 +451,6 @@ fn assets_for_fixture(
             source,
             containing_file,
             AssetContentType::FixtureMap2d,
-        )?);
-    }
-    if let Some(source) = fixture.patch.value().source() {
-        assets.extend(assets_for_slot(
-            source,
-            containing_file,
-            AssetContentType::FixturePatch,
         )?);
     }
     Ok(assets)
@@ -690,8 +683,8 @@ mod tests {
     use alloc::string::ToString;
 
     use crate::{
-        BindingRef, ConsumerCell2, LpValue, MappingConfig, PathSpec, ShaderSpace,
-        SlotShapeRegistry, SpaceAnswer2, TextureDef, VisualConsumerSpace,
+        BindingRef, ConsumerCell2, LpValue, MappingConfig, ShaderSpace, SlotShapeRegistry,
+        SpaceAnswer2, TextureDef, VisualConsumerSpace,
     };
 
     #[test]
@@ -724,17 +717,14 @@ mod tests {
             r#"{
   "kind": "Fixture",
   "render_size": { "width": 8, "height": 8 },
-  "mapping": { "kind": "PathPoints" }
+  "mapping": { "kind": "Unset" }
 }"#,
         )
         .expect("fixture");
         let NodeDef::Fixture(fixture) = fixture else {
             panic!("expected fixture");
         };
-        assert!(matches!(
-            fixture.mapping.value(),
-            MappingConfig::PathPoints { .. }
-        ));
+        assert!(matches!(fixture.mapping.value(), MappingConfig::Unset));
 
         let fixture = NodeDef::read_json(
             &registry,
@@ -757,44 +747,6 @@ mod tests {
         assert_eq!(
             source.artifact_value().unwrap().to_string(),
             "sign.map2d.json"
-        );
-    }
-
-    #[test]
-    fn node_def_round_trips_point_list_fixture_json() {
-        let registry = registry();
-        let fixture = crate::FixtureDef {
-            mapping: EnumSlot::new(MappingConfig::path_points_vec(
-                alloc::vec![PathSpec::point_list(
-                    3,
-                    alloc::vec![[0.0, 0.25], [1.0, 0.75]],
-                )],
-                2.0,
-            )),
-            ..crate::FixtureDef::default()
-        };
-        let text = NodeDef::Fixture(fixture)
-            .write_json(&registry)
-            .expect("write fixture");
-        let read = NodeDef::read_json(&registry, &text).expect("read fixture");
-        let NodeDef::Fixture(read) = read else {
-            panic!("expected fixture");
-        };
-        let MappingConfig::PathPoints { paths, .. } = read.mapping.value() else {
-            panic!("expected PathPoints");
-        };
-        let PathSpec::PointList {
-            first_channel,
-            points,
-        } = paths.entries.get(&0).expect("path").value();
-        assert_eq!(*first_channel.value(), 3);
-        assert_eq!(
-            points.entries.get(&0).expect("point").value().0,
-            [0.0, 0.25]
-        );
-        assert_eq!(
-            points.entries.get(&1).expect("point").value().0,
-            [1.0, 0.75]
         );
     }
 
@@ -1090,7 +1042,7 @@ mod tests {
             r#"{
   "kind": "Fixture",
   "render_size": { "width": 8, "height": 8 },
-  "mapping": { "kind": "PathPoints" }
+  "mapping": { "kind": "Unset" }
 }"#,
         )
         .expect("fixture");
@@ -1121,13 +1073,7 @@ mod tests {
     fn node_def_json_round_trip_is_byte_stable() {
         let registry = registry();
         let fixture = crate::FixtureDef {
-            mapping: EnumSlot::new(MappingConfig::path_points_vec(
-                alloc::vec![PathSpec::point_list(
-                    3,
-                    alloc::vec![[0.0, 0.25], [1.0, 0.75]],
-                )],
-                2.0,
-            )),
+            mapping: EnumSlot::new(MappingConfig::map2d("sign.map2d.json")),
             ..crate::FixtureDef::default()
         };
         let first = NodeDef::Fixture(fixture)
@@ -1283,12 +1229,13 @@ mod tests {
         );
     }
 
-    /// A patched fixture references TWO siblings, each under its own content
-    /// type — the loader looks assets up one per (node, content type), so a
-    /// shared type would make the pair unresolvable.
+    /// Project format 12 retired the fixture's `patch` slot (its map2d holds
+    /// the patching): a fixture definition that still carries one does not
+    /// parse, so a hand-edited or half-upgraded file is refused rather than
+    /// its patch silently dropped.
     #[test]
-    fn node_def_referenced_assets_carry_the_fixtures_mapping_and_patch_apart() {
-        let fixture = NodeDef::from_json_str(
+    fn a_fixture_with_a_patch_slot_is_refused() {
+        let err = NodeDef::from_json_str(
             r#"{
   "kind": "Fixture",
   "render_size": { "width": 64, "height": 16 },
@@ -1302,44 +1249,8 @@ mod tests {
   }
 }"#,
         )
-        .expect("fixture");
-
-        assert_eq!(
-            fixture
-                .referenced_assets(LpPath::new("/fixtures/f.json"))
-                .unwrap(),
-            vec![
-                ReferencedAsset::new(
-                    AssetLocation::artifact(ArtifactLocation::file("/fixtures/fixture.map2d.json")),
-                    AssetContentType::FixtureMap2d,
-                ),
-                ReferencedAsset::new(
-                    AssetLocation::artifact(ArtifactLocation::file("/fixtures/fixture.patch.json")),
-                    AssetContentType::FixturePatch,
-                ),
-            ]
-        );
-    }
-
-    /// The patch is independent of the mapping: a hand-authored `PathPoints`
-    /// fixture (no mapping document at all) can still be patched.
-    #[test]
-    fn a_patch_is_referenced_without_a_mapping_document() {
-        let fixture = NodeDef::from_json_str(
-            r#"{
-  "kind": "Fixture",
-  "render_size": { "width": 8, "height": 1 },
-  "patch": { "kind": "File", "source": "strip.patch.json" }
-}"#,
-        )
-        .expect("fixture");
-
-        assert_eq!(
-            fixture
-                .referenced_asset_paths(LpPath::new("/fixtures/f.json"))
-                .unwrap(),
-            vec![LpPathBuf::from("/fixtures/strip.patch.json")]
-        );
+        .expect_err("a patch slot is no longer a fixture field");
+        assert!(format!("{err:?}").contains("patch"), "{err:?}");
     }
 
     #[test]

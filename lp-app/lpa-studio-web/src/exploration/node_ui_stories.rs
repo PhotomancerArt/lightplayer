@@ -906,16 +906,16 @@ fn fixture_node() -> NodeUiNode {
                     NodeUiValueRow {
                         source: NodeUiValueSource::Direct,
                         label: "Mapping",
-                        value: "SvgPath",
+                        value: "Map2d",
                         binding_target: None,
                         revision: 42,
                         nested: Some(NodeUiNestedValue {
-                            title: "fyeah-mapping.svg",
+                            title: "fyeah.map2d.json",
                             summary: "sample diameter 2.0",
                             items: vec![
                                 NodeUiNestedItem {
                                     label: "source",
-                                    value: "./fyeah-mapping.svg",
+                                    value: "./fyeah.map2d.json",
                                 },
                                 NodeUiNestedItem {
                                     label: "sampling",
