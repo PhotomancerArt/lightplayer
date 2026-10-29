@@ -21,7 +21,7 @@ use std::cell::{Ref, RefCell};
 use std::rc::Rc;
 
 use dioxus::prelude::*;
-use lab_mapping_model::{Editor, GraphInput};
+use lpa_graph::{Editor, GraphInput};
 
 /// Applies an input to the host's editor; returns whether it was used.
 pub type GraphSink = Rc<dyn Fn(GraphInput) -> bool>;

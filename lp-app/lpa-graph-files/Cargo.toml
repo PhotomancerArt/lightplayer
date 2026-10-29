@@ -1,19 +1,19 @@
 [package]
-name = "lab-mapping-files"
+name = "lpa-graph-files"
 version.workspace = true
 authors.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 publish = false
-description = "Mapping design lab: opens and saves real LightPlayer projects in the product's own formats"
+description = "The Graph — Studio's project canvas: opens and saves real LightPlayer projects in the product's own formats"
 
 # A fixture's mapping is read by `lpc-mapping` (map2d format 6), the reader
 # the engine runs (mapping rebuild M4 P03); the rest of the product's
 # documents are read here as JSON.
 [dependencies]
-lab-mapping-model = { path = "../model" }
-lpc-mapping = { path = "../../../lp-core/lpc-mapping", features = ["std"] }
+lpa-graph = { path = "../lpa-graph" }
+lpc-mapping = { path = "../../lp-core/lpc-mapping", features = ["std"] }
 # Never `preserve_order`: Studio builds this crate (the Graph tab), and cargo
 # unifies features per build, so it would flip serde_json's map order for
 # every crate in Studio — and the committed schema corpus (see lpa-upgrade's
@@ -23,7 +23,7 @@ lpc-mapping = { path = "../../../lp-core/lpc-mapping", features = ["std"] }
 serde_json = { workspace = true, features = ["std"] }
 
 [dev-dependencies]
-lab-layout = { path = "../layout" }
+lpa-graph-layout = { path = "../lpa-graph-layout" }
 
 [lints]
 workspace = true

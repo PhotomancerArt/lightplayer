@@ -6,7 +6,7 @@
 //! The first time, it opens the project with the lab's files crate,
 //! fetching from the board every file the crate asks for that Studio
 //! hasn't read yet ([`GraphSource`]), then builds the editor and lays it
-//! out on the canvas (`lab-layout`).
+//! out on the canvas (`lpa-graph-layout`).
 //!
 //! **Keeping in step.** When the project moves (an edit in Map or Nodes,
 //! the agent, a save), the controller reads again the files the open read.
@@ -46,9 +46,9 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 
-use lab_mapping_files::{Opened, ProductProject};
-use lab_mapping_model::Project;
-use lab_mapping_model::{BoardFrame, Editor, NodeId};
+use lpa_graph::Project;
+use lpa_graph::{BoardFrame, Editor, NodeId};
+use lpa_graph_files::{Opened, ProductProject};
 
 use crate::StudioServerClient;
 use crate::app::graph::graph_canvas_meta::{EDITOR_JSON, apply_pins, with_pins};
@@ -84,7 +84,7 @@ pub struct GraphController {
     /// node: what its undo writes back when the node returns (DD36).
     deleted: BTreeMap<NodeId, Vec<(String, String)>>,
     /// The selection the board last breathed, while it breathes one.
-    pulsed: Option<Vec<lab_mapping_model::Target>>,
+    pulsed: Option<Vec<lpa_graph::Target>>,
     /// The verbs that take values as last published, and what they were
     /// worked out from: the project's revision, the generation (port
     /// tables handed over move it) and the selection (which preselects
@@ -111,7 +111,7 @@ struct GraphOpened {
 struct OffersKey {
     revision: u64,
     generation: u64,
-    selection: Vec<lab_mapping_model::Target>,
+    selection: Vec<lpa_graph::Target>,
 }
 
 /// What the board's frame was built from: the board's frame count, the
@@ -511,7 +511,7 @@ impl GraphController {
 
     /// Say on the canvas that a save didn't happen.
     fn refuse_save(&mut self, why: String) {
-        self.handle.editor().borrow_mut().notice = Some(lab_mapping_model::Notice::refused(
+        self.handle.editor().borrow_mut().notice = Some(lpa_graph::Notice::refused(
             "Couldn't save the Graph's edit",
             why,
             "the edit is still on the Graph; undo it, or try again",
@@ -587,7 +587,7 @@ impl GraphController {
                 .filter(|t| e.project.exists(t))
                 .cloned()
                 .collect();
-            e.set_placement(&lab_layout::canvas_layout(&e.layout_input()));
+            e.set_placement(&lpa_graph_layout::canvas_layout(&e.layout_input()));
             if first {
                 e.fit();
             } else {

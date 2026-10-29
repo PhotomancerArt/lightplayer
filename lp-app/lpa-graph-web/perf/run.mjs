@@ -2,7 +2,7 @@
 // Runs harness.js against a served lab page in headless Chrome and prints
 // what it measured, one JSON object per project.
 //
-//   bun lab/mapping/web/perf/run.mjs http://127.0.0.1:<port>/ [project…]
+//   bun lp-app/lpa-graph-web/perf/run.mjs http://127.0.0.1:<port>/ [project…]
 //
 // Headless (`--headless=new`, never a visible window: other agents share the
 // desk), 1440 × 900 at device pixel ratio 2, like a laptop screen. Its

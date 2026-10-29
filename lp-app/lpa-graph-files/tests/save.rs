@@ -2,8 +2,8 @@
 //! what a person made, with `lpc-mapping`'s own writer, and nothing when
 //! they made nothing.
 //!
-//! The repo-wide statements walk every project under `catalog/`,
-//! `projects/` and `lab/mapping/projects/` at project format 12.
+//! The repo-wide statements walk every project under `catalog/` and
+//! `projects/` at project format 12.
 
 mod common;
 
@@ -11,9 +11,9 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use common::{fixture, node, open_files, part, project_around};
-use lab_mapping_files::embedded::{CHOKER, EAVES, ZOOK_DOME};
-use lab_mapping_files::{DirFiles, MemFiles, Opened, Saved, Source};
-use lab_mapping_model::{NodeId, Project, Vec2};
+use lpa_graph::{NodeId, Project, Vec2};
+use lpa_graph_files::embedded::{CHOKER, EAVES, ZOOK_DOME};
+use lpa_graph_files::{DirFiles, MemFiles, Opened, Saved, Source};
 use lpc_mapping::edit::{self, OverrideField};
 use lpc_mapping::map2d6;
 use lpc_mapping::part::{PartKind, Path as PathPart, SegmentKey, Shape, TreeId};
@@ -200,18 +200,18 @@ fn a_circles_rings_keep_their_keys_across_a_save() {
 fn saving_what_undo_put_back_writes_the_files_own_bytes() {
     let o = common::open(&CHOKER);
     let fixture = NodeId::new("fixture");
-    let mut e = lab_mapping_model::Editor::new(o.project.clone());
+    let mut e = lpa_graph::Editor::new(o.project.clone());
     let first = e.project.fixture(&fixture).unwrap().parts()[0].id.clone();
-    e.select(vec![lab_mapping_model::Target::Part(
-        lab_mapping_model::PartRef::new(&fixture, &first),
-    )]);
-    assert!(e.press(lab_mapping_model::GraphVerb::More));
+    e.select(vec![lpa_graph::Target::Part(lpa_graph::PartRef::new(
+        &fixture, &first,
+    ))]);
+    assert!(e.press(lpa_graph::GraphVerb::More));
     let saved = o.files.save(&e.project).unwrap();
     assert_eq!(paths(&saved), ["playful.map2d.json"]);
     let again = reopen(&CHOKER, &saved);
     assert_eq!(again.project.lamp_count(), 74);
 
-    assert!(e.press(lab_mapping_model::GraphVerb::Undo));
+    assert!(e.press(lpa_graph::GraphVerb::Undo));
     let back = again.files.save(&e.project).unwrap();
     assert_eq!(paths(&back), ["playful.map2d.json"]);
     let original = CHOKER.files().read("playful.map2d.json").unwrap();
@@ -228,7 +228,7 @@ fn moving_a_part_writes_only_its_mapping() {
     let repeat = p.fixture(&fixture).unwrap().parts()[0].id.clone();
     let f = p.fixture_mut(&fixture).unwrap();
     let moved = f.part_mut(&repeat).unwrap();
-    lab_mapping_model::domain::part_geometry::translate(&mut moved.kind, Vec2::new(2.0, 0.0));
+    lpa_graph::domain::part_geometry::translate(&mut moved.kind, Vec2::new(2.0, 0.0));
     let saved = o.files.save(&p).unwrap();
     assert_eq!(paths(&saved), ["fixture.map2d.json"]);
     assert!(saved.removed.is_empty());
@@ -304,7 +304,7 @@ fn naming_an_output_on_a_port_choice_writes_its_name() {
     let out = common::output();
     assert_eq!(o.project.output(&out).unwrap().label, None);
     let mut e = common::editor_of(o.project.clone());
-    e.edit(&[lab_mapping_model::GraphEdit::SetFixtureStart {
+    e.edit(&[lpa_graph::GraphEdit::SetFixtureStart {
         fixture: fixture(),
         output: out.clone(),
         port: "0".to_string(),
@@ -425,7 +425,7 @@ fn a_journeys_patching_reopens_landing_the_same() {
 #[test]
 fn the_desk_saves_as_a_new_project() {
     let o = common::open(&CHOKER);
-    let empty = lab_mapping_files::ProductProject {
+    let empty = lpa_graph_files::ProductProject {
         nodes: Default::default(),
         root: serde_json::json!({"kind": "Module", "nodes": {}}),
         ..o.files.clone()
@@ -528,7 +528,7 @@ fn fixture_ids(p: &Project) -> Vec<NodeId> {
     p.fixtures().iter().map(|n| n.id.clone()).collect()
 }
 
-fn reopen(e: &lab_mapping_files::embedded::Embedded, saved: &Saved) -> Opened {
+fn reopen(e: &lpa_graph_files::embedded::Embedded, saved: &Saved) -> Opened {
     let mut files = e.files();
     for (path, text) in &saved.writes {
         files.files.insert(path.clone(), text.clone());
@@ -570,7 +570,7 @@ fn open_dir(dir: &Path) -> Opened {
 fn repo_projects() -> Vec<(String, PathBuf)> {
     let root = workspace();
     let mut dirs = Vec::new();
-    for tree in ["catalog", "projects", "lab/mapping/projects"] {
+    for tree in ["catalog", "projects"] {
         project_dirs(&root.join(tree), &mut dirs);
     }
     dirs.sort();
@@ -604,5 +604,5 @@ fn project_format(dir: &Path) -> Option<u64> {
 }
 
 fn workspace() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
 }

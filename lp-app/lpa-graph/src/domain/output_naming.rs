@@ -8,7 +8,7 @@
 //! output it creates with, and the format-12 upgrade too
 //! (`lpc_model::next_output_name`, M3's Q59); this crate holds no
 //! `lpc-model`, so the rule is said again here. Saving writes the name into
-//! the output's own file (`lab-mapping-files`), with the mapping that names
+//! the output's own file (`lpa-graph-files`), with the mapping that names
 //! it.
 
 use lpc_mapping::patching::OutputName;

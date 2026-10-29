@@ -7,7 +7,7 @@
 //! on the same output, port and pixel after the edit, each old segment id
 //! taken to its new one.
 
-use lab_mapping_model::*;
+use lpa_graph::*;
 use lpc_mapping::part::{Circle, PartKind, Path, Repeat, Shape};
 use lpc_mapping::patching::Direction;
 

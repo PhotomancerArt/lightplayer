@@ -4,8 +4,8 @@
 //! that asks what the canvas and the panels ask.
 //!
 //! ```bash
-//! cargo run --release -p lab-mapping-files --example scale_bench
-//! cargo run --release -p lab-mapping-files --example scale_bench -- radiance-dome 50   # or `all 50`
+//! cargo run --release -p lpa-graph-files --example scale_bench
+//! cargo run --release -p lpa-graph-files --example scale_bench -- radiance-dome 50   # or `all 50`
 //! ```
 //!
 //! Each figure is the median of N runs (default 20), in milliseconds. The
@@ -14,8 +14,8 @@
 
 use std::time::Instant;
 
-use lab_mapping_files::{Opened, embedded};
-use lab_mapping_model::{Editor, Mods, Project, Target, Vec2};
+use lpa_graph::{Editor, Mods, Project, Target, Vec2};
+use lpa_graph_files::{Opened, embedded};
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -29,7 +29,7 @@ fn main() {
     }
 }
 
-fn bench(key: &str, files: &lab_mapping_files::MemFiles, runs: usize) {
+fn bench(key: &str, files: &lpa_graph_files::MemFiles, runs: usize) {
     let open = median(runs.min(5), || {
         let _ = Opened::open(files).unwrap();
     });
@@ -57,9 +57,9 @@ fn bench(key: &str, files: &lab_mapping_files::MemFiles, runs: usize) {
     let both = |name: &str, f: &dyn Fn(&Project)| {
         println!("  {name:<34} cold {:>9.3}  warm {:>9.3}", cold(f), warm(f));
     };
-    both("layout (input, then lab-layout)", &|p| {
+    both("layout (input, then lpa-graph-layout)", &|p| {
         let input = Editor::new(p.clone()).layout_input();
-        let _ = lab_layout::canvas_layout(&input);
+        let _ = lpa_graph_layout::canvas_layout(&input);
     });
     both("placed segments", &|p| {
         let _ = p.placed_segments();
@@ -92,7 +92,7 @@ fn bench(key: &str, files: &lab_mapping_files::MemFiles, runs: usize) {
 
     // The editor's questions, at the whole view and zoomed in on a lamp.
     let mut e = Editor::new(fresh(&project));
-    e.set_placement(&lab_layout::canvas_layout(&e.layout_input()));
+    e.set_placement(&lpa_graph_layout::canvas_layout(&e.layout_input()));
     e.resize(Vec2::new(1200.0, 800.0));
     e.fit();
     let segments = project.placed_segments();

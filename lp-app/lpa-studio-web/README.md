@@ -21,10 +21,10 @@ lives on the site header's session·project control. See
 `docs/adr/2026-08-20-patching-view-grain-follows-activity.md`.
 
 The **Graph** view (`/graph`, `src/app/workbench/graph_view.rs`) mounts
-the mapping design lab's canvas, tree, inspector and hint bar
-(`lab/mapping/web`'s library) over core's Graph editor
+the Graph's canvas, tree, inspector and hint bar
+(`lpa-graph-web`) over core's Graph editor
 (`lpa_studio_core::app::graph`): the canvas and hint bar in the center,
-the lab's tree in the Tree dock and its inspector in Props. The page
+the Graph's tree in the Tree dock and its inspector in Props. The page
 holds core's `GraphHandle` (provided as context by `web_app.rs`) and
 hands it every pointer and key fact directly; the toolbar's tools, Move
 & draw, undo and redo are core's `project/graph/…` offers. Colours are

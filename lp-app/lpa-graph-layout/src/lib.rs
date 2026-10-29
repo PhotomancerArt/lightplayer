@@ -1,4 +1,4 @@
-//! Layout for the mapping lab: a semantic graph of nodes in, placements
+//! Layout for the Graph: a semantic graph of nodes in, placements
 //! out.
 //!
 //! The canvas has two layouts (architecture §5), and both are here, pure,
@@ -22,7 +22,7 @@
 //! geometry ([`Vec2`], [`Rect`]), so it stands alone.
 //!
 //! ```
-//! use lab_layout::*;
+//! use lpa_graph_layout::*;
 //!
 //! let input = LayoutInput::new(vec![
 //!     LayoutNode::new("shader", LayoutRole::Source, Vec2::new(60.0, 27.0)),

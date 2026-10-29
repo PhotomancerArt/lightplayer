@@ -3,7 +3,7 @@
 //! say.
 
 use dioxus::prelude::*;
-use lab_mapping_model::{
+use lpa_graph::{
     GraphEdit, GraphInput, Hint, HintBar as Bar, HintKind, Notice, NoticeKind, PatchField,
     PatchInput, Prop, PropEdit, PropKind, PropValue, UiField, UiFieldValue, UiInspector, UiItem,
     UiProblem, UiSource, UiTree,

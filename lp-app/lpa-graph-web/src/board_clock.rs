@@ -5,7 +5,7 @@
 //! pattern, a draft), so a still board costs no redraws.
 
 use dioxus::prelude::*;
-use lab_mapping_model::BoardFrame;
+use lpa_graph::BoardFrame;
 
 use crate::graph_editor::GraphEditor;
 

@@ -4,7 +4,7 @@
 //! with no picture in the frame draws nothing.
 
 use dioxus::prelude::*;
-use lab_mapping_model::{BoardFrame, NodeId, Picture};
+use lpa_graph::{BoardFrame, NodeId, Picture};
 use wasm_bindgen::{Clamped, JsCast};
 use web_sys::{HtmlCanvasElement, ImageData};
 

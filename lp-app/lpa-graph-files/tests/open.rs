@@ -7,9 +7,9 @@
 mod common;
 
 use common::{format6_doc, project_around};
-use lab_mapping_files::embedded::{CHOKER, Embedded, PLASMA, RADIANCE_DOME, ZOOK_DOME};
-use lab_mapping_files::{FilesError, MemFiles, Opened};
-use lab_mapping_model::{Channel, ColorOrder, NodeId, NodeKind, Target, Vec2};
+use lpa_graph::{Channel, ColorOrder, NodeId, NodeKind, Target, Vec2};
+use lpa_graph_files::embedded::{CHOKER, Embedded, PLASMA, RADIANCE_DOME, ZOOK_DOME};
+use lpa_graph_files::{FilesError, MemFiles, Opened};
 use lpc_mapping::map2d6;
 use lpc_mapping::part::{PartKind, PathCommand, Shape, TreeId};
 use lpc_mapping::patching::{Amount, Direction, Start};
@@ -92,7 +92,7 @@ fn the_zook_dome_opens() {
     }
     let copy2 = TreeId::parse("sector@2").unwrap();
     assert!(p.segments_in(&fixture).iter().any(|s| s.id.id == copy2));
-    let repeat = Target::Part(lab_mapping_model::PartRef::new(&fixture, &f.parts()[0].id));
+    let repeat = Target::Part(lpa_graph::PartRef::new(&fixture, &f.parts()[0].id));
     assert_eq!(p.children(Some(&repeat)).len(), 5);
 }
 
@@ -153,7 +153,7 @@ fn a_grid_and_a_ring_set_open_whole() {
     let kinds: Vec<&str> = fixture
         .parts()
         .iter()
-        .map(|p| lab_mapping_model::domain::target::part_word(&p.kind))
+        .map(|p| lpa_graph::domain::target::part_word(&p.kind))
         .collect();
     assert_eq!(kinds, ["grid", "circle"]);
     // 1 + (60 + 48 + 40 + 32 + 24 + 16 + 12 + 8).

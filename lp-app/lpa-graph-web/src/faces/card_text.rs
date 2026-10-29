@@ -3,7 +3,7 @@
 //! when, from how big the text would be on screen).
 
 use dioxus::prelude::*;
-use lab_mapping_model::card_geometry::CARD_HEADER;
+use lpa_graph::card_geometry::CARD_HEADER;
 
 /// The card font's size, in world units: 4.5 px at the zoom where words
 /// first show.

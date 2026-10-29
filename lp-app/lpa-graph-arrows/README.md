@@ -1,19 +1,19 @@
-# lab-arrows
+# lpa-graph-arrows
 
-Arrows for the mapping lab: **a semantic arrow in, renderer-agnostic
+Arrows for the Graph (Studio's project canvas): **a semantic arrow in, renderer-agnostic
 geometry out.** Pure Rust, no IO, no dependencies at all.
 
-The lab's canvas draws its wiring as curved arrows with words on them, and
+The Graph's canvas draws its wiring as curved arrows with words on them, and
 the words were the messy part: a label floating level at the midpoint
 wherever the curve happened to be, with a channel name on its way (D53).
-This crate is the arrow piece of the lab's view model
+This crate is the arrow piece of the Graph's view model
 (`lp2025/2026-10-10-1853-mapping-design-lab/view-model.md`): the model says
 *what* to draw, with roles; the renderer only draws.
 
 ```bash
-cargo test -p lab-arrows                                   # the statements
-cargo run -p lab-arrows --example gallery > /tmp/arrows.svg
-qlmanage -t -s 1600 -o /tmp /tmp/arrows.svg                # a PNG of it
+cargo test -p lpa-graph-arrows                                   # the statements
+cargo run -p lpa-graph-arrows --example gallery > /tmp/arrows.svg
+qlmanage -t -s 1600 -o /tmp /tmp/arrows.svg                      # a PNG of it
 ```
 
 ## Semantic → geometry

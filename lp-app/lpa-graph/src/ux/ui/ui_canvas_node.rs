@@ -1,7 +1,7 @@
 //! One node on the canvas: what it is, how much of it shows, and how it
 //! stands out. Never where it is.
 
-use lab_layout::LayoutRole;
+use lpa_graph_layout::LayoutRole;
 
 use crate::domain::geom::Vec2;
 use crate::domain::node::NodeId;

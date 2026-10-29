@@ -1,15 +1,15 @@
-# lab-layout
+# lpa-graph-layout
 
-Layout for the mapping lab: **a semantic graph of nodes in, placements
+Layout for the Graph (Studio's project canvas): **a semantic graph of nodes in, placements
 out.** Pure Rust, no IO, no dependencies at all.
 
 Where cards sit is the view layer's job (architecture §5, D63): core says
 what there is (each node's role, size and parent, the dataflow), and the
 page runs this crate and draws the result. It is the layout piece of the
-lab's view model, the way `lab-arrows` is the arrow piece.
+Graph's view model, the way `lpa-graph-arrows` is the arrow piece.
 
 ```bash
-cargo test -p lab-layout        # the statements
+cargo test -p lpa-graph-layout  # the statements
 ```
 
 ## Input and output

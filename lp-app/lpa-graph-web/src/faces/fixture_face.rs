@@ -15,7 +15,7 @@ use dioxus::prelude::*;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use lab_mapping_model::{
+use lpa_graph::{
     BoardFrame, Emphasis, FixtureLook, NodeId, Rect, TreeRef, UiFixtureFace, UiObject, UiShape,
     UiWire, Vec2, picture_rect,
 };

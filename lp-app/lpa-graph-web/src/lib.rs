@@ -3,7 +3,7 @@
 //!
 //! A host owns the editor and hands the components a [`GraphEditor`]:
 //! they read the editor through it and say what happened as
-//! [`GraphInput`](lab_mapping_model::GraphInput)s, which the host applies.
+//! [`GraphInput`](lpa_graph::GraphInput)s, which the host applies.
 //! The colours are the host's too: it hands [`Canvas`] the board's frame
 //! (the lab simulates one with [`use_simulated_frame`]). No editor logic
 //! and no detail decisions live here; what's dimmed, lit or shown is the

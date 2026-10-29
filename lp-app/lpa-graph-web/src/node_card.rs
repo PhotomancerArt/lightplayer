@@ -9,7 +9,7 @@
 //! one size. A relayout eases each node to its new place (`lab.css`).
 
 use dioxus::prelude::*;
-use lab_mapping_model::{BoardFrame, DetailLevel, FrameKind, Rect, UiCanvasNode, UiNodeFace, Vec2};
+use lpa_graph::{BoardFrame, DetailLevel, FrameKind, Rect, UiCanvasNode, UiNodeFace, Vec2};
 
 use crate::faces::{FixtureFace, OutputFace, PlainFace, SourceFace, emphasis_class};
 use crate::graph_editor::GraphEditor;

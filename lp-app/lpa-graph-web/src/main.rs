@@ -4,19 +4,19 @@
 //! every input the components say is applied to it at once.
 //!
 //! The project picker opens the lab's own desk, or one of the real
-//! projects baked in by `lab-mapping-files` (the PLAYFUL choker, the zook
+//! projects baked in by `lpa-graph-files` (the PLAYFUL choker, the zook
 //! dome, the radiance dome), and fits the view to it.
 
 use std::cell::RefCell;
 use std::rc::Rc;
 
 use dioxus::prelude::*;
-use lab_mapping_files::{Opened, embedded};
-use lab_mapping_model::{
+use lpa_graph::{
     Editor, GraphInput, LayoutKind, Notice, Piece, PortGrouping, Presentation, Project, SizeClass,
     Tool,
 };
-use lab_mapping_web::{
+use lpa_graph_files::{Opened, embedded};
+use lpa_graph_web::{
     Canvas, GRAPH_CSS, GraphEditor, HintBar, Inspector, InspectorDebug, PieceView, TreePane, input,
     use_remembered_inspector_debug, use_simulated_frame, use_view,
 };
@@ -366,7 +366,7 @@ fn open_project(ed: &GraphEditor, key: &str) {
             });
             let mut e = Editor::new(project).with_view_of(&ed.peek());
             e.piece = Some(piece);
-            e.set_placement(&lab_layout::canvas_layout(&e.layout_input()));
+            e.set_placement(&lpa_graph_layout::canvas_layout(&e.layout_input()));
             e.resize(viewport);
             e.fit();
             *ed.editor().borrow_mut() = e;

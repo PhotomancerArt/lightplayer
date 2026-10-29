@@ -402,7 +402,7 @@ fn counters_are_written_honest() {
 
 // ---- parity with today's documents (A2, A4) ----------------------------------
 
-/// Every layout in the catalog, the test projects and the lab's projects,
+/// Every layout in the catalog and the test projects,
 /// written as format 6 and read back, renders today's lamps bit for bit:
 /// ring sets as circles split one, gaps as moves. A document already at
 /// format 6 (the engine's test projects, `projects/test/*-6`) has no
@@ -410,7 +410,7 @@ fn counters_are_written_honest() {
 #[test]
 fn every_layout_through_format_6_renders_todays_lamps_bit_for_bit() {
     let mut files = Vec::new();
-    for dir in ["catalog", "projects", "lab/mapping/projects"] {
+    for dir in ["catalog", "projects"] {
         collect_map2d(&root().join(dir), &mut files);
     }
     files.sort();

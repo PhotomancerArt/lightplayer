@@ -607,7 +607,7 @@ lab-mapping: install-wasm32-target
     set -euo pipefail
     port="$(scripts/dev-port.sh lab-mapping)"
     echo "Serving the mapping lab at http://127.0.0.1:${port}/"
-    dx serve --web -p lab-mapping-web --port "${port}" --addr 127.0.0.1 --open false
+    dx serve --web -p lpa-graph-web --bin lpa-graph-lab --port "${port}" --addr 127.0.0.1 --open false
 
 # studio-dev on a reserved bench-block port, so the standing WebSerial
 # grant (`just serial-grant`, Google Chrome only) covers the origin and the
@@ -3434,11 +3434,11 @@ build-xt-fixtures:
 # without it that module is not compiled and its tests silently do not run.
 # CI gates this recipe on studio paths (the feature-unified Dioxus rebuild is
 # the single most expensive test compile); locally it is part of `test-rust`.
-# The mapping lab's crates ride along: Studio's Graph mounts them, they are
-# not default members, and nothing else runs their statements.
+# The Graph's crates (`lpa-graph`, `-files`, `-layout`, `-arrows`) are default
+# members, so `test-rust-core` runs their statements; `lpa-graph-web` has no
+# tests of its own and is built here, under Studio.
 test-studio-host:
-    cargo test -p lpa-studio-web -p lpa-studio-web-story-macros --features lpa-studio-web/stories \
-        -p lab-mapping-model -p lab-mapping-files -p lab-layout -p lab-arrows
+    cargo test -p lpa-studio-web -p lpa-studio-web-story-macros --features lpa-studio-web/stories
 
 # The browser CPU tier's shader frontend, on the engine's own palette suite.
 #

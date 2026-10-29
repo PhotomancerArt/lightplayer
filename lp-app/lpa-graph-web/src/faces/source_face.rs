@@ -3,8 +3,8 @@
 //! live from the board frame when there is one (plan D11).
 
 use dioxus::prelude::*;
-use lab_mapping_model::card_geometry::card_row;
-use lab_mapping_model::{BoardFrame, DetailLevel, UiSourceFace};
+use lpa_graph::card_geometry::card_row;
+use lpa_graph::{BoardFrame, DetailLevel, UiSourceFace};
 
 use crate::faces::{CardTitle, card_font};
 use crate::picture_canvas::PictureCanvas;

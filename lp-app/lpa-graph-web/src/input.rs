@@ -5,7 +5,7 @@ use dioxus::html::geometry::WheelDelta;
 use dioxus::html::input_data::MouseButton;
 use dioxus::html::{Key as WebKey, Modifiers};
 use dioxus::prelude::*;
-use lab_mapping_model::{Button, GraphInput, Key, Mods, Vec2};
+use lpa_graph::{Button, GraphInput, Key, Mods, Vec2};
 
 use crate::graph_editor::GraphEditor;
 use wasm_bindgen::JsCast;

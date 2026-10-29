@@ -9,8 +9,8 @@
 //! cargo test -p lpa-studio-core --release graph_offer_cost -- --ignored --nocapture
 //! ```
 //!
-//! It opens the repo's biggest project, the radiance dome (`lab/mapping/
-//! projects/radiance-dome`), as Studio's Graph opens it (the files crate,
+//! It opens the repo's biggest project, the radiance dome
+//! (`projects/test/radiance-dome`), as Studio's Graph opens it (the files crate,
 //! port tables from the engine's own walk), and times
 //! [`publish_graph_offers`] over and over on one editor (the project's
 //! patch is worked out once, as the view needs it anyway), then what a view
@@ -20,8 +20,8 @@
 use std::path::Path;
 use std::time::Instant;
 
-use lab_mapping_files::{DirFiles, Opened};
-use lab_mapping_model::{Editor, Target};
+use lpa_graph::{Editor, Target};
+use lpa_graph_files::{DirFiles, Opened};
 
 use super::graph_offers::{publish_graph_offers, publish_key_offers, value_offers};
 use super::graph_port_tables::port_tables;
@@ -31,7 +31,7 @@ use crate::{OfferParamKind, UiOfferTree};
 #[ignore = "a measurement: run in release with --ignored --nocapture (module docs)"]
 fn graph_offer_cost_on_the_radiance_dome() {
     for dir in [
-        "lab/mapping/projects/radiance-dome",
+        "projects/test/radiance-dome",
         "catalog/projects/zook-dome",
         "projects/test/circular-display-6",
     ] {

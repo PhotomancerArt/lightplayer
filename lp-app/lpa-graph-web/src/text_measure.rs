@@ -1,5 +1,5 @@
 //! How wide a label is, measured with the browser's own fonts, so
-//! `lab-arrows` sizes each label's box to the text actually drawn.
+//! `lpa-graph-arrows` sizes each label's box to the text actually drawn.
 
 use std::cell::RefCell;
 

@@ -62,7 +62,7 @@ pub enum GraphInput {
     /// The canvas's size, in screen pixels.
     Resize(Vec2),
     /// Where the layout put every node: a fact the page worked out.
-    Placement(lab_layout::Placement),
+    Placement(lpa_graph_layout::Placement),
     /// The edge under the pointer, as the page hit-tests it.
     HoveredEdge(Option<(NodeId, NodeId)>),
     /// The screen's size class, from the app's width.

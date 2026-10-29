@@ -6,7 +6,7 @@
 //! remembered choice to the editor once, at start.
 
 use dioxus::prelude::*;
-use lab_mapping_model::{GraphInput, Presentation};
+use lpa_graph::{GraphInput, Presentation};
 
 use crate::graph_editor::GraphEditor;
 

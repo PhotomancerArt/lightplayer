@@ -30,7 +30,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use lab_mapping_model::{ColorOrder, Fixture, Node, NodeId, NodeKind, Project, Vec2};
+use lpa_graph::{ColorOrder, Fixture, Node, NodeId, NodeKind, Project, Vec2};
 use lpc_mapping::map2d6;
 use lpc_mapping::part::Mapping;
 use serde_json::{Map, Value, json};

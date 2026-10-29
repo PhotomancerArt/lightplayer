@@ -5,7 +5,7 @@
 //! The projects here are bare: a rainbow shader, a fixture `f` of paths,
 //! and an output `out` with the ports named.
 
-use lab_mapping_model::*;
+use lpa_graph::*;
 use lpc_mapping::part::{Circle, PartKind, Path, Shape};
 use lpc_mapping::patching::{Direction, PatchTarget, StepSource};
 
@@ -912,7 +912,7 @@ fn flow(p: &mut Project, f: &NodeId, out: &NodeId) {
 /// An editor on `p`, laid out the way the page does it.
 fn editor_of(p: Project) -> Editor {
     let mut e = Editor::new(p);
-    let placement = lab_layout::canvas_layout(&e.layout_input());
+    let placement = lpa_graph_layout::canvas_layout(&e.layout_input());
     e.set_placement(&placement);
     e.resize(Vec2::new(1200.0, 800.0));
     e
@@ -1051,7 +1051,7 @@ fn inherited(e: &Editor, label: &str) -> (String, Option<(String, Target)>) {
 /// fixture's box on the canvas and the simulated board lights them.
 fn laid_out(p: Project) -> Project {
     let mut e = Editor::new(p);
-    let placement = lab_layout::canvas_layout(&e.layout_input());
+    let placement = lpa_graph_layout::canvas_layout(&e.layout_input());
     e.set_placement(&placement);
     e.project
 }

@@ -2,7 +2,7 @@
 //!
 //! The model never lays anything out. Layout runs in the view layer (D63):
 //! the page builds the layout input (`Editor::layout_input`), runs
-//! `lab-layout`, and hands the result back as a fact
+//! `lpa-graph-layout`, and hands the result back as a fact
 //! (`Editor::set_placement`). The model reads where things landed: to put
 //! each fixture's drawing in world units, to pick, and to frame. Until a
 //! placement is set, every node sits at the origin and nothing is

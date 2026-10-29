@@ -1,5 +1,5 @@
-//! A real LightPlayer project, opened: the lab's [`Project`] plus
-//! everything the lab doesn't model, kept to be written back untouched.
+//! A real LightPlayer project, opened: the Graph's [`Project`] plus
+//! everything the Graph doesn't model, kept to be written back untouched.
 //!
 //! What is read (fit-check §6): `project.json` → the root `module.json` →
 //! every node file it refers to, recursively. For a fixture, its mapping
@@ -28,7 +28,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use lab_mapping_model::{
+use lpa_graph::{
     Channel, ColorOrder, Fixture, Node, NodeId, NodeKind, OtherNode, Output, Pattern, Port,
     Project, RenderSource, Unsupported, Vec2,
 };

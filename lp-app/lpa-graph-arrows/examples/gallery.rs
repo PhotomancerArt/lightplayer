@@ -1,7 +1,7 @@
 //! An SVG gallery of arrow cases, for eyeballing layout:
 //!
 //! ```bash
-//! cargo run -p lab-arrows --example gallery > /tmp/arrows.svg
+//! cargo run -p lpa-graph-arrows --example gallery > /tmp/arrows.svg
 //! qlmanage -t -s 1600 -o /tmp /tmp/arrows.svg   # a PNG beside it
 //! ```
 //!
@@ -12,7 +12,7 @@
 
 use std::fmt::Write;
 
-use lab_arrows::{
+use lpa_graph_arrows::{
     Arrow, ArrowGeometry, AverageCharWidth, Bend, EndDirection, Gutter, Head, Label, LabelFit,
     LabelRole, LayoutOptions, Route, Side, Vec2, layout_arrows,
 };

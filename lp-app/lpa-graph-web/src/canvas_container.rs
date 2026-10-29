@@ -11,7 +11,7 @@
 //! - the right-click list and the note beside the cursor, as DOM.
 //!
 //! Layout runs here, in the view (D63): whenever what there is to lay out
-//! changes, the page lays it out with `lab-layout`, places the cards from
+//! changes, the page lays it out with `lpa-graph-layout`, places the cards from
 //! it, and hands the editor where everything landed. The page makes no
 //! detail decisions of its own: what's dimmed, lit or shown is the view
 //! tree's (`Editor::view_tree`).
@@ -31,7 +31,7 @@
 use std::collections::BTreeMap;
 
 use dioxus::prelude::*;
-use lab_mapping_model::{BoardFrame, Camera, GraphInput, LayoutKind, NodeId, Rect, UiCursor, Vec2};
+use lpa_graph::{BoardFrame, Camera, GraphInput, LayoutKind, NodeId, Rect, UiCursor, Vec2};
 
 use crate::dots_layer::DotsLayer;
 use crate::edge_layer;
@@ -74,7 +74,7 @@ pub fn Canvas(ed: GraphEditor, view: View, frame: ReadSignal<BoardFrame>) -> Ele
         move || std::rc::Rc::new(input::follow_window(ed))
     });
 
-    // Layout, in the view: what there is (core's), laid out (lab-layout's),
+    // Layout, in the view: what there is (core's), laid out (lpa-graph-layout's),
     // handed back to the editor as a fact. The input is compared, so this
     // runs only when it changes, and handing the placement back changes no
     // input, so it can't loop.
@@ -95,8 +95,8 @@ pub fn Canvas(ed: GraphEditor, view: View, frame: ReadSignal<BoardFrame>) -> Ele
         }
     });
     let placement = use_memo(move || match layout() {
-        LayoutKind::Canvas => lab_layout::canvas_layout(&layout_input.read()),
-        LayoutKind::Stack => lab_layout::stack_layout(&layout_input.read(), stack_width()),
+        LayoutKind::Canvas => lpa_graph_layout::canvas_layout(&layout_input.read()),
+        LayoutKind::Stack => lpa_graph_layout::stack_layout(&layout_input.read(), stack_width()),
     });
     let rects = use_memo(move || to_rects(&placement.read()));
     let mut scroll_top = use_signal(|| 0.0_f64);
@@ -292,7 +292,7 @@ fn scroller() -> Option<web_sys::Element> {
 }
 
 /// The page's placement as the model's rects, by node.
-fn to_rects(p: &lab_layout::Placement) -> BTreeMap<NodeId, Rect> {
+fn to_rects(p: &lpa_graph_layout::Placement) -> BTreeMap<NodeId, Rect> {
     p.rects
         .iter()
         .map(|(id, r)| {

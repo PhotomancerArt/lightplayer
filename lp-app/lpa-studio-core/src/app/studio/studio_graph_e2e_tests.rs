@@ -12,7 +12,7 @@ use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::rc::Rc;
 
-use lab_mapping_model::{GraphInput, GraphVerb, NodeId, PartRef, Rgb, Target, UiNodeFace};
+use lpa_graph::{GraphInput, GraphVerb, NodeId, PartRef, Rgb, Target, UiNodeFace};
 
 use crate::app::graph::{GraphHandle, UiGraphState, graph_verb_path};
 use crate::app::studio::offer_press_test_api::{OfferPressTestApi, actor_clicks};
@@ -149,7 +149,7 @@ fn the_pages_input_is_cores_editor() {
         .find(|n| n.id == NodeId::new("fixture"))
         .and_then(|n| n.face.clone());
     assert!(
-        matches!(face, Some(UiNodeFace::Fixture(f)) if f.look == lab_mapping_model::FixtureLook::Editing),
+        matches!(face, Some(UiNodeFace::Fixture(f)) if f.look == lpa_graph::FixtureLook::Editing),
         "a selected fixture is its editing view"
     );
 }
@@ -548,7 +548,7 @@ fn choker_map() -> String {
 }
 
 /// The fixture node's face, as the canvas draws it.
-fn fixture_face(e: &lab_mapping_model::Editor) -> lab_mapping_model::UiFixtureFace {
+fn fixture_face(e: &lpa_graph::Editor) -> lpa_graph::UiFixtureFace {
     let face = e
         .view_nodes()
         .into_iter()

@@ -1,7 +1,7 @@
 //! Edges, routed by the page and drawn in the overlay, in screen pixels, so
 //! heads and labels stay one size (Q3). Core says which edges show and what
 //! each says (`UiCanvasEdge`); only the view knows where the cards landed,
-//! so it routes each one with `lab-arrows`, lays their labels out together,
+//! so it routes each one with `lpa-graph-arrows`, lays their labels out together,
 //! and hit-tests them, reporting the one under the pointer back to core as
 //! a fact (`Editor::set_hovered_edge`).
 //!
@@ -20,9 +20,11 @@
 use std::collections::BTreeMap;
 
 use dioxus::prelude::*;
-use lab_arrows::{Arrow, ArrowGeometry, EndDirection, Gutter, Head, Label, LabelRole, Route, Side};
-use lab_mapping_model::card_geometry::{CARD_HEADER, CARD_ROW, card_row};
-use lab_mapping_model::{Camera, Editor, Emphasis, LayoutKind, NodeId, Rect, UiCanvasEdge, Vec2};
+use lpa_graph::card_geometry::{CARD_HEADER, CARD_ROW, card_row};
+use lpa_graph::{Camera, Editor, Emphasis, LayoutKind, NodeId, Rect, UiCanvasEdge, Vec2};
+use lpa_graph_arrows::{
+    Arrow, ArrowGeometry, EndDirection, Gutter, Head, Label, LabelRole, Route, Side,
+};
 
 /// How near, in screen pixels, the pointer must be to an edge to hover it.
 pub const EDGE_HOVER_PX: f64 = 6.0;
@@ -84,7 +86,7 @@ pub fn route(
 /// The edge under `at` (screen), if one is within [`EDGE_HOVER_PX`]: the
 /// nearest. Routed from where the editor was told the nodes are.
 pub fn hit(ed: &Editor, at: Vec2) -> Option<(NodeId, NodeId)> {
-    let p = lab_arrows::Vec2::new(at.x, at.y);
+    let p = lpa_graph_arrows::Vec2::new(at.x, at.y);
     let rects = &ed.project.placement().rects;
     route(&ed.view_edges(), ed, rects, &ed.camera)
         .into_iter()
@@ -100,10 +102,10 @@ pub fn hit(ed: &Editor, at: Vec2) -> Option<(NodeId, NodeId)> {
 #[component]
 pub fn EdgeLayer(edges: Vec<(UiCanvasEdge, Arrow)>, settling: bool) -> Element {
     let arrows: Vec<Arrow> = edges.iter().map(|(_, a)| a.clone()).collect();
-    let geometry: Vec<ArrowGeometry> = lab_arrows::layout_arrows(
+    let geometry: Vec<ArrowGeometry> = lpa_graph_arrows::layout_arrows(
         &arrows,
         &crate::text_measure::measure,
-        &lab_arrows::LayoutOptions::default(),
+        &lpa_graph_arrows::LayoutOptions::default(),
     );
     rsx! {
         g { class: if settling { "edges settling" } else { "edges" },
@@ -211,6 +213,6 @@ fn words(arrow: Arrow, x: &UiCanvasEdge) -> Arrow {
     arrow
 }
 
-fn av(p: Vec2) -> lab_arrows::Vec2 {
-    lab_arrows::Vec2::new(p.x, p.y)
+fn av(p: Vec2) -> lpa_graph_arrows::Vec2 {
+    lpa_graph_arrows::Vec2::new(p.x, p.y)
 }

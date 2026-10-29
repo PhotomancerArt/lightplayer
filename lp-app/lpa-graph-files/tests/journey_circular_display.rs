@@ -10,7 +10,7 @@
 mod common;
 
 use common::*;
-use lab_mapping_model::*;
+use lpa_graph::*;
 use lpc_mapping::part::PartId;
 use lpc_mapping::patching::{PatchTarget, StepSource};
 

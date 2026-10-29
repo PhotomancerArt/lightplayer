@@ -13,7 +13,7 @@
 
 use std::collections::BTreeMap;
 
-use lab_mapping_model::{BoardFrame, NodeId, Project, Rgb};
+use lpa_graph::{BoardFrame, NodeId, Project, Rgb};
 
 use crate::{ColorOrder, ControlSampleEncoding, UiControlProductPreview};
 

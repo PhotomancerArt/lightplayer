@@ -10,7 +10,7 @@
 //! fixture the piece wires.
 
 use dioxus::prelude::*;
-use lab_mapping_model::{BoardFrame, NodeId, Target};
+use lpa_graph::{BoardFrame, NodeId, Target};
 
 use crate::dense_canvas::{Raster, canvas_id, put_when_mounted};
 use crate::faces::{DRAFT_PITCH, lamp_radius_px, rgb};

@@ -9,7 +9,7 @@
 
 use std::rc::Rc;
 
-use lab_mapping_model::BoardFrame;
+use lpa_graph::BoardFrame;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct UiGraphView {

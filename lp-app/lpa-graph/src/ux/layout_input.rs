@@ -1,10 +1,10 @@
 //! What the view lays out. Core says what there is (D63): each node with
 //! its role, its size and its module, the dataflow between them, and the
-//! pins while pinning is on (D64). The page runs `lab-layout` on it and
+//! pins while pinning is on (D64). The page runs `lpa-graph-layout` on it and
 //! hands the result back with [`Editor::set_placement`]; core never runs
 //! the layout itself.
 
-use lab_layout::{LayoutInput, LayoutNode, LayoutRole};
+use lpa_graph_layout::{LayoutInput, LayoutNode, LayoutRole};
 
 use crate::domain::geom::{Rect, Vec2};
 use crate::domain::node::{Node, NodeKind};
@@ -25,14 +25,14 @@ impl Editor {
                 id: n.id.to_string(),
                 parent: p.parent_module(&n.id).map(|m| m.to_string()),
                 role: layout_role(n),
-                size: lab_layout::Vec2::new(size.x, size.y),
+                size: lpa_graph_layout::Vec2::new(size.x, size.y),
             });
             if self.debug.pinning
                 && let Some(at) = n.pinned
             {
                 input
                     .pins
-                    .push((n.id.to_string(), lab_layout::Vec2::new(at.x, at.y)));
+                    .push((n.id.to_string(), lpa_graph_layout::Vec2::new(at.x, at.y)));
             }
         }
         let mut add = |from: String, to: String| {
@@ -53,8 +53,8 @@ impl Editor {
     /// Take the view's layout as a fact: where every node landed. Picks,
     /// areas, handles and framing all read it. The first placement after
     /// opening a project frames everything.
-    pub fn set_placement(&mut self, placement: &lab_layout::Placement) {
-        let rect = |r: &lab_layout::Rect| {
+    pub fn set_placement(&mut self, placement: &lpa_graph_layout::Placement) {
+        let rect = |r: &lpa_graph_layout::Rect| {
             Rect::new(Vec2::new(r.min.x, r.min.y), Vec2::new(r.max.x, r.max.y))
         };
         let ids = |id: &str| crate::domain::node::NodeId::new(id);

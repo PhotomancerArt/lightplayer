@@ -1,8 +1,8 @@
 //! A node the lab doesn't simulate: a card that says what it is.
 
 use dioxus::prelude::*;
-use lab_mapping_model::card_geometry::card_row;
-use lab_mapping_model::{DetailLevel, UiPlainFace};
+use lpa_graph::card_geometry::card_row;
+use lpa_graph::{DetailLevel, UiPlainFace};
 
 use crate::faces::{CardTitle, card_font};
 

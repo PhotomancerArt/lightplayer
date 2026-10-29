@@ -200,7 +200,7 @@ fn peach_body_legs_land_at_0_and_34_the_second_reversed() {
 /// output ports `0` (60 lamps) and `1` (the rest).
 #[test]
 fn eaves_wired_front_is_reversed_on_port_0_and_side_starts_port_1() {
-    let landing = repo_landing("lab/mapping/projects/eaves-wired");
+    let landing = repo_landing("projects/test/eaves-wired");
     let fixture = landing.fixture("/fixture.json");
     assert_eq!(fixture.lamps, 110);
     assert_eq!(fixture.lands(0), vec![at("/output.json", 0, 59 * 3)]);
@@ -219,7 +219,7 @@ fn eaves_wired_front_is_reversed_on_port_0_and_side_starts_port_1() {
 /// output "7" port 12.
 #[test]
 fn radiance_dome_lands_every_panel_and_nothing_on_output_10() {
-    let landing = repo_landing("lab/mapping/projects/radiance-dome");
+    let landing = repo_landing("projects/test/radiance-dome");
     let dome = landing.fixture("/dome.json");
     assert_eq!(dome.lamps, 22_000);
     assert!(dome.dark.is_empty(), "every lamp is named by a row");
@@ -449,7 +449,7 @@ fn repo_landing(relative: &str) -> ProjectLanding {
 /// today's object order, the repeat holding the object's id).
 fn object_index(id: &str) -> u32 {
     let text = std::fs::read_to_string(
-        workspace_dir().join("lab/mapping/projects/radiance-dome/dome.map2d.json"),
+        workspace_dir().join("projects/test/radiance-dome/dome.map2d.json"),
     )
     .expect("radiance map2d");
     let value: serde_json::Value = serde_json::from_str(&text).expect("radiance map2d parses");

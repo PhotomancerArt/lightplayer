@@ -6,7 +6,7 @@
 //! Text is measured with `AverageCharWidth` (0.6 em) and the default
 //! `LayoutOptions` (10-unit primary text, 9-unit quiet, 4-unit clearance).
 
-use lab_arrows::*;
+use lpa_graph_arrows::*;
 
 // ---- labels lie along their arrow ------------------------------------------
 

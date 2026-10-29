@@ -6,7 +6,7 @@
 use std::collections::BTreeMap;
 
 use dioxus::prelude::*;
-use lab_mapping_model::{BoardFrame, Camera, NodeId, Rect, UiCanvasNode, Vec2};
+use lpa_graph::{BoardFrame, Camera, NodeId, Rect, UiCanvasNode, Vec2};
 
 use crate::canvas_container::STACK_TOP_PX;
 use crate::dense_canvas::zoom_step;

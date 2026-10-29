@@ -3,20 +3,20 @@
 //! story, so the lab's simulated board stands in for the board's frames.
 //!
 //! The projects are the repo's own, at project format 12 with their
-//! mappings in map2d format 6 (baked into `lab_mapping_files::embedded`).
+//! mappings in map2d format 6 (baked into `lpa_graph_files::embedded`).
 //! A story that shows an edit makes it the way an offer does: the verb by
 //! name, its values as text (`GraphEdit::bind`), through `Editor::edit`.
 
 use dioxus::prelude::*;
-use lab_mapping_files::MemFiles;
-use lab_mapping_files::Opened;
-use lab_mapping_files::embedded::{
-    CHOKER, CIRCULAR_DISPLAY, CIRCULAR_DISPLAY_WALK, EAVES, Embedded, FIBER_HEADBAND, PLASMA,
-    ZOOK_DOME,
-};
-use lab_mapping_model::{
+use lpa_graph::{
     Editor, GraphEdit, GraphInput, GraphVerb, LayoutKind, NodeId, PartRef, Presentation, Target,
     TreeRef, Vec2,
+};
+use lpa_graph_files::MemFiles;
+use lpa_graph_files::Opened;
+use lpa_graph_files::embedded::{
+    CHOKER, CIRCULAR_DISPLAY, CIRCULAR_DISPLAY_WALK, EAVES, Embedded, FIBER_HEADBAND, PLASMA,
+    ZOOK_DOME,
 };
 use lpa_studio_core::app::graph::{GraphHandle, UiGraphFrame, UiGraphState, UiGraphView};
 use lpa_studio_web_story_macros::story;
@@ -127,7 +127,7 @@ fn graph_choker_f_at_60() -> Element {
     description = "Sean's eaves with the front run reversed: the front selected, its Direction set here; the side run wraps onto the next port, end to end."
 )]
 fn graph_eaves_front_reversed() -> Element {
-    rsx! { GraphStory { example: "lab/mapping/projects/eaves", setup: Setup::EavesFront } }
+    rsx! { GraphStory { example: "projects/test/eaves", setup: Setup::EavesFront } }
 }
 
 #[story(
@@ -231,7 +231,7 @@ fn story_handle(example: &str, setup: Setup) -> (GraphHandle, Option<String>) {
         *e = Editor::new(opened.project);
         edit(&mut e, &fixture, setup);
         e.resize(Vec2::new(720.0, 560.0));
-        let placement = lab_layout::canvas_layout(&e.layout_input());
+        let placement = lpa_graph_layout::canvas_layout(&e.layout_input());
         e.set_placement(&placement);
         e.fit();
     }
@@ -443,16 +443,16 @@ fn embedded(example: &str) -> &'static Embedded {
         "catalog/plasma" => &PLASMA,
         "catalog/fiber-headband" => &FIBER_HEADBAND,
         "catalog/zook-dome" => &ZOOK_DOME,
-        "lab/mapping/projects/eaves" => &EAVES,
+        "projects/test/eaves" => &EAVES,
         "projects/test/circular-display-6" => &CIRCULAR_DISPLAY,
         "projects/test/circular-display-walk" => &CIRCULAR_DISPLAY_WALK,
-        other => panic!("{other} isn't baked into lab_mapping_files::embedded"),
+        other => panic!("{other} isn't baked into lpa_graph_files::embedded"),
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use lab_mapping_model::ProblemKind;
+    use lpa_graph::ProblemKind;
 
     use super::*;
 
@@ -478,7 +478,7 @@ mod tests {
             ("projects/test/circular-display-walk", Setup::OneRingPerPort),
             ("catalog/zook-dome", Setup::ZookCopyThree),
             ("catalog/playful-choker", Setup::ChokerF),
-            ("lab/mapping/projects/eaves", Setup::EavesFront),
+            ("projects/test/eaves", Setup::EavesFront),
             ("catalog/zook-dome", Setup::Problems),
             ("projects/test/circular-display-6", Setup::PortGap),
         ];

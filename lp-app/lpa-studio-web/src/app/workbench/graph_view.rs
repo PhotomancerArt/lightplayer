@@ -1,5 +1,5 @@
 //! The Graph view: the mapping lab's canvas on the open project
-//! (`lab-mapping-web`'s components, over core's editor).
+//! (`lpa-graph-web`'s components, over core's editor).
 //!
 //! Core owns the editor (`lpa_studio_core::app::graph`) and shares it
 //! through a [`GraphHandle`] the app provides as context. This page wraps
@@ -18,10 +18,8 @@
 use std::rc::Rc;
 
 use dioxus::prelude::*;
-use lab_mapping_model::{
-    BoardFrame, GraphInput, GraphVerb, LayoutKind, Presentation, SizeClass, Tool,
-};
-use lab_mapping_web::{
+use lpa_graph::{BoardFrame, GraphInput, GraphVerb, LayoutKind, Presentation, SizeClass, Tool};
+use lpa_graph_web::{
     Canvas, GRAPH_CSS, GraphEditor, HintBar, Inspector, InspectorDebug, TreePane, View,
     use_remembered_inspector_debug, use_view,
 };
@@ -164,8 +162,8 @@ fn GraphCanvas(page: GraphPage, live: bool, on_action: EventHandler<UiAction>) -
             // A press on the canvas keeps its keys here (the canvas
             // stops the browser moving focus).
             onmousedown: move |_| focus_keys(),
-            onkeydown: move |evt| lab_mapping_web::input::key_down(&on_down, evt),
-            onkeyup: move |evt| lab_mapping_web::input::key_up(&on_up, evt),
+            onkeydown: move |evt| lpa_graph_web::input::key_down(&on_down, evt),
+            onkeyup: move |evt| lpa_graph_web::input::key_up(&on_up, evt),
             div { class: "graph-bar top tw:flex tw:flex-wrap tw:items-center tw:gap-3",
                 for group in TOOLBAR {
                     div { class: "tools",

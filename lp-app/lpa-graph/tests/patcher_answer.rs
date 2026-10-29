@@ -13,7 +13,7 @@
 //! Each test builds its own project: a fixture `f`, an output `out` with the
 //! ports named (keys 0, 1, …), RGB lamps.
 
-use lab_mapping_model::*;
+use lpa_graph::*;
 use lpc_mapping::part::{Circle, PartKind, Path, Repeat, Shape, TreeId, render};
 use lpc_mapping::patching::{
     Amount, ChannelOp, Direction, Flow, PatchTarget, PortKey, Problem, patch_mapping,

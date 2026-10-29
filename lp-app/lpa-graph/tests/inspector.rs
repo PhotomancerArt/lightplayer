@@ -6,7 +6,7 @@
 //! of four rings and a one-lamp centre (ring r5, radius 0) on output
 //! `main`, five ports of 64 lamps, starting at D0's first lamp, end to end.
 
-use lab_mapping_model::*;
+use lpa_graph::*;
 use lpc_mapping::part::{PartKind, Path, Repeat, Shape};
 use lpc_mapping::patching::{Direction, Flow, PatchTarget, PortKey};
 

@@ -1,10 +1,10 @@
 //! Pressing one of the Graph's verbs: what its offer's action carries —
 //! the verb, and for a verb that takes values, the values bound
-//! (`lab_mapping_model::GraphEdit`).
+//! (`lpa_graph::GraphEdit`).
 
 use core::any::Any;
 
-use lab_mapping_model::{GraphEdit, GraphVerb};
+use lpa_graph::{GraphEdit, GraphVerb};
 
 use crate::{
     ActionClass, ActionMeta, ActionPriority, ControllerId, ControllerOp,

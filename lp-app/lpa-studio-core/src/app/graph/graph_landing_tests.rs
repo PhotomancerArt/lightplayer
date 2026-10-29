@@ -17,8 +17,8 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::path::{Path, PathBuf};
 
-use lab_mapping_files::{DirFiles, Opened, ProductProject, Saved, Source};
-use lab_mapping_model::{NodeId, Project};
+use lpa_graph::{NodeId, Project};
+use lpa_graph_files::{DirFiles, Opened, ProductProject, Saved, Source};
 
 use super::graph_port_tables::port_tables;
 
@@ -26,13 +26,13 @@ use super::graph_port_tables::port_tables;
 const GOLDEN_ROOT: &str = "lp-app/lpa-upgrade/tests/landing";
 
 /// The trees whose projects the Graph must open, from the workspace root.
-const PROJECT_TREES: [&str; 3] = ["catalog", "projects", "lab/mapping/projects"];
+const PROJECT_TREES: [&str; 2] = ["catalog", "projects"];
 
 /// The project format the Graph reads.
 const PROJECT_FORMAT: u64 = 12;
 
 /// The Graph opens every format-6 project in the repo: every project under
-/// `catalog/`, `projects/` and `lab/mapping/projects/` opens, and every
+/// `catalog/` and `projects/` opens, and every
 /// fixture's mapping renders.
 #[test]
 fn the_graph_opens_every_format_6_project_in_the_repo() {

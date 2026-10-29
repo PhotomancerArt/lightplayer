@@ -1,5 +1,5 @@
-//! The mapping design lab's model, in two halves (architecture §2). Read
-//! it top-down as the vocabulary of the editor.
+//! The Graph's editor model — Studio's project canvas — in two halves
+//! (architecture §2). Read it top-down as the vocabulary of the editor.
 //!
 //! **[`domain`]: what is stored, and the logic over it.**
 //!
@@ -48,10 +48,10 @@
 //!
 //! - [`Editor`] — the state, driven by input events, with no IO; "Move &
 //!   draw" off holds the drawing still. [`GraphInput`] is every input as
-//!   one value, so a page in the lab and one in Studio say the same thing.
+//!   one value, so every page that mounts the Graph says the same thing.
 //! - [`layout_input`] — what the view lays out: each node's role, size and
 //!   module, the dataflow, and pins while pinning is on (D64). The page
-//!   runs `lab-layout` and hands the placement back.
+//!   runs `lpa-graph-layout` and hands the placement back.
 //! - [`card_geometry`] — a card's own size and rows, declared by core.
 //! - [`edges`] — the wiring between nodes, one edge per pair, and what each
 //!   says; [`highlight`] — what a selection lights up across the patch.

@@ -4,7 +4,7 @@
 //! from the board frame by output and port.
 
 use dioxus::prelude::*;
-use lab_mapping_model::{BoardFrame, DetailLevel, Emphasis, UiOutputFace};
+use lpa_graph::{BoardFrame, DetailLevel, Emphasis, UiOutputFace};
 
 use crate::dense_canvas::{Raster, canvas_id, put_when_mounted};
 use crate::faces::{CardTitle, card_font, emphasis_class, rgb};

@@ -12,7 +12,7 @@
 //! this needs no format bump. Nodes are keyed as the Map view keys them:
 //! by their tree path.
 
-use lab_mapping_model::{NodeId, Project, Vec2};
+use lpa_graph::{NodeId, Project, Vec2};
 use lpc_mapping::EditorMetaDoc;
 use serde_json::{Value, json};
 

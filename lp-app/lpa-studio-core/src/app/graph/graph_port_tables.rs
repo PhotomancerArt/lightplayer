@@ -13,8 +13,8 @@
 
 use std::collections::BTreeMap;
 
-use lab_mapping_files::ProductProject;
-use lab_mapping_model::{NodeId, Project};
+use lpa_graph::{NodeId, Project};
+use lpa_graph_files::ProductProject;
 use lpc_engine::node::output_port_slices;
 use lpc_mapping::patching::{OutputName, OutputPorts, Port, PortKey};
 

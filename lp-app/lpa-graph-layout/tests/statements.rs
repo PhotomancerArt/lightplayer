@@ -6,8 +6,8 @@
 //! Cards are the lab's: 60 wide, 27 tall (a header and one row), an output
 //! 14 taller per port.
 
-use lab_layout::spacing::*;
-use lab_layout::*;
+use lpa_graph_layout::spacing::*;
+use lpa_graph_layout::*;
 
 // ---- stability -------------------------------------------------------------
 

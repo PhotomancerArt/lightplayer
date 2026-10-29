@@ -7,7 +7,7 @@
 //! them. Each test builds its own small project: a fixture `f` and an
 //! output `out` with one port, D0.
 
-use lab_mapping_model::*;
+use lpa_graph::*;
 use lpc_mapping::part::{Circle, PartKind, Path, Repeat, Shape};
 
 /// A path is one row, its own segment: its lamps sit directly under it as

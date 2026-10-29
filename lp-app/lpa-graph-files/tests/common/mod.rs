@@ -5,9 +5,9 @@
 
 #![allow(dead_code, reason = "each journey uses only some of these")]
 
-use lab_mapping_files::embedded::Embedded;
-use lab_mapping_files::{MemFiles, Opened};
-use lab_mapping_model::*;
+use lpa_graph::*;
+use lpa_graph_files::embedded::Embedded;
+use lpa_graph_files::{MemFiles, Opened};
 use serde_json::{Value, json};
 
 pub fn open(e: &Embedded) -> Opened {
@@ -18,7 +18,7 @@ pub fn open(e: &Embedded) -> Opened {
 /// (`lp-core/lpc-mapping/tests/format6/<name>.map2d.json`).
 pub fn format6_doc(name: &str) -> String {
     let path = format!(
-        "{}/../../../lp-core/lpc-mapping/tests/format6/{name}.map2d.json",
+        "{}/../../lp-core/lpc-mapping/tests/format6/{name}.map2d.json",
         env!("CARGO_MANIFEST_DIR")
     );
     std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path}: {e}"))
@@ -99,7 +99,7 @@ pub fn node(id: &str) -> TreeRef {
 /// An editor on `p`, laid out the way the page does it.
 pub fn editor_of(p: Project) -> Editor {
     let mut e = Editor::new(p);
-    let placement = lab_layout::canvas_layout(&e.layout_input());
+    let placement = lpa_graph_layout::canvas_layout(&e.layout_input());
     e.set_placement(&placement);
     e.resize(Vec2::new(1200.0, 800.0));
     e

@@ -18,7 +18,7 @@
 
 use std::path::{Path, PathBuf};
 
-use lab_mapping_model::{
+use lpa_graph::{
     Button, GraphInput, GraphVerb, Mods, NodeId, NodeKind, Output, Target, Vec2, port_value,
 };
 use lpc_mapping::part::{Mapping, TreeId, render};
@@ -265,13 +265,13 @@ fn a_dome_slice() {
     j.choosing_a_port_of_an_unnamed_output_names_it(&format!("fixture:{}", copy(1)));
 }
 
-/// Sean's eaves (`lab/mapping/projects/eaves`: the front's 60 lamps on D10,
+/// Sean's eaves (`projects/test/eaves`: the front's 60 lamps on D10,
 /// which holds 60, and the side's 50 after it): the side that doesn't fit
 /// what is left wraps to the next port; the front reversed, as the house
 /// feeds it from its far end.
 #[test]
 fn seans_eaves() {
-    let mut j = Journey::repo("lab/mapping/projects/eaves", "/fixture.map2d.json");
+    let mut j = Journey::repo("projects/test/eaves", "/fixture.map2d.json");
 
     // 1. The front fills D10; the side doesn't fit, so it starts D9.
     assert_eq!(j.span("front"), Some((0, 0, 59)));
@@ -438,7 +438,7 @@ fn the_circular_display_from_nothing() {
     // The page lays the canvas out again and says where everything went.
     let placement = {
         let e = j.graph.handle.editor().borrow();
-        lab_layout::canvas_layout(&e.layout_input())
+        lpa_graph_layout::canvas_layout(&e.layout_input())
     };
     // (Where things sit is not an edit: nothing to send the actor.)
     j.graph.handle.input(GraphInput::Placement(placement));

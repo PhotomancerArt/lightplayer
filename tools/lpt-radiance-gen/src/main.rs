@@ -1,10 +1,10 @@
 //! Generates the **radiance dome** test project
-//! (`lab/mapping/projects/radiance-dome/`) in the product's own on-disk
+//! (`projects/test/radiance-dome/`) in the product's own on-disk
 //! formats: a project manifest, one root module, a clock, a shader, one
 //! fixture whose `map2d` mapping (format 6) holds its layout and its patch,
 //! and ten outputs.
 //!
-//! Why it exists: the mapping design lab needs a project at the radiance
+//! Why it exists: the Graph needs a project at the radiance
 //! dome's scale (275 panels, tens of thousands of lamps, ten control boxes)
 //! to test journeys against, and no such project is on disk. lp2014's
 //! `radiance.json` is the 2017 one-light-per-panel install, not the
@@ -30,7 +30,7 @@
 //! directory (default: the checked-in project):
 //!
 //! ```bash
-//! cargo run -p lab-mapping-radiance-gen [-- <out-dir>]
+//! cargo run -p lpt-radiance-gen [-- <out-dir>]
 //! ```
 //!
 //! Deterministic: the same source writes the same bytes.
@@ -55,7 +55,7 @@ fn main() {
         .nth(1)
         .map(PathBuf::from)
         .unwrap_or_else(|| {
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../projects/radiance-dome")
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../projects/test/radiance-dome")
         });
     std::fs::create_dir_all(&out_dir).expect("create the project directory");
     let out_dir = out_dir

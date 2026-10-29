@@ -1,11 +1,11 @@
-//! The mapping lab's files: real LightPlayer projects, opened into the
-//! lab's model and saved back, in the product's own formats (vision D51;
+//! The Graph's files: real LightPlayer projects, opened into the
+//! Graph's model and saved back, in the product's own formats (vision D51;
 //! the design is fit-check §6).
 //!
 //! - [`Opened::open`] reads `project.json`, the root module and every node
-//!   it refers to into a lab [`Project`](lab_mapping_model::Project) —
+//!   it refers to into a Graph [`Project`](lpa_graph::Project) —
 //!   fixtures with their mappings (parts and patching), outputs with their ports,
-//!   modules, and every other node as a plain card — and keeps what the lab
+//!   modules, and every other node as a plain card — and keeps what the Graph
 //!   doesn't model in a [`ProductProject`], untouched.
 //! - [`ProductProject::save`] writes back what changed: each fixture's
 //!   mapping with `lpc-mapping`'s own map2d format 6 writer, and the

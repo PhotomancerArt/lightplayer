@@ -1,17 +1,17 @@
 [package]
-name = "lab-mapping-radiance-gen"
+name = "lpt-radiance-gen"
 version.workspace = true
 authors.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 publish = false
-description = "Mapping design lab: generates the radiance dome test project (placeholder lamp counts and patch)"
+description = "Generates the radiance dome test project (projects/test/radiance-dome: placeholder lamp counts and patch)"
 
 # The map2d document is written by lpc-mapping's format-6 writer; the node
 # files are written by hand (`json_text.rs`).
 [dependencies]
-lpc-mapping = { path = "../../../lp-core/lpc-mapping" }
+lpc-mapping = { path = "../../lp-core/lpc-mapping" }
 serde_json = { workspace = true, features = ["std"] }
 
 [lints]

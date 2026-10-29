@@ -1,7 +1,7 @@
 //! The page's synchronous hold on the Graph's editor.
 //!
 //! The Graph is the mapping lab's canvas, and its editor
-//! (`lab_mapping_model::Editor`) is core's: offers, saves and the board's
+//! (`lpa_graph::Editor`) is core's: offers, saves and the board's
 //! highlight are all built from it here. But a pointer move cannot wait
 //! for the studio actor — the actor runs one batch at a time, a batch can
 //! hold a device read, and every batch rebuilds the whole studio view — so
@@ -20,7 +20,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use lab_mapping_model::{Editor, GraphInput, Project, Target};
+use lpa_graph::{Editor, GraphInput, Project, Target};
 
 use crate::app::graph::GraphNote;
 use crate::app::studio::studio_command::StudioCommand;

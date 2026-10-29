@@ -120,7 +120,7 @@ fn palette(offers: UiOfferTree, query: &str, armed: bool) -> Element {
 
 /// What the Graph publishes with the circular display's fixture selected.
 fn graph_offers() -> UiOfferTree {
-    use lab_mapping_model::{Editor, GraphInput, Project, Target};
+    use lpa_graph::{Editor, GraphInput, Project, Target};
     let mut editor = Editor::new(Project::circular_display_wired());
     let fixture = editor.project.fixtures()[0].id.clone();
     editor.input(GraphInput::Select(vec![Target::Node(fixture)]));

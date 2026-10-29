@@ -4,7 +4,7 @@
 //! run. A shader the lab opened is never written: its own files stay as
 //! they were.
 
-use lab_mapping_model::{Pattern, RenderSource};
+use lpa_graph::{Pattern, RenderSource};
 use serde_json::{Value, json};
 
 /// The node file: a `Shader` reading `source` and writing its channel.

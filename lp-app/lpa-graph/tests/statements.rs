@@ -32,9 +32,9 @@
 //! Positions are in each fixture's own coordinates; `place(e, "tail", x, y)`
 //! turns them into the canvas's.
 
-use lab_mapping_model::card_geometry::*;
-use lab_mapping_model::domain::*;
-use lab_mapping_model::*;
+use lpa_graph::card_geometry::*;
+use lpa_graph::domain::*;
+use lpa_graph::*;
 use lpc_mapping::part::{
     Circle, Part, PartId, PartKind, Path, PathCommand, Repeat, SegmentKey, Shape, TreeId,
 };
@@ -653,15 +653,15 @@ fn the_layout_input_says_what_there_is_never_where() {
         input.nodes.iter().find(|n| n.id == id).unwrap().clone()
     };
     let rig = node_id(&e, "tail rig").to_string();
-    assert_eq!(node("tail rig").role, lab_layout::LayoutRole::Module);
-    assert_eq!(node("rainbow").role, lab_layout::LayoutRole::Source);
-    assert_eq!(node("tail").role, lab_layout::LayoutRole::Fixture);
+    assert_eq!(node("tail rig").role, lpa_graph_layout::LayoutRole::Module);
+    assert_eq!(node("rainbow").role, lpa_graph_layout::LayoutRole::Source);
+    assert_eq!(node("tail").role, lpa_graph_layout::LayoutRole::Fixture);
     assert_eq!(node("tail").parent, Some(rig));
-    assert_eq!(node("tail").size, lab_layout::Vec2::new(82.0, 82.0));
-    assert_eq!(node("main").role, lab_layout::LayoutRole::Output);
+    assert_eq!(node("tail").size, lpa_graph_layout::Vec2::new(82.0, 82.0));
+    assert_eq!(node("main").role, lpa_graph_layout::LayoutRole::Output);
     assert_eq!(
         node("main").size,
-        lab_layout::Vec2::new(CARD_WIDTH, CARD_HEADER + 2.0 * CARD_ROW + CARD_FOOT),
+        lpa_graph_layout::Vec2::new(CARD_WIDTH, CARD_HEADER + 2.0 * CARD_ROW + CARD_FOOT),
         "a header and a row per port"
     );
     let edge = |a: &str, b: &str| (node_id(&e, a).to_string(), node_id(&e, b).to_string());
@@ -693,9 +693,9 @@ fn controls_and_playlists_have_their_roles() {
         p.add_node(None, kind, NodeKind::Other(OtherNode::new(kind)));
     }
     let e = editor_of(p);
-    let roles: Vec<lab_layout::LayoutRole> =
+    let roles: Vec<lpa_graph_layout::LayoutRole> =
         e.layout_input().nodes.iter().map(|n| n.role).collect();
-    use lab_layout::LayoutRole::*;
+    use lpa_graph_layout::LayoutRole::*;
     assert_eq!(
         roles,
         vec![Control, Control, Control, Control, Source, Other]
@@ -3556,7 +3556,7 @@ fn the_selection_has_a_node_it_is_in() {
 fn a_fixture_drawn_bigger_in_the_stack_still_picks_and_drags() {
     let mut e = editor();
     e.set_layout(Some(LayoutKind::Stack));
-    let placement = lab_layout::stack_layout(&e.layout_input(), 300.0);
+    let placement = lpa_graph_layout::stack_layout(&e.layout_input(), 300.0);
     e.set_placement(&placement);
     e.fit();
     let ring = node_id(&e, "ring display");
@@ -3682,7 +3682,7 @@ fn editor_of(p: Project) -> Editor {
 /// What the page does after every change: build the layout input, run the
 /// layout, and hand the editor where everything landed.
 fn lay_out(e: &mut Editor) {
-    let placement = lab_layout::canvas_layout(&e.layout_input());
+    let placement = lpa_graph_layout::canvas_layout(&e.layout_input());
     e.set_placement(&placement);
 }
 

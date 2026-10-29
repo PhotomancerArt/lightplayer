@@ -56,7 +56,7 @@
 //! the Graph is Lasting. Moving the view (pan, zoom, fit, Canvas | Stack)
 //! is view state, never an offer.
 
-use lab_mapping_model::{Editor, GraphEdit, GraphVerb, VerbChoice, node_value};
+use lpa_graph::{Editor, GraphEdit, GraphVerb, VerbChoice, node_value};
 
 use crate::app::graph::GraphOp;
 use crate::{

@@ -1,11 +1,11 @@
 //! The view tree, part by part. Each part is a memo built from the editor
-//! only when its key moves (`lab_mapping_model::view_keys`): panning
+//! only when its key moves (`lpa_graph::view_keys`): panning
 //! builds the overlay again and nothing else, so the cards, the edges and
 //! the panels keep what they drew. Together the parts are
 //! `Editor::view_tree`.
 
 use dioxus::prelude::*;
-use lab_mapping_model::{
+use lpa_graph::{
     HintBar, Notice, UiCanvasEdge, UiCanvasNode, UiCursor, UiCursorNote, UiInspector, UiMenu,
     UiOverlay, UiToolbar, UiTree,
 };

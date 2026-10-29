@@ -53,11 +53,11 @@ lpa-studio-web, future CLI, future desktop, tests, and agents
   unit-tested), and `share` (the `lp.package` / `lp.node` clipboard
   envelope formats — see `docs/adr/2026-07-28-share-envelopes.md`; pure
   byte functions, with the clipboard itself living in the web edge).
-- `app/graph/` is the **Graph** tab's state: the mapping design lab's
-  editor (`lab/mapping/`'s `lab-mapping-model`) on the open project. While
+- `app/graph/` is the **Graph** tab's state: the Graph's editor
+  (`lpa-graph`) on the open project. While
   the Graph is the place, the actor opens the project's own files with
-  `lab-mapping-files` (fetching what it asks for), lays it out with
-  `lab-layout`, and rebuilds it only when a file it read changes. The page
+  `lpa-graph-files` (fetching what it asks for), lays it out with
+  `lpa-graph-layout`, and rebuilds it only when a file it read changes. The page
   applies its pointer and key input to the editor synchronously through
   a `GraphHandle` (an `Rc<RefCell>` built before the controller moves into
   the actor, like `StudioHandle`'s delay cell), because a pointer move

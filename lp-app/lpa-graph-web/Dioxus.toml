@@ -1,5 +1,5 @@
 [application]
-name = "lab-mapping-web"
+name = "lpa-graph-lab"
 default_platform = "web"
 asset_dir = "public"
 out_dir = "dist"
@@ -9,4 +9,4 @@ title = "Mapping lab"
 base_path = "/"
 
 [web.watcher]
-watch_path = ["lab/mapping/web/src", "lab/mapping/model/src", "lab/mapping/files/src"]
+watch_path = ["lp-app/lpa-graph-web/src", "lp-app/lpa-graph/src", "lp-app/lpa-graph-files/src"]

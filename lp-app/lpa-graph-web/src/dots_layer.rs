@@ -4,7 +4,7 @@
 //! Redrawn when the camera or the view's size changes.
 
 use dioxus::prelude::*;
-use lab_mapping_model::{Camera, Vec2};
+use lpa_graph::{Camera, Vec2};
 use wasm_bindgen::JsCast;
 use web_sys::HtmlCanvasElement;
 

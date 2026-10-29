@@ -1,12 +1,12 @@
 [package]
-name = "lab-mapping-web"
+name = "lpa-graph-web"
 version.workspace = true
 authors.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 publish = false
-description = "Mapping design lab: the canvas (Dioxus web components over lab-mapping-model) and the lab's page"
+description = "The Graph — Studio's project canvas: its Dioxus web components (the canvas and its panels, over lpa-graph), and the lab's page"
 
 # The library is the canvas and its panels, which any host mounts (the lab's
 # page, Studio's Graph tab); the bin is the lab's own page around it.
@@ -14,16 +14,16 @@ description = "Mapping design lab: the canvas (Dioxus web components over lab-ma
 path = "src/lib.rs"
 
 [[bin]]
-name = "lab-mapping-web"
+name = "lpa-graph-lab"
 path = "src/main.rs"
 
 [dependencies]
 dioxus = { version = "0.7", features = ["web"] }
 gloo-timers = { version = "0.3", features = ["futures"] }
-lab-mapping-files = { path = "../files" }
-lab-arrows = { path = "../arrows" }
-lab-layout = { path = "../layout" }
-lab-mapping-model = { path = "../model" }
+lpa-graph = { path = "../lpa-graph" }
+lpa-graph-arrows = { path = "../lpa-graph-arrows" }
+lpa-graph-files = { path = "../lpa-graph-files" }
+lpa-graph-layout = { path = "../lpa-graph-layout" }
 wasm-bindgen = "0.2"
 web-sys = { version = "0.3", features = ["Window", "Document", "Element", "DomRect", "MouseEvent", "EventTarget", "Performance", "HtmlCanvasElement", "CanvasRenderingContext2d", "TextMetrics", "ImageData", "Storage"] }
 

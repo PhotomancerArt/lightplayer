@@ -27,7 +27,7 @@
 
 use std::collections::BTreeMap;
 
-use lab_mapping_model::{NodeId, Project, Target};
+use lpa_graph::{NodeId, Project, Target};
 
 use crate::{PatchPulseLamps, PatchPulseLanguage, PatchPulseOp, PatchPulseSubject};
 
@@ -123,7 +123,7 @@ pub(crate) fn highlight_of(
 fn fixture_lamps(
     project: &Project,
     nodes: &BTreeMap<NodeId, lpc_model::NodeId>,
-    object: &lab_mapping_model::TreeRef,
+    object: &lpa_graph::TreeRef,
 ) -> Option<(lpc_model::NodeId, u32, u32)> {
     let placed = project.placed();
     let i = placed.index_of(object)?;

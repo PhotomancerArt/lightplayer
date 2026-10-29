@@ -8,13 +8,13 @@
 use std::collections::BTreeMap;
 
 use dioxus::prelude::*;
-use lab_arrows::Arrow;
-use lab_mapping_model::ux::area::{FRAME_TITLE_PX, PROBLEM_GAP_PX};
-use lab_mapping_model::ux::handle::HANDLE_PX;
-use lab_mapping_model::{
+use lpa_graph::ux::area::{FRAME_TITLE_PX, PROBLEM_GAP_PX};
+use lpa_graph::ux::handle::HANDLE_PX;
+use lpa_graph::{
     Camera, Emphasis, FrameKind, GraphInput, NodeId, OutlineKind, Rect, UiCanvasEdge, UiCanvasNode,
     UiCursorNote, UiMenu, UiOverlay, UiShape, Vec2,
 };
+use lpa_graph_arrows::Arrow;
 
 use crate::edge_layer::EdgeLayer;
 use crate::faces::{DRAFT_PITCH, lamp_radius_px};

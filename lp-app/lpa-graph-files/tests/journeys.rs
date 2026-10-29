@@ -12,9 +12,9 @@
 mod common;
 
 use common::*;
-use lab_mapping_files::embedded::{EAVES, EAVES_WIRED, RADIANCE_DOME};
-use lab_mapping_model::domain::breath::BREATH_SECONDS;
-use lab_mapping_model::*;
+use lpa_graph::domain::breath::BREATH_SECONDS;
+use lpa_graph::*;
+use lpa_graph_files::embedded::{EAVES, EAVES_WIRED, RADIANCE_DOME};
 
 /// J1: the dome, one segment at a time. The first box's panels are
 /// scrambled across its ports, each a random way round and entering at a

@@ -10,7 +10,7 @@
 mod common;
 
 use common::*;
-use lab_mapping_model::*;
+use lpa_graph::*;
 
 #[test]
 fn seans_eaves() {

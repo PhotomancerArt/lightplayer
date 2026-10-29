@@ -1,4 +1,4 @@
-/* The mapping canvas, its panels and its hint bar (lab-mapping-web).
+/* The mapping canvas, its panels and its hint bar (lpa-graph-web).
    Everything is nested under .graph, so a host page (Studio) keeps its
    own styles. The colours are Studio's tokens, copied so the lab needs
    nothing from the app. */

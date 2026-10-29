@@ -14,7 +14,7 @@ pub use output_face::OutputFace;
 pub use plain_face::PlainFace;
 pub use source_face::SourceFace;
 
-use lab_mapping_model::{Emphasis, Rgb};
+use lpa_graph::{Emphasis, Rgb};
 
 /// A lamp's radius on screen: a third of the gap to the next lamp, so
 /// lamps are as big as they can be with a clear gap between them, however

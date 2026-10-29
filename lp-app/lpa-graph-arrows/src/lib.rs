@@ -1,10 +1,10 @@
-//! Arrows for the mapping lab: a semantic arrow in, renderer-agnostic
+//! Arrows for the Graph: a semantic arrow in, renderer-agnostic
 //! geometry out.
 //!
-//! The lab's canvas draws wiring as curved arrows with words on them, and
+//! The Graph's canvas draws wiring as curved arrows with words on them, and
 //! the words were the messy part: a label floating at the midpoint, level,
 //! wherever the curve happened to be, and another one coming for every
-//! channel's name. This crate is the arrow piece of the lab's view model
+//! channel's name. This crate is the arrow piece of the Graph's view model
 //! (the model says *what* to draw, with roles; the renderer only draws):
 //!
 //! - an [`Arrow`] says what the arrow *is* — from, to, how it leaves and
@@ -22,7 +22,7 @@
 //! [`Rect`], [`OrientedBox`], [`Cubic`], [`Polyline`]), so it stands alone.
 //!
 //! ```
-//! use lab_arrows::*;
+//! use lpa_graph_arrows::*;
 //!
 //! // The lab's patch edge: leave toward the pixel, arrive from its left.
 //! let arrow = Arrow::new(Vec2::new(0.0, 0.0), Vec2::new(320.0, 90.0))
