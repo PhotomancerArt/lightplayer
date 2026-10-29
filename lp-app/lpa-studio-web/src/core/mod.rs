@@ -30,6 +30,7 @@ pub mod terminal_output;
 #[cfg(feature = "stories")]
 pub(crate) mod terminal_output_stories;
 pub mod view;
+pub mod window_keys;
 
 pub use action::{
     ActionButton, ActionButtonVariant, ActionStrip, ArmedConfirmButton, inline_link_row_class,

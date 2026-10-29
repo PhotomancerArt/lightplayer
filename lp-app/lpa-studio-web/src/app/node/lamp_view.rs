@@ -4,9 +4,9 @@
 //! scale tomorrow (~30k), so one DOM node per lamp is not an option: the
 //! positioned-`<span>` renderer this replaced rebuilt the whole lamp field
 //! through the vdom on every live frame. Here the field is one `<canvas>`,
-//! and each lamp is a **voronoi cell** — the same seam-inset polygons the
-//! mapping canvas draws ([`point_cells`]), so the product display speaks
-//! the design language instead of a row of blurred dots.
+//! and each lamp is a **voronoi cell** — seam-inset polygons
+//! ([`point_cells`]), so the product display speaks the design language
+//! instead of a row of blurred dots.
 //!
 //! Geometry is scale-free and computed ONCE per layout: cell polygons live
 //! in the layout's own hint space (all lengths derived from the field's
@@ -31,19 +31,20 @@
 //! Not yet — 1500 path fills are well under a frame, and a GPU context per
 //! card is its own bill.
 //!
-//! [`point_cells`]: lpa_mapping_editor::point_cells
+//! [`point_cells`]: super::lamp_cells_geometry::point_cells
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use dioxus::prelude::*;
-use lpa_mapping_editor::{neutral_lamp_rgb, point_cells};
 use lpa_studio_core::{
     ColorOrder, ControlDisplayLayout, ControlSampleEncoding, UiControlProductPreview,
     UiPatchSurface, UiPatchSurfaceFixture,
 };
 use wasm_bindgen::{JsCast, closure::Closure};
+
+use super::lamp_cells_geometry::point_cells;
 
 /// Monotonic lamp-canvas element ids (one per mounted lamp view).
 static NEXT_LAMP_CANVAS_ID: AtomicU64 = AtomicU64::new(0);
@@ -228,6 +229,10 @@ pub(crate) fn cell_frame<'a>(
 /// rather than as a black lamp.
 pub(crate) const UNLIT_RGB: [u8; 3] = [58, 63, 70];
 
+/// Every lamp's fill when live coloring is off: the layout, painted
+/// neutral.
+const NEUTRAL_LAMP_RGB: [u8; 3] = [96, 102, 112];
+
 /// Whether the product's sample layout carries anything this renderer can
 /// colour a lamp from.
 pub(crate) fn control_sample_layout_has_rgb(preview: &UiControlProductPreview) -> bool {
@@ -296,7 +301,7 @@ pub(crate) fn lamp_field_geometry(layout: &lpa_studio_core::ControlLayout2d) -> 
     let cells: Vec<(u32, Vec<[f32; 2]>)> = point_cells(&positions, floor)
         .into_iter()
         .zip(&layout.lamps)
-        .map(|(cell, lamp)| (lamp.sample_start, cell.polygon))
+        .map(|(polygon, lamp)| (lamp.sample_start, polygon))
         .collect();
     let mut min = [f64::INFINITY; 2];
     let mut max = [f64::NEG_INFINITY; 2];
@@ -398,7 +403,7 @@ impl LampCellPaths {
                 y + (height - scale * bounds_h) / 2.0 - scale * bounds_y,
             )
             .map_err(|error| format!("set transform: {error:?}"))?;
-        let neutral = neutral_lamp_rgb();
+        let neutral = NEUTRAL_LAMP_RGB;
         let mut style = String::new();
         for (sample_start, path) in &self.cells {
             let color = if live {

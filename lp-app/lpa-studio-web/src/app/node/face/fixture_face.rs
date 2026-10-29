@@ -87,10 +87,8 @@ pub fn FixtureFace(
     // below settings).
     let mut space_open = use_signal(move || space_initially_open);
     let preview = face.preview.clone();
-    // One view state for both faces of the section: the same toggle bar
-    // (and its state) survives the view ⇄ edit flip, and the toggles drive
-    // the editor canvas exactly like the display renderer.
-    let mut view = use_signal(move || initial_map_view.unwrap_or_default().into_editor());
+    // The toggle bar's state, view-local (see module doc).
+    let mut view = use_signal(move || initial_map_view.unwrap_or_default());
     let show_toggles = preview.kind == UiProductKind::Control;
 
     rsx! {
@@ -106,10 +104,8 @@ pub fn FixtureFace(
                     div { class: "lpme-spacer" }
                     if show_toggles {
                         MapViewToggles {
-                            value: view().into(),
-                            on_change: move |next: MapViewOptions| {
-                                next.apply_to_editor(&mut view.write());
-                            },
+                            value: view(),
+                            on_change: move |next: MapViewOptions| view.set(next),
                             bare: true,
                             // The wiring instruments are authoring tools;
                             // the face shows the product.
