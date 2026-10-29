@@ -23,6 +23,7 @@ pub struct ProjectTree {
     /// Definition files of Fluid nodes (a source the frozen copy does not
     /// answer: the theory gives it an extent, P4).
     pub fluids: Vec<String>,
+    visited: std::collections::BTreeSet<String>,
 }
 
 pub struct FixtureNode {
@@ -93,6 +94,7 @@ impl ProjectTree {
             shaders: Vec::new(),
             playlists: Vec::new(),
             fluids: Vec::new(),
+            visited: Default::default(),
         };
         tree.visit_file(&dir.join("module.json"));
         tree
@@ -116,6 +118,12 @@ impl ProjectTree {
     }
 
     fn visit_file(&mut self, file: &Path) {
+        // A node file referenced twice (one module in two playlist entries)
+        // is one node.
+        let key = self.relative(file);
+        if !self.visited.insert(key) {
+            return;
+        }
         let Ok(text) = std::fs::read_to_string(file) else {
             return;
         };
@@ -151,12 +159,8 @@ impl ProjectTree {
                         }
                     }
                 }
-                let file = self.relative(file);
-                if self.playlists.iter().any(|p| p.file == file) {
-                    return;
-                }
                 self.playlists.push(PlaylistNode {
-                    file,
+                    file: self.relative(file),
                     idle_entry: json.get("idle_entry").and_then(Value::as_u64),
                     entries,
                 });
