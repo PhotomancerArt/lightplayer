@@ -15,7 +15,7 @@ use lpfs::LpFsStd;
 use lps_shared::LpsValueF32;
 
 use super::project_tree::ProjectTree;
-use super::recording_graphics::{Event, Log, RecordingGraphics};
+use super::recording_graphics::{Event, Log, RecordingGraphics, Swap};
 
 /// Frames before the recorded one: past the compile window and the outputs'
 /// settling.
@@ -27,11 +27,69 @@ const WARM_TICKS: usize = 8;
 /// a project the live engine will not load.
 pub fn record_frame(dir: &Path) -> Result<(Log, Option<String>), String> {
     let log = Arc::new(Mutex::new(Log::default()));
+    let mut rt = load(dir, &log)?;
+    for _ in 0..WARM_TICKS {
+        let _ = rt.tick(16);
+    }
+    log.lock().unwrap().events.clear();
+    let failed = rt.tick(16).err().map(|e| format!("{e:?}"));
+    Ok((std::mem::take(&mut *log.lock().unwrap()), failed))
+}
+
+/// Run a project with `swap` in place and keep each lamp's colour at each of
+/// `times_ms` (from load, in 100 ms steps after the warm frames): what the
+/// swapped program answers at the swapped coordinates.
+pub fn swapped_frames(
+    dir: &Path,
+    swap: Swap,
+    times_ms: &[u32],
+) -> Result<Vec<Vec<Option<[u16; 4]>>>, String> {
+    let lamps = swap.colors.len();
+    let log = Arc::new(Mutex::new(Log {
+        swap: Some(swap),
+        ..Log::default()
+    }));
+    let mut rt = load(dir, &log)?;
+    let mut elapsed = 0u32;
+    for _ in 0..WARM_TICKS {
+        let _ = rt.tick(16);
+        elapsed += 16;
+    }
+    let mut frames = Vec::new();
+    for &at in times_ms {
+        while elapsed + 100 < at {
+            let _ = rt.tick(100);
+            elapsed += 100;
+            log.lock().unwrap().events.clear();
+        }
+        if let Some(swap) = log.lock().unwrap().swap.as_mut() {
+            swap.colors = vec![None; lamps];
+        }
+        let step = at.saturating_sub(elapsed).max(1);
+        rt.tick(step)
+            .map_err(|e| format!("frame at {at} ms: {e:?}"))?;
+        elapsed += step;
+        let mut log = log.lock().unwrap();
+        log.events.clear();
+        frames.push(
+            log.swap
+                .as_ref()
+                .map(|s| s.colors.clone())
+                .unwrap_or_default(),
+        );
+    }
+    Ok(frames)
+}
+
+fn load(
+    dir: &Path,
+    log: &Arc<Mutex<Log>>,
+) -> Result<lpc_engine::engine::LoadedProjectRuntime, String> {
     let graphics: Arc<dyn LpGraphics> = Arc::new(RecordingGraphics {
         inner: Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new(
             lp_shader::ShaderFrontend::LpsGlsl,
         )),
-        log: Arc::clone(&log),
+        log: Arc::clone(log),
     });
     let hardware = Rc::new(HardwareSystem::with_virtual_drivers(Rc::new(
         HwRegistry::new(default_esp32c6_hardware_manifest()),
@@ -44,12 +102,7 @@ pub fn record_frame(dir: &Path) -> Result<(Log, Option<String>), String> {
     let fs = LpFsStd::new(dir.to_path_buf());
     let mut rt = ProjectLoader::load_from_root(&fs, services).map_err(|e| format!("{e:?}"))?;
     rt.engine_mut().set_graphics(Some(graphics));
-    for _ in 0..WARM_TICKS {
-        let _ = rt.tick(16);
-    }
-    log.lock().unwrap().events.clear();
-    let failed = rt.tick(16).err().map(|e| format!("{e:?}"));
-    Ok((std::mem::take(&mut *log.lock().unwrap()), failed))
+    Ok(rt)
 }
 
 /// One recorded stream found among the predictions: which fixture, which

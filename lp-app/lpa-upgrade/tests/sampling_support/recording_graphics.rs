@@ -35,6 +35,33 @@ pub enum Event {
 pub struct Log {
     pub programs: Vec<Program>,
     pub events: Vec<Event>,
+    /// When set, the program compiled from `swap.glsl` is handed other
+    /// coordinates and uniforms, and what it answers is kept per lamp.
+    pub swap: Option<Swap>,
+}
+
+/// A dev-only seam for the look pictures: where today's engine hands the
+/// program one fixture's coordinates (`today`, found batch by batch), hand
+/// it `words` instead, with `uniforms` laid over the bound block, and keep
+/// the colour it answers for each lamp. The program, its compile and every
+/// other uniform (time, phasors, palettes) are the engine's own.
+pub struct Swap {
+    pub glsl: String,
+    pub lanes: usize,
+    pub today: Vec<i32>,
+    pub words: Vec<i32>,
+    pub uniforms: Vec<(String, LpsValueF32)>,
+    /// Each lamp's answer, RGBA16, from the last batch that sampled it.
+    pub colors: Vec<Option<[u16; 4]>>,
+}
+
+impl Swap {
+    /// Where `batch` sits in today's stream, in words.
+    fn offset_of(&self, batch: &[i32]) -> Option<usize> {
+        (0..self.today.len().saturating_sub(batch.len()) + 1)
+            .step_by(self.lanes)
+            .find(|&at| self.today[at..at + batch.len()] == *batch)
+    }
 }
 
 pub struct RecordingGraphics {
@@ -47,6 +74,8 @@ struct RecordingShader {
     graphics: Arc<lp_gfx_lpvm::TargetLpvmGraphics>,
     program: usize,
     space: ShaderEntrySpace,
+    /// Compiled from the swap's GLSL.
+    swapped: bool,
     log: Arc<Mutex<Log>>,
 }
 
@@ -69,11 +98,25 @@ impl LpShader for RecordingShader {
     }
 
     fn bind_uniforms(&mut self, uniforms: &LpsValueF32) -> Result<(), GfxError> {
-        self.log.lock().unwrap().events.push(Event::Bind {
+        let mut log = self.log.lock().unwrap();
+        log.events.push(Event::Bind {
             program: self.program,
             uniforms: uniforms.clone(),
         });
-        self.inner.bind_uniforms(uniforms)
+        let mut block = uniforms.clone();
+        if self.swapped
+            && let Some(swap) = &log.swap
+            && let LpsValueF32::Struct { fields, .. } = &mut block
+        {
+            for (name, value) in &swap.uniforms {
+                match fields.iter_mut().find(|(n, _)| n == name) {
+                    Some(field) => field.1 = value.clone(),
+                    None => fields.insert(1, (name.clone(), value.clone())),
+                }
+            }
+        }
+        drop(log);
+        self.inner.bind_uniforms(&block)
     }
 
     fn sample_rgba16_bound(
@@ -87,11 +130,33 @@ impl LpShader for RecordingShader {
             ShaderEntrySpace::OneD => 1,
         };
         let words = self.graphics.read_sample_points(points)?;
-        self.log.lock().unwrap().events.push(Event::Batch {
+        let batch = words[..count as usize * lanes].to_vec();
+        let mut log = self.log.lock().unwrap();
+        log.events.push(Event::Batch {
             program: self.program,
-            words: words[..count as usize * lanes].to_vec(),
+            words: batch.clone(),
         });
-        self.inner.sample_rgba16_bound(points, out, count)
+        let at = if self.swapped {
+            log.swap.as_ref().and_then(|swap| swap.offset_of(&batch))
+        } else {
+            None
+        };
+        if let (Some(at), Some(swap)) = (at, &log.swap) {
+            let data = self.graphics.sample_points_data_mut(points)?;
+            data[..batch.len()].copy_from_slice(&swap.words[at..at + batch.len()]);
+        }
+        drop(log);
+        self.inner.sample_rgba16_bound(points, out, count)?;
+        if let Some(at) = at {
+            let samples = self.graphics.read_sample_out(out)?;
+            let mut log = self.log.lock().unwrap();
+            let swap = log.swap.as_mut().expect("swap");
+            let first = at / lanes;
+            for (k, rgba) in samples[..count as usize * 4].chunks_exact(4).enumerate() {
+                swap.colors[first + k] = Some([rgba[0], rgba[1], rgba[2], rgba[3]]);
+            }
+        }
+        Ok(())
     }
 
     fn compile_stats(&self) -> Option<lp_gfx::ShaderCompileStats> {
@@ -112,11 +177,13 @@ impl LpGraphics for RecordingGraphics {
             source: source.to_string(),
             space: options.space,
         });
+        let swapped = log.swap.as_ref().is_some_and(|swap| swap.glsl == source);
         Ok(Box::new(RecordingShader {
             inner,
             graphics: Arc::clone(&self.inner),
             program,
             space: options.space,
+            swapped,
             log: Arc::clone(&self.log),
         }))
     }

@@ -8,3 +8,4 @@ pub mod live_streams;
 pub mod project_tree;
 pub mod recording_graphics;
 pub mod scratch_copy;
+pub mod space_options;
