@@ -232,6 +232,7 @@ impl FakeBoardIo {
                 },
                 hardware: lpc_wire::HardwareFacts::default(),
                 device_uid: None,
+                device_name: None,
                 // This fake speaks JSON only: 0 names no dictionary.
                 pack_format: 0,
                 auth: lpc_wire::HelloAuth {

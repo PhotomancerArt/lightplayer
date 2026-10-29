@@ -38,7 +38,9 @@ pub mod whole_file_gate;
 pub use access_gate::{Required, classify};
 pub use access_guarded_fs::AccessGuardedFs;
 pub use access_state::EntropySource;
-pub use device_identity::{DEVICE_IDENTITY_PATH, read_device_uid};
+pub use device_identity::{
+    DEVICE_IDENTITY_PATH, read_device_name, read_device_uid, write_device_name,
+};
 pub use error::ServerError;
 pub use heartbeat_status::HeartbeatStatus;
 pub use link_session::LinkSession;

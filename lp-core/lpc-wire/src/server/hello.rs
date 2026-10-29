@@ -37,6 +37,12 @@ use crate::server::hello_auth::HelloAuth;
 ///
 /// # History
 ///
+/// - 46: the board keeps its own name (plan
+///   `lp2025/2026-10-28-2051-one-board-name`) — `ClientRequest::SetDeviceName
+///   { name }` (edit tier) and its answer `ServerMsgBody::SetDeviceName
+///   { name }`, and the hello's `deviceName`: the name a person gave the
+///   board, kept in `/.lp/device.json`'s `name`. An older board would not
+///   decode the request, so Studio sends it only at this version.
 /// - 45: a playlist pick is a panel write (plan
 ///   `lp2025/2026-10-20-0001-playlists-on-the-bus`, vision D1/D15) — the
 ///   runtime node-command channel is gone: `WireProjectCommand::NodeCommand`,
@@ -463,7 +469,7 @@ use crate::server::hello_auth::HelloAuth;
 /// as `None` on new Studio and a new firmware's extra fields are ignored
 /// by old Studio. Bumping for those would mark every board running
 /// current firmware Incompatible in exchange for nothing.
-pub const WIRE_PROTO_VERSION: u32 = 45;
+pub const WIRE_PROTO_VERSION: u32 = 46;
 
 /// Unsolicited/boot-time server identity, version, and capability report.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -482,6 +488,12 @@ pub struct ServerHello {
     /// hello, and `ClientRequest::Hello` answers re-read it, so a
     /// post-stamp request reports the new uid. `None` means unstamped.
     pub device_uid: Option<String>,
+    /// The board's own name, if a person gave it one: `/.lp/device.json`'s
+    /// `name`, set by [`crate::ClientRequest::SetDeviceName`]. The name
+    /// Studio shows, the board's Bluetooth name (`LP-<name>`) and its name
+    /// on the cloud relay. `None`: never named (Studio shows its own).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device_name: Option<String>,
     /// The JSON Pack format this build packs in
     /// ([`lp_json_pack::PACK_FORMAT_VERSION`]), or 0 when this embedder does
     /// not pack at all (hosts, the browser, `fw-emu`, an ESP image without
@@ -726,6 +738,7 @@ mod tests {
                 ..Default::default()
             },
             device_uid: Some("dev0000000000000001".to_string()),
+            device_name: None,
             pack_format: lp_json_pack::PACK_FORMAT_VERSION,
             auth: HelloAuth::TRUSTED,
             firmware: None,
@@ -779,6 +792,7 @@ mod tests {
             },
             hardware: HardwareFacts::default(),
             device_uid: None,
+            device_name: None,
             pack_format: 0,
             auth: HelloAuth::TRUSTED,
             firmware: Some(manifest.clone()),
@@ -826,6 +840,7 @@ mod tests {
                 ..Default::default()
             },
             device_uid: None,
+            device_name: None,
             pack_format: lp_json_pack::PACK_FORMAT_VERSION,
             auth: HelloAuth {
                 required: true,
@@ -860,6 +875,7 @@ mod tests {
                 ..Default::default()
             },
             device_uid: None,
+            device_name: None,
             pack_format: lp_json_pack::PACK_FORMAT_VERSION,
             auth: HelloAuth {
                 required: true,

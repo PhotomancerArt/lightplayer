@@ -211,6 +211,7 @@ pub fn hello_body() -> WireServerMsgBody {
         },
         hardware: HardwareFacts::default(),
         device_uid: None,
+        device_name: None,
         pack_format: 0,
         auth: HelloAuth::TRUSTED,
         firmware: None,

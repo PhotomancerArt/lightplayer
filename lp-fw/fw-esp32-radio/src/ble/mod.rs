@@ -36,7 +36,7 @@ mod hci_transport;
 mod notify_queue;
 mod nus_service;
 
-pub use advertising::refresh_advertised_name;
+pub use advertising::{name_at_boot, refresh_advertised_name};
 pub use ble_task::start;
 
 /// Run K's parameter file (`desk_ble_params`).
