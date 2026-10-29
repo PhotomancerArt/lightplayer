@@ -61,8 +61,7 @@ fn instance(path: &str, label: &str, start: u32, lamps: u32, stride: u32) -> UiP
 }
 
 /// What `build_patch_surface` stamps in production: per-instance placed
-/// state from the fixture's runs, and a settled editor.json (stories show
-/// the loaded state; the arrange facts default to unarranged).
+/// state from the fixture's runs, and every fixture's tree address.
 fn finish_surface(mut surface: UiPatchSurface) -> UiPatchSurface {
     for fixture in &mut surface.fixtures {
         let cells = fixture.patch.cells.clone();
@@ -72,13 +71,10 @@ fn finish_surface(mut surface: UiPatchSurface) -> UiPatchSurface {
                     && cell.source_start + cell.lamps > instance.start
             });
         }
-        fixture.arrange = Some(lpa_studio_core::UiArrangeMeta::default());
         if fixture.address.is_none() {
             fixture.address = Some(format!("/{}", fixture.label));
         }
     }
-    surface.editor_meta_loaded = true;
-    surface.editor_meta_artifact = Some(lpa_studio_core::editor_meta_artifact());
     surface
 }
 
@@ -206,7 +202,6 @@ fn build_small_dome_surface() -> UiPatchSurface {
                         )
                     })
                     .collect(),
-                arrange: None,
             },
             UiPatchSurfaceFixture {
                 node: NodeId::new(3),
@@ -228,7 +223,6 @@ fn build_small_dome_surface() -> UiPatchSurface {
                 instances: (0..3)
                     .map(|k| instance(&format!("/door/{k}"), &format!("door {k}"), k * 9, 9, 3))
                     .collect(),
-                arrange: None,
             },
         ],
         ..Default::default()

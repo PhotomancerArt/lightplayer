@@ -1,27 +1,20 @@
 //! The project-scoped PATCH SURFACE (D36, slice 2): every output's ports
-//! and cells, every producing fixture's runs and instances, one shared
-//! selection — the full-page editing home the face bays are read-only
-//! mirrors of.
+//! and cells, every producing fixture's runs and instances, and the
+//! modules above them — the face bays' derivation widened to project
+//! scope, with one shared selection.
 //!
 //! Built by the project controller from what the bay derivation already
-//! computes, widened to project scope: the sidebar walks
-//! [`UiPatchSurface::outputs`] as an output → port tree, the canvas draws
-//! each output's lamps from its published frame (layout + bytes, the same
-//! [`crate::UiControlProductPreview`] the bay cells read), and the bay
-//! section reuses the two-sided cells verbatim. Instance structure (one
-//! row per segment, `sector@2`) renders out of each fixture's OWN map2d
-//! document (format 6), the same bytes its mapping holds.
+//! computes: the Nodes view's Outputs panel walks
+//! [`UiPatchSurface::outputs`] as a module → output → port tree, each
+//! output's bay carries its lamps' published frame (layout + bytes, the
+//! same [`crate::UiControlProductPreview`] the bay cells read), and the
+//! two-sided cells are the face bays' own. Instance structure (one row per
+//! segment, `sector@2`) comes out of each fixture's OWN map2d document
+//! (format 6), the same bytes its mapping holds.
 //!
 //! Read-only: the DTO carries selection TARGETS (stable strings the
 //! ui-state stores), not slot addresses. The Patch tab's verbs went with
 //! the patch file (project format 12); the mapping's new editor is M4's.
-//!
-//! Since the unified-editor pass this surface is also the **editor shell's**
-//! view DTO (extend, don't fork): the same fixtures/outputs feed the
-//! workbench panels and the Arrange canvas, and the surface carries the
-//! project-level `editor.json` facts — per-fixture [`UiArrangeMeta`] plus
-//! the loaded-flag/artifact pair pages drive the editor-meta prefetch from
-//! (never hand-code a fetch a flag doesn't ask for — the #409 lesson).
 
 use lpc_model::NodeId;
 
@@ -37,28 +30,11 @@ pub struct UiPatchSurface {
     /// [`UiPatchSurfaceOutput::module`].
     pub modules: Vec<UiPatchSurfaceModule>,
     /// Every bus-consuming output that has answered a frame probe, with its
-    /// bay (ports + cells) — the sidebar's tree and the canvas's wires.
+    /// bay (ports + cells) — the Outputs panel's tree.
     pub outputs: Vec<UiPatchSurfaceOutput>,
     /// Every producing fixture on any of those wires, with its runs and its
     /// instance table.
     pub fixtures: Vec<UiPatchSurfaceFixture>,
-    /// THE chase for the selected UNMAPPED object, computed once here (Q9)
-    /// — the panel strip and the canvas sprites both paint these colors, so
-    /// the two views can never disagree about what the object is doing.
-    /// `None` whenever the selection is mapped (its chase is in the
-    /// published bytes), wire-side, or absent. See
-    /// [`crate::UiPatchChasePreview`].
-    pub chase_preview: Option<crate::UiPatchChasePreview>,
-    /// The project-level `editor.json` settled locally (cached content, or
-    /// the file is known absent). While false, pages dispatch
-    /// [`crate::EditorMetaFetchOp`] against [`Self::editor_meta_artifact`]
-    /// and fixtures carry `arrange: None`.
-    pub editor_meta_loaded: bool,
-    /// A present-but-unreadable `editor.json` (newer format, parse error).
-    /// Arrange edits refuse rather than rewrite over it.
-    pub editor_meta_error: Option<String>,
-    /// Where `editor.json` lives — the prefetch and write target.
-    pub editor_meta_artifact: Option<lpc_model::ArtifactLocation>,
 }
 
 impl UiPatchSurface {
@@ -147,10 +123,6 @@ pub struct UiPatchSurfaceFixture {
     /// lamp order. EMPTY for a fixture with no mapping document and for one
     /// that does not read or render.
     pub instances: Vec<UiPatchInstance>,
-    /// The fixture's Arrange-canvas facts from `editor.json`. `None` until
-    /// the editor-meta fetch settles (see
-    /// [`UiPatchSurface::editor_meta_loaded`]).
-    pub arrange: Option<UiArrangeMeta>,
     /// The nearest enclosing module on [`UiPatchSurface::modules`], `None`
     /// when the fixture sits above every module face.
     pub module: Option<NodeId>,
@@ -177,59 +149,13 @@ pub struct UiPatchInstance {
     pub placed: bool,
 }
 
-/// A fixture's Arrange-canvas placement facts, from the project-level
-/// `editor.json` — presentation only, NEVER a sampling input.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct UiArrangeMeta {
-    /// The fixture has a `"mapping"` entry in `editor.json`. False = it has
-    /// never been dragged: the canvas auto-packs it in the bottom row, and
-    /// the first drag writes its entry.
-    pub arranged: bool,
-    /// Placement in the conceptual space (identity while unarranged).
-    pub transform: UiArrangeTransform,
-    /// Cached placeholder footprint (doc-space bbox + lamps) for rendering
-    /// the fixture before its map2d body loads. `None` = never cached; the
-    /// canvas falls back to the fixture's lamp count alone.
-    pub footprint: Option<UiArrangeFootprint>,
-}
-
-/// Translate + rotate + uniform scale, no shear (ratified) — the DTO twin
-/// of [`lpc_mapping::EditorTransform`].
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct UiArrangeTransform {
-    /// Translation in doc-space units.
-    pub t: [f64; 2],
-    /// Rotation in degrees.
-    pub r: f64,
-    /// Uniform scale.
-    pub s: f64,
-}
-
-impl Default for UiArrangeTransform {
-    fn default() -> Self {
-        Self {
-            t: [0.0, 0.0],
-            r: 0.0,
-            s: 1.0,
-        }
-    }
-}
-
-/// The cached placeholder facts mirrored from `editor.json`.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct UiArrangeFootprint {
-    /// `[x, y, w, h]` in the fixture's own doc space.
-    pub bbox: [f64; 4],
-    pub lamps: u32,
-}
-
 /// What the surface's one shared selection points at (P5: highlight only;
 /// P6: the verbs' subject). Stored in core ui state so e2e can drive it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum UiPatchTarget {
     /// A module level above the fixtures/outputs (tree context row).
     Module { node: NodeId },
-    /// A whole output (sidebar header).
+    /// A whole output (its section header).
     Output { node: NodeId },
     /// One port of an output.
     Port { node: NodeId, port: u32 },

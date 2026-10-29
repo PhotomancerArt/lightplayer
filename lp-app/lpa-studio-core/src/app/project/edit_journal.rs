@@ -1,23 +1,16 @@
 //! The undo **correlation substrate** (unified-editor P2): a
-//! session-global monotonic `edit_seq` stamped onto every undo step in
-//! every stack, plus a bounded journal of edit/switch events.
+//! session-global monotonic `edit_seq`, plus a bounded journal of
+//! edit/switch events.
 //!
-//! Undo itself stays MODE-SCOPED (ratified v1): mapping ⌘Z is the focused
-//! fixture's session undo, patching and arrange ⌘Z are controller byte
-//! stacks. This module does not change that — it only guarantees that
-//! every step everywhere carries `(edit_seq, node, mode)` from ONE
-//! sequence, and that node/mode switches land in the same sequence, so the
+//! Every event lands in ONE sequence as `(edit_seq, node, mode)`, so
 //! streams COULD be correlated into a global timeline later. No global
-//! replay exists in this pass; v1 UI ignores the journal entirely.
-//!
-//! The mapping editor's session (`lpa-mapping-editor`) stays
-//! project-unaware: its step commits are stamped at the GLUE layer — the
-//! shell observes them and dispatches
-//! [`crate::ProjectEditorOp::EditorJournal`] events (wired in P5).
+//! replay exists; the UI ignores the journal entirely. Events arrive as
+//! [`crate::ProjectEditorOp::EditorJournal`]; the Graph keys its file
+//! reads on the sequence (`ProjectController::edit_seq`).
 
 use std::collections::VecDeque;
 
-use lpc_model::{ArtifactLocation, NodeId};
+use lpc_model::NodeId;
 
 /// Journal capacity: enough to correlate a working session's recent
 /// history, small enough to clone into every snapshot.
@@ -26,10 +19,8 @@ pub const EDIT_JOURNAL_CAP: usize = 256;
 /// Which mode-scoped undo surface an event belongs to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum UiEditorMode {
-    /// The focused fixture's `MapEditorSession` (geometry edits).
+    /// A fixture's mapping (geometry edits).
     Mapping,
-    /// The `editor.json` byte stack (canvas placement edits).
-    Arrange,
 }
 
 /// What happened, in correlation grain.
@@ -53,17 +44,6 @@ pub struct UiEditJournalEntry {
     /// journal is session-scoped, exactly like the id).
     pub node: Option<NodeId>,
     pub mode: UiEditorMode,
-}
-
-/// One committed step on a controller byte stack: the `(edit_seq, node,
-/// mode)` stamp plus the two-sided `(artifact, before, after)` snapshots
-/// (the #409 lesson: never snapshot from a cold cache).
-#[derive(Clone, Debug, PartialEq)]
-pub struct EditStep {
-    pub seq: u64,
-    pub node: Option<NodeId>,
-    pub mode: UiEditorMode,
-    pub writes: Vec<(ArtifactLocation, Vec<u8>, Vec<u8>)>,
 }
 
 /// The sequence + journal pair the controller owns.
@@ -113,14 +93,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_sequence_is_strictly_monotonic_across_modes() {
+    fn the_sequence_is_strictly_monotonic_across_events() {
         let mut journal = EditJournal::default();
         let a = journal.record(UiEditJournalEvent::Edit, None, UiEditorMode::Mapping);
-        let b = journal.record(UiEditJournalEvent::ModeSwitch, None, UiEditorMode::Arrange);
+        let b = journal.record(UiEditJournalEvent::ModeSwitch, None, UiEditorMode::Mapping);
         let c = journal.record(
             UiEditJournalEvent::Edit,
             Some(NodeId::new(7)),
-            UiEditorMode::Arrange,
+            UiEditorMode::Mapping,
         );
         assert!(a < b && b < c);
         assert_eq!(journal.seq(), c);

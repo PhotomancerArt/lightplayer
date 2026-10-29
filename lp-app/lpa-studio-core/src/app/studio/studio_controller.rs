@@ -5112,14 +5112,6 @@ impl StudioController {
                 let op = action.into_op::<AssetContentFetchOp>()?;
                 return self.execute_asset_content_fetch(op).await;
             }
-            if action.op_as::<crate::EditorMetaOp>().is_some() {
-                let op = action.into_op::<crate::EditorMetaOp>()?;
-                return self.execute_editor_meta_op(op).await;
-            }
-            if action.op_as::<crate::EditorMetaFetchOp>().is_some() {
-                let op = action.into_op::<crate::EditorMetaFetchOp>()?;
-                return self.execute_editor_meta_fetch(op).await;
-            }
             if action.op_as::<NodeRevertOp>().is_some() {
                 let op = action.into_op::<NodeRevertOp>()?;
                 return self.execute_node_revert_op(op).await;
@@ -8527,27 +8519,6 @@ impl StudioController {
             self.project.apply_asset_edit(server, op).await
         };
         self.record_project_edit_run(run)
-    }
-
-    /// One Arrange gesture over `editor.json` (unified-editor P2): routed
-    /// like an asset edit — the op writes an asset.
-    async fn execute_editor_meta_op(&mut self, op: crate::EditorMetaOp) -> UiResult {
-        let run = {
-            let server = self.pool.lens_session_mut()?.client_mut()?;
-            self.project.apply_editor_meta(server, op).await
-        };
-        self.record_project_edit_run(run)
-    }
-
-    /// Settle the `editor.json` loaded-flag: presence via a root listing,
-    /// then the normal content fetch — absence is a state, not an error.
-    async fn execute_editor_meta_fetch(&mut self, op: crate::EditorMetaFetchOp) -> UiResult {
-        let logs = {
-            let server = self.pool.lens_session_mut()?.client_mut()?;
-            self.project.fetch_editor_meta(server, &op.artifact).await?
-        };
-        self.record_logs(logs);
-        Ok(UiNotices::new())
     }
 
     /// Resolve (and cache) an asset's effective editor content so the next

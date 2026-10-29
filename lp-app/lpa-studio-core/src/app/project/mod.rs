@@ -26,7 +26,6 @@ pub(crate) mod agent_project_edits;
 pub(crate) mod agent_project_summary;
 pub(crate) mod agent_slot_json;
 pub(crate) mod agent_support;
-pub(crate) mod arrange_offers;
 pub mod asset;
 pub(crate) mod binding_graph_cache;
 pub(crate) mod control_geometry_cache;
@@ -34,7 +33,6 @@ pub mod demo_project;
 pub(crate) mod device_bind;
 pub mod dirty_summary;
 pub(crate) mod edit_journal;
-pub(crate) mod editor_meta_op;
 pub(crate) mod entry_check;
 pub mod export_lint;
 pub mod header_verbs;
@@ -43,7 +41,6 @@ pub mod node;
 pub mod node_card_ui_state;
 pub(crate) mod output_lamp_coverage;
 pub(crate) mod patch_bay_derivation;
-pub mod patch_preview;
 pub mod patch_pulse;
 pub mod project_connect_result;
 pub mod project_controller;
@@ -70,21 +67,12 @@ pub(crate) mod ui_patch_surface;
 pub mod ui_pending_edit;
 
 pub use agent_support::AgentEngineStatus;
-pub use arrange_offers::{
-    ARRANGE_GROUP, ARRANGE_REDO_VERB, ARRANGE_ROTATION_PARAM, ARRANGE_SCALE_PARAM,
-    ARRANGE_SET_VERB, ARRANGE_UNDO_VERB, ARRANGE_X_PARAM, ARRANGE_Y_PARAM, arrange_batch,
-    arrange_history_path, publish_arrange_offers,
-};
 pub use asset::{
     AssetContentFetchOp, AssetEditOp, MAX_ASSET_BODY_BYTES, PendingAssetEdit, UiAssetContent,
     UiAssetContentBody, UiShaderError, asset_body_too_large,
 };
 pub use dirty_summary::DirtySummary;
 pub use edit_journal::{EDIT_JOURNAL_CAP, UiEditJournalEntry, UiEditJournalEvent, UiEditorMode};
-pub use editor_meta_op::{
-    EDITOR_META_PATH, EditorMetaFetchOp, EditorMetaFixture, EditorMetaOp, EditorMetaSet,
-    EditorMetaVerb, editor_meta_artifact,
-};
 pub use export_lint::{ExportGraphContext, ExportGraphNode, check_export_graph};
 pub use header_verbs::{
     CLEAR_DEBUG_VERB, REVERT_EDIT_PARAM, REVERT_EDIT_VERB, SAVE_COPY_VERB, is_header_verb,
@@ -105,7 +93,6 @@ pub use node::{
 pub use node_card_ui_state::{
     ModuleHeroProduct, NodeCardDrawer, NodeCardUiState, NodeUiOp, UiPreviewSpaces,
 };
-pub use patch_preview::{FROZEN_PREVIEW_PHASE, UiPatchChasePreview, chase_preview, preview_phase};
 pub use patch_pulse::{
     PatchPulseLamps, PatchPulseLanguage, PatchPulseOp, PatchPulseSpace, PatchPulseSubject,
 };
@@ -143,7 +130,7 @@ pub use slot::{
 };
 pub use ui_affordance::UiAffordance;
 pub use ui_patch_surface::{
-    UiArrangeFootprint, UiArrangeMeta, UiArrangeTransform, UiPatchInstance, UiPatchSurface,
-    UiPatchSurfaceFixture, UiPatchSurfaceModule, UiPatchSurfaceOutput, UiPatchTarget, UiSelection,
+    UiPatchInstance, UiPatchSurface, UiPatchSurfaceFixture, UiPatchSurfaceModule,
+    UiPatchSurfaceOutput, UiPatchTarget, UiSelection,
 };
 pub use ui_pending_edit::{UiPendingEdit, UiPendingEditKind, UiPendingEditPhase};
