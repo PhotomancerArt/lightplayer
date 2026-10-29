@@ -6836,10 +6836,16 @@ name = "lpa-upgrade"
 version = "40.0.0"
 dependencies = [
  "libm",
+ "lp-gfx",
+ "lp-gfx-lpvm",
+ "lp-shader",
+ "lpc-engine",
+ "lpc-hardware",
  "lpc-mapping",
  "lpc-model",
  "lpc-registry",
  "lpfs",
+ "lps-shared",
  "serde",
  "serde_json",
 ]

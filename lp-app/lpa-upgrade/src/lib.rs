@@ -53,6 +53,7 @@ mod upgrade;
 mod upgrade_error;
 mod upgrade_report;
 mod v11;
+pub mod v12;
 
 pub use format_class::{FormatClass, UPGRADE_FLOOR, classify, stored_format};
 pub use json::{JsonError, JsonNode};
