@@ -80,6 +80,13 @@ With it, on XS1:
 | engine digest check (2.1 MB through the cache) | 159 ms | 103 ms |
 | core hash at boot, project rendering | 152 ms | 110 ms |
 
+What it costs: the QIO switch is a RAM function, reachable now, so `.rwtext`
+grows. The S3's static RAM moves 400 B (the arena and radio region start
+`0x190` higher), and the main stack total drops 58,916 → 58,516 B
+(`lp-emu:esp32s3:t1`). The core grows 752 B, leaving it 28.8 KB from its next
+64 KiB page. The C6 calls the same verdict with its own address length, and
+its figures do not move.
+
 Soak: 20 reboots, each `[flash] 80 MHz, set before the core QIO (jedec
 1740c8, sr2 02)`, and each hello's core SHA-256 equal to the built
 `core.bin`. A project upload (tree-store writes under QIO), then a reboot:
