@@ -163,7 +163,7 @@ fn a_grid_and_a_ring_set_open_whole() {
 
 /// A format-12 project opens with its fixture's mapping as `lpc-mapping`
 /// reads it — its parts, start, flows and overrides, exactly what
-/// `map2d6::read` gives — and its box is the document's canvas.
+/// `map2d6::read` gives — and its box is the document's view box.
 #[test]
 fn a_format_12_project_opens_with_its_fixtures_as_lpc_mapping_parts() {
     let doc = format6_doc("circular_display");

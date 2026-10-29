@@ -328,10 +328,10 @@ fn naming_an_output_on_a_port_choice_writes_its_name() {
     assert_eq!(e.project.output(&out).unwrap().label, None, "one undo step");
 }
 
-/// Resizing a fixture's box writes its canvas from the box's corner, and
-/// the box opens again that size.
+/// Resizing a fixture's box writes its view box from the box's corner,
+/// and the box opens again that size.
 #[test]
-fn resizing_a_fixture_writes_its_canvas() {
+fn resizing_a_fixture_writes_its_view_box() {
     let o = common::open(&CHOKER);
     let fixture = NodeId::new("fixture");
     let mut p = o.project.clone();
@@ -340,8 +340,8 @@ fn resizing_a_fixture_writes_its_canvas() {
     assert_eq!(paths(&saved), ["playful.map2d.json"]);
     let again = reopen(&CHOKER, &saved).project;
     assert_eq!(
-        again.fixture(&fixture).unwrap().mapping.canvas,
-        Some([0.0, 0.0, 140.0, 40.0])
+        again.fixture(&fixture).unwrap().mapping.view_box,
+        [0.0, 0.0, 140.0, 40.0]
     );
     assert_eq!(
         again.fixture(&fixture).unwrap().size,

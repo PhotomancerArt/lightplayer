@@ -313,6 +313,7 @@ fn project_apply_map2d_body_change_refreshes_existing_fixture_node() {
         LpPath::new("/sign.map2d.json"),
         br#"{
   "format": 6,
+  "view_box": [0.0, 0.0, 40.0, 30.0],
   "parts": [
     { "id": "panel", "kind": { "grid": { "origin": [0, 0], "cols": 5, "rows": 4, "pitch": 10 } } }
   ]
@@ -478,6 +479,7 @@ fn fixture_map2d_project_fs() -> LpFsMemory {
         LpPath::new("/sign.map2d.json"),
         br#"{
   "format": 6,
+  "view_box": [0.0, 0.0, 30.0, 30.0],
   "parts": [
     { "id": "panel", "kind": { "grid": { "origin": [0, 0], "cols": 4, "rows": 4, "pitch": 10 } } }
   ]

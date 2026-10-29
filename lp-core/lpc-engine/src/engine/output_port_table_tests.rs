@@ -307,8 +307,7 @@ struct Project {
 /// do not depend on where it lands).
 const STRIP: &str = r#"{
   "format": 6,
-  "sample_diameter": 1.0,
-  "canvas": [0.0, 0.0, 4.0, 1.0],
+  "view_box": [0.0, 0.0, 4.0, 1.0],
   "parts": [
     { "id": "strand", "kind": { "grid": { "origin": [0.5, 0.5], "cols": 4, "rows": 1, "pitch": 1 } } }
   ]

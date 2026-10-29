@@ -116,8 +116,7 @@ This is the project the app itself creates for a seeed/xiao-esp32-c6 board: a cl
 ```json
 {
   "format": 6,
-  "sample_diameter": 1.0,
-  "canvas": [
+  "view_box": [
     0.0,
     0.0,
     256.0,
@@ -358,7 +357,7 @@ This one `edit_project` call builds a project for 250 LEDs on D6 of a Seeed XIAO
       "set_asset": {
         "node": "fixture",
         "file": "fixture.map2d.json",
-        "text": "{\n  \"format\": 6,\n  \"sample_diameter\": 1.0,\n  \"canvas\": [\n    0.0,\n    0.0,\n    250.0,\n    8.0\n  ],\n  \"start\": {\n    \"output\": {\n      \"set\": \"1\"\n    },\n    \"port\": {\n      \"set\": 0\n    },\n    \"channel\": {\n      \"set\": {\n        \"lamps\": 0\n      }\n    }\n  },\n  \"parts\": [\n    {\n      \"id\": \"strip\",\n      \"name\": \"strip\",\n      \"kind\": {\n        \"grid\": {\n          \"origin\": [\n            0.5,\n            4.0\n          ],\n          \"cols\": 250,\n          \"rows\": 1,\n          \"pitch\": 1.0,\n          \"routing\": \"snake\",\n          \"start_corner\": \"tl\"\n        }\n      }\n    }\n  ]\n}\n"
+        "text": "{\n  \"format\": 6,\n  \"view_box\": [\n    0.0,\n    0.0,\n    250.0,\n    8.0\n  ],\n  \"start\": {\n    \"output\": {\n      \"set\": \"1\"\n    },\n    \"port\": {\n      \"set\": 0\n    },\n    \"channel\": {\n      \"set\": {\n        \"lamps\": 0\n      }\n    }\n  },\n  \"parts\": [\n    {\n      \"id\": \"strip\",\n      \"name\": \"strip\",\n      \"kind\": {\n        \"grid\": {\n          \"origin\": [\n            0.5,\n            4.0\n          ],\n          \"cols\": 250,\n          \"rows\": 1,\n          \"pitch\": 1.0,\n          \"routing\": \"snake\",\n          \"start_corner\": \"tl\"\n        }\n      }\n    }\n  ]\n}\n"
       }
     },
     {

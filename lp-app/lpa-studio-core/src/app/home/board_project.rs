@@ -273,7 +273,7 @@ pub(crate) fn fixture_json(pixels: u32) -> String {
 /// default output, so the fixture's start names the board's one output.
 const OUTPUT_NAME: &str = "1";
 
-/// A one-row grid in a canvas the same shape as the fixture texture, so a
+/// A one-row grid in a view box the same shape as the fixture texture, so a
 /// lamp is one texel wide and the row sits on the texture's centre line.
 /// Map2d format 6 through `lpc-mapping`'s writer: one part, `strip`,
 /// starting at port 0, lamp 0 of the output [`OUTPUT_NAME`].
@@ -296,8 +296,7 @@ pub(crate) fn strip_map2d_json(pixels: u32) -> String {
     );
     strip.name = "strip".to_string();
     let mapping = Mapping {
-        sample_diameter: 1.0,
-        canvas: Some([0.0, 0.0, pixels as f32, rows]),
+        view_box: [0.0, 0.0, pixels as f32, rows],
         parts: vec![strip],
         start: Start::at(OUTPUT_NAME, 0, Amount::lamps(0)),
         ..Mapping::default()

@@ -4,10 +4,15 @@
 //! Today a `PathPoints` lamp's position is used as written (clamped to
 //! `[0, 1]`), and its sample diameter is in texture pixels. A map2d's lamps
 //! go through the aspect fit instead (`lpc_mapping::fit_points_in_place`
-//! against the document's `canvas`), and its sample diameter is a document
-//! length scaled by the same fit (`fit_scale`). So the step picks a canvas
-//! and writes each coordinate and the diameter as the document value the
-//! fit carries back onto today's number exactly.
+//! against the document's `view_box`, here called its canvas), and a
+//! sample diameter was a document length scaled by the same fit
+//! (`fit_scale`). So the step picks a canvas and writes each coordinate as
+//! the document value the fit carries back onto today's number exactly.
+//!
+//! **The diameter is read, not written.** Format 6 has no lamp size
+//! (fixture-space theory, D28), but a canvas is still only taken when the
+//! diameter too lands exactly on it: the canvas each fixture gets is the one
+//! it got while format 6 still wrote the diameter, so no lamp moves.
 //!
 //! **The canvas** is `[0, 0, 1, h]`, `h` at most `H / W`: the fit's scale
 //! is then 1 and x passes through untouched, while y is multiplied by the
@@ -28,22 +33,21 @@
 //! are the engine's. Every step is one IEEE-754 `f32` operation, so the
 //! answer is the same on every host (Q110).
 
-/// A canvas `[min_x, min_y, width, height]` and the document values that
-/// fit onto today's numbers.
+/// A canvas `[min_x, min_y, width, height]` (the document's view box) and
+/// the document positions that fit onto today's numbers.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ExactFit {
     pub(crate) canvas: [f32; 4],
     /// Each lamp's document position.
     pub(crate) at: Vec<[f32; 2]>,
-    pub(crate) sample_diameter: f32,
 }
 
 /// How many offsets are tried, in 64ths of the texture's height.
 const OFFSET_STEPS: u32 = 32;
 
-/// Document positions and diameter that a `width` × `height` texture fits
-/// onto `positions` (as the sampler clamps them) and `sample_diameter` (in
-/// pixels) exactly. `Err` names a number no canvas tried lands exactly.
+/// A canvas and document positions that a `width` × `height` texture fits
+/// onto `positions` (as the sampler clamps them) exactly, on which
+/// `sample_diameter` (in pixels) also has an exact document value. `Err` names a number no canvas tried lands exactly.
 pub(crate) fn exact_fit(
     positions: &[[f32; 2]],
     sample_diameter: f32,
@@ -119,18 +123,14 @@ fn fit_on(
         at.push(doc);
     }
     let scale = fit_scale(canvas, width, height);
-    let diameter =
-        preimage(sample_diameter, sample_diameter / scale, |d| d * scale).ok_or_else(|| {
-            format!(
-                "its sample diameter ({sample_diameter}) has no document value the map2d fit \
-                 scales onto exactly"
-            )
-        })?;
-    Ok(ExactFit {
-        canvas,
-        at,
-        sample_diameter: diameter,
-    })
+    // Read, not written (module doc): the canvas must still carry it.
+    preimage(sample_diameter, sample_diameter / scale, |d| d * scale).ok_or_else(|| {
+        format!(
+            "its sample diameter ({sample_diameter}) has no document value the map2d fit \
+             scales onto exactly"
+        )
+    })?;
+    Ok(ExactFit { canvas, at })
 }
 
 /// `fit_points_in_place` for one point (frozen; see the module doc).
@@ -247,10 +247,9 @@ mod tests {
                     .zip(&positions)
                     .all(|(doc, today)| doc[0] == today[0])
             );
-            assert_eq!(
-                fit.sample_diameter * fit_scale(fit.canvas, width, height),
-                1.0
-            );
+            // The diameter still lands on this canvas (read, not written).
+            let scale = fit_scale(fit.canvas, width, height);
+            assert!(preimage(1.0, 1.0 / scale, |d| d * scale).is_some());
         }
     }
 

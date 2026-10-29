@@ -29,7 +29,7 @@ use lpa_upgrade::{
 use lpc_mapping::map2d6;
 use lpc_mapping::part::render;
 use lpc_mapping::patching::{OutputName, OutputPorts, Port, PortKey, Problem, patch_mapping};
-use lpc_mapping::{Bounds2d, Map2dDoc, fit_points, fit_scale, resolve};
+use lpc_mapping::{Bounds2d, Map2dDoc, bounds_of_points, fit_points, resolve};
 
 // --- the gate: every corpus project at format 11 -------------------------------
 
@@ -451,7 +451,7 @@ fn hand_placed_lamps_become_a_map2d_of_points() {
 /// A map2d already at format 6 passes through byte for byte.
 #[test]
 fn a_format_6_map2d_passes_through_byte_for_byte() {
-    let text = "{\n  \"format\": 6,\n  \"sample_diameter\": 2.0,\n  \"parts\": []\n}\n";
+    let text = "{\n  \"format\": 6,\n  \"view_box\": [\n    0.0,\n    0.0,\n    1.0,\n    1.0\n  ],\n  \"parts\": []\n}\n";
     let before = fixture_project(text, None, &[output("o", None, r#"{"0":{}}"#)]);
     let after = step(&before);
     assert_eq!(after.get("f.map2d.json"), before.get("f.map2d.json"));
@@ -706,11 +706,17 @@ fn positions_kept(
                 let old = Map2dDoc::from_json(&old_text).map_err(|e| format!("{e:?}"))?;
                 let old_positions = resolve(&old).map_err(|e| format!("{e:?}"))?.positions();
                 same_positions(node, &old_positions, &new_positions)?;
-                if old.sample_diameter.to_bits() != mapping.sample_diameter.to_bits()
-                    || old.canvas.map(|c| c.map(f32::to_bits))
-                        != mapping.canvas.map(|c| c.map(f32::to_bits))
-                {
-                    return Err(format!("{node}: the sample diameter or canvas moved"));
+                // The view box is the canvas, or the box today's fit framed
+                // without one: the lamps' own bounds.
+                let framed = old.canvas.unwrap_or_else(|| {
+                    bounds_of_points(&old_positions)
+                        .map_or([0.0; 4], |b| [b.min_x, b.min_y, b.width, b.height])
+                });
+                if framed.map(f32::to_bits) != mapping.view_box.map(f32::to_bits) {
+                    return Err(format!(
+                        "{node}: the view box {:?} is not the box today's fit framed, {framed:?}",
+                        mapping.view_box
+                    ));
                 }
             }
             Some("PathPoints") => {
@@ -719,27 +725,19 @@ fn positions_kept(
                     def["render_size"]["height"].as_u64().unwrap_or(16) as u32,
                 );
                 let today = hand_placed(&def);
-                let frame = mapping.canvas.and_then(|[min_x, min_y, w, h]| {
-                    (w > f32::EPSILON && h > f32::EPSILON).then_some(Bounds2d {
-                        min_x,
-                        min_y,
-                        width: w,
-                        height: h,
-                    })
+                let [min_x, min_y, w, h] = mapping.view_box;
+                let frame = (w > f32::EPSILON && h > f32::EPSILON).then_some(Bounds2d {
+                    min_x,
+                    min_y,
+                    width: w,
+                    height: h,
                 });
                 let fitted = fit_points(&new_positions, frame, width, height)
                     .map_err(|e| format!("{e:?}"))?;
                 same_positions(node, &today, &fitted)?;
-                let scale = fit_scale(&new_positions, frame, width, height)
-                    .map_err(|e| format!("{e:?}"))?;
-                let old_diameter = def["mapping"]["sample_diameter"].as_f64().unwrap() as f32;
-                if mapping.sample_diameter * scale != old_diameter {
-                    return Err(format!(
-                        "{node}: the sample diameter reaches the sampler as {} where it was \
-                         {old_diameter}",
-                        mapping.sample_diameter * scale
-                    ));
-                }
+                // Format 6 writes no sample diameter (D28): texture-area
+                // sampling reads its own from here on, so there is none to
+                // keep.
             }
             _ => {}
         }

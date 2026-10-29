@@ -281,7 +281,7 @@ impl FixtureNode {
                 ResolvedMappingCompact {
                     spans: Vec::new(),
                     points: Vec::new(),
-                    sample_diameter: mapping.sample_diameter,
+                    sample_diameter: crate::nodes::fixture::parts_carrier::AREA_SAMPLE_DIAMETER,
                 }
             }
         };
@@ -4703,7 +4703,7 @@ vec4 render_2d(vec2 pos) { return vec4(pos.x / outputSize.x, pos.y / outputSize.
     fn map2d_scarf() -> ResolvedMappingCompact {
         let doc = r#"{
   "format": 6,
-  "sample_diameter": 1.0,
+  "view_box": [0.0, 0.0, 1.0, 1.0],
   "next": { "circle": 2, "path": 2 },
   "parts": [
     { "id": "circle1", "kind": { "circle": { "center": [0.5, 0.5], "start_angle_deg": -90.0,

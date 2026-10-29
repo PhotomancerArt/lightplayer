@@ -543,13 +543,13 @@ fn the_circular_display_from_nothing() {
     }
 
     // What Studio saved: the writer's bytes for the Graph's mapping, with
-    // the canvas its resized box gives (the Graph's in-memory canvas is the
-    // one it opened with: P05's finding), read back by the engine's
+    // the view box its resized box gives (the Graph's in-memory view box is
+    // the one it opened with: P05's finding), read back by the engine's
     // reader; and the golden next to this test.
     let text = j.saved_text();
     let read = lpc_mapping::map2d6::read(&text).expect("the engine's reader reads it");
     let mut held = j.mapping();
-    held.canvas = Some([0.0, 0.0, 100.0, 100.0]);
+    held.view_box = [0.0, 0.0, 100.0, 100.0];
     assert_eq!(read, held);
     assert_eq!(text, lpc_mapping::map2d6::write(&held).expect("it writes"));
     let golden = concat!(

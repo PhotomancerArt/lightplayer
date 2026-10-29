@@ -24,8 +24,6 @@ const PROJECT_FORMAT: u32 = 12;
 /// Fixture render size, square. At 256 px over a ~760-inch plan one texel
 /// is about 3 inches; a panel spans roughly ten.
 const RENDER_SIZE: u32 = 256;
-/// Lamp sample diameter, in doc units (inches): about one texel.
-const SAMPLE_DIAMETER: f64 = 3.0;
 
 /// The project's files, `(file name, contents)`, in a fixed order.
 pub fn project_files() -> Vec<(String, String)> {
@@ -319,8 +317,7 @@ fn fixture_json() -> String {
 fn dome_mapping(plan: &DomePlan, rows: &[PatchRow]) -> Mapping {
     let point = |p: &P2| [p[0] as f32, p[1] as f32];
     let mut mapping = Mapping::new();
-    mapping.sample_diameter = SAMPLE_DIAMETER as f32;
-    mapping.canvas = Some([0.0, 0.0, plan.size[0] as f32, plan.size[1] as f32]);
+    mapping.view_box = [0.0, 0.0, plan.size[0] as f32, plan.size[1] as f32];
     for class in &plan.classes {
         // No `stride`: 80 lamps do not split evenly over the subdivided
         // outline's sides, so there is no honest per-side count to write.
@@ -465,7 +462,7 @@ A frequency-5 geodesic icosahedral dome, {RADIUS} in (19 ft) radius, zenith up; 
 - **Plan view.** Azimuthal equidistant about the zenith with lp2014's
   orientation. One doc unit is one inch of arc along the shell from the
   zenith, uniform on both axes (lp2014 stretched each axis to a unit box).
-  Canvas: `[0, 0, {w}, {h}]`, zenith (the repeat center) at
+  View box: `[0, 0, {w}, {h}]`, zenith (the repeat center) at
   `[{cx}, {cy}]`, including a {MARGIN}-unit margin.
 - **Panels.** Each panel is its face shrunk to {shrink} toward the face
   centroid (the 2 ft lucite panel inside a ~3.6 ft face), its edges cut into
@@ -487,7 +484,7 @@ A frequency-5 geodesic icosahedral dome, {RADIUS} in (19 ft) radius, zenith up; 
 
 ## Files
 
-- `dome.map2d.json` — map2d format {MAP2D6_FORMAT}, sample diameter {sd} (≈ one texel):
+- `dome.map2d.json` — map2d format {MAP2D6_FORMAT}:
   the layout and the patch. The patch is the fixture's start (the first
   panel's port) and {overrides} overrides, one on every other panel copy, since
   none follows on from the one before it in lamp order.
@@ -503,7 +500,6 @@ A frequency-5 geodesic icosahedral dome, {RADIUS} in (19 ft) radius, zenith up; 
         cx = number(plan.center[0]),
         cy = number(plan.center[1]),
         shrink = dome_geometry::PANEL_SHRINK,
-        sd = number(SAMPLE_DIAMETER),
         overrides = mapping.overrides.len(),
     )
 }

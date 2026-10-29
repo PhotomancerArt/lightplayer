@@ -27,20 +27,23 @@
 //!
 //! An object's `stride` (the Patch tab's rotation step, format 3) has no
 //! place in format 6 and is dropped; it never moved a lamp. Nothing about
-//! lamps is written (DD12).
+//! lamps is written (DD12), and neither is the old `sample_diameter`
+//! (fixture-space theory, D28).
+//!
+//! **The view box** is the old `canvas` when it has one. When it has none,
+//! today's fit frames the lamps' own bounds, so the view box is those
+//! bounds (`freeze_view_box`): the fit lands every lamp where it did.
 
 use super::freeze_fit::ExactFit;
 use super::freeze_ids::{ObjectToName, PartIds};
 use super::freeze_patching::{FrozenAddress, FrozenOverride, FrozenPatching};
+use super::freeze_view_box::lamp_bounds;
 use super::v11_files::{refused, scalar};
 use crate::json::JsonNode;
 use crate::upgrade_error::UpgradeError;
 
 /// The format the step writes.
 pub(crate) const MAP2D6_FORMAT: u32 = 6;
-
-/// A map2d's default sample diameter (`DEFAULT_SAMPLE_DIAMETER`).
-const DEFAULT_SAMPLE_DIAMETER: f32 = 2.0;
 
 /// A ring set's default start angle (12 o'clock).
 const DEFAULT_START_ANGLE_DEG: f32 = -90.0;
@@ -116,10 +119,6 @@ pub(crate) fn map2d6_document(
     patching: &FrozenPatching,
     output_name: OutputNameOf<'_>,
 ) -> Result<JsonNode, UpgradeError> {
-    let sample_diameter = match old.get("sample_diameter") {
-        None => DEFAULT_SAMPLE_DIAMETER,
-        Some(node) => f32_of(file, node, "sample_diameter")?,
-    };
     let canvas = match old.get("canvas") {
         None => None,
         Some(node) => Some(f32_array::<4>(file, node, "canvas")?),
@@ -139,14 +138,17 @@ pub(crate) fn map2d6_document(
             &names[index],
         )?);
     }
-    Ok(document(
-        sample_diameter,
-        canvas,
-        &ids.next.iter().map(|(w, n)| (*w, *n)).collect::<Vec<_>>(),
-        parts,
-        patching,
-        output_name,
-    ))
+    let next: Vec<(&str, u32)> = ids.next.iter().map(|(w, n)| (*w, *n)).collect();
+    let view_box = match canvas {
+        Some(canvas) => canvas,
+        // The lamps' bounds, from the document as written (the box draws
+        // nothing, so any box renders the same lamps).
+        None => lamp_bounds(
+            file,
+            &document([0.0; 4], &next, parts.clone(), patching, output_name),
+        )?,
+    };
+    Ok(document(view_box, &next, parts, patching, output_name))
 }
 
 /// A `PathPoints` fixture's lamps as a format-6 document: one `points` part
@@ -181,20 +183,12 @@ pub(crate) fn points_document(
     } else {
         vec![("points", paths.len() as u32 + 1)]
     };
-    document(
-        fit.sample_diameter,
-        Some(fit.canvas),
-        &next,
-        parts,
-        patching,
-        output_name,
-    )
+    document(fit.canvas, &next, parts, patching, output_name)
 }
 
 /// The top level, in the writer's order.
 fn document(
-    sample_diameter: f32,
-    canvas: Option<[f32; 4]>,
+    view_box: [f32; 4],
     next: &[(&str, u32)],
     parts: Vec<JsonNode>,
     patching: &FrozenPatching,
@@ -202,11 +196,8 @@ fn document(
 ) -> JsonNode {
     let mut members = vec![
         ("format", JsonNode::u32(MAP2D6_FORMAT)),
-        ("sample_diameter", f32_node(sample_diameter)),
+        ("view_box", f32s(&view_box)),
     ];
-    if let Some(canvas) = canvas {
-        members.push(("canvas", f32s(&canvas)));
-    }
     if !next.is_empty() {
         let mut sorted = next.to_vec();
         sorted.sort();
@@ -649,11 +640,33 @@ mod tests {
         assert_eq!(counts, vec![12, 9, 4]);
     }
 
+    /// A document with no canvas gets its lamps' own bounds as its view
+    /// box: the box today's fit framed.
+    #[test]
+    fn no_canvas_gives_the_lamps_bounds_as_the_view_box() {
+        let old = JsonNode::parse(
+            r#"{"format":1,"objects":[
+              {"name":"panel","shape":{"grid":{"origin":[1,2],"cols":3,"rows":2,"pitch":1.5}}}]}"#,
+        )
+        .unwrap();
+        let (ids, names) = object_ids_and_names("m.json", &old).unwrap();
+        let ids = mint_part_ids(&objects_to_name("m.json", &old, &ids, &names).unwrap());
+        let doc = map2d6_document("m.json", &old, &ids, &FrozenPatching::default(), &|node| {
+            node.to_string()
+        })
+        .unwrap();
+        assert_eq!(
+            doc.get("view_box"),
+            Some(&f32s(&[1.0, 2.0, 3.0, 1.5])),
+            "x 1 to 4, y 2 to 3.5"
+        );
+    }
+
     /// Ids, kinds and defaults as the writer spells them.
     #[test]
     fn a_document_reads_like_the_writers() {
         let old = JsonNode::parse(
-            r#"{"format":2,"sample_diameter":1,"objects":[
+            r#"{"format":2,"sample_diameter":1,"canvas":[-3,-4,6,8.5],"objects":[
               {"name":"Rim A","shape":{"repeat":{"center":[0,0],"count":2,
                  "shape":{"grid":{"origin":[1,2],"cols":2,"rows":1,"pitch":1}}}}}]}"#,
         )
@@ -669,7 +682,12 @@ mod tests {
             text,
             r#"{
   "format": 6,
-  "sample_diameter": 1.0,
+  "view_box": [
+    -3.0,
+    -4.0,
+    6.0,
+    8.5
+  ],
   "next": {
     "repeat": 2
   },

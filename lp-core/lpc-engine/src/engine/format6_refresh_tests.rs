@@ -122,7 +122,7 @@ fn strip_6(lamps: u32, start: u32) -> String {
     format!(
         r#"{{
   "format": 6,
-  "canvas": [0.0, 0.0, 20.0, 10.0],
+  "view_box": [0.0, 0.0, 20.0, 10.0],
   "next": {{ "path": 2 }},
   "start": {{ "output": {{ "set": "main" }}, "port": {{ "set": 0 }},
              "channel": {{ "set": {{ "lamps": {start} }} }} }},

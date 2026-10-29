@@ -36,7 +36,7 @@ One strokes table per board; `just pcb-map2d <table> <design-folder>` is the
 front door.
 
 Doc space is millimetres, y-down, origin at the board outline's top-left, and
-the outline's bounding box is the canvas. Each stroke is a `path` part whose
+the outline's bounding box is the view box. Each stroke is a `path` part whose
 `d` visits its pads, whose `count` is its lamp count and whose id is the
 stroke name's slug (`A-bar` -> `a-bar`); the document's `start` puts the first
 lamp on output "1", the name the project's output.json carries. The resolver
@@ -204,7 +204,7 @@ def read_text(path: str) -> str:
 def load_strokes(path: str) -> dict:
     with open(path, encoding="utf-8") as f:
         table = json.load(f)
-    for key in ("out_dir", "map2d", "svg", "svg_comment", "sample_diameter", "designator_prefix",
+    for key in ("out_dir", "map2d", "svg", "svg_comment", "designator_prefix",
                 "din_pin", "dout_pin", "strokes"):
         if key not in table:
             raise ExportError(f"{path}: strokes table has no {key!r}")
@@ -295,7 +295,7 @@ def render_map2d(table: dict, canvas: list, pos: dict, runs: list) -> str:
     parts = [map2d6.part(held, name, "path",
                          map2d6.path(map2d6.path_d([pos[d] for d in run]), len(run)))
              for (_, held), (name, run) in zip(ids.objects, runs)]
-    doc = map2d6.document(sample_diameter=table["sample_diameter"], canvas=canvas,
+    doc = map2d6.document(view_box=canvas,
                           next_ids=ids.next, output=OUTPUT_NAME, parts=parts)
     return map2d6.dumps(doc)
 
@@ -412,7 +412,7 @@ def self_test() -> int:
     table = {
         "map2d": "t.map2d.json", "svg": "t-mapping.svg",
         "svg_comment": ["first line", "last line"],
-        "sample_diameter": 1.5, "designator_prefix": "LED", "din_pin": 3, "dout_pin": 1,
+        "designator_prefix": "LED", "din_pin": 3, "dout_pin": 1,
         "strokes": [{"name": "one", "leds": [7, 3]}, {"name": "two", "leds": [9]}],
     }
 

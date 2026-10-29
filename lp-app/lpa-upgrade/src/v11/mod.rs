@@ -6,6 +6,7 @@ mod freeze_document;
 mod freeze_fit;
 mod freeze_ids;
 mod freeze_patching;
+mod freeze_view_box;
 mod v11_files;
 mod v11_filled_polygon_cells;
 mod v11_landing;

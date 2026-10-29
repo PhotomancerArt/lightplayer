@@ -1,7 +1,6 @@
 {
   "format": 6,
-  "sample_diameter": 3.0,
-  "canvas": [
+  "view_box": [
     0.0,
     0.0,
     100.0,

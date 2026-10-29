@@ -120,6 +120,12 @@ impl<'a> JsonText<'a> {
         self.fail_naming("missing field", field)
     }
 
+    /// A field this format no longer has, given.
+    #[cold]
+    pub fn retired(&mut self, field: &str) -> Fail {
+        self.fail_naming("retired field", field)
+    }
+
     fn begin(&mut self, open: u8, what: &str) -> Read<()> {
         self.expect(open, what)?;
         self.depth_left -= 1;

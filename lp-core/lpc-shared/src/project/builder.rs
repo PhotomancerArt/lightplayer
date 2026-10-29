@@ -526,7 +526,7 @@ fn default_map2d(output: Option<&str>) -> String {
         })
         .unwrap_or_default();
     format!(
-        "{{\n  \"format\": 6,\n  \"sample_diameter\": 0.125,\n  \"canvas\": [0.0, 0.0, 1.0, 1.0],\n  \"next\": {{ \"points\": 2 }},{start}\n  \"parts\": [ {{ \"id\": \"points1\", \"kind\": {{ \"points\": {{ \"at\": [[0.5, 0.5]] }} }} }} ]\n}}\n"
+        "{{\n  \"format\": 6,\n  \"view_box\": [0.0, 0.0, 1.0, 1.0],\n  \"next\": {{ \"points\": 2 }},{start}\n  \"parts\": [ {{ \"id\": \"points1\", \"kind\": {{ \"points\": {{ \"at\": [[0.5, 0.5]] }} }} }} ]\n}}\n"
     )
 }
 

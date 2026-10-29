@@ -46,8 +46,7 @@ fn map2d(parts: &[(&str, u32)], patching: &str) -> String {
     format!(
         r#"{{
   "format": 6,
-  "sample_diameter": 1.0,
-  "canvas": [0.0, 0.0, 10.0, 1.0]{patching},
+  "view_box": [0.0, 0.0, 10.0, 1.0]{patching},
   "parts": [ {} ]
 }}"#,
         parts.join(", ")

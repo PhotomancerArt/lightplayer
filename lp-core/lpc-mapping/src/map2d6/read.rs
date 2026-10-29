@@ -102,8 +102,7 @@ pub fn read(json: &str) -> Result<Mapping, Map2d6Error> {
     }
 
     Ok(Mapping {
-        sample_diameter: doc.sample_diameter,
-        canvas: doc.canvas,
+        view_box: doc.view_box,
         parts,
         lamp: Default::default(),
         next,

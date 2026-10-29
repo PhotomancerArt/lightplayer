@@ -460,3 +460,35 @@ itself (the crates, the offers, the Map and Patch tabs deleted).
   (the default); B, the flow's start for the node as a quiet line, then
   only what is set here. Yona passed G3 without picking; the one not chosen
   is deleted when he does.
+
+## Amendment (2026-10-29): a required `view_box`, no `sample_diameter`
+
+Before format 6 shipped (F0 of the mapping rebuild; Yona, 2026-10-28:
+"holding makes sense"), two of its top-level fields changed, from the
+fixture and shader space theory (planning
+`lp2025/2026-10-28-0935-fixture-space-theory`, D7, D11, D28). Format 6 had
+not reached a user, so this is no new format number; every writer, the
+upgrade corpus goldens and every committed project changed with it.
+
+- **`canvas` is `view_box`, required.** `Mapping.view_box: [f32; 4]`,
+  `[min_x, min_y, width, height]` in the layout's units, y down: the
+  fixture's coordinate system, an SVG `viewBox` by another name. The reader
+  refuses a format-6 document without one by name; the writer always
+  writes it, after `format`. The fit is unchanged: it frames the view box,
+  and a box of no width or height frames the lamps' own bounds, as a
+  missing canvas did. The upgrade writes a format 1–5 document's `canvas`
+  as its view box, and for one with no canvas the bounds of the lamps the
+  written document renders (`lpa-upgrade` `v11/freeze_view_box.rs`): the
+  box today's fit framed, so every lamp lands where it did. That one
+  branch reads the current model (`lpc-mapping` is now a dependency of
+  `lpa-upgrade`, where lean Q6 had it a dev-dependency only).
+- **No `sample_diameter`.** Lamps have no size field; a format-6 document
+  that gives one is refused by name. The upgrade still reads a format-11
+  `PathPoints` fixture's diameter to choose its canvas, so each fixture's
+  canvas is the one it got before, and writes none. Texture-area sampling,
+  until it retires (D26), reads every lamp at 2 layout units through the
+  fit (`lpc-engine` `AREA_SAMPLE_DIAMETER`: the diameter a map2d that gave
+  none always had).
+- §1's "layout facts `sample_diameter` and `canvas`" are now the one
+  layout fact `view_box`. The Graph's box is the view box (its far corner,
+  from (0, 0)); a resized box writes its view box from the box's corner.

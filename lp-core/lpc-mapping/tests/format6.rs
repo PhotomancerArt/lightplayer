@@ -161,7 +161,7 @@ fn path_data_that_isnt_a_path_is_refused() {
 #[test]
 fn an_absent_start_field_is_keep() {
     let m = map2d6::read(
-        r#"{"format": 6, "next": {"path": 2}, "start": {"port": {"set": 1}},
+        r#"{"format": 6, "view_box": [0, 0, 10, 10], "next": {"path": 2}, "start": {"port": {"set": 1}},
             "parts": [{"id": "path1", "start": {"channel": {"add": {"lamps": 2}}},
                        "kind": {"path": {"d": "M 0 0 L 9 0", "count": 2}}}]}"#,
     )
@@ -185,7 +185,7 @@ fn an_absent_start_field_is_keep() {
 fn an_amount_says_its_unit() {
     let landing = |amount: &str| {
         let m = map2d6::read(&format!(
-            r#"{{"format": 6, "next": {{"path": 2}},
+            r#"{{"format": 6, "view_box": [0, 0, 10, 10], "next": {{"path": 2}},
                 "start": {{"output": {{"set": "out"}}, "port": {{"set": 0}},
                           "channel": {{"set": {amount}}}}},
                 "parts": [{{"id": "path1", "kind": {{"path": {{"d": "M 0 0 L 9 0", "count": 3}}}}}}]}}"#
@@ -233,11 +233,45 @@ fn an_overrides_keep_is_not_absent() {
 
 // ---- refusals ----------------------------------------------------------------
 
+/// A format-6 document without a `view_box` is refused, naming it: every
+/// fixture has a coordinate system (fixture-space theory, D11).
+#[test]
+fn a_document_without_a_view_box_is_refused_naming_it() {
+    let error = map2d6::read(r#"{"format": 6, "parts": []}"#).unwrap_err();
+    assert!(
+        matches!(&error, Map2d6Error::Parse(reason) if reason.contains(r#""view_box""#)),
+        "{error:?}"
+    );
+    // A `canvas` is not a view box: format 6 never had one by that name.
+    let canvas = r#"{"format": 6, "canvas": [0, 0, 10, 10], "parts": []}"#;
+    assert!(matches!(
+        map2d6::read(canvas),
+        Err(Map2d6Error::Parse(reason)) if reason.contains(r#""view_box""#)
+    ));
+}
+
+/// A format-6 document that gives a `sample_diameter` is refused, naming
+/// it: lamps have no size field (fixture-space theory, D28).
+#[test]
+fn a_sample_diameter_is_refused_naming_it() {
+    let text = r#"{"format": 6, "view_box": [0, 0, 10, 10], "sample_diameter": 2.0, "parts": []}"#;
+    let error = map2d6::read(text).unwrap_err();
+    assert!(
+        matches!(&error, Map2d6Error::Parse(reason) if reason.contains(r#""sample_diameter""#)),
+        "{error:?}"
+    );
+    // An older document with one is still an older document.
+    assert_eq!(
+        map2d6::read(r#"{"format": 5, "sample_diameter": 2.0, "objects": []}"#),
+        Err(Map2d6Error::OlderFormat { found: 5 })
+    );
+}
+
 /// A repeated id, an `@` or `/` in a part id, or a counter below an
 /// existing id is refused, naming it.
 #[test]
 fn a_bad_id_or_counter_is_refused_naming_it() {
-    let two = r#"{"format": 6, "parts": [
+    let two = r#"{"format": 6, "view_box": [0, 0, 10, 10], "parts": [
         {"id": "front", "kind": {"path": {"d": "M 0 0 L 1 0", "count": 2}}},
         {"id": "g", "kind": {"group": {"parts": [
             {"id": "front", "kind": {"path": {"d": "M 0 0 L 1 0", "count": 2}}}]}}}]}"#;
@@ -250,7 +284,7 @@ fn a_bad_id_or_counter_is_refused_naming_it() {
 
     for (id, mark) in [("panel@2", "'@'"), ("circle1/r3", "'/'")] {
         let json = format!(
-            r#"{{"format": 6, "parts": [{{"id": "{id}", "kind": {{"path": {{"d": "M 0 0 L 1 0", "count": 2}}}}}}]}}"#
+            r#"{{"format": 6, "view_box": [0, 0, 10, 10], "parts": [{{"id": "{id}", "kind": {{"path": {{"d": "M 0 0 L 1 0", "count": 2}}}}}}]}}"#
         );
         let error = map2d6::read(&json).unwrap_err();
         assert!(
@@ -259,7 +293,7 @@ fn a_bad_id_or_counter_is_refused_naming_it() {
         );
     }
 
-    let low = r#"{"format": 6, "next": {"path": 3}, "parts": [
+    let low = r#"{"format": 6, "view_box": [0, 0, 10, 10], "next": {"path": 3}, "parts": [
         {"id": "path3", "kind": {"path": {"d": "M 0 0 L 1 0", "count": 2}}}]}"#;
     assert_eq!(
         map2d6::read(low),
@@ -434,8 +468,9 @@ fn every_layout_through_format_6_renders_todays_lamps_bit_for_bit() {
             "{}",
             file.display()
         );
-        assert_eq!(m.canvas, doc.canvas);
-        assert_eq!(m.sample_diameter.to_bits(), doc.sample_diameter.to_bits());
+        if let Some(canvas) = doc.canvas {
+            assert_eq!(m.view_box, canvas, "{}", file.display());
+        }
     }
 }
 
@@ -581,7 +616,7 @@ fn today_doc(rel: &str) -> Map2dDoc {
 /// after), holding this kind.
 fn part_kind_json(kind: &str) -> String {
     format!(
-        r#"{{"format": 6, "next": {{"path": 2}}, "parts": [{{"id": "path1", "kind": {kind}}}]}}"#
+        r#"{{"format": 6, "view_box": [0, 0, 10, 10], "next": {{"path": 2}}, "parts": [{{"id": "path1", "kind": {kind}}}]}}"#
     )
 }
 
@@ -620,8 +655,7 @@ fn span(p: &Patching, id: &str) -> Option<(u32, u32, u32)> {
 /// kind of override field.
 fn every_construct() -> Mapping {
     let mut m = Mapping::new();
-    m.sample_diameter = 1.25;
-    m.canvas = Some([-1.5, 0.0, 300.0, 120.25]);
+    m.view_box = [-1.5, 0.0, 300.0, 120.25];
 
     let mut split = Path::of(
         vec![

@@ -6,7 +6,7 @@
 //! reader holding a rendered tree asks this to keep it: the same layout
 //! renders the same tree, and only the patching needs doing again.
 //!
-//! The layout is the sample diameter, the canvas, the fixture's lamp facts,
+//! The layout is the view box, the fixture's lamp facts,
 //! and every part's id, name, lamp facts and kind (its shape, a group's
 //! parts, a repeat's centre, count and part), compared in order. The
 //! patching is the fixture's and every part's start and flow, the
@@ -22,8 +22,7 @@ impl Mapping {
     /// Whether `other` draws the same lamps as this mapping (module doc).
     #[must_use]
     pub fn same_layout(&self, other: &Mapping) -> bool {
-        self.sample_diameter == other.sample_diameter
-            && self.canvas == other.canvas
+        self.view_box == other.view_box
             && self.lamp == other.lamp
             && same_parts(&self.parts, &other.parts)
     }

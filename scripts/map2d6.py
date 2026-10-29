@@ -14,7 +14,7 @@ One file holds a fixture's layout and its patching: `start` names the output
 the fixture's first lamp goes to (`"1"`), and that output's node file carries
 the same `"name"` (`named_output`).
 
-    doc = document(sample_diameter=2.0, canvas=[0, 0, 100, 100], parts=[...],
+    doc = document(view_box=[0, 0, 100, 100], parts=[...],
                    output="1", next_ids=ids.next)
     text = dumps(doc)
 """
@@ -177,11 +177,11 @@ def start(output, port=0, lamp=0):
             "channel": {"set": {"lamps": lamp}}}
 
 
-def document(sample_diameter, parts, output, canvas=None, next_ids=None):
-    """A whole format-6 document, in the writer's field order."""
-    doc = {"format": FORMAT, "sample_diameter": f32(sample_diameter)}
-    if canvas is not None:
-        doc["canvas"] = f32s(canvas)
+def document(view_box, parts, output, next_ids=None):
+    """A whole format-6 document, in the writer's field order. `view_box`
+    is the fixture's coordinate system `[min_x, min_y, width, height]`, which
+    every format-6 document gives."""
+    doc = {"format": FORMAT, "view_box": f32s(view_box)}
     if next_ids:
         doc["next"] = dict(sorted(next_ids.items()))
     doc["start"] = start(output)

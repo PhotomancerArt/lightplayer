@@ -5,7 +5,7 @@
 //! ```json
 //! {
 //!   "format": 6,
-//!   "sample_diameter": 2.0,
+//!   "view_box": [0.0, 0.0, 100.0, 100.0],
 //!   "next": { "circle": 2 },
 //!   "start": { "output": { "set": "main" }, "port": { "set": 0 },
 //!              "channel": { "set": { "lamps": 0 } } },

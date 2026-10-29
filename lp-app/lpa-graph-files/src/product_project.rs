@@ -33,7 +33,6 @@ use lpa_graph::{
     Project, RenderSource, Unsupported, Vec2,
 };
 use lpc_mapping::map2d6::{self, MAP2D6_FORMAT};
-use lpc_mapping::part::render;
 use serde_json::Value;
 
 use crate::channels::{exports, fixture_reads, fixture_writes, output_reads, visual_writes};
@@ -98,9 +97,6 @@ pub struct MapFile {
     /// The mapping it holds, as read: what saving compares the fixture's
     /// against (a mapping that is the same is not written).
     pub mapping: lpc_mapping::part::Mapping,
-    /// The box the Graph gave a document with no canvas (none is written
-    /// back while the box stays this size).
-    pub derived_size: Option<Vec2>,
 }
 
 impl Opened {
@@ -305,15 +301,11 @@ impl Reader<'_> {
         }
         let mapping = map2d6::read(&text).map_err(|e| FilesError::new(&map_path, e.to_string()))?;
 
-        // The box: the canvas, from (0, 0). A canvas that starts elsewhere
-        // keeps its corner on disk; the Graph's box reaches back to (0, 0).
-        let (size, derived_size) = match mapping.canvas {
-            Some([x, y, w, h]) => (Vec2::new(f64::from(x + w), f64::from(y + h)), None),
-            None => {
-                let size = derived_box(&mapping);
-                (size, Some(size))
-            }
-        };
+        // The box: the view box, from (0, 0). A view box that starts
+        // elsewhere keeps its corner on disk; the Graph's box reaches back
+        // to (0, 0).
+        let [x, y, w, h] = mapping.view_box;
+        let size = Vec2::new(f64::from(x + w), f64::from(y + h));
         let mut fixture = Fixture::new(size);
         fixture.render_size = render_size_of(value);
         fixture.mapping = mapping.clone();
@@ -323,7 +315,6 @@ impl Reader<'_> {
             path: map_path,
             text,
             mapping,
-            derived_size,
         });
         Ok(fixture)
     }
@@ -436,17 +427,6 @@ fn output_of(value: &Value) -> Output {
             .map(str::to_string),
         reads: Channel::new(output_reads(value)),
     }
-}
-
-/// A box for a document with no canvas: from (0, 0) out past its lamps.
-fn derived_box(mapping: &lpc_mapping::part::Mapping) -> Vec2 {
-    let mut max = Vec2::new(1.0, 1.0);
-    if let Ok(tree) = render(mapping) {
-        for p in tree.positions() {
-            max = Vec2::new(max.x.max(f64::from(p[0])), max.y.max(f64::from(p[1])));
-        }
-    }
-    max
 }
 
 fn read_text(src: &dyn Source, path: &str) -> Result<String, FilesError> {

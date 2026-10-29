@@ -55,7 +55,12 @@ pub const STARTER_COMPUTE_GLSL: &str = "void tick() { pulse = phase; }
 /// writes. `lpc-engine`'s `creatable_projects_land` loads and lands it.
 pub const STARTER_FIXTURE_MAP2D: &str = r#"{
   "format": 6,
-  "sample_diameter": 2.0,
+  "view_box": [
+    0.0,
+    0.0,
+    70.0,
+    70.0
+  ],
   "start": {
     "output": {
       "set": "1"

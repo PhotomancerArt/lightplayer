@@ -8,7 +8,8 @@
 //! fields read and ignored, a field given twice refused, a missing field
 //! refused (the first in declaration order) unless it has a default, `null`
 //! only where the field is optional (absent and `null` alike are "not
-//! set"). Enums are externally tagged: a unit variant is `"word"` (or
+//! set"). The document's `view_box` has no default, and its retired
+//! `sample_diameter` is refused by name (D28). Enums are externally tagged: a unit variant is `"word"` (or
 //! `{"word": null}`), a variant with data `{"word": value}`. A map's key
 //! given twice keeps its last value.
 //!
@@ -21,8 +22,8 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use crate::map2d_doc::{
-    DEFAULT_SAMPLE_DIAMETER, FilledPolygonShape, GridCorner, GridRouting, GridShape, PathAlign,
-    PolygonShape, RingDir, RingOrder,
+    FilledPolygonShape, GridCorner, GridRouting, GridShape, PathAlign, PolygonShape, RingDir,
+    RingOrder,
 };
 use crate::map2d6::json_text::{JsonText, Read};
 use crate::part::{CircleSplit, PathSplit, Points, Shape, TreeId};
@@ -34,8 +35,7 @@ use crate::sorted_set::{WordNumbers, set_word};
 /// A format-6 document as written, before its rules are checked.
 pub(crate) struct DocText {
     pub format: u32,
-    pub sample_diameter: f32,
-    pub canvas: Option<[f32; 4]>,
+    pub view_box: [f32; 4],
     /// By word, sorted; a word given twice keeps its last number.
     pub next: WordNumbers,
     pub start: Start,
@@ -109,16 +109,20 @@ pub(crate) fn read_format(t: &mut JsonText) -> Read<u32> {
     format.ok_or_else(|| t.missing("format"))
 }
 
-const DOC_FIELDS: [&str; 8] = [
+const DOC_FIELDS: [&str; 7] = [
     "format",
-    "sample_diameter",
-    "canvas",
+    "view_box",
     "next",
     "start",
     "flow",
     "parts",
     "overrides",
 ];
+
+/// Format 6's lamp size, retired before it shipped (fixture-space theory,
+/// D28: it belongs to area sampling): a document that gives one is refused
+/// by name, never read and dropped.
+const RETIRED_SAMPLE_DIAMETER: &str = "sample_diameter";
 
 /// The document, its `format` with it (read on its own, [`read_format`],
 /// only when this does not read a format-6 document: see `read`).
@@ -127,8 +131,7 @@ const DOC_FIELDS: [&str; 8] = [
 pub(crate) fn read_doc(t: &mut JsonText) -> Read<DocText> {
     let mut doc = DocText {
         format: 0,
-        sample_diameter: DEFAULT_SAMPLE_DIAMETER,
-        canvas: None,
+        view_box: [0.0; 4],
         next: WordNumbers::new(),
         start: Start::KEEP,
         flow: Flow::EndToEnd,
@@ -139,6 +142,9 @@ pub(crate) fn read_doc(t: &mut JsonText) -> Read<DocText> {
     let mut seen = 0;
     t.begin_object()?;
     while let Some(key) = t.next_key()? {
+        if *key == *RETIRED_SAMPLE_DIAMETER {
+            return Err(t.retired(RETIRED_SAMPLE_DIAMETER));
+        }
         let Some(field) = DOC_FIELDS.iter().position(|f| **f == *key) else {
             t.skip()?;
             continue;
@@ -146,24 +152,17 @@ pub(crate) fn read_doc(t: &mut JsonText) -> Read<DocText> {
         t.once(&mut seen, field as u32, &key)?;
         match field {
             0 => doc.format = t.u32()?,
-            1 => doc.sample_diameter = t.f32()?,
+            1 => t.f32s(&mut doc.view_box)?,
             2 => {
-                if !t.null()? {
-                    let mut canvas = [0.0; 4];
-                    t.f32s(&mut canvas)?;
-                    doc.canvas = Some(canvas);
-                }
-            }
-            3 => {
                 t.begin_object()?;
                 while let Some(word) = t.next_key()? {
                     let n = t.u32()?;
                     set_word(&mut doc.next, &word, n);
                 }
             }
-            4 => doc.start = read_start(t)?,
-            5 => doc.flow = read_flow(t)?,
-            6 => doc.parts = read_parts(t)?,
+            3 => doc.start = read_start(t)?,
+            4 => doc.flow = read_flow(t)?,
+            5 => doc.parts = read_parts(t)?,
             _ => {
                 t.begin_object()?;
                 while let Some(text) = t.next_key()? {
@@ -185,6 +184,9 @@ pub(crate) fn read_doc(t: &mut JsonText) -> Read<DocText> {
     }
     if seen & 1 == 0 {
         return Err(t.missing("format"));
+    }
+    if seen & 2 == 0 {
+        return Err(t.missing("view_box"));
     }
     Ok(doc)
 }

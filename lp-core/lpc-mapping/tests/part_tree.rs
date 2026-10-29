@@ -572,7 +572,7 @@ fn a_layout_edit_is_another_layout() {
     )));
     m.parts.push(repeat);
 
-    let edits: [(&str, fn(&mut Mapping)); 6] = [
+    let edits: [(&str, fn(&mut Mapping)); 5] = [
         ("a shape's count", |m| {
             m.parts[0].kind = straight(6);
         }),
@@ -589,8 +589,7 @@ fn a_layout_edit_is_another_layout() {
             r.part.kind = straight(4);
         }),
         ("a part's id", |m| m.parts[0].id = pid("path9")),
-        ("the sample diameter", |m| m.sample_diameter = 3.0),
-        ("the canvas", |m| m.canvas = Some([0.0, 0.0, 10.0, 10.0])),
+        ("the view box", |m| m.view_box = [0.0, 0.0, 10.0, 10.0]),
     ];
     for (what, edit) in edits {
         let mut edited = m.clone();

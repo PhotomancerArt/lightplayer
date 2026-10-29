@@ -145,8 +145,7 @@ impl Shape6 {
         format!(
             r#"{{
   "format": 6,
-  "sample_diameter": 1.0,
-  "canvas": [0.0, 0.0, 100.0, 100.0],
+  "view_box": [0.0, 0.0, 100.0, 100.0],
   {next}
   "start": {{ "output": {{ "set": "main" }}, "port": {{ "set": 0 }}, "channel": {{ "set": {{ "lamps": 0 }} }} }},
   "parts": [ {part} ]

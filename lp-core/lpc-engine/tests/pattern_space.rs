@@ -916,7 +916,7 @@ impl Scratch {
             })
             .collect();
         let map2d = format!(
-            "{{\n  \"format\": 6,\n  \"sample_diameter\": 1.0,\n  \"canvas\": [0.0, 0.0, 1.0, {aspect}],\n  \"next\": {{ \"points\": {} }},\n  \"start\": {{ \"output\": {{ \"set\": \"1\" }}, \"port\": {{ \"set\": 0 }}, \"channel\": {{ \"set\": {{ \"lamps\": 0 }} }} }},\n  \"parts\": [{}]\n}}\n",
+            "{{\n  \"format\": 6,\n  \"view_box\": [0.0, 0.0, 1.0, {aspect}],\n  \"next\": {{ \"points\": {} }},\n  \"start\": {{ \"output\": {{ \"set\": \"1\" }}, \"port\": {{ \"set\": 0 }}, \"channel\": {{ \"set\": {{ \"lamps\": 0 }} }} }},\n  \"parts\": [{}]\n}}\n",
             paths.len() + 1,
             parts.join(", ")
         );

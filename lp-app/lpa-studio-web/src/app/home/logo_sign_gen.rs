@@ -152,8 +152,9 @@ fn logo_sign_mapping() -> Mapping {
         })
         .collect();
     Mapping {
-        sample_diameter: doc.sample_diameter,
-        canvas: doc.canvas,
+        view_box: doc
+            .canvas
+            .expect("the sign frames itself on the hero's stage"),
         parts,
         start: Start::at(OUTPUT_NAME, 0, Amount::lamps(0)),
         ..Mapping::default()
@@ -399,7 +400,7 @@ fn logo_sign_lamp_counts_are_pinned() {
 #[test]
 fn logo_sign_map2d_is_a_format_6_stage() {
     let mapping = lpc_mapping::map2d6::read(&logo_sign_map2d_json()).expect("format 6");
-    assert_eq!(mapping.canvas, Some([0.0, 0.0, 300.0, 308.0]));
+    assert_eq!(mapping.view_box, [0.0, 0.0, 300.0, 308.0]);
     assert_eq!(mapping.parts.len(), 12);
     assert_eq!(mapping.parts[0].name, "matrix");
     let names: Vec<&str> = mapping.parts[1..]

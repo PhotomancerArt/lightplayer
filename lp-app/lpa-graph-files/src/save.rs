@@ -38,7 +38,7 @@ use serde_json::{Map, Value, json};
 use crate::channels::{fixture_reads, output_reads};
 use crate::error::FilesError;
 use crate::json::{insert_sorted, pretty, same, set};
-use crate::product_project::{MapFile, ProductProject};
+use crate::product_project::ProductProject;
 use crate::source::{file_name, join};
 
 /// What saving did: the files to write (path, text), and the files no
@@ -250,7 +250,7 @@ impl<'a> Writer<'a> {
             Some(m) => m.path.clone(),
             None => join(path, &format!("./{name}.map2d.json")),
         };
-        let mapping = mapping_to_write(fx, opened);
+        let mapping = mapping_to_write(fx);
         if !self.force && opened.is_some_and(|m| m.mapping == mapping) {
             return Ok(());
         }
@@ -284,18 +284,13 @@ impl<'a> Writer<'a> {
 }
 
 /// The fixture's mapping as its file says it: its `Mapping`, with the
-/// canvas its box gives. A box the Graph didn't resize keeps the canvas
-/// (or no canvas) it opened with; a resized one keeps its corner and
-/// reaches its new size.
-fn mapping_to_write(fx: &Fixture, opened: Option<&MapFile>) -> Mapping {
+/// view box its box gives. A box the Graph didn't resize keeps the view box
+/// it opened with; a resized one keeps its corner and reaches its new size.
+fn mapping_to_write(fx: &Fixture) -> Mapping {
     let mut mapping = fx.mapping.clone();
-    let kept = match fx.mapping.canvas {
-        Some([x, y, w, h]) => Vec2::new(f64::from(x + w), f64::from(y + h)) == fx.size,
-        None => opened.and_then(|m| m.derived_size) == Some(fx.size),
-    };
-    if !kept {
-        let [x, y] = fx.mapping.canvas.map_or([0.0, 0.0], |c| [c[0], c[1]]);
-        mapping.canvas = Some([x, y, fx.size.x as f32 - x, fx.size.y as f32 - y]);
+    let [x, y, w, h] = fx.mapping.view_box;
+    if Vec2::new(f64::from(x + w), f64::from(y + h)) != fx.size {
+        mapping.view_box = [x, y, fx.size.x as f32 - x, fx.size.y as f32 - y];
     }
     mapping
 }

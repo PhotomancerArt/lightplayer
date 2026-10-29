@@ -406,8 +406,7 @@ const RIG_OUTPUT_PLACEHOLDER: &str = "{output}";
 /// port 0, lamp 0 of the rig's output.
 const STRIP_300_MAP2D: &str = r#"{
   "format": 6,
-  "sample_diameter": 1.0,
-  "canvas": [
+  "view_box": [
     0.0,
     0.0,
     300.0,
@@ -446,8 +445,7 @@ const STRIP_300_MAP2D: &str = r#"{
 /// above.
 const MATRIX_32X16_MAP2D: &str = r#"{
   "format": 6,
-  "sample_diameter": 1.0,
-  "canvas": [
+  "view_box": [
     0.0,
     0.0,
     32.0,

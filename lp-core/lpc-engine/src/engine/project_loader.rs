@@ -1017,7 +1017,8 @@ impl ProjectLoader {
                                 lpc_model::nodes::fixture::ResolvedMappingCompact {
                                     spans: Vec::new(),
                                     points: Vec::new(),
-                                    sample_diameter: mapping.sample_diameter,
+                                    sample_diameter:
+                                        crate::nodes::fixture::parts_carrier::AREA_SAMPLE_DIAMETER,
                                 },
                             ),
                             *config.sampling.value(),
@@ -2841,7 +2842,7 @@ mod tests {
     #[cfg(feature = "node-fixture")]
     const FORMAT_6_STRIP: &str = r#"{
   "format": 6,
-  "canvas": [0.0, 0.0, 20.0, 10.0],
+  "view_box": [0.0, 0.0, 20.0, 10.0],
   "start": { "output": { "set": "main" }, "port": { "set": 0 },
              "channel": { "set": { "lamps": 0 } } },
   "parts": [ { "id": "path1", "kind": { "path": { "d": "M 0 5 L 20 5", "count": 3 } } } ],
@@ -5728,8 +5729,7 @@ mod tests {
             "/fixture.map2d.json".as_path(),
             br#"{
   "format": 6,
-  "sample_diameter": 2.0,
-  "canvas": [0.0, 0.0, 1.0, 1.0],
+  "view_box": [0.0, 0.0, 1.0, 1.0],
   "next": { "points": 2 },
   "parts": [ { "id": "points1", "kind": { "points": { "at": [[0.5, 0.5]] } } } ]
 }

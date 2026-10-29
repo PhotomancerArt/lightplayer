@@ -730,8 +730,7 @@ impl Rig {
                 &format!(
                     r#"{{
   "format": 6,
-  "sample_diameter": 1.0,
-  "canvas": [0.0, 0.0, {lamps}.0, 1.0],
+  "view_box": [0.0, 0.0, {lamps}.0, 1.0],
   {start}
   "parts": [
     {{ "id": "strip", "kind": {{ "grid": {{ "origin": [0.5, 0.5], "cols": {lamps}, "rows": 1, "pitch": 1 }} }} }}
@@ -775,8 +774,7 @@ impl Rig {
             .with_parts_mapping(
                 Mapping {
                     // Every journey is drawn inside 100 × 100.
-                    canvas: Some([0.0, 0.0, 100.0, 100.0]),
-                    sample_diameter: 1.0,
+                    view_box: [0.0, 0.0, 100.0, 100.0],
                     ..*mapping
                 },
                 RENDER,

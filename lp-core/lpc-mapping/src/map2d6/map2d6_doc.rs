@@ -18,9 +18,9 @@ use crate::map2d6::part_doc::PartDoc;
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub(crate) struct Map2d6Doc {
     pub format: u32,
-    pub sample_diameter: f32,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub canvas: Option<[f32; 4]>,
+    /// The fixture's coordinate system `[min_x, min_y, width, height]`:
+    /// always written.
+    pub view_box: [f32; 4],
     /// The next number per kind of part: `{"path": 4, "circle": 2}`.
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub next: BTreeMap<String, u32>,

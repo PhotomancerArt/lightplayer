@@ -16,8 +16,14 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use lpc_mapping::part::{Mapping, render};
-use lpc_mapping::{Bounds2d, fit_points_in_place, fit_scale};
+use lpc_mapping::{Bounds2d, DEFAULT_SAMPLE_DIAMETER, fit_points_in_place, fit_scale};
 use lpc_model::nodes::fixture::{ResolvedMappingCompact, ResolvedSpan};
+
+/// The diameter texture-area sampling reads every lamp at, in the layout's
+/// units, until that sampling retires (fixture-space theory, D26). Format 6
+/// has no lamp size (D28); this is the one a map2d that gave none always
+/// had, carried through the fit like the positions.
+pub(crate) const AREA_SAMPLE_DIAMETER: f32 = DEFAULT_SAMPLE_DIAMETER;
 
 /// Render `mapping` for a `texture_width` × `texture_height` fixture into
 /// the carrier. `Err` is the fixture's
@@ -56,14 +62,14 @@ pub fn render_parts_carrier(
         return Ok(ResolvedMappingCompact {
             spans,
             points,
-            sample_diameter: mapping.sample_diameter,
+            sample_diameter: AREA_SAMPLE_DIAMETER,
         });
     }
-    let frame = canvas_bounds(mapping);
+    let frame = view_box_bounds(mapping);
     let fit = |error| format!("fit fixture mapping: {error}");
     // The diameter is a drawing-space length and rides the same fit as the
     // positions (`docs/defects/2026-08-24-map2d-sample-diameter-unit-mismatch.md`).
-    let sample_diameter = mapping.sample_diameter
+    let sample_diameter = AREA_SAMPLE_DIAMETER
         * fit_scale(&points, frame, texture_width, texture_height).map_err(fit)?;
     fit_points_in_place(&mut points, frame, texture_width, texture_height).map_err(fit)?;
     Ok(ResolvedMappingCompact {
@@ -73,11 +79,11 @@ pub fn render_parts_carrier(
     })
 }
 
-/// The mapping's canvas as the fit reads it; a canvas of no width or height
-/// is none (as a map2d document's is), and the fit frames the lamps' own
-/// bounds.
-fn canvas_bounds(mapping: &Mapping) -> Option<Bounds2d> {
-    let [min_x, min_y, width, height] = mapping.canvas?;
+/// The mapping's view box as the fit reads it; a box of no width or height
+/// is none (as a map2d document's canvas was), and the fit frames the
+/// lamps' own bounds.
+fn view_box_bounds(mapping: &Mapping) -> Option<Bounds2d> {
+    let [min_x, min_y, width, height] = mapping.view_box;
     (width > f32::EPSILON && height > f32::EPSILON).then_some(Bounds2d {
         min_x,
         min_y,
@@ -152,7 +158,7 @@ mod tests {
 
     // --- helpers ---
 
-    /// One straight path per count, side by side, on a 100 × 50 canvas.
+    /// One straight path per count, side by side, in a 100 × 50 view box.
     fn mapping(counts: &[u32]) -> Mapping {
         let mut mapping = Mapping::new();
         for (i, count) in counts.iter().enumerate() {
@@ -163,8 +169,7 @@ mod tests {
                 PartKind::Shape(Shape::Path(Path::through(&[[10.0, y], [90.0, y]], *count))),
             ));
         }
-        mapping.canvas = Some([0.0, 0.0, 100.0, 50.0]);
-        mapping.sample_diameter = 2.0;
+        mapping.view_box = [0.0, 0.0, 100.0, 50.0];
         mapping
     }
 }

@@ -65,7 +65,7 @@ def main():
         name = f"lane-{n}"
         ids = map2d6.part_ids([(name, "grid", 0)])
         mapping = map2d6.document(
-            sample_diameter=2.0, canvas=[0.0, 0.0, 100.0, 100.0],
+            view_box=[0.0, 0.0, 100.0, 100.0],
             next_ids=ids.next, output=str(n),
             parts=[map2d6.part(ids.objects[0][1], name, "grid", map2d6.grid(
                 origin=[k * width + 1.0, 2.0], cols=cols, rows=rows,

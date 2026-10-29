@@ -192,8 +192,7 @@ fn write_shared_assets(fs: &LpFsMemory) {
         r#"
 {
   "format": 6,
-  "sample_diameter": 2.0,
-  "canvas": [0.0, 0.0, 100.0, 100.0],
+  "view_box": [0.0, 0.0, 100.0, 100.0],
   "parts": [
     { "id": "grid", "kind": { "grid": { "origin": [50, 50], "cols": 2, "rows": 2, "pitch": 10 } } }
   ]

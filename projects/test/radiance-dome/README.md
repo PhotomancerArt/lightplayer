@@ -49,7 +49,7 @@ A frequency-5 geodesic icosahedral dome, 228 in (19 ft) radius, zenith up; the t
 - **Plan view.** Azimuthal equidistant about the zenith with lp2014's
   orientation. One doc unit is one inch of arc along the shell from the
   zenith, uniform on both axes (lp2014 stretched each axis to a unit box).
-  Canvas: `[0, 0, 752.62, 752.81]`, zenith (the repeat center) at
+  View box: `[0, 0, 752.62, 752.81]`, zenith (the repeat center) at
   `[376.31, 375.62]`, including a 1-unit margin.
 - **Panels.** Each panel is its face shrunk to 0.55 toward the face
   centroid (the 2 ft lucite panel inside a ~3.6 ft face), its edges cut into
@@ -71,7 +71,7 @@ A frequency-5 geodesic icosahedral dome, 228 in (19 ft) radius, zenith up; the t
 
 ## Files
 
-- `dome.map2d.json` — map2d format 6, sample diameter 3.0 (≈ one texel):
+- `dome.map2d.json` — map2d format 6:
   the layout and the patch. The patch is the fixture's start (the first
   panel's port) and 274 overrides, one on every other panel copy, since
   none follows on from the one before it in lamp order.

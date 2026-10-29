@@ -563,7 +563,7 @@ impl Project {
         let f = self
             .fixture(fixture)
             .ok_or_else(|| format!("there is no fixture {fixture}"))?;
-        let [x, y] = f.mapping.canvas.map_or([0.0, 0.0], |c| [c[0], c[1]]);
+        let [x, y] = [f.mapping.view_box[0], f.mapping.view_box[1]];
         Ok([(x + f.size.x as f32) / 2.0, (y + f.size.y as f32) / 2.0])
     }
 }

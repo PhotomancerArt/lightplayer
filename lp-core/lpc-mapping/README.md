@@ -86,6 +86,7 @@ circular display as soldered:
 ```json
 {
   "format": 6,
+  "view_box": [0.0, 0.0, 100.0, 100.0],
   "next": { "circle": 2 },
   "start": { "output": { "set": "main" }, "port": { "set": 0 },
              "channel": { "set": { "lamps": 0 } } },
@@ -102,6 +103,12 @@ circular display as soldered:
 }
 ```
 
+- `view_box` (required): the fixture's coordinate system, `[min_x, min_y,
+  width, height]` in the layout's units, y down, as an SVG `viewBox`; the
+  fit frames it (a box of no width or height frames the lamps' own
+  bounds). A document without one is refused by name. Lamps have no size:
+  a `sample_diameter` is refused by name (fixture-space theory, D7, D11,
+  D28).
 - Kinds: `path` (`d`: SVG path data, `M` and `L`; `H`/`V` read as lines;
   `Z`, curves and arcs refused by name until built; a move inside a path is
   the jumper; `split: "subpaths"`), `polygon`, `grid`, `filled_polygon`

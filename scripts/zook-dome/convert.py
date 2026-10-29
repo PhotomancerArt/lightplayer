@@ -334,9 +334,8 @@ def rounded(points):
 
 def doc_skeleton(view_box, parts, next_ids):
     return map2d6.document(
-        sample_diameter=2.0,
-        canvas=[view_box[0], view_box[1], round(view_box[2], 1),
-                round(view_box[3], 1)],
+        view_box=[view_box[0], view_box[1], round(view_box[2], 1),
+                  round(view_box[3], 1)],
         next_ids=next_ids,
         output=OUTPUT_NAME,
         parts=parts,

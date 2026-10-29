@@ -69,10 +69,6 @@ const DOOR_LAMPS: u32 = 360;
 /// The door's offset: one leg — the meaningful re-seat step for an open
 /// chevron with no intrinsic period.
 const DOOR_STRIDE: u32 = 180;
-/// Lamp sample diameter in fixture texture space: panel lamps sit ~0.2 doc
-/// units apart, so at the fixtures' render sizes a 1-px footprint keeps
-/// neighboring lamps sampling distinct texels instead of one smear.
-const SAMPLE_DIAMETER: f32 = 1.0;
 
 /// Panels chained per port (CNLINKO connector): the crew jumpers two
 /// adjacent panels onto one feed; the odd panel out gets the last port.
@@ -420,7 +416,6 @@ fn door_points() -> Vec<[f32; 2]> {
 
 fn dome_doc() -> Map2dDoc {
     let mut doc = Map2dDoc::new();
-    doc.sample_diameter = SAMPLE_DIAMETER;
     doc.canvas = Some([0.0, 0.0, 120.0, 120.0]);
     for spec in sector_panels() {
         doc.objects.push(Map2dObject {
@@ -444,7 +439,6 @@ fn dome_doc() -> Map2dDoc {
 
 fn doors_doc() -> Map2dDoc {
     let mut doc = Map2dDoc::new();
-    doc.sample_diameter = SAMPLE_DIAMETER;
     doc.canvas = Some([0.0, 0.0, 120.0, 120.0]);
     doc.objects.push(Map2dObject {
         name: "door".to_string(),
@@ -471,8 +465,7 @@ fn fixture_mapping(
     outputs: &[(&str, &[(String, u32)])],
 ) -> Mapping {
     let mut mapping = Mapping::new();
-    mapping.sample_diameter = doc.sample_diameter;
-    mapping.canvas = doc.canvas;
+    mapping.view_box = doc.canvas.expect("every layout here has a canvas");
     for object in &doc.objects {
         let id = object.id.as_ref().expect("every object carries an id");
         let part = match &object.shape {
