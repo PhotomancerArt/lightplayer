@@ -124,6 +124,7 @@ fn board_card_online_through_lightplayer_app() -> Element {
             Cell { caption: "met here · unplugged",
                 StoryBoardCard {
                     card: DeviceView {
+                        usb: None,
                         state_label: ONLINE_AT_LIGHTPLAYER_APP.to_string(),
                         ..offline()
                     },
@@ -412,7 +413,7 @@ fn board_card_setup_rows_two_up() -> Element {
 // --- The name, renamed where it is --------------------------------------------
 
 #[story(
-    description = "Rename where the name is (AC7): the name bar's name with a faint pencil after it, always shown (brighter, and the name underlined, on hover); pressed, a field takes the name's place at the bar's height with the text selected — Enter or clicking away keeps it, Esc puts it back. Hardware's details no longer hold a name field."
+    description = "Rename where the name is (AC7): the name bar's name with a faint pencil after it, always shown (brighter, and the name underlined, on hover); pressed, a field takes the name's place at the bar's height with the text selected — Enter or clicking away keeps it, Esc puts it back; the kept name shows at once, dimmed with the bar's small spinner where the pencil was, until it is the board's. Hardware's details no longer hold a name field."
 )]
 fn board_card_rename_in_place() -> Element {
     rsx! {
@@ -430,6 +431,17 @@ fn board_card_rename_in_place() -> Element {
                     plays: BoardPlays::Nothing,
                     previews: CardPreviews {
                         renaming: true,
+                        ..CardPreviews::default()
+                    },
+                    on_action: |_| {},
+                }
+            }
+            Cell { caption: "saving the new name",
+                StoryBoardCard {
+                    card: fresh(),
+                    plays: BoardPlays::Nothing,
+                    previews: CardPreviews {
+                        rename_pending: Some("Flower-Viatrix".to_string()),
                         ..CardPreviews::default()
                     },
                     on_action: |_| {},
@@ -575,6 +587,7 @@ const CARD_WIDTH_CLASS: &str = "tw:w-[300px] tw:max-w-full";
 /// project as it told lightplayer.app.
 fn never_met() -> DeviceView {
     DeviceView {
+        usb: None,
         id: DeviceId(11),
         title: "Fabric Test".to_string(),
         state_label: ONLINE_AT_LIGHTPLAYER_APP.to_string(),
@@ -649,6 +662,7 @@ fn kept_cloud_board(picture: bool) -> UiCloudBoard {
 /// firmware and project the last a Studio or the relay heard.
 fn never_met_offline() -> DeviceView {
     DeviceView {
+        usb: None,
         id: DeviceId(12),
         title: "Porch".to_string(),
         state_label: "Offline".to_string(),
@@ -681,6 +695,7 @@ const HOME: &str = "Cedar Lane";
 /// its model.
 fn fresh() -> DeviceView {
     DeviceView {
+        usb: None,
         title: "XIAO ESP32-C6".to_string(),
         loaded_project: DeviceLoadedProject::Empty,
         can_remove_project: false,

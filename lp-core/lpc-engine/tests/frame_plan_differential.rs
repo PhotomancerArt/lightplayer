@@ -33,7 +33,6 @@ use lpc_engine::node::PressureLevel;
 use lpc_engine::{EngineServices, ProjectLoader};
 use lpc_model::{ChannelName, LpValue, NodeUseLocation, SlotPath, TreePath, current_revision};
 use lpc_registry::ParseCtx;
-use lpc_wire::WireNodeCommand;
 use lpfs::{FsEvent, FsEventKind, LpFs, LpFsMemory, LpPath, LpPathBuf};
 use serde_json::Value;
 
@@ -506,12 +505,21 @@ fn pick_playlist_entry(s: &mut Session) {
             .project_runtime_index()
             .node_id(&location)
             .unwrap_or_else(|| panic!("{}: playlist {name} projected", s.name));
-        if let Err(e) =
-            engine.handle_node_command(id, &WireNodeCommand::PlaylistActivateEntry { entry })
-        {
-            s.failures
-                .push(format!("{} [playlist pick] ({:?}): {e}", s.name, lane.mode));
-        }
+        // A pick is a panel write on `playlist.entry` in the playlist's
+        // read scope (playlists-on-the-bus D1).
+        let Some(scope) = engine.tree().bus_read_scope(id) else {
+            s.failures.push(format!(
+                "{} [playlist pick] ({:?}): no read scope",
+                s.name, lane.mode
+            ));
+            continue;
+        };
+        engine.panel_write(
+            scope,
+            lpc_model::ChannelName(String::from(lpc_model::PLAYLIST_ENTRY_CHANNEL)),
+            lpc_model::LpValue::U32(entry),
+            None,
+        );
     }
     s.step("playlist pick", SETTLE_FRAMES);
 }

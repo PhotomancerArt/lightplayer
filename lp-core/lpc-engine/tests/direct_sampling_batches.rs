@@ -26,7 +26,6 @@ use lp_gfx::{
 use lpc_engine::{Engine, EngineServices, ProjectLoader};
 use lpc_model::{ArtifactLocation, NodeDefLocation, NodeUseLocation, SlotPath, TreePath};
 use lpc_registry::ProjectRegistry;
-use lpc_wire::WireNodeCommand;
 use lpfs::LpFsStd;
 use lps_shared::{LpsValueF32, TextureStorageFormat};
 
@@ -370,12 +369,13 @@ fn render_crossfade(dir: &Path, capacity: u32) -> Frames {
     for _ in 0..4 {
         engine.tick(&registry, DELTA_MS).expect("warm tick");
     }
-    engine
-        .handle_node_command(
-            playlist,
-            &WireNodeCommand::PlaylistActivateEntry { entry: 2 },
-        )
-        .expect("activate entry");
+    let scope = engine.tree().bus_read_scope(playlist).expect("scope");
+    engine.panel_write(
+        scope,
+        lpc_model::ChannelName(String::from(lpc_model::PLAYLIST_ENTRY_CHANNEL)),
+        lpc_model::LpValue::U32(2),
+        None,
+    );
     // 0.12 s fade at 16 ms: every one of these frames blends both entries.
     for _ in 0..6 {
         engine.tick(&registry, DELTA_MS).expect("transition tick");

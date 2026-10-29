@@ -26,6 +26,7 @@ mod node_card;
 mod overlay;
 mod panels;
 mod picture_canvas;
+mod piece_view;
 mod text_measure;
 mod view;
 mod world_layer;
@@ -34,6 +35,7 @@ pub use board_clock::use_simulated_frame;
 pub use canvas_container::Canvas;
 pub use graph_editor::{GraphEditor, GraphSink};
 pub use panels::{HintBar, Inspector, TreePane};
+pub use piece_view::PieceView;
 pub use view::{View, use_view};
 
 /// The canvas's, the panels' and the hint bar's styles, all under

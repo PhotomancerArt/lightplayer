@@ -19,18 +19,18 @@ pub enum PlaylistEntryReason {
     /// Its child is loaded (the playing entry, or the one a switch is
     /// bringing in).
     Loaded,
-    /// Its load or first compile failed. Timed advance and triggers skip it
-    /// until the project reloads; an explicit activate tries it again.
+    /// Its load or first compile failed. The cycle, triggers and next/prev
+    /// skip it until the project reloads; a pick tries it again.
     Failed(String),
     /// Switched off in the cycle: named in the playlist's `skip` list
     /// (authored, or written by Play mode). The cycle, triggers and next/prev
-    /// pass it over; an explicit activate still plays it.
+    /// pass it over; a pick still plays it.
     Disabled,
 }
 
 impl PlaylistEntryReason {
-    /// Whether the playlist may move to this entry on its own (timed
-    /// advance, a trigger, or moving on after a failure).
+    /// Whether the playlist may move to this entry on its own (the cycle,
+    /// a trigger, next/prev, or moving on after a failure).
     #[must_use]
     pub fn is_playable(&self) -> bool {
         matches!(self, Self::NotPlaying | Self::Loaded)

@@ -248,6 +248,12 @@ ws281x_telemetry = []
 # harness entrypoint instead of the app.
 fixture-trial-dies = []
 fixture-trial-hangs = []
+# Emulator and desk FIXTURE, never shipped and never in a build def: a split
+# image whose ENGINE panics at its entry on every boot, so the core's "engine
+# keeps crashing" core-only (four incomplete boots) can be walked on silicon,
+# where the recovery ledger in RTC RAM survives the panic's software resets.
+# Inert in a plain (unsplit) build.
+fixture-engine-dies = []
 # Emulator FIXTURE, never shipped: the USB link is NOT trusted by the split
 # image's update session, so the emulator (which has only USB) can prove a
 # core install is refused without a login. The C6's feature of the same name.

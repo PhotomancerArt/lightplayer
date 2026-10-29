@@ -12,7 +12,10 @@
 //! own words (Bluetooth's restarts the board). Where this link may not flip it, the switch is
 //! dimmed; where the offer refuses, its reason sits under the line
 //! ("Bluetooth can only be turned off by USB…"), so "why can't I?" is
-//! answered where it is asked.
+//! answered where it is asked. A switch only *waiting* on a change on its
+//! way ([`UiDetailSwitch::waiting`]) is dimmed with the reason on its
+//! hover instead: a line that came and went with every change made the
+//! whole box jump (P3, Yona 10-25).
 
 use dioxus::prelude::*;
 use lpa_studio_core::{ActionEnablement, OfferPath, UiAction, UiDetailSwitch};
@@ -44,12 +47,16 @@ pub(crate) fn DetailSwitchHead(
         _ => None,
     };
     let locked = pressed.is_none() || refused.is_some();
+    // A wait is said on hover, a standing refusal under the line.
+    let (under, waited) = match refused {
+        Some(reason) if switch.waiting => (None, Some(reason)),
+        refused => (refused, None),
+    };
     let icon = action_icon_name(Some(&switch.icon)).unwrap_or(StudioIconName::Info);
     // What a flip does, in the offer's own words ("Turn the board's
     // Bluetooth off… It restarts to apply it."), on hover.
-    let title = pressed
-        .as_ref()
-        .map(|action| action.meta().summary.clone())
+    let title = waited
+        .or_else(|| pressed.as_ref().map(|action| action.meta().summary.clone()))
         .unwrap_or_default();
     rsx! {
         div { class: HEAD_CLASS, "data-detail-switch": "{switch.icon}",
@@ -73,7 +80,7 @@ pub(crate) fn DetailSwitchHead(
                     }
                 }
             }
-            if let Some(reason) = refused {
+            if let Some(reason) = under {
                 p { class: HELP_CLASS, "data-detail-switch-refused": "true", "{reason}" }
             }
         }

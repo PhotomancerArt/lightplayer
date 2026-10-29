@@ -2,6 +2,7 @@
 //! Debug switches at its right end.
 
 use crate::ux::editor::Tool;
+use crate::ux::port_grouping::PortGrouping;
 use crate::ux::ui::{LayoutKind, SizeClass};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -20,4 +21,7 @@ pub struct UiToolbar {
     pub forced_size_class: Option<SizeClass>,
     /// Debug: dragging a node pins it (D64).
     pub pinning: bool,
+    /// How output cards group a port's pixels, and the size of a group.
+    pub grouping: PortGrouping,
+    pub group_size: u32,
 }

@@ -81,6 +81,14 @@ pub struct LinkLayoutInspection {
     pub chip_name: Option<String>,
     /// The base MAC read in the session, as reported (normalize before use).
     pub probed_mac: Option<String>,
+    /// The build the session chose for the chip it heard (the request's
+    /// [`crate::FlashBuild`]), or `None` when an executor reads no package.
+    #[serde(default)]
+    pub build_id: Option<String>,
+    /// The flash chip's JEDEC id, when the probe read one
+    /// ([`crate::flash_size_from_jedec_id`] says what size it names).
+    #[serde(default)]
+    pub flash_id: Option<u32>,
     /// The partition table the package about to be written carries (its
     /// merged image at `0x8000`) — the target layout.
     pub target_table: Vec<u8>,

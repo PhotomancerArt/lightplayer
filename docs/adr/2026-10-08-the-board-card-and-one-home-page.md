@@ -729,3 +729,49 @@ new-board defaults for lightplayer.app and Bluetooth, and account settings.
 This change leaves the seams: no "Remember…" switch yet, and a row's
 account mark (`UiBarMark`) is drawn only once a store says a value came
 from the account.
+
+## Amendment 2026-10-28: boards keep their place
+
+Boards moved while someone set one up: flashing it, sending a project,
+renaming it, restarting it. The sections had no order of their own. Online
+boards drew links still identifying first and then the roster's order,
+which was the order of the registry file plus boards appended as they were
+met. So a new board jumped from the top to the bottom when it said hello.
+A board that restarted (after a flash, a Reset, or turning Bluetooth on)
+went to Offline boards and came back. Three rules now hold:
+
+- **Boards are listed first added first, in both sections.** Each board
+  keeps the time this browser first met it. It is `added_at` on the
+  model's record (`DeviceRecord`) and on the registry row
+  (`RegisteredDevice`, epoch seconds), an additive field. It is set when
+  the board's link first appeared, and a merge or a later write keeps the
+  earliest one. `lpa_devices::view::roster_view` sorts by it, so every
+  surface that reads the roster agrees. A row saved before the field
+  existed sorts before every board added since, in the order the file
+  lists it. We chose this over name order because a rename would move the
+  card (renaming is one of the moves being fixed) and a new board's name
+  changes when it says hello. We chose it over last seen because every
+  restart would move the card. The old last-seen sort (D27) was dropped
+  for that reason.
+- **A link still identifying is drawn last,** where a new board lands, so
+  its card does not move when it becomes one. A link that turns out to be
+  a board already listed merges into that board and takes its place.
+- **A board that restarts holds its place.** For `RECONNECT_GRACE_MS`
+  (10 s) after its link goes by itself, a board is Reconnecting
+  (`BoardConnection::Reconnecting`, `lpa-studio-core`'s `reconnect_grace`).
+  It is not Offline. Its card stays in Online boards and its surface says
+  "Reconnecting to this board…". Meanwhile a link still identifying is
+  taken to be that board coming back and draws no card of its own. This
+  reads `DeviceView::detached_age_ms`, which is `None` after the user's own
+  Disconnect, so a board the user let go is Offline at once. A sim powered
+  off is off, not restarting. When the grace ends, a board that has not
+  come back is Offline, as before. The card a connected session held while
+  its link dropped (the lens's Reconnecting) is now drawn in Online boards
+  too, so the page and the curtain agree.
+
+A card keeps its id when a restarted board comes back on a new link,
+because the link merges into the existing entry. Two entries that each
+already were a board can still merge (an anonymous board adopted and then
+recognised). In that case the older record keeps its id, as before,
+because the registry row is keyed to it. The card takes the older place
+and mounts again. That is rare, and it is not a move during setup.

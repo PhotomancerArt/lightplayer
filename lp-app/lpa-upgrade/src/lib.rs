@@ -52,6 +52,7 @@ mod steps;
 mod upgrade;
 mod upgrade_error;
 mod upgrade_report;
+mod v11;
 
 pub use format_class::{FormatClass, UPGRADE_FLOOR, classify};
 pub use json::{JsonError, JsonNode};
@@ -60,3 +61,7 @@ pub use steps::UpgradeStep;
 pub use upgrade::{chain_tip, upgrade_steps, upgrade_to_current};
 pub use upgrade_error::UpgradeError;
 pub use upgrade_report::UpgradeReport;
+pub use v11::{
+    DarkReason, FixtureLanding, FixtureLayout, LandedPiece, Landing, OutputLanding, ProjectLanding,
+    SegmentLanding, SegmentSource, landing,
+};

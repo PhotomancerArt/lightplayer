@@ -136,6 +136,169 @@ fn a_board_never_met_here_is_online_and_connects_through_lightplayer_app() {
     bench.not_offered(&verb);
 }
 
+/// One press is enough (defect 2026-10-25, "a relay connect looked like it
+/// needed two presses"): from the press until the board says hello, the
+/// card the person pressed says it is connecting through lightplayer.app,
+/// with its spinner — through the relay's answer and while the board is
+/// identified, never its Connect again, and no second card beside it — and a
+/// second press dials nothing.
+#[test]
+fn one_press_on_a_board_never_met_says_connecting_until_its_hello() {
+    let device = relay_light_player("dev00000acctbrd09");
+    let (mut bench, tasks) = DeviceBench::ungranted(&device, "usb-account-boards-9");
+    let rig = with_relay(&mut bench, &device);
+    sign_in(&mut bench, &tasks);
+    list(&mut bench, &tasks, &[BOARD]);
+    let entry = crate::account_board_device(key());
+    let connect = bench.device_verb(entry, "connect-relay");
+    bench
+        .press(&connect, OfferArgs::new())
+        .expect("the connect starts");
+
+    let mut turns = 0;
+    while bench
+        .controller
+        .view()
+        .home
+        .expect("the home view")
+        .devices
+        .cards
+        .iter()
+        .any(|card| card.device == entry)
+    {
+        let cards = bench.controller.view().home.unwrap().devices.cards;
+        assert_eq!(
+            cards.len(),
+            1,
+            "turn {turns}: one card for the board while it connects: {:?}",
+            cards
+                .iter()
+                .map(|card| card.surface.state)
+                .collect::<Vec<_>>()
+        );
+        assert_connecting_through_lightplayer_app(&cards[0], turns);
+        // A second press finds the verb waiting, and a double click that
+        // races the disable dials nothing.
+        let again = bench.offered(&connect);
+        assert!(!again.is_enabled(), "turn {turns}: the verb waits");
+        let _ = drive(bench.controller.dispatch(again.action.clone()));
+        assert_eq!(rig.asked.borrow().len(), 1, "turn {turns}: one dial");
+        bench.step(&tasks);
+        turns += 1;
+        assert!(turns < 200, "the board never said hello");
+    }
+    assert!(turns > 1, "the connect took more than the press's own turn");
+    bench.run_until(&tasks, "the board ready on the relay", |bench| {
+        bench
+            .view()
+            .devices
+            .iter()
+            .any(|card| card.activity.is_none() && card.state_label == "Ready")
+    });
+    assert_eq!(rig.asked.borrow().as_slice(), [BOARD], "one dial in all");
+    assert!(
+        bench
+            .controller
+            .device_roster_view()
+            .wifi_connects
+            .is_empty(),
+        "the hello ended the connect: nothing left to say"
+    );
+}
+
+/// The board says hello before the relay's answer comes back to the page
+/// (seen on the studio-relay walk's T5, where the answer waits on the
+/// page's settle): the hello ends the connect, so the board's card never
+/// keeps a spinner over a board that is already here, and the late answer
+/// adds nothing.
+#[test]
+fn a_hello_before_the_relays_answer_ends_the_connect() {
+    let device = relay_light_player("dev00000acctbrd10");
+    let (mut bench, tasks) = DeviceBench::ungranted(&device, "usb-account-boards-10");
+    let rig = with_relay(&mut bench, &device);
+    sign_in(&mut bench, &tasks);
+    list(&mut bench, &tasks, &[BOARD]);
+    let entry = crate::account_board_device(key());
+    rig.answer_late.set(true);
+    let connect = bench.device_verb(entry, "connect-relay");
+    bench
+        .press(&connect, OfferArgs::new())
+        .expect("the connect starts");
+    assert_connecting_through_lightplayer_app(&home_card(&bench, entry), 0);
+    // The session is up and announced (the page's `connect` edge sweeps it
+    // in), and the board says hello while the answer waits.
+    bench
+        .controller
+        .note_device_hotplug(crate::app::studio::studio_command::DeviceHotplug::Connected);
+    bench.run_until(&tasks, "the board's hello", |bench| {
+        bench
+            .view()
+            .devices
+            .iter()
+            .any(|card| card.id != entry && card.state_label == "Ready")
+    });
+    let board = bench
+        .view()
+        .devices
+        .iter()
+        .find(|card| card.id != entry)
+        .map(|card| card.id)
+        .unwrap();
+    assert_ne!(
+        home_card(&bench, board).surface.state,
+        crate::SurfaceState::Connecting,
+        "the board said hello: no spinner over it"
+    );
+    assert!(
+        bench
+            .controller
+            .device_roster_view()
+            .wifi_connects
+            .is_empty()
+    );
+
+    // The answer comes back late: nothing to say.
+    rig.answer_late.set(false);
+    bench.step(&tasks);
+    assert!(
+        bench
+            .controller
+            .device_roster_view()
+            .wifi_connects
+            .is_empty(),
+        "a late answer for a board already here says nothing"
+    );
+    assert_eq!(rig.asked.borrow().len(), 1, "one dial");
+}
+
+/// The card says a connect through lightplayer.app is under way, with its
+/// spinner and no button to press again.
+pub(super) fn assert_connecting_through_lightplayer_app(card: &crate::UiBoardCard, turn: usize) {
+    assert_eq!(
+        card.surface.state,
+        crate::SurfaceState::Connecting,
+        "turn {turn}: the card says it is connecting"
+    );
+    assert_eq!(
+        card.surface
+            .notice
+            .as_ref()
+            .map(|notice| notice.first.as_str()),
+        Some("Connecting to this board through lightplayer.app."),
+        "turn {turn}"
+    );
+    assert_eq!(
+        card.surface.progress,
+        Some(crate::SurfaceProgress::Spinner),
+        "turn {turn}"
+    );
+    assert!(
+        !matches!(card.name_bar.primary, Some(crate::UiPrimary::Offer(_))),
+        "turn {turn}: no button to press again: {:?}",
+        card.name_bar.primary
+    );
+}
+
 #[test]
 fn a_board_with_a_usb_link_keeps_it_and_the_list_only_says_online() {
     let device = relay_light_player("dev00000acctbrd02");
@@ -178,6 +341,21 @@ fn a_remembered_board_moves_to_online_boards_while_the_list_names_it() {
     assert_eq!(card.presence, crate::UiBoardPresence::Online);
     let verb = bench.device_verb(target, "connect-relay");
     bench.offered(&verb);
+    // What it plays is what it tells lightplayer.app now, not "not known"
+    // until a link reaches it (Yona's new C6, 2026-10-25).
+    let roster = bench.controller.device_roster_view();
+    let tile = roster
+        .roster
+        .devices
+        .iter()
+        .find(|device| device.id == target)
+        .expect("its card");
+    assert_eq!(
+        tile.loaded_project,
+        lpa_devices::view::LoadedProject::Running {
+            label: "rainbow".to_string()
+        }
+    );
 
     // It leaves the list: back to what this browser knew of it.
     list(&mut bench, &tasks, &[]);

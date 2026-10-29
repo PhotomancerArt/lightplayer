@@ -325,19 +325,21 @@ impl BrowserSerialEsp32Provider {
         .await
     }
 
-    /// Read the board's layout against the package `build_id` would write
-    /// (the layout migration's first step). Leaves the chip in ROM download.
+    /// Read the board's layout against the package `build` resolves to for
+    /// the chip the session hears (the layout migration's first step, and
+    /// the install's identification). Leaves the chip in ROM download.
     pub async fn inspect_layout_with_events(
         &self,
         endpoint_id: &LinkEndpointId,
-        build_id: Option<&str>,
+        build: &crate::FlashBuild,
         events: LinkManagementEventSink,
     ) -> Result<crate::LinkLayoutInspection, LinkError> {
-        let build_id = require_build_id(build_id)?;
         let port_id = self.endpoint_port_id(endpoint_id)?;
+        let options = self.options.clone();
         browser_esp32_flash::inspect_layout_with_events(
             port_id,
-            &self.options.firmware_manifest_path(build_id),
+            build,
+            move |build_id| options.firmware_manifest_path(build_id),
             self.options.esptool_module_path(),
             events,
         )
@@ -397,9 +399,9 @@ impl BrowserSerialEsp32Provider {
         let (endpoint_id, port_id) = self.session_endpoint_and_port(session_id)?;
         self.release_protocol_if_open(session_id).await?;
         match request {
-            LinkManagementRequest::InspectLayout { ref build_id } => {
+            LinkManagementRequest::InspectLayout { ref build } => {
                 let result = self
-                    .inspect_layout_with_events(&endpoint_id, build_id.as_deref(), events.clone())
+                    .inspect_layout_with_events(&endpoint_id, build, events.clone())
                     .await?;
                 Ok(LinkManagementResult::InspectLayout(result))
             }

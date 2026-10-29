@@ -312,10 +312,13 @@ impl HostSerialEsp32Provider {
                 self.extend_session_logs(session_id, &result.logs)?;
                 Ok(LinkManagementResult::FlashFirmware(result))
             }
-            LinkManagementRequest::InspectLayout { ref build_id } => {
-                let manifest_path = self.manifest_path(build_id.as_deref())?;
-                let result =
-                    host_esp32_layout::inspect_layout(&port_name, &manifest_path, &events)?;
+            LinkManagementRequest::InspectLayout { ref build } => {
+                let result = host_esp32_layout::inspect_layout(
+                    &port_name,
+                    build,
+                    |build_id| self.manifest_path(Some(build_id)),
+                    &events,
+                )?;
                 self.extend_session_logs(session_id, &result.logs)?;
                 Ok(LinkManagementResult::InspectLayout(result))
             }

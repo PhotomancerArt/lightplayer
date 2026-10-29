@@ -245,6 +245,11 @@ pub struct DeviceEffects {
     /// any effect starts for that device. Shared for the same reason as
     /// [`Self::completed_pushes`].
     removal_notes: Rc<RefCell<BTreeMap<DeviceId, String>>>,
+    /// What each board's last install identified (its chip, the board
+    /// model when one fit, every board that fit), kept past the activity:
+    /// the auto-name and "Which board is this?" read it. A saved board
+    /// model narrows it to that board.
+    install_identities: Rc<RefCell<BTreeMap<DeviceId, lpa_devices::BoardIdentity>>>,
     next_link: u64,
     /// The C6 repartition's layout step: the backup store, what each
     /// device's inspection staged, the store's index as last read, and
@@ -293,6 +298,7 @@ impl DeviceEffects {
             staged_pushes: BTreeMap::new(),
             completed_pushes: Rc::new(RefCell::new(Vec::new())),
             removal_notes: Rc::new(RefCell::new(BTreeMap::new())),
+            install_identities: Rc::new(RefCell::new(BTreeMap::new())),
             next_link: 0,
             layout: super::device_layout_effect::LayoutEffects::default(),
             firmware: super::device_firmware_sources::DeviceFirmwareSources::default(),
@@ -738,6 +744,11 @@ impl DeviceEffects {
         self.removal_notes.borrow().get(&device).cloned()
     }
 
+    /// What `device`'s last install identified, if it ran one this session.
+    pub fn install_identity(&self, device: DeviceId) -> Option<lpa_devices::BoardIdentity> {
+        self.install_identities.borrow().get(&device).cloned()
+    }
+
     /// Record writes to perform, taken by the roster sub-controller.
     pub fn take_writes(&mut self) -> PendingWrites {
         self.writes
@@ -799,6 +810,7 @@ impl DeviceEffects {
                 // A forgotten device takes its unsent payload with it.
                 self.staged_pushes.remove(&device);
                 self.removal_notes.borrow_mut().remove(&device);
+                self.install_identities.borrow_mut().remove(&device);
                 self.writes.delete.push(device);
             }
             Command::RevokeGrant(info) => self.revoke_grant(info),
@@ -903,6 +915,7 @@ impl DeviceEffects {
             return;
         }
         let info = slot.info.clone();
+        let usb = info.usb;
         let borrowed = Rc::clone(&slot.borrowed);
         let payload = matches!(effect, EffectRequest::Push)
             .then(|| self.staged_pushes.remove(&device))
@@ -921,6 +934,11 @@ impl DeviceEffects {
         // verdict is staged and reported before its end marker; a stamp
         // after a VERIFIED carried write completes the backup that covered
         // it.
+        // A stamp's board, for the identity it settles once it lands.
+        let saved_board = match &effect {
+            EffectRequest::WriteBoardManifest { board_id, .. } => Some(board_id.clone()),
+            _ => None,
+        };
         let inspect_restore = match &effect {
             EffectRequest::InspectLayout { restore_backup, .. } => Some(*restore_backup),
             _ => None,
@@ -976,8 +994,25 @@ impl DeviceEffects {
         sink(Input::Event(Event::LinkBorrow { link, held: true }));
         let writes = Rc::clone(&self.completed_pushes);
         let removal_notes = Rc::clone(&self.removal_notes);
+        let install_identities = Rc::clone(&self.install_identities);
         spawn(Box::pin(async move {
             let mut result = transport.run_effect(info, call, progress).await;
+            // What the session learned about the board, before the layout
+            // verdict: the activity takes its build and board from it, and
+            // asks before replacing somebody else's firmware.
+            if let (Some(_), Ok(facts)) = (inspect_restore, &result)
+                && let Some(inspection) = &facts.inspection
+            {
+                let identity = super::device_board_identity::board_identity(inspection, usb);
+                install_identities
+                    .borrow_mut()
+                    .insert(device, identity.clone());
+                sink(Input::Event(Event::ActivityMarker {
+                    device,
+                    effect: Some(effect_id),
+                    marker: ActivityMarker::BoardIdentified { identity },
+                }));
+            }
             if let (Some(restore), Ok(facts)) = (inspect_restore, &result) {
                 match layout
                     .after_inspection(device, facts.inspection.clone(), restore)
@@ -1020,6 +1055,13 @@ impl DeviceEffects {
                         && let Some(next) = facts.boots_next.clone()
                     {
                         removal_notes.borrow_mut().insert(device, next);
+                    }
+                    // A saved board model answers "which board is this?".
+                    if let Some(board) = saved_board
+                        && let Some(identity) = install_identities.borrow_mut().get_mut(&device)
+                    {
+                        identity.board_id = Some(board.clone());
+                        identity.candidates = vec![board];
                     }
                     // Normalized HERE, not trusted from the tool: the JS
                     // side is untestable, and an unnormalized (or garbage)
@@ -1760,6 +1802,21 @@ fn effect_kind(effect: &EffectRequest) -> ActivityKind {
     }
 }
 
+/// The model's build choice in the provider's terms.
+fn flash_build(build: lpa_devices::FlashBuildChoice) -> lpa_link::FlashBuild {
+    match build {
+        lpa_devices::FlashBuildChoice::Fixed(build_id) => lpa_link::FlashBuild::Fixed(build_id),
+        lpa_devices::FlashBuildChoice::ByChip(rows) => lpa_link::FlashBuild::ByChip(
+            rows.into_iter()
+                .map(|row| lpa_link::ChipBuild {
+                    chip: row.chip,
+                    build_id: row.build_id,
+                })
+                .collect(),
+        ),
+    }
+}
+
 /// Resolve a model effect into platform terms. The board manifest is looked
 /// up HERE (the app layer owns `lpa-boards`), so a display-only board id
 /// degrades honestly instead of writing junk to the device; a push's payload
@@ -1782,9 +1839,9 @@ fn resolve_effect_call(
                 false => None,
             },
         }),
-        EffectRequest::InspectLayout { build_id, .. } => {
-            Ok(DeviceEffectCall::InspectLayout { build_id })
-        }
+        EffectRequest::InspectLayout { build, .. } => Ok(DeviceEffectCall::InspectLayout {
+            build: flash_build(build),
+        }),
         EffectRequest::WriteBoardManifest { board_id, .. } => {
             let manifest_json = lpa_boards::runtime_manifest_json(&board_id)
                 .ok_or_else(|| format!("board {board_id} has no checked-in runtime manifest"))?;
@@ -1959,7 +2016,7 @@ mod tests {
         let call = resolve_effect_call(
             EffectRequest::Flash {
                 build_id: "esp32c6-4mb".to_string(),
-                board_id: "seeed-xiao-esp32c6".to_string(),
+                board_id: Some("seeed-xiao-esp32c6".to_string()),
                 carry: true,
             },
             None,
@@ -1978,7 +2035,7 @@ mod tests {
         let refused = resolve_effect_call(
             EffectRequest::Flash {
                 build_id: "esp32c6-4mb".to_string(),
-                board_id: "seeed-xiao-esp32c6".to_string(),
+                board_id: Some("seeed-xiao-esp32c6".to_string()),
                 carry: true,
             },
             None,
@@ -1988,7 +2045,7 @@ mod tests {
         assert!(matches!(
             resolve_effect_call(
                 EffectRequest::InspectLayout {
-                    build_id: "esp32c6-4mb".to_string(),
+                    build: lpa_devices::FlashBuildChoice::Fixed("esp32c6-4mb".to_string()),
                     restore_backup: false,
                 },
                 None,
@@ -1998,7 +2055,7 @@ mod tests {
         ));
         assert_eq!(
             effect_kind(&EffectRequest::InspectLayout {
-                build_id: "esp32c6-4mb".to_string(),
+                build: lpa_devices::FlashBuildChoice::Fixed("esp32c6-4mb".to_string()),
                 restore_backup: false,
             }),
             ActivityKind::Flash
@@ -2014,7 +2071,7 @@ mod tests {
         assert_eq!(
             effect_kind(&EffectRequest::Flash {
                 build_id: "esp32c6-4mb".to_string(),
-                board_id: "seeed-xiao-esp32c6".to_string(),
+                board_id: Some("seeed-xiao-esp32c6".to_string()),
                 carry: false,
             }),
             ActivityKind::Flash
@@ -2282,7 +2339,7 @@ mod tests {
             EffectId(3),
             EffectRequest::Flash {
                 build_id: "esp32c6-4mb".to_string(),
-                board_id: "seeed-xiao-esp32c6".to_string(),
+                board_id: Some("seeed-xiao-esp32c6".to_string()),
                 carry: false,
             },
         );

@@ -38,7 +38,7 @@ use lpc_update::{BoardMessage, CHUNK, HostMessage, Offer, PieceKind, ReadBackReq
 use lpc_wire::server::{FsRequest, FsResponse, SampleStats};
 use lpc_wire::{
     ClientMessage, ClientRequest, HelloAuth, ProjectReadRequest, TransportError,
-    WireCreateNodeRequest, WireNodeCommand, WireOverlayCommitRequest, WireOverlayMutationRequest,
+    WireCreateNodeRequest, WireOverlayCommitRequest, WireOverlayMutationRequest,
     WireOverlayReadRequest, WirePanelAutoSaveRequest, WirePanelClearRequest, WirePanelWriteRequest,
     WireProjectCommand, WireProjectHandle, WireProjectInventoryReadRequest, WireRemoveNodeRequest,
     WireScopeRef, WireServerMessage, WireServerMsgBody,
@@ -1076,13 +1076,6 @@ fn project_commands() -> Vec<(WireProjectCommand, Required)> {
                 request: WireRemoveNodeRequest::new(NodeAttachSite::ProjectNodes {
                     key: "x".to_string(),
                 }),
-            },
-            Required::Edit,
-        ),
-        (
-            WireProjectCommand::NodeCommand {
-                node: owner,
-                command: WireNodeCommand::PlaylistActivateEntry { entry: 0 },
             },
             Required::Edit,
         ),

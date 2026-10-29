@@ -24,6 +24,7 @@ pub use device_session::{
     DeviceLinkMode, DeviceManageOutcome, DeviceMode, DeviceSession, DeviceSnapshot, DeviceState,
     DeviceTimers, IncompatibleReason,
 };
+pub use provider::app_descriptor::{AppDescriptor, AppImage};
 pub use provider::base_mac::normalize_base_mac;
 pub use provider::chip::{
     KNOWN_CHIP_IDS, chip_id_from_reported, chip_ids_match, normalize_chip_name,
@@ -36,6 +37,8 @@ pub use provider::endpoint::LinkEndpoint;
 pub use provider::endpoint::LinkEndpointId;
 pub use provider::endpoint::LinkEndpointStatus;
 pub use provider::error::LinkError;
+pub use provider::flash_build::{ChipBuild, FlashBuild};
+pub use provider::flash_id::flash_size_from_jedec_id;
 pub use provider::flash_plan::{FlashPlan, FlashStep, FlashStepTarget, PlanError, run_plan};
 pub use provider::flash_region::LinkFlashRegion;
 pub use provider::fs_kind::FsKind;
@@ -56,6 +59,7 @@ pub use provider::partition_table::{
     PartitionTableError,
 };
 pub use provider::provider::LinkProvider;
+pub use provider::resident_firmware::{ResidentFirmware, next_resident_read};
 pub use provider::session::LinkSession;
 pub use provider::session::LinkSessionId;
 pub use provider::session::LinkSessionStatus;

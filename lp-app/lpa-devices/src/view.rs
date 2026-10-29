@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 use crate::activity::{ActivityCell, ActivityKind, ActivityOutcome, CancelPhase};
 use crate::device::{Device, DeviceStatus};
 use crate::evidence::{
-    Classification, Evidence, IncompatibleReason, Liveness, TerminalLine, WireVersion,
+    Classification, Evidence, IncompatibleReason, Liveness, Presence, TerminalLine, WireVersion,
 };
 use crate::firmware_age::FirmwareAge;
 use crate::identity::DeviceId;
@@ -55,6 +55,14 @@ pub struct DeviceView {
     /// `None` until the board has been heard.
     #[serde(default)]
     pub heard_age_ms: Option<u64>,
+    /// How long ago this session saw the board's link go, in milliseconds:
+    /// `Some` only while it is gone, only once this session held one (a
+    /// board rehydrated cold from its record has `None`), and never after
+    /// the user's own Disconnect. What lets a
+    /// surface show a board that is rebooting as reconnecting in place
+    /// rather than offline (Studio's `reconnect_grace`).
+    #[serde(default)]
+    pub detached_age_ms: Option<u64>,
     /// Strongest identity binding, for disambiguating two similar boards.
     pub identity_label: Option<String>,
     /// Chip read off the boot banner, normalized ("esp32c6"). What the
@@ -142,6 +150,10 @@ pub struct DeviceView {
     /// update this?" is answered where it is asked.
     #[serde(default)]
     pub firmware_blocked: Option<String>,
+    /// The USB vendor/product of the link the board is on, when it is a
+    /// USB link: which bridge it sits behind, for the install's board guess.
+    #[serde(default)]
+    pub usb: Option<crate::link::UsbIds>,
     /// Why an over-the-air update cannot run from here, when it cannot:
     /// [`FIRMWARE_NEEDS_USB`]'s sentence unless the current link carries
     /// lp-link's update channel (USB, Bluetooth, the LAN and the relay all
@@ -178,11 +190,19 @@ pub struct ActivityView {
     /// and whether the card must ask before the board's files move.
     #[serde(default)]
     pub layout: Option<crate::activity::FlashLayoutView>,
+    /// A Flash waiting on the user's yes to replace somebody else's
+    /// firmware: what the board runs, for the question's words.
+    #[serde(default)]
+    pub replace: Option<crate::activity::FlashReplaceView>,
     /// An Update's stage, progress, outcome and whether it is waiting for
     /// the board between legs — typed, so the card's words never parse
     /// [`Self::label`].
     #[serde(default)]
     pub update: Option<crate::activity::UpdateActivityView>,
+    /// A Flash's step (reading, writing, restarting, saving the board
+    /// model…), typed for the card's sentence the way [`Self::update`] is.
+    #[serde(default)]
+    pub flash_step: Option<crate::activity::FlashStep>,
 }
 
 /// What a board is running, as the card is allowed to state it.
@@ -257,6 +277,9 @@ pub struct PendingLinkView {
     /// restart request, which waits for the board to answer.)
     #[serde(default)]
     pub firmware_blocked: Option<String>,
+    /// The link's USB vendor/product, when it is a USB link.
+    #[serde(default)]
+    pub usb: Option<crate::link::UsbIds>,
     /// This link's port is held by another tab of this browser, so it was
     /// not opened here ([`crate::Event::LinkHeld`]).
     #[serde(default)]
@@ -266,11 +289,21 @@ pub struct PendingLinkView {
 }
 
 /// Project the whole roster.
+///
+/// **Devices come first added first** ([`Device::added_at`]), whatever the
+/// roster's own order: a board keeps its place while it is flashed, sent a
+/// project, renamed or rebooted, and a board that turns out to be one
+/// already listed takes that one's place. Not by name, which a rename moves,
+/// and not by last seen, which every reboot moves. The sort is stable, so
+/// boards added at the same instant (every record saved before the time was
+/// kept) keep the order the store lists them in; a device with no time yet
+/// sorts last, where a new board lands.
 pub fn roster_view(roster: &Roster, now: Millis) -> RosterView {
+    let mut devices: Vec<&Device> = roster.devices().iter().collect();
+    devices.sort_by_key(|device| device.added_at.unwrap_or(Millis(u64::MAX)));
     RosterView {
-        devices: roster
-            .devices()
-            .iter()
+        devices: devices
+            .into_iter()
             .map(|device| device_view(device, now))
             .collect(),
         pending: roster
@@ -298,6 +331,8 @@ pub fn device_view(device: &Device, now: Millis) -> DeviceView {
         cancellable: cell.accepts_cancel() && !cell.is_cancel_requested(),
         cancel_requested: matches!(cell.cancel, CancelPhase::CancelRequested { .. }),
         layout: cell.flash_layout(),
+        replace: cell.flash_replace(),
+        flash_step: cell.flash_step(),
         update: cell.update_view(),
     });
 
@@ -338,6 +373,17 @@ pub fn device_view(device: &Device, now: Millis) -> DeviceView {
         detail: detail(device),
         freshness_label: freshness_label(device, now),
         heard_age_ms: device.evidence.freshness.age_ms(now),
+        detached_age_ms: match device.evidence.presence {
+            // A link the user let go (Disconnect) is not coming back by
+            // itself: no age, so nothing reads it as a reboot.
+            Presence::Detached { .. }
+                if device.intent.connection == crate::intent::ConnectionIntent::Disconnected =>
+            {
+                None
+            }
+            Presence::Detached { since } => Some(now.since(since)),
+            Presence::Unknown | Presence::Present { .. } | Presence::Open { .. } => None,
+        },
         identity_label: device.identity.strongest_label(),
         // A boot banner names the chip for a board seen booting; a board
         // that was already running when the tab attached never shows one,
@@ -409,6 +455,7 @@ pub fn device_view(device: &Device, now: Millis) -> DeviceView {
             .as_ref()
             .filter(|endpoint| endpoint.is_network())
             .map(|_| FIRMWARE_NEEDS_USB.to_string()),
+        usb: device.evidence.link_usb(),
         update_blocked: update_blocked(device),
         held_elsewhere: device.evidence.held_elsewhere.clone(),
         escapes,
@@ -801,6 +848,7 @@ pub fn pending_link_view(entry: &PendingLink, now: Millis) -> PendingLinkView {
             .endpoint
             .is_bluetooth()
             .then(|| FIRMWARE_NEEDS_USB.to_string()),
+        usb: entry.info.usb,
         held_by_tab,
         escapes: vec![Escape::Forget],
     }

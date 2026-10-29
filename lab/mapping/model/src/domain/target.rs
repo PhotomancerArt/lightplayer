@@ -3,16 +3,18 @@
 //! The UI shows ONE tree (D18): the project holds nodes, a module holds
 //! nodes, a fixture holds components, groups hold components, a circle
 //! holds its rings, a ring holds its lamps; an output holds its ports, and
-//! a port its pixels. A path is its own object, so its lamps sit directly
+//! a port its spans (`span.rs`: an object's pixels on it, or a gap), a
+//! span its pixels. A path is its own object, so its lamps sit directly
 //! under it. Lamps and pixels are part of the tree for navigation (Enter,
 //! arrows, drill-down) but the tree *pane* stops above them.
 //!
 //! On the canvas a frame — a module, a fixture — is see-through, like a
 //! frame in Figma: a click inside it selects what is in it. A frame itself
 //! is picked by its title or border, from the tree, or with Esc
-//! ([`Project::pick_level`]). An output card is not a frame: a click on it
-//! selects the output, the next goes into its ports, and the next into the
-//! port's pixels (D47) — the hardware, reachable like anything else.
+//! ([`Project::pick_level`]). An output card is not a frame, but its spans
+//! are picked directly, as a fixture's contents are (plan D13): a click on
+//! a span selects it, the next goes into its pixels (D47) — the hardware,
+//! reachable like anything else — and the card's title selects the output.
 //!
 //! A target is a path of stable ids, so a selection survives edits: change a
 //! path's count and lamp 7 is still lamp 7.
@@ -35,6 +37,14 @@ pub enum Target {
     Lamp { object: ObjectId, index: u32 },
     /// One port of an output, by the key its output minted.
     Port { output: NodeId, key: String },
+    /// A span of a port (`span.rs`): one object's pixels on it, by its
+    /// object (`start` 0), or a gap, by where it starts.
+    Span {
+        output: NodeId,
+        key: String,
+        object: Option<ObjectId>,
+        start: u32,
+    },
     /// One pixel of a port, by its index on the strip (D47). Like a lamp,
     /// it comes from a count: the port's.
     Pixel {
@@ -50,7 +60,9 @@ impl Target {
     /// layout places them.
     pub fn owner(&self) -> Option<&ComponentId> {
         match self {
-            Target::Node(_) | Target::Port { .. } | Target::Pixel { .. } => None,
+            Target::Node(_) | Target::Port { .. } | Target::Span { .. } | Target::Pixel { .. } => {
+                None
+            }
             Target::Component(id) => Some(id),
             Target::Object(o) | Target::Lamp { object: o, .. } => Some(&o.component),
         }
@@ -64,13 +76,15 @@ impl Target {
         )
     }
 
-    /// The port a pixel is on, as a target.
+    /// The port a pixel or a span is on, as a target.
     pub fn port_of_pixel(&self) -> Option<Target> {
         match self {
-            Target::Pixel { output, key, .. } => Some(Target::Port {
-                output: output.clone(),
-                key: key.clone(),
-            }),
+            Target::Pixel { output, key, .. } | Target::Span { output, key, .. } => {
+                Some(Target::Port {
+                    output: output.clone(),
+                    key: key.clone(),
+                })
+            }
             _ => None,
         }
     }
@@ -96,6 +110,7 @@ impl Project {
             Target::Port { output, key } => {
                 self.output(output).is_some_and(|o| o.port(key).is_some())
             }
+            Target::Span { .. } => self.span_of(t).is_some(),
             Target::Pixel { output, key, index } => {
                 self.output(output).and_then(|o| o.port(key)).is_some()
                     && *index < self.port_pixels(output, key)
@@ -123,7 +138,7 @@ impl Project {
     pub fn fixture_of_target(&self, t: &Target) -> Option<NodeId> {
         match t {
             Target::Node(id) => self.fixture(id).map(|_| id.clone()),
-            Target::Port { .. } | Target::Pixel { .. } => None,
+            Target::Port { .. } | Target::Span { .. } | Target::Pixel { .. } => None,
             other => self.fixture_of(other.owner()?).map(|n| n.id.clone()),
         }
     }
@@ -148,7 +163,16 @@ impl Project {
             Target::Object(o) => Some(Target::Component(o.component.clone())),
             Target::Lamp { object, .. } => Some(self.object_target(object)),
             Target::Port { output, .. } => Some(Target::Node(output.clone())),
-            Target::Pixel { .. } => t.port_of_pixel(),
+            Target::Span { .. } => t.port_of_pixel(),
+            Target::Pixel { output, key, index } => {
+                // The span the pixel is in: an object's first, else its gap.
+                let spans = self.spans(output, key);
+                let span = spans
+                    .iter()
+                    .find(|s| s.object.is_some() && s.pixels.contains(index))
+                    .or_else(|| spans.iter().find(|s| s.pixels.contains(index)));
+                span.map(|s| s.target()).or_else(|| t.port_of_pixel())
+            }
         }
     }
 
@@ -208,15 +232,19 @@ impl Project {
                 .map(|obj| lamp_targets(o, obj.lamps.len()))
                 .unwrap_or_default(),
             Target::Port { output, key } => {
-                let n = self.port_pixels(output, key);
-                (0..n)
+                self.spans(output, key).iter().map(|s| s.target()).collect()
+            }
+            Target::Span { output, key, .. } => match self.span_of(t) {
+                Some(s) => s
+                    .pixels
                     .map(|index| Target::Pixel {
                         output: output.clone(),
                         key: key.clone(),
                         index,
                     })
-                    .collect()
-            }
+                    .collect(),
+                None => Vec::new(),
+            },
             Target::Lamp { .. } | Target::Pixel { .. } => Vec::new(),
         }
     }
@@ -235,10 +263,18 @@ impl Project {
 
     fn see_through(&self, t: Target, out: &mut Vec<Target>) {
         let frame = self.is_frame(&t);
+        let output = self.is_output(&t);
         out.push(t.clone());
         if frame {
             for c in self.children(Some(&t)) {
                 self.see_through(c, out);
+            }
+        }
+        // An output card's spans are picked directly, like a fixture's
+        // contents (plan D13).
+        if output {
+            for port in self.children(Some(&t)) {
+                out.extend(self.children(Some(&port)));
             }
         }
     }
@@ -287,7 +323,7 @@ impl Project {
                 .iter()
                 .flat_map(|c| self.lamps_under(c))
                 .collect(),
-            Target::Port { .. } | Target::Pixel { .. } => Vec::new(),
+            Target::Port { .. } | Target::Span { .. } | Target::Pixel { .. } => Vec::new(),
         }
     }
 
@@ -303,7 +339,7 @@ impl Project {
                 .iter()
                 .map(|c| self.lamp_count_under(c))
                 .sum(),
-            Target::Port { .. } | Target::Pixel { .. } => 0,
+            Target::Port { .. } | Target::Span { .. } | Target::Pixel { .. } => 0,
         }
     }
 
@@ -320,6 +356,16 @@ impl Project {
                 .and_then(|o| o.port(key))
                 .map(|p| p.name.clone())
                 .unwrap_or_else(|| key.clone()),
+            Target::Span { .. } => match self.span_of(t) {
+                Some(s) => {
+                    let what = match &s.object {
+                        Some(o) => self.long_label(&self.object_target(o)),
+                        None => "free".into(),
+                    };
+                    format!("{what} · {}", pixel_words(&s.pixels))
+                }
+                None => "span".into(),
+            },
             Target::Pixel { index, .. } => format!("pixel {index}"),
         }
     }
@@ -337,7 +383,7 @@ impl Project {
             Target::Port { output, .. } => {
                 format!("{} of {}", self.label(t), self.node_name(output))
             }
-            Target::Pixel { .. } => match t.port_of_pixel() {
+            Target::Pixel { .. } | Target::Span { .. } => match t.port_of_pixel() {
                 Some(port) => format!("{} of {}", self.label(t), self.long_label(&port)),
                 None => self.label(t),
             },
@@ -363,6 +409,7 @@ impl Project {
             Target::Object(o) => self.object_word(o),
             Target::Lamp { .. } => "lamp",
             Target::Port { .. } => "port",
+            Target::Span { .. } => "span",
             Target::Pixel { .. } => "pixel",
         }
     }
@@ -375,4 +422,13 @@ fn lamp_targets(object: &ObjectId, n: usize) -> Vec<Target> {
             index,
         })
         .collect()
+}
+
+/// Pixels in words: `pixel 4`, `pixels 40–63`.
+fn pixel_words(px: &std::ops::Range<u32>) -> String {
+    if px.len() == 1 {
+        format!("pixel {}", px.start)
+    } else {
+        format!("pixels {}–{}", px.start, px.end.saturating_sub(1))
+    }
 }

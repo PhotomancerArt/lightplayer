@@ -49,11 +49,11 @@ use crate::core::notice::UiNotices;
 use crate::{
     AssetContentFetchOp, AssetEditOp, Controller, ControllerContext, ModuleExportOp,
     NodeClearDebugOp, NodeCopyOp, NodeCreateOp, NodeImportOp, NodePasteOp, NodeRemoveOp,
-    NodeRevertOp, PanelAutoSaveOp, PanelClearOp, PanelWriteOp, PatchPulseOp, PlaylistActivateOp,
-    ProjectConnectResult, ProjectController, ProjectEditRun, ProjectOp, ProjectRefreshOutcome,
-    ProjectState, ProjectSyncRun, RuntimePool, ServerSnapshot, ServerState, SlotEditOp,
-    StudioSnapshot, UiAction, UiActions, UiActivityView, UiError, UiLogDraft, UiLogEntry,
-    UiLogLevel, UiLogOrigin, UiNotice, UiResult, UiStatus, UiStudioView, UiViewContent,
+    NodeRevertOp, PanelAutoSaveOp, PanelBatchOp, PanelClearOp, PanelWriteOp, PatchPulseOp,
+    PlaylistPickOp, ProjectConnectResult, ProjectController, ProjectEditRun, ProjectOp,
+    ProjectRefreshOutcome, ProjectState, ProjectSyncRun, RuntimePool, ServerSnapshot, ServerState,
+    SlotEditOp, StudioSnapshot, UiAction, UiActions, UiActivityView, UiError, UiLogDraft,
+    UiLogEntry, UiLogLevel, UiLogOrigin, UiNotice, UiResult, UiStatus, UiStudioView, UiViewContent,
     UxActivityTarget, UxUpdate, UxUpdateSink,
 };
 
@@ -1024,7 +1024,11 @@ impl StudioController {
             self.take_over_reach_ended(board, result.as_ref().err().map(|failure| failure.words()));
         }
         let connected = result.is_ok();
-        self.wifi_connects.finish(target, host, result);
+        let now = (self.now_secs)();
+        self.wifi_connects.finish(target, host, result, now);
+        // The board may have said hello before its socket's answer came
+        // back here: the connect is over now, not at the next fold.
+        self.settle_wifi_connects();
         if let crate::WifiConnectTarget::Board(board) = target {
             match connected {
                 true => {
@@ -1096,8 +1100,16 @@ impl StudioController {
         }
         self.take_over_reach_ended(board, result.as_ref().err().map(|failure| failure.words()));
         let connected = result.is_ok();
-        self.wifi_connects
-            .finish_relay(crate::WifiConnectTarget::Relay(board), RELAY_HOST, result);
+        let now = (self.now_secs)();
+        self.wifi_connects.finish_relay(
+            crate::WifiConnectTarget::Relay(board),
+            RELAY_HOST,
+            result,
+            now,
+        );
+        // The board may have said hello before the relay's answer came back
+        // here: the connect is over now, not at the next fold.
+        self.settle_wifi_connects();
         self.fall_through_ended(board, !connected);
         if connected {
             self.device_sweep_pending = true;
@@ -2164,7 +2176,7 @@ impl StudioController {
         // A failed Connect's words go once the board is reached by any
         // road, and so do a failed Wi‑Fi or lightplayer.app connect's.
         self.settle_connect_failure();
-        self.settle_wifi_connect_failures();
+        self.settle_wifi_connects();
         // One tab holds a board: a refused open is read against the claims
         // standing now, at this batch's reconcile.
         if let Some(link) = link_error {
@@ -2539,6 +2551,9 @@ impl StudioController {
         // joins in: a record seen more recently stands over it.
         view.last_seen = self.registry_last_seen(&view);
         self.join_account_boards(&mut view);
+        // A board restarting under setup holds its place, reconnecting.
+        // Last: it reads what every other join said about the board.
+        crate::join_reconnect_grace(&mut view);
         view.board_projects = self.board_projects(&view);
         view
     }
@@ -3911,6 +3926,11 @@ impl StudioController {
                 projects: &sources.projects,
                 examples: &sources.examples,
                 update: self.device_update_facts(view),
+                which_board: roster
+                    .which_board
+                    .get(&view.id)
+                    .map(Vec::as_slice)
+                    .unwrap_or(&[]),
             };
             // On a board the account's list holds, Forget reads as this
             // browser's only, and Remove from your account stands after it.
@@ -4154,11 +4174,26 @@ impl StudioController {
     /// Should two entries answer to one MAC (a pending link whose
     /// preflight read the MAC of a board the roster already remembers),
     /// the second is offered as a `new-<n>` instead, so no path is
-    /// published twice.
+    /// published twice. "Second" is in the roster's own order (devices,
+    /// then pending links), never the page's: the page lists boards first
+    /// added first, and that order must not move a board's path.
     fn device_offer_prefixes(
         &self,
         entries: &[crate::DeviceId],
     ) -> std::collections::BTreeMap<crate::DeviceId, crate::OfferPath> {
+        let roster = self.devices.roster();
+        let held: Vec<crate::DeviceId> = roster
+            .devices()
+            .iter()
+            .map(|device| device.id)
+            .chain(roster.pending().iter().map(|pending| pending.device_id()))
+            .collect();
+        let mut entries = entries.to_vec();
+        entries.sort_by_key(|device| {
+            held.iter()
+                .position(|id| id == device)
+                .unwrap_or(usize::MAX)
+        });
         let mut taken = std::collections::BTreeSet::new();
         let known: Vec<(crate::DeviceId, Option<crate::BoardRef>)> = entries
             .iter()
@@ -4778,6 +4813,9 @@ impl StudioController {
         Cancel: CancelSignal + ?Sized,
     {
         self.try_pending_device_lens().await;
+        // A card's connect whose board never said hello gives up, here as
+        // a held Connect does.
+        self.settle_wifi_connects();
         self.try_resume_held_lens().await;
         // A session through lightplayer.app moves onto Wi‑Fi, and back.
         self.drive_lan_moves().await;
@@ -5041,9 +5079,13 @@ impl StudioController {
                 self.mark_dirty();
                 return Ok(crate::core::notice::UiNotices::new());
             }
-            if action.op_as::<PlaylistActivateOp>().is_some() {
-                let op = action.into_op::<PlaylistActivateOp>()?;
-                return self.execute_playlist_activate_op(op).await;
+            if action.op_as::<PlaylistPickOp>().is_some() {
+                let op = action.into_op::<PlaylistPickOp>()?;
+                return self.execute_playlist_pick_op(op).await;
+            }
+            if action.op_as::<PanelBatchOp>().is_some() {
+                let op = action.into_op::<PanelBatchOp>()?;
+                return self.execute_panel_batch_op(op).await;
             }
             if action.op_as::<PanelWriteOp>().is_some() {
                 let op = action.into_op::<PanelWriteOp>()?;
@@ -7203,13 +7245,23 @@ impl StudioController {
             .roster()
             .devices()
             .iter()
+            // A name the user gave (typed at the install, or a rename) is in
+            // the intent before the next record snapshot carries it.
+            .filter(|entry| entry.intent.name.is_none())
             .filter_map(|entry| entry.record.clone())
             // The rule's own guards are in `auto_record_name`; these two are
             // repeated here only so the common case (every board named, or a
             // blank board that has not said what it is) costs a scan and
             // never a roster projection.
             .filter(|record| record.name.is_none() && record.identity.name.is_none())
-            .filter(|record| record.board_id.is_some())
+            .filter(|record| {
+                record.board_id.is_some()
+                    || self
+                        .devices
+                        .effects()
+                        .install_identity(record.device)
+                        .is_some()
+            })
             .collect();
         if unnamed.is_empty() {
             return Vec::new();
@@ -7221,7 +7273,18 @@ impl StudioController {
         for record in unnamed {
             let mut taken = crate::app::devices::taken_device_titles(&cards, record.device);
             taken.extend(minted.iter().cloned());
-            let Some(name) = crate::app::devices::auto_record_name(&record, &taken) else {
+            // What this session's install identified outranks the record's
+            // board id: the hello names the firmware's compiled-in board
+            // until a saved model is read at the next boot.
+            let installed = self
+                .devices
+                .effects()
+                .install_identity(record.device)
+                .and_then(|identity| install_display_name(&identity))
+                .map(|display| crate::app::devices::derive_flash_name(&display, &taken));
+            let Some(name) =
+                installed.or_else(|| crate::app::devices::auto_record_name(&record, &taken))
+            else {
                 continue;
             };
             minted.push(name.clone());
@@ -7272,6 +7335,10 @@ impl StudioController {
         if named {
             return None;
         }
+        // The board's model when the press knows it. Otherwise the install
+        // identifies it in its bootloader session, and the auto-namer names
+        // the board from what it found (`auto_name_actions`).
+        let board_id = board_id.as_ref()?;
         let board_display = lpa_boards::board_by_id(board_id)
             .map(|board| board.display_name.clone())
             .unwrap_or_else(|| board_id.clone());
@@ -9045,6 +9112,24 @@ impl StudioController {
                 _ => {}
             }
         }
+        // An install that stopped on a question only the user answers —
+        // replacing somebody else's firmware, or moving the board's files —
+        // resumes the agent now, saying so, rather than at the question's
+        // deadline: its Lasting answer is the user's card, not the agent's.
+        if ended.is_none()
+            && let Some(question) = self.agent_wait_question(wait.device)
+        {
+            let board = self
+                .devices
+                .roster()
+                .device(wait.device)
+                .map(lpa_devices::Device::title)
+                .unwrap_or_else(|| wait.board.clone());
+            self.settle_agent_wait(format!(
+                "[flashing {board:?} waits for the user: {question}]"
+            ));
+            return;
+        }
         let now = self.device_now();
         let device = self.devices.roster().device(wait.device);
         let reported = device.is_some_and(|device| device.evidence.loaded_projects().is_some());
@@ -9100,6 +9185,43 @@ impl StudioController {
         }
     }
 
+    /// The question `device`'s install is waiting on the user for, in plain
+    /// words with the offer that answers it, or `None`.
+    fn agent_wait_question(&self, device: crate::DeviceId) -> Option<String> {
+        let roster = self.device_roster_view();
+        let view = roster
+            .roster
+            .devices
+            .iter()
+            .find(|view| view.id == device)?;
+        let activity = view.activity.as_ref()?;
+        let answer = |verb: &str| {
+            roster
+                .layout
+                .get(&device)
+                .map(|layout| layout.offers_at.clone().child(verb).to_string())
+                .unwrap_or_else(|| verb.to_string())
+        };
+        if let Some(replace) = &activity.replace {
+            return Some(format!(
+                "{} Replacing it is theirs to press ({}).",
+                crate::app::devices::device_layout_view::resident_words(&replace.resident),
+                answer(crate::app::devices::device_layout_view::CONFIRM_REPLACE),
+            ));
+        }
+        activity
+            .layout
+            .as_ref()
+            .filter(|layout| layout.awaiting_consent)
+            .map(|_| {
+                format!(
+                    "the board's files move to the new layout first; continuing is theirs to \
+                     press ({}).",
+                    answer(crate::app::devices::device_layout_view::CONTINUE_UPDATE)
+                )
+            })
+    }
+
     /// What an activity the agent waited on came to, in one plain line:
     /// `[flashing "Porch" finished: it runs LightPlayer and no project
     /// yet]`, `[pushing "porch" to "Porch" finished: it runs it now]`,
@@ -9123,6 +9245,7 @@ impl StudioController {
             (Kind::RemoveProject, _) => format!("removing the project from {board:?}"),
             (Kind::Identify, _) => format!("identifying {board:?}"),
             (Kind::Update, _) => format!("updating {board:?}"),
+            (Kind::SetBoard, _) => format!("saving which board {board:?} is"),
         };
         match outcome {
             ActivityOutcome::Succeeded { summary } => {
@@ -9574,16 +9697,34 @@ impl StudioController {
         self.record_project_edit_run(run)
     }
 
-    /// Playlist entry-strip click: dispatch the activate-entry runtime
-    /// command (the non-overlay command channel). Quiet on acceptance —
-    /// the ACTIVE placard follows via the tightened refresh ticks; a
-    /// rejection comes back as a warning notice.
-    async fn execute_playlist_activate_op(&mut self, op: PlaylistActivateOp) -> UiResult {
+    /// A pattern pick (tap, next, prev, the entry strip): a panel write on
+    /// the playlist's `playlist.entry`. Quiet on acceptance — the playing
+    /// mark follows via the tightened refresh ticks.
+    async fn execute_playlist_pick_op(&mut self, op: PlaylistPickOp) -> UiResult {
         let run = {
             let server = self.pool.lens_session_mut()?.client_mut()?;
-            self.project.activate_playlist_entry(server, op).await
+            self.project.pick_playlist_entry(server, op).await
         };
         self.record_project_edit_run(run)
+    }
+
+    /// Several panel writes, then clears, in order (the Pattern zone's
+    /// reset; the cycle switched off with the playing pattern picked).
+    async fn execute_panel_batch_op(&mut self, op: PanelBatchOp) -> UiResult {
+        let mut notices = crate::core::notice::UiNotices::new();
+        for write in op.writes {
+            notices
+                .notices
+                .extend(self.execute_panel_write_op(write).await?.notices);
+        }
+        for request in op.clears {
+            notices.notices.extend(
+                self.execute_panel_clear_op(PanelClearOp { request })
+                    .await?
+                    .notices,
+            );
+        }
+        Ok(notices)
     }
 
     /// Panel-control gesture: dispatch the `(scope, channel)` panel write
@@ -10730,7 +10871,10 @@ fn board_on_tree_store(evidence: &lpa_devices::Evidence) -> Option<bool> {
     // not hold it back (since the tree-store cutover such a board is almost
     // always a tree board, and a tree core on a littlefs one holds its files
     // for the USB migration, AD3); an automatic start waits for the hello.
-    let hello = evidence.classification.hello()?;
+    // A hello from another wire says it in its own words (`fs.tree`, `fs`).
+    let Some(hello) = evidence.classification.hello() else {
+        return evidence.other_wire_tree_store();
+    };
     Some(
         (hello.tree_store || hello.fs == BoardFs::TreeStoreHeld) && hello.fs != BoardFs::LegacyHeld,
     )
@@ -10785,6 +10929,18 @@ fn agent_actions_under(
         })
         .collect();
     serde_json::Value::from(lines)
+}
+
+/// The name an install's identification gives a board: its model's when
+/// one fit, else its chip's ("ESP32-C6"), else none.
+fn install_display_name(identity: &lpa_devices::BoardIdentity) -> Option<String> {
+    match &identity.board_id {
+        Some(board_id) => lpa_boards::board_by_id(board_id).map(|board| board.display_name.clone()),
+        None => identity
+            .chip
+            .as_deref()
+            .and_then(crate::app::devices::chip_display_name),
+    }
 }
 
 #[cfg(test)]

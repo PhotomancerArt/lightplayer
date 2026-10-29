@@ -1061,6 +1061,134 @@ fn flashing_a_blank_pending_link_adopts_joins_identity_and_lands_ready() {
     assert_eq!(count_notes(&replay, "ActivityEnded"), 2, "identify + flash");
 }
 
+/// Yona's phone install, 2026-10-25, replayed: a blank C6 from first press
+/// to "installed". The card's percent is the write's and only the write's —
+/// never the layout read's near-instant 100 % (which stood through the
+/// manifest load, the loader start and the baud change), never wiped by an
+/// esptool log line in the middle of the write — and the two waits after
+/// it have their own words instead of a bare spinner
+/// (`docs/defects/2026-10-25-install-progress-jumped-to-100-and-vanished.md`).
+#[test]
+fn an_install_counts_only_the_write_and_names_each_wait() {
+    use lpa_devices::FlashStep;
+
+    let config = RosterConfig::default();
+    let mut replay = Replay::new(config);
+    replay.step(Millis(0), Step::attach(1, "usb-1"));
+    replay.step(Millis(20), Step::opened(1));
+    replay.step(Millis(40), Step::line(1, "ESP-ROM:esp32c6-20220919"));
+    replay.step(Millis(60), Step::line(1, "invalid header: 0xffffffff"));
+    replay.advance_to(Millis(6_000));
+    let device = replay.view().pending[0].device;
+    replay.step(
+        Millis(6_100),
+        Step::Flash {
+            device: device.0,
+            board: "seeed-xiao-esp32c6".to_string(),
+            build: "esp32c6-4mb".to_string(),
+            name: None,
+        },
+    );
+    // What the card reads: the step its sentence follows, and its percent.
+    let shown = |replay: &Replay| {
+        let view = replay.view();
+        let activity = view.devices[0].activity.clone().expect("flashing");
+        (activity.flash_step, activity.percent)
+    };
+    let progress = |label: &str, percent: Option<u8>| Step::EffectProgress {
+        device: device.0,
+        label: label.to_string(),
+        percent,
+        effect: None,
+    };
+    let ended = |message: &str| Step::EffectEnded {
+        device: device.0,
+        ok: true,
+        message: Some(message.to_string()),
+        effect: None,
+        kind: None,
+    };
+    let mut seen = Vec::new();
+
+    // The layout read: a few kilobytes, done almost at once. No percent.
+    let mut at = 7_000;
+    for (label, percent) in [
+        ("Connecting...", None),
+        ("Reading the board's layout", Some(33)),
+        ("Reading the board's layout", Some(100)),
+    ] {
+        replay.step(Millis(at), progress(label, percent));
+        at += 100;
+        let (step, percent) = shown(&replay);
+        assert_eq!(step, Some(FlashStep::ReadingBoard), "{label}");
+        assert_eq!(percent, None, "the layout read shows no percent: {label}");
+    }
+    replay.step(Millis(8_000), ended("read the board's layout"));
+
+    // The write's own effect, before its first tick: the manifest, the
+    // loader, the baud change. Its words, no number yet — and certainly not
+    // the read's 100.
+    for label in [
+        "Loading the firmware package",
+        "Changing baudrate to 460800",
+        "Compressed 1835008 bytes to 1012345...",
+    ] {
+        replay.step(Millis(at.max(9_000)), progress(label, None));
+        at = at.max(9_000) + 100;
+        assert_eq!(
+            shown(&replay),
+            (Some(FlashStep::FlashingFirmware), None),
+            "{label}"
+        );
+    }
+
+    // The write: percent ticks with esptool's log lines between them.
+    at = 12_000;
+    for (label, percent) in [
+        ("Writing firmware", Some(1)),
+        ("Writing at 0x00010000... (2 %)", None),
+        ("Writing firmware", Some(40)),
+        ("Writing at 0x000a0000... (40 %)", None),
+        ("Writing firmware", Some(99)),
+        ("Wrote 1835008 bytes (1012345 compressed)", None),
+        ("Hash of data verified.", None),
+        ("Writing firmware", Some(100)),
+        ("Leaving...", None),
+    ] {
+        replay.step(Millis(at), progress(label, percent));
+        at += 1_000;
+        let (step, shown_percent) = shown(&replay);
+        assert_eq!(step, Some(FlashStep::FlashingFirmware), "{label}");
+        let shown_percent =
+            shown_percent.unwrap_or_else(|| panic!("the percent vanished mid-write at {label:?}"));
+        seen.push(shown_percent);
+    }
+    assert_eq!(seen, [1, 1, 40, 40, 99, 99, 99, 100, 100]);
+
+    // The flasher's closing reset: the board restarting, no number.
+    replay.step(Millis(at), progress("Resetting the board", Some(100)));
+    assert_eq!(shown(&replay), (Some(FlashStep::Restarting), None));
+    replay.step(Millis(at + 500), ended("flashed"));
+    assert_eq!(shown(&replay), (Some(FlashStep::Restarting), None));
+    replay.step(Millis(at + 1_500), Step::opened(1));
+    assert_eq!(shown(&replay), (Some(FlashStep::Restarting), None));
+
+    // The new firmware answers: the board model is saved on it.
+    replay.step(
+        Millis(at + 2_500),
+        Step::hello(1).uid("dev_2f8a").board("seeed-xiao-esp32c6"),
+    );
+    assert_eq!(shown(&replay), (Some(FlashStep::SavingBoardModel), None));
+    replay.step(Millis(at + 3_000), ended("manifest written"));
+    let view = replay.view();
+    assert!(view.devices[0].activity.is_none());
+    let outcome = view.devices[0].last_outcome.as_ref().expect("an outcome");
+    assert!(
+        outcome.summary.contains("firmware installed"),
+        "{outcome:?}"
+    );
+}
+
 /// Scripted post-flash silence: the ladder escalates reopen → Normal →
 /// BothThenDrop and then fails with the honest replug/Reconnect guidance
 /// (V3/CH340: a replug kills the grant).
@@ -1157,8 +1285,8 @@ fn a_native_usb_board_after_a_flash_never_gets_the_ch34x_rung() {
         Millis(2_000),
         Input::Action(Action::Flash {
             device,
-            board_id: "seeed-xiao-esp32c6".to_string(),
-            build_id: "esp32c6-4mb".to_string(),
+            board_id: Some("seeed-xiao-esp32c6".to_string()),
+            build: lpa_devices::FlashBuildChoice::Fixed("esp32c6-4mb".to_string()),
             park_first: true,
             name: None,
             restore_backup: false,
@@ -2426,4 +2554,52 @@ fn reset_over_usb_still_pulses_the_lines() {
         )),
         "{commands:?}"
     );
+}
+
+/// A blank XIAO ESP32-C6 on a Mac, 2026-10-28: Studio sat on "Identifying"
+/// for as long as it stayed plugged in. The card's Reset pulse (and the
+/// board's own boot-loop watchdog) re-enumerates this board's USB, so every
+/// reset identify sent "for the ROM banner" took the port away, the link
+/// came back as a new pending device with no memory of it, and its first
+/// `invalid header` line sent the reset again
+/// (docs/defects/2026-10-28-a-blank-board-that-re-enumerates-on-reset-identified-forever.md).
+///
+/// Replayed as the board did it: each cycle the port opens mid boot loop,
+/// hears the flood and no banner, and drops off USB a moment later. Every
+/// cycle must settle on the blank verdict at its first line, and nothing
+/// may reset the board.
+#[test]
+fn a_blank_board_that_drops_off_usb_settles_blank_every_time_and_is_never_reset() {
+    let config = RosterConfig::default();
+    let mut replay = Replay::new(config);
+    let mut at = 0;
+    for cycle in 0..6 {
+        let link = cycle + 1;
+        replay.step(Millis(at), Step::attach(link, "usb-1"));
+        replay.step(Millis(at + 20), Step::opened(link));
+        let commands = replay.step(
+            Millis(at + 50),
+            Step::line(link, "invalid header: 0xffffffff"),
+        );
+        assert!(
+            !commands.iter().any(|command| matches!(
+                command,
+                Command::Link {
+                    command: LinkCommand::RunReset(_),
+                    ..
+                }
+            )),
+            "cycle {cycle}: a blank board is never reset by identify: {commands:?}"
+        );
+        let pending = &replay.view().pending[0];
+        assert!(
+            pending.needs_firmware(),
+            "cycle {cycle}: the first blank line is the verdict: {pending:?}"
+        );
+        assert_eq!(pending.detected_chip, None, "the premise: no banner heard");
+        // Its watchdog (or anything else) resets it: USB goes away.
+        replay.step(Millis(at + 100), Step::closed(link));
+        replay.step(Millis(at + 100), Step::detach(link));
+        at += 700;
+    }
 }

@@ -800,3 +800,10 @@ hours), and neither is an exit path on its own.
   job. Twice in two days on the full capture makes the 2026-10-23 question
   (is 180 s too tight for 2,519 stories on a loaded runner) a recurring
   burden, not a one-off.
+- 2026-10-28 — **`oxipng` hit its 180 s bound a third time in six days.**
+  "Validate story baselines" on #1320 (install without a board pick — a
+  Studio change, 42 stories moved), run 40671320780 attempt 1, head
+  3effbec6c: the capture completed, then `Error: oxipng did not exit within
+  180000 ms — killed.` ("a pipeline failure, not story drift"). The previous
+  head of the same PR passed the job. Re-ran the failed job. Three hits since
+  2026-10-23 makes the 180 s bound for a full capture the paydown to do.

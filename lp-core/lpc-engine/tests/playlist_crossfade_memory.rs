@@ -35,7 +35,7 @@
 //! its ring scaled ×K. It loads with the product's residency (only the idle
 //! entry), and every frame runs the residency step before the tick, as every
 //! edge does. The transition is driven through the runtime command channel
-//! (`PlaylistActivateEntry`), the same path a wire client uses.
+//! (a panel write on `playlist.entry`), the same path a wire client uses.
 //!
 //! ```bash
 //! cargo test -p lpc-engine --test playlist_crossfade_memory -- --nocapture
@@ -63,7 +63,6 @@ use lpc_engine::{Engine, EngineServices, ProjectLoader};
 use lpc_model::{ArtifactLocation, NodeDefLocation, NodeId, TreePath};
 use lpc_registry::ProjectRegistry;
 use lpc_shared::output::MemoryOutputProvider;
-use lpc_wire::WireNodeCommand;
 use lpfs::LpFsStd;
 use lps_shared::{LpsValueF32, TextureStorageFormat};
 
@@ -457,12 +456,17 @@ impl Run {
     }
 
     fn activate(&mut self, entry: u32) {
-        self.engine
-            .handle_node_command(
-                self.playlist,
-                &WireNodeCommand::PlaylistActivateEntry { entry },
-            )
-            .expect("activate entry");
+        let scope = self
+            .engine
+            .tree()
+            .bus_read_scope(self.playlist)
+            .expect("scope");
+        self.engine.panel_write(
+            scope,
+            lpc_model::ChannelName(String::from(lpc_model::PLAYLIST_ENTRY_CHANNEL)),
+            lpc_model::LpValue::U32(entry),
+            None,
+        );
     }
 }
 

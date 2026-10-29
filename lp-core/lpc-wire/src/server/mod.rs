@@ -33,7 +33,10 @@ pub use hello::{
     BuildFacts, HardwareFacts, HardwareIdentity, HelloIdentity, ServerHello, WIRE_PROTO_VERSION,
 };
 pub use hello_auth::HelloAuth;
-pub use hello_proto::{hello_board_id, hello_proto};
+pub use hello_proto::{
+    hello_base_mac, hello_board_id, hello_device_uid, hello_firmware, hello_on_tree_store,
+    hello_proto,
+};
 pub use last_attempt::LastAttempt;
 pub use link_counters::{LinkCounters, LinkResets};
 pub use network_scan::{HeardNetwork, NetworkScan};

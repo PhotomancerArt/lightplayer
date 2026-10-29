@@ -3,9 +3,12 @@
 //! reads the same hints the page's hint bar shows), so the bar, the
 //! toolbar and the agent see one set.
 //!
-//! **Levels.** Delete is Undoable (the Graph's own undo puts it back);
-//! everything else is Routine: selecting, the tools, a count, a direction,
-//! undo and redo. Nothing on the Graph is Lasting. Moving the view (pan,
+//! **Levels.** Delete, Unpatch and Unpatch all are Undoable: they take
+//! something away (off the canvas, or off the wire), and the Graph's own
+//! undo puts it back. Everything else is Routine: selecting, the tools, a
+//! count, a direction, undo and redo, and the rest of patching by hand
+//! (patch, swap, turn, shift, auto), which moves what is on the wire
+//! without taking anything off it. Nothing on the Graph is Lasting. Moving the view (pan,
 //! zoom, fit, Canvas | Stack) is view state, never an offer.
 
 use lab_mapping_model::{Editor, GraphVerb};
@@ -26,7 +29,7 @@ pub fn publish_graph_offers(offers: &mut UiOfferTree, editor: &Editor) {
     for verb in editor.verbs() {
         let action = GraphOp::action(verb);
         let action = match verb {
-            GraphVerb::Delete => action.undoable(),
+            GraphVerb::Delete | GraphVerb::Unpatch | GraphVerb::UnpatchAll => action.undoable(),
             _ => action,
         };
         offers.publish(UiOffer::new(graph_verb_path(verb), icon(verb), action));
@@ -35,7 +38,7 @@ pub fn publish_graph_offers(offers: &mut UiOfferTree, editor: &Editor) {
 
 fn icon(verb: GraphVerb) -> &'static str {
     match verb {
-        GraphVerb::Delete => "trash",
+        GraphVerb::Delete | GraphVerb::Unpatch | GraphVerb::UnpatchAll => "trash",
         GraphVerb::Undo | GraphVerb::Redo => "revert",
         _ => "",
     }

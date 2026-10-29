@@ -14,12 +14,15 @@ pub struct PlaylistState {
     #[slot(produced)]
     pub entry_time: ValueSlot<f32>,
 
-    /// Normalized progress through the current timed entry, or -1.0 for untimed entries.
+    /// Normalized progress through a trigger's timed excursion, or -1.0 when
+    /// the playlist rests on its pick, cycles, or plays an untimed entry.
     #[slot(produced)]
     pub entry_progress: ValueSlot<f32>,
 
-    /// Current entry key.
-    #[slot(produced)]
+    /// The entry key playing now: the selected entry once its child is
+    /// loaded. Published on `bus:playlist.playing`, read-only, for the
+    /// panel, the agent and any node (playlists-on-the-bus vision D11).
+    #[slot(produced, default_bind = "bus:playlist.playing")]
     pub active_entry: ValueSlot<u32>,
 }
 

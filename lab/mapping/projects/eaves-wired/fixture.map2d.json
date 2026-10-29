@@ -1,0 +1,13 @@
+{
+  "format": 3,
+  "sample_diameter": 2.0,
+  "canvas": [0.0, 0.0, 200.0, 60.0],
+  "objects": [
+    { "id": "front", "name": "front", "shape": { "path": {
+        "points": [[10, 50], [10, 10], [12, 8], [100, 8]], "count": 60, "gaps": [1]
+    } } },
+    { "id": "side", "name": "side", "shape": { "path": {
+        "points": [[110, 8], [188, 8], [190, 10], [190, 50]], "count": 50, "gaps": [1]
+    } } }
+  ]
+}

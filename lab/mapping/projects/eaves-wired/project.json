@@ -1,0 +1,9 @@
+{
+  "format": 11,
+  "name": "Eaves",
+  "description": "The mapping lab's fit project for Sean's eaves: two runs of an ordinary strip, each turning a corner on a short jumper (an unlit gap), the first on D10 (60 pixels) and the second flowing on to D9.",
+  "kind": "pattern",
+  "exports": [
+    "effect"
+  ]
+}

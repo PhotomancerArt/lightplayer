@@ -13,7 +13,7 @@ use std::collections::HashMap;
 
 use crate::domain::geom::Vec2;
 use crate::domain::node::NodeId;
-use crate::domain::patch::Span;
+use crate::domain::patch::PixelRun;
 use crate::domain::project::Project;
 
 /// One fixture's wiring, in world units.
@@ -43,15 +43,15 @@ impl Project {
                 .and_then(|o| o.lamps.get(i as usize))
                 .map(|l| l.pos)
         };
-        let on = |s: &Span, pixel: u32| s.lamp_at(pixel).and_then(|i| lamp(&s.object, i));
+        let on = |s: &PixelRun, pixel: u32| s.lamp_at(pixel).and_then(|i| lamp(&s.object, i));
         let mut out = DataPath::default();
-        let mine: Vec<&Span> = patch
-            .spans
+        let mine: Vec<&PixelRun> = patch
+            .pixel_runs
             .iter()
             .filter(|s| &s.fixture == fixture)
             .collect();
         // Where each span starts: (output, port, first pixel) → its spans.
-        let mut starting: HashMap<(&NodeId, &str, u32), Vec<&Span>> = HashMap::new();
+        let mut starting: HashMap<(&NodeId, &str, u32), Vec<&PixelRun>> = HashMap::new();
         for s in &mine {
             starting
                 .entry((&s.output, s.port.as_str(), s.pixels().start))

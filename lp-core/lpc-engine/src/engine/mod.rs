@@ -12,6 +12,10 @@ mod frame_time;
 mod loaded_project_runtime;
 pub mod memory_pressure;
 mod output_picture;
+// The port tables a format-6 fixture patches against (mapping rebuild M2
+// P1), asked of a loaded project's fixture.
+#[cfg(all(test, feature = "node-fixture"))]
+mod output_port_table_tests;
 mod power_service;
 // All three tests in this module exercise a Fixture node fed by a Shader
 // node's output slot, so the module needs both node kinds.
@@ -28,6 +32,10 @@ mod probe_read_backs;
 // false`) is served the previous probe's frame one probe late.
 #[cfg(all(test, feature = "node-shader"))]
 mod probe_read_back_tests;
+// A format-6 fixture through a real engine (mapping rebuild M2 P3): the
+// journeys, painted by a shader, read through real outputs.
+#[cfg(all(test, feature = "node-fixture", feature = "node-shader"))]
+mod parts_patch_tests;
 mod project_apply;
 mod project_fault;
 // The never-black policy's oracle: what faults a project, what must not,

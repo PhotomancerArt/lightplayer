@@ -33,22 +33,23 @@ pub fn signal_bars(rssi: i8) -> u8 {
     }
 }
 
-/// The line under the Networks page's header, when it has one: nothing
-/// while connected (the connected network leads the list), else why not.
-pub fn networks_page_line(status: &NetworkStatus) -> Option<String> {
+/// The line under the Networks page's header, in every station state: the
+/// network it is on, or why not. One line always, so a change of state
+/// changes its words in place and nothing below moves (P3).
+pub fn networks_page_line(status: &NetworkStatus) -> String {
     match &status.station {
-        StationState::Connected { .. } => None,
+        StationState::Connected { ssid, .. } => format!("Connected to {ssid}."),
         StationState::Unsupported if status.networks.is_empty() => {
-            Some(NOT_SET_UP_UNSUPPORTED.to_string())
+            NOT_SET_UP_UNSUPPORTED.to_string()
         }
-        StationState::Unsupported => Some(NOT_CONNECTED_UNSUPPORTED.to_string()),
-        StationState::Off => Some(WIFI_OFF.to_string()),
-        StationState::Connecting { ssid, .. } => Some(format!("Connecting to {ssid}…")),
+        StationState::Unsupported => NOT_CONNECTED_UNSUPPORTED.to_string(),
+        StationState::Off => WIFI_OFF.to_string(),
+        StationState::Connecting { ssid, .. } => format!("Connecting to {ssid}…"),
         StationState::Failed {
             ssid,
             reason: StationFailure::WrongPassword,
-        } => Some(format!("Not connected — {ssid} refused its password.")),
-        StationState::Failed { .. } | StationState::NotConnected => Some(NOT_CONNECTED.to_string()),
+        } => format!("Not connected — {ssid} refused its password."),
+        StationState::Failed { .. } | StationState::NotConnected => NOT_CONNECTED.to_string(),
     }
 }
 
@@ -161,6 +162,8 @@ pub mod row {
         format!("Connected · {ip}")
     }
     pub const CONNECTING: &str = "Connecting…";
+    /// An add on its way: the board has not answered that it saved it.
+    pub const SAVING: &str = "Saving…";
     pub const WRONG_PASSWORD: &str = "Wrong password";
     pub const IN_RANGE: &str = "In range";
     pub const NOT_IN_RANGE: &str = "Not in range";
@@ -234,6 +237,8 @@ pub mod label {
     /// The connect page while the board's radio listens and nothing has
     /// been heard yet (the board answered a scan `scanning`).
     pub const LOOKING_FOR_NETWORKS: &str = "Looking for networks…";
+    /// The connect page when the board's last scan heard nothing.
+    pub const HEARS_NO_NETWORKS: &str = "The board hears no networks.";
     pub const OTHER_NETWORK: &str = "Other network…";
     pub const OTHER_NETWORK_SUB: &str = "hidden, or not in range";
     pub const OTHER_NETWORK_TITLE: &str = "Other network";
@@ -243,7 +248,6 @@ pub mod label {
     pub const DONE: &str = "Done";
     /// The wrong-password test row's forget.
     pub const REMOVE: &str = "Remove";
-    pub const WRITING: &str = "Writing to the device…";
     /// A heard network with no password.
     pub const OPEN: &str = "open";
 }
@@ -270,6 +274,10 @@ pub mod test {
     pub const CHECKING_PASSWORD: &str = "Checking the password";
     pub const GETTING_ADDRESS: &str = "Getting an address";
     pub const REACHING_CLOUD: &str = "Reaching lightplayer.app";
+
+    /// The outcome's line while the test runs: its place, held (P3).
+    pub const TESTING: &str = "Testing";
+    pub const TESTING_BODY: &str = "it takes a few seconds.";
 
     pub const CONNECTED: &str = "Connected";
     /// <signal> signal · <ip>.
@@ -387,20 +395,12 @@ mod tests {
     }
 
     #[test]
-    fn the_networks_page_says_why_it_is_not_connected() {
+    fn the_networks_page_always_says_how_it_stands() {
         let cases = [
-            (
-                StationState::Unsupported,
-                true,
-                Some(NOT_CONNECTED_UNSUPPORTED),
-            ),
-            (
-                StationState::Unsupported,
-                false,
-                Some(NOT_SET_UP_UNSUPPORTED),
-            ),
-            (StationState::Off, true, Some(WIFI_OFF)),
-            (StationState::NotConnected, true, Some(NOT_CONNECTED)),
+            (StationState::Unsupported, true, NOT_CONNECTED_UNSUPPORTED),
+            (StationState::Unsupported, false, NOT_SET_UP_UNSUPPORTED),
+            (StationState::Off, true, WIFI_OFF),
+            (StationState::NotConnected, true, NOT_CONNECTED),
             (
                 StationState::Connected {
                     ssid: "lp-walk-net".to_string(),
@@ -409,12 +409,12 @@ mod tests {
                     host: "lp-8e30.local".to_string(),
                 },
                 true,
-                None,
+                "Connected to lp-walk-net.",
             ),
         ];
         for (station, saved, line) in cases {
             assert_eq!(
-                networks_page_line(&status(station.clone(), saved)).as_deref(),
+                networks_page_line(&status(station.clone(), saved)),
                 line,
                 "{station:?}"
             );
@@ -426,9 +426,8 @@ mod tests {
                     reason: StationFailure::WrongPassword
                 },
                 true
-            ))
-            .as_deref(),
-            Some("Not connected — lp-walk-net refused its password.")
+            )),
+            "Not connected — lp-walk-net refused its password."
         );
         assert_eq!(
             networks_page_line(&status(
@@ -437,9 +436,8 @@ mod tests {
                     step: lpc_wire::ConnectStep::Looking,
                 },
                 true
-            ))
-            .as_deref(),
-            Some("Connecting to lp-walk-net…")
+            )),
+            "Connecting to lp-walk-net…"
         );
     }
 

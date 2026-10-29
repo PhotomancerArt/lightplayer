@@ -28,7 +28,6 @@ use lpc_model::{
     ChannelName, LpValue, NodeId, NodeRuntimeStatus, NodeUseLocation, PlaylistCycle, SlotPath,
     ToLpValue, TreePath,
 };
-use lpc_wire::WireNodeCommand;
 use lpfs::{AsLpPath, LpFs, LpFsMemory};
 
 const IDLE: u32 = 1;
@@ -42,6 +41,9 @@ const ALL: [u32; 5] = [IDLE, GREEN, BLUE, RED, BROKEN];
 /// (`button:local:D8`, GPIO19).
 const NEXT_PIN: u32 = 20;
 const PREV_PIN: u32 = 19;
+/// The blast button (`button:local:D4`, GPIO22): message id 9, which
+/// `green_trigger` puts on green's `trigger_ids`.
+const BLAST_PIN: u32 = 22;
 
 /// Frames in one half-second step at 16 ms a frame.
 const HALF_SECOND: usize = 32;
@@ -121,12 +123,13 @@ fn a_pick_while_cycling_jumps_and_the_cycle_carries_on_from_it() {
     );
 }
 
-/// A held, frozen or absent cycle is the playlist exactly as before P5: the
-/// idle entry stays, an activate (a trigger's twin) plays its entry for its
-/// duration, the timed advance walks the later entries, and the playlist
-/// returns to idle.
+/// A held, frozen or absent cycle holds the picked entry (playlists-on-the-
+/// bus vision D7): a pick stays put whatever its `duration`, and a trigger's
+/// excursion plays the entry's duration and comes back to the pick. Before
+/// this, a held cycle walked the entries by their durations and settled on
+/// idle (`docs/defects/2026-10-19-the-cycle-switch-off-does-not-hold.md`).
 #[test]
-fn frozen_hold_and_absent_cycles_play_the_playlist_as_before() {
+fn frozen_hold_and_absent_cycles_hold_the_pick() {
     let mut runs = Vec::new();
     for cycle in [
         "",
@@ -137,13 +140,14 @@ fn frozen_hold_and_absent_cycles_play_the_playlist_as_before() {
         let mut show = Show::boot(Authored {
             cycle,
             durations: true,
+            green_trigger: true,
             ..Authored::default()
         });
-        let resting = show.run(HALF_SECOND * 6);
-        show.activate(GREEN);
-        let triggered = show.run(HALF_SECOND * 6);
-        let mut frames = resting;
-        frames.extend(triggered);
+        let mut frames = show.run(HALF_SECOND * 6);
+        show.activate(BLUE);
+        frames.extend(show.run(HALF_SECOND * 6));
+        show.press(BLAST_PIN);
+        frames.extend(show.run(HALF_SECOND * 6));
         println!("cycle {cycle:?}: {:?}", visited(&frames));
         runs.push((cycle, frames));
     }
@@ -151,8 +155,8 @@ fn frozen_hold_and_absent_cycles_play_the_playlist_as_before() {
     let (_, absent) = &runs[0];
     assert_eq!(
         visited(absent),
-        [IDLE, GREEN, BLUE, RED, IDLE],
-        "idle rests; each entry plays its duration; back to idle"
+        [IDLE, BLUE, GREEN, BLUE],
+        "blue holds past its duration; the trigger's green plays 0.5 s and returns to blue"
     );
     for (cycle, frames) in &runs[1..] {
         assert_eq!(
@@ -160,6 +164,71 @@ fn frozen_hold_and_absent_cycles_play_the_playlist_as_before() {
             "cycle {cycle:?} must be frame-for-frame the playlist without a cycle"
         );
     }
+}
+
+/// A trigger while cycling is an excursion: the entry plays its duration,
+/// then the cycle carries on where its clock says (it is not re-anchored).
+#[test]
+fn a_trigger_while_cycling_plays_its_duration_and_the_cycle_carries_on() {
+    let mut show = Show::boot(Authored {
+        cycle: r#""cycle": { "kind": "cycle", "step_seconds": 2.0, "fade_seconds": 0.1 },"#,
+        durations: true,
+        green_trigger: true,
+        ..Authored::default()
+    });
+    show.run(8);
+    assert_eq!(show.loaded(), [IDLE]);
+
+    show.press(BLAST_PIN);
+    let walk = show.visited(HALF_SECOND * 6);
+    println!("blast while idle's 2 s step runs: {walk:?}");
+    assert_eq!(
+        &walk[..3],
+        [GREEN, IDLE, GREEN],
+        "green's half second, back to idle for the rest of its step, then the cycle's green"
+    );
+}
+
+/// Re-tapping the entry the cycle started from writes the same key again.
+/// It is still a pick: the cycle restarts there (vision Q2).
+#[test]
+fn re_picking_the_same_entry_restarts_the_cycle_there() {
+    let mut show = Show::boot(Authored {
+        cycle: r#""cycle": { "kind": "cycle", "step_seconds": 0.5, "fade_seconds": 0.1 },"#,
+        ..Authored::default()
+    });
+    show.run(8);
+    show.activate(BLUE);
+    let on = show.visited(HALF_SECOND + HALF_SECOND / 2);
+    assert_eq!(
+        on.last(),
+        Some(&RED),
+        "the cycle walked on from blue: {on:?}"
+    );
+
+    show.activate(BLUE);
+    let again = show.visited(HALF_SECOND / 2);
+    assert_eq!(
+        again.last(),
+        Some(&BLUE),
+        "the same key, written again: {again:?}"
+    );
+}
+
+/// A pick restored before the first tick (`.lp/panel.json`, panel.md P10)
+/// is settled into the playlist before it ever ticks, so the first tick's
+/// residency step swaps the authored entry out before anything renders:
+/// no frame ever shows the authored entry (playlists-on-the-bus Q3).
+#[test]
+fn a_pick_settled_before_the_first_tick_is_the_first_entry_shown() {
+    let mut show = Show::boot(Authored::default());
+    show.activate(BLUE);
+    show.rt.engine_mut().settle_load_deciding_panel_values();
+
+    let frames = show.run(HALF_SECOND * 2);
+    println!("restored pick blue: {:?}", visited(&frames));
+    assert_eq!(frames[0], [BLUE], "the first tick has already swapped");
+    assert_eq!(visited(&frames), [BLUE], "and it holds");
 }
 
 /// The cycle follows the clock (plan A3): at rate 2× a step takes half the
@@ -368,8 +437,10 @@ struct Authored {
     cycle: &'static str,
     /// A `"skip": […],` line, or nothing.
     skip: &'static str,
-    /// Green, blue and red play 0.5 s each (the timed advance).
+    /// Green, blue and red last 0.5 s each — which only an excursion uses.
     durations: bool,
+    /// Green is triggered by the blast button (message id 9).
+    green_trigger: bool,
     /// Add entry 5, a `ref` to a missing file.
     broken_entry: bool,
 }
@@ -424,12 +495,9 @@ impl Show {
         self.run(8);
     }
 
+    /// Pick `entry` from Play mode: a panel write on `playlist.entry`.
     fn activate(&mut self, entry: u32) {
-        let playlist = self.playlist_id();
-        self.rt
-            .engine_mut()
-            .handle_node_command(playlist, &WireNodeCommand::PlaylistActivateEntry { entry })
-            .unwrap_or_else(|e| panic!("activate {entry}: {e}"));
+        self.playlist_write(lpc_model::PLAYLIST_ENTRY_CHANNEL, LpValue::U32(entry));
     }
 
     /// A panel write in the playlist's scope (Play mode's control surface).
@@ -531,6 +599,7 @@ fn project_fs(authored: &Authored) -> LpFsMemory {
     "clock": { "ref": "./clock.json" },
     "next": { "ref": "./next.json" },
     "prev": { "ref": "./prev.json" },
+    "blast": { "ref": "./blast.json" },
     "list": { "ref": "./playlist.json" },
     "fixture": { "ref": "./fixture.json" },
     "output": { "ref": "./output.json" }
@@ -538,7 +607,7 @@ fn project_fs(authored: &Authored) -> LpFsMemory {
 }"#,
     );
     write(&fs, "/clock.json", br#"{ "kind": "Clock" }"#);
-    for (name, pin, id) in [("next", "D9", 7), ("prev", "D8", 8)] {
+    for (name, pin, id) in [("next", "D9", 7), ("prev", "D8", 8), ("blast", "D4", 9)] {
         write(
             &fs,
             &format!("/{name}.json"),
@@ -556,6 +625,11 @@ fn project_fs(authored: &Authored) -> LpFsMemory {
     }
     let duration = if authored.durations {
         r#""duration": 0.5, "#
+    } else {
+        ""
+    };
+    let green_trigger = if authored.green_trigger {
+        r#""trigger_ids": [9], "#
     } else {
         ""
     };
@@ -584,7 +658,7 @@ fn project_fs(authored: &Authored) -> LpFsMemory {
   "prev_trigger_ids": [8],
   "entries": {{
     "1": {{ "name": "idle", "node": {{ "ref": "./idle.json" }} }},
-    "2": {{ "name": "green", {duration}"node": {{ "ref": "./green.json" }} }},
+    "2": {{ "name": "green", {green_trigger}{duration}"node": {{ "ref": "./green.json" }} }},
     "3": {{ "name": "blue", {duration}"node": {{ "ref": "./blue.json" }} }},
     "4": {{ "name": "red", {duration}"node": {{ "ref": "./red.json" }} }}{broken}
   }}

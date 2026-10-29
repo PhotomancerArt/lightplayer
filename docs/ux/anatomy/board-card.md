@@ -123,6 +123,9 @@ moving here (take-over)     Moving this board to this tab.  + spinner           
 confirmation required       This update is waiting for your confirmation.                  (none: its details rise)
 updating                    This board is updating its firmware.  + bar                     (none)
 installing                  Installing the firmware on this board.  + bar                   (none)
+  …reading the board first  Reading this board before installing.  + spinner                (none)
+  …restarting on it         This board is restarting on its new firmware.  + spinner        (none)
+  …saving its board model   Saving the board model on this board.  + spinner                (none)
 erasing                     Erasing this board.  + bar                                      (none)
 sending                     Sending the project “studio” to this board.  + bar              (none)
 removing                    Removing the project from this board.  + bar                    (none)
@@ -338,6 +341,22 @@ pressed in a row's details is that road alone. A board this tab already
 reaches (USB, Bluetooth, Wi‑Fi or lightplayer.app) has no road: Connect
 opens its session on that link.
 
+The connecting state lasts from the press until the board says hello, on
+the card that was pressed. The socket answering (through lightplayer.app,
+the secure link coming up) is half-way: the board is still being
+identified, and the card keeps its spinner rather than going back to its
+Connect. A board never met here does not trade its card for a separate
+"Identifying" one meanwhile. A board that never says hello gives up after a
+minute, in a held Connect's words. A second press finds the button waiting
+and dials nothing.
+
+```text
+do:   Connecting to this board through lightplayer.app.  ◌   # press → hello, one state
+bad:  (its picture, no words)               │ ☁ Connect │   # the relay answered, the board
+                                                            #   has not said hello: it reads
+                                                            #   as a press that was lost
+```
+
 ```text
 do:   │ Fabric Test                │ ≋ Connect │   # one press: Wi‑Fi, else lightplayer.app
 bad:  │ Fabric Test                │ ☁ Connect │   # on your own network, through the cloud:
@@ -421,7 +440,10 @@ Off, the row says `disabled`, plain, with no button, and the same switch
 turns it back on. Where this link may not flip it the switch is dimmed, and
 a refusal says why under the line ("Bluetooth can only be turned off by
 USB…"); its hover says what a flip does, in the offer's words (Bluetooth's
-restarts the board).
+restarts the board). A switch waiting on a change on its way is dimmed and
+says why on its hover, with nothing under the line: the details never grow
+and shrink with routine work (P3), and Studio asking the board again holds
+nothing at all.
 
 ```text
 ᛒ Bluetooth        LP-3f2a                 › │   the row, which opened them
@@ -504,10 +526,35 @@ and its link counters.
 
 Its details: the switch line (Wi‑Fi and the board's switch), then the
 Wi‑Fi panel (its networks, adding one), and Connect over Wi‑Fi where the
-primary doesn't already offer it. Off: the switch stands off over "Wi‑Fi is
-disabled on this board. It reaches Studio over USB and Bluetooth only."
+primary doesn't already offer it. Off: the switch stands off over "Wi‑Fi
+is disabled on this board. It reaches Studio over USB and Bluetooth only."
 The panel draws no heading or switches of its own on the card: the switch
 line is both, and lightplayer.app's switch is its own row's.
+
+The panel holds still (P3): its line under the switch says how the board
+stands in every state ("Connected to Cedar Lane.", "Connecting to Cedar
+Lane…", "Not connected.", or the board's refusal in its place), and gives way to a test, which says it; a network
+being added is a row, "Saving…", with its test under it from the press;
+and the test's last line is held, "Testing · it takes a few seconds.",
+until its outcome takes the place.
+
+```text
+≋ Wi‑Fi                              (●━━)   the switch line
+Not connected.                               the line: how it stands, in every state
+▂▄▆  Cedar Lane      Not in range          › 
++ Connect to a network
+```
+
+```text
+≋ Wi‑Fi                              (●━━)   dimmed while the add is on its way
+▂▄▆  Cedar Lane      Not in range          ›   (no line: the test says it)
+▂▄▆  Starlink Apt    Saving…                 the add, from the press
+     ● Looking for Starlink Apt               its test: the steps…
+     ○ Checking the password
+     ○ Getting an address
+     Testing · it takes a few seconds.        …and the outcome's place, held
++ Connect to a network
+```
 
 ### Bluetooth ᛒ: the board's own radio
 
@@ -597,7 +644,7 @@ bad:  ☁ lightplayer.app  river@example.com   last seen 2…    # story, 10-20:
 ▲ Firmware  unknown (pre-2026.07)   │ Install │          # was: Pre-hello firmware; no button when the primary is Install firmware
             # "Update to v2026.10.16-1" does not fit beside the version at the card's width:
             # the button says the verb, and the version it brings is the details' Newest
-▲ Firmware  none            │ Install │              # blank, or Studio erased it: lit, the primary's board pick. primary: Install firmware
+▲ Firmware  none            │ Install │              # blank, or Studio erased it: lit, one press (no board pick, 10-28). primary: Install firmware
 ▲ Firmware  unknown   no response                      # it never said hello and says nothing. primary: Install firmware
 ◌ Firmware  v2026.10.08-9   updating                   # carried: the surface has 42 %. was: updating · 42% and a rainbow fill
 ◌ Firmware  v2026.10.08-9   backing up │ Cancel │
@@ -624,6 +671,7 @@ bad:  Firmware   No response — try flashing firmware     # Yona's C6 10-19: a 
 
 ```text
 ■ Hardware  XIAO ESP32-C6
+▲ Hardware  ESP32-C6       which board?   │ Which board? │   # an install that could not tell: lit, a to-do; the pick opens on press (10-28)
 ■ Hardware  ESP32-C6       model not set         # was: ESP32-C6
 ■ Hardware  unknown                              # was: Board not known
 ◌ Hardware  —   identifying                      # was: identifying, in the name's place; chip unknown
@@ -638,7 +686,7 @@ something. The name is renamed in the name bar, not here:
 │ Board      Model  XIAO ESP32-C6                 │
 │            Chip   ESP32-C6                      │
 │            Id     a0:f2:62:87:b4:8c             │
-│ Actions    ↻ Reset                              │
+│ Actions    ▦ Change board   ↻ Reset              │   Change board: the chip fits several boards
 │ Danger     ✕ Factory reset   ✕ Forget on this browser   ✕ Remove from your account │   Lasting: arm, then press again
 ```
 
@@ -778,6 +826,15 @@ Yona's C6 install walk, 2026-10-19:
 W1  Factory reset is the Hardware row's: it erases the board, not only its firmware (Yona)
 W2  a board Studio erased is the blank board at once, heard or not: Install firmware, no Retry (Yona)
 W3  the Firmware details say what is there in the row's words; the surface says the sentence (Yona)
+```
+
+Install without picking a board, 2026-10-28 (Sean and Yona; plan `lp2025/2026-10-28-0025-install-without-board-pick`):
+
+```text
+I1  Install is one press: the install reads the board in its bootloader, then writes   (Yona)
+I2  the board model is asked AFTER, on the Hardware row, only when several boards fit   (Yona, D1)
+I3  replacing somebody else's firmware is the one question, and it names what is there   (Yona, D2)
+    ("This board is running WLED 0.15.0." — an Arduino build says "an Arduino sketch")
 ```
 
 The setup rows, 2026-10-19 (plan `lp2025/2026-10-19-1350-board-setup-rows`, spike `spikes/install-network-setup`):

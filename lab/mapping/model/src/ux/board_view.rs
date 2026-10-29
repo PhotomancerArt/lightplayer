@@ -13,6 +13,8 @@ impl Editor {
     pub fn board_frame(&self, time: f64) -> BoardFrame {
         if self.drawing() {
             self.draft_frame(time)
+        } else if let Some(frame) = self.armed_frame(time) {
+            frame
         } else {
             self.project.board_frame(&self.selection, time)
         }
@@ -22,7 +24,7 @@ impl Editor {
     /// pattern, a drawing in progress), so the page knows to keep ticking.
     /// The stand-in patterns hold still (`pattern.rs`).
     pub fn board_animates(&self) -> bool {
-        !self.selection.is_empty() || self.drawing()
+        !self.selection.is_empty() || self.drawing() || self.armed.is_some()
     }
 
     /// A circle being dragged out, or a path being clicked out.

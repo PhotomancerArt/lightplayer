@@ -23,6 +23,7 @@ use lpc_shared::output::{
 use lpc_shared::time::TimeProvider;
 
 use super::PowerService;
+use crate::node::output_port_slices;
 use crate::resource::{RuntimeBufferId, RuntimeBufferStore};
 
 /// Every wire one output node drives from its single control buffer.
@@ -244,6 +245,27 @@ impl EngineServices {
 
     pub fn project_root(&self) -> &TreePath {
         &self.project_root
+    }
+
+    /// The wires `config`'s ports cut the output's buffer into, as `(port
+    /// key, first sample, samples)` (`None`: the rest of the buffer), exactly
+    /// as [`Self::reconcile_wires`] registers them: a zero-lamp port dropped,
+    /// and NO wires at all when a port other than the last omits its count.
+    ///
+    /// For the upgrade landing goldens (`tests/upgrade_landing.rs`) only, which
+    /// must read where a lamp reaches a wire with the code the wires use, not
+    /// a copy of it. Nothing in production calls this, and it is a host-only
+    /// convenience (`std`), so no firmware image links it.
+    #[doc(hidden)]
+    #[must_use]
+    #[cfg(feature = "std")]
+    pub fn planned_wire_slices_for_landing(config: &OutputDef) -> Vec<(u32, u32, Option<u32>)> {
+        if remainder_offender(config).is_some() {
+            return Vec::new();
+        }
+        planned_wires(config)
+            .map(|wire| (wire.port, wire.start_samples, wire.len_samples))
+            .collect()
     }
 
     /// Replace the optional [`OutputProvider`] used when flushing sinks after each tick.
@@ -558,42 +580,35 @@ impl Drop for EngineServices {
 /// Walk `ports` in ascending key order, deriving each wire's slice of the
 /// node's control buffer.
 ///
-/// A port's `count` is in lamps and a lamp is three samples; slices start
-/// where the previous one ended. A port with no count takes the remainder,
-/// which only the last one may do — [`remainder_offender`] is the check, and
-/// this iterator assumes it has passed. Ports authoring zero lamps drive
-/// nothing and are dropped here (the warning is issued once, on the changed
-/// path, not by this iterator — it runs per tick).
+/// The slices are [`output_port_slices`]', the walk the port tables a fixture
+/// patches against share, so an address and its wire can never disagree. A
+/// port with no count takes the remainder, which only the last one may do —
+/// [`remainder_offender`] is the check, and this iterator assumes it has
+/// passed. Ports authoring zero lamps drive nothing and are dropped here (the
+/// warning is issued once, on the changed path, not by this iterator — it
+/// runs per tick).
 ///
 /// Allocation-free by construction: endpoints are borrowed and the running
 /// offset lives in the iterator's own state, so the per-tick diff drives it
 /// directly.
 fn planned_wires(config: &OutputDef) -> impl Iterator<Item = PlannedWire<'_>> {
-    let mut start = 0u32;
-    config
-        .ports
-        .entries
-        .iter()
-        .filter_map(move |(key, port)| match port.count() {
-            Some(0) => None,
-            Some(count) => {
-                let len = count.saturating_mul(3);
-                let wire = PlannedWire {
-                    port: *key,
-                    endpoint: port.endpoint(),
-                    start_samples: start,
-                    len_samples: Some(len),
-                };
-                start = start.saturating_add(len);
-                Some(wire)
-            }
-            None => Some(PlannedWire {
-                port: *key,
-                endpoint: port.endpoint(),
-                start_samples: start,
-                len_samples: None,
-            }),
+    output_port_slices(config).filter_map(|(port, slice)| {
+        (slice.capacity_samples != Some(0)).then(|| PlannedWire {
+            port: slice.key,
+            endpoint: port.endpoint(),
+            start_samples: slice.start_samples,
+            len_samples: slice.capacity_samples,
         })
+    })
+}
+
+/// The wires an output's ports are cut into, as `(port, start, len)` in
+/// samples: what a test compares the port tables against.
+#[cfg(all(test, feature = "node-fixture"))]
+pub(crate) fn planned_wire_slices(config: &OutputDef) -> Vec<(u32, u32, Option<u32>)> {
+    planned_wires(config)
+        .map(|wire| (wire.port, wire.start_samples, wire.len_samples))
+        .collect()
 }
 
 /// The key of the first port that takes the remainder without being the
@@ -604,7 +619,7 @@ fn planned_wires(config: &OutputDef) -> impl Iterator<Item = PlannedWire<'_>> {
 /// count-less port in the middle leaves everything after it without a
 /// start. Rather than guess, the whole output is refused: a wrong strip lit is
 /// worse than a dark one, and the log names the port to fix.
-fn remainder_offender(config: &OutputDef) -> Option<u32> {
+pub(crate) fn remainder_offender(config: &OutputDef) -> Option<u32> {
     let mut remainder: Option<u32> = None;
     for wire in planned_wires(config) {
         if let Some(previous) = remainder {

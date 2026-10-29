@@ -58,11 +58,12 @@ pub enum DeviceEffectCall {
         build_id: String,
         plan: Option<lpa_link::FlashPlan>,
     },
-    /// Read the board's layout against the package `build_id` writes
-    /// (`LinkManagementRequest::InspectLayout`): leaves the chip in ROM
-    /// download. A transport with no such read (a sim, an emulated tab
-    /// board) answers with no inspection — a plain flash.
-    InspectLayout { build_id: String },
+    /// Read the board's layout against the package `build` resolves to for
+    /// the chip the session hears (`LinkManagementRequest::InspectLayout`),
+    /// and what the board runs: leaves the chip in ROM download. A
+    /// transport with no such read (a sim, an emulated tab board) answers
+    /// with no inspection — a plain flash of a build known before the press.
+    InspectLayout { build: lpa_link::FlashBuild },
     /// esptool full-flash erase (the card's Factory reset). Verification —
     /// the completion line outranking the benign flash-id warning (C6 rev 2
     /// lore) — lives below this seam in the shipped JS.

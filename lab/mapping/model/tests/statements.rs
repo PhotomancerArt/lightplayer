@@ -464,7 +464,7 @@ fn the_layout_places_every_node_while_pinning_is_off() {
         e.hint_bar().hints.iter().all(|h| h.keys != "drag"),
         "the bar offers no dragging"
     );
-    key(&mut e, Key::Char('u'), none());
+    key(&mut e, Key::Char('u'), alt());
     assert!(
         e.notice
             .as_ref()
@@ -512,8 +512,8 @@ fn dragging_a_node_pins_it() {
     );
     lay_out(&mut e);
     assert!(e.project.node_rect(&ring).unwrap().min.distance(moved) < 1e-9);
-    // U gives it back to the layout.
-    key(&mut e, Key::Char('u'), none());
+    // ⌥U gives it back to the layout.
+    key(&mut e, Key::Char('u'), alt());
     lay_out(&mut e);
     assert!(e.project.node(&ring).unwrap().pinned.is_none());
     assert_eq!(e.project.node_rect(&ring).unwrap(), before);
@@ -775,29 +775,38 @@ fn a_module_is_see_through() {
     assert_eq!(e.selection, vec![fixture(&e, "tail rig")]);
 }
 
-/// On an output, a span is its object: a click on the strip's span on D1
-/// selects path3, as a click on it in the strip would, and a press there
-/// never drags the drawing. The output itself is picked by its title, and
-/// Esc from a span's pixel climbs to its port.
+/// On an output, a span is its own selection (plan D13): a click on the
+/// strip's span on D1 selects that span, and its inspector says where it is
+/// and offers to select path3. A press there never drags the drawing. The
+/// output itself is picked by its title, and Esc from a pixel climbs to its
+/// span, then its port.
 #[test]
-fn a_span_on_an_output_selects_its_object() {
+fn a_span_on_an_output_is_its_own_selection() {
     let mut e = editor();
     let main = node_id(&e, "main");
     let at = pixel_centre(&e, &main, "1", 3);
+    let span = path3_span(&main);
     e.pointer_move(e.camera.to_screen(at), none());
-    assert_eq!(e.hover_target(), Some(comp("path3")), "the hover says so");
+    assert_eq!(e.hover_target(), Some(span.clone()), "the hover says so");
     assert_eq!(e.cursor_note(), None, "the card behind is no overlap");
     click_at(&mut e, at, none());
-    assert_eq!(e.selection, vec![comp("path3")]);
-    let spans = e
+    assert_eq!(e.selection, vec![span]);
+    let items = e
         .view_inspector()
         .sections
         .into_iter()
-        .find(|s| s.title.as_deref() == Some("Spans"))
-        .expect("the inspector says where it lands");
+        .find(|s| s.title.as_deref() == Some("Span"))
+        .expect("the inspector says what's on it")
+        .items;
     assert_eq!(
-        spans.items,
-        vec![UiItem::Fact("Pixels 0–29 of D1 of main".into())]
+        items,
+        vec![
+            UiItem::Fact("Pixels 0–29 of D1 of main".into()),
+            UiItem::Select {
+                text: "Select path3".into(),
+                target: comp("path3")
+            }
+        ]
     );
     let before = e.project.clone();
     let from = e.camera.to_screen(at);
@@ -811,6 +820,9 @@ fn a_span_on_an_output_selects_its_object() {
     click_at(&mut e, at, none());
     click_at(&mut e, at, none());
     assert_eq!(e.selection, vec![pixel(&main, "1", 3)]);
+    // Esc climbs output → port → span → pixel back up.
+    key(&mut e, Key::Escape, none());
+    assert_eq!(e.selection, vec![path3_span(&main)]);
     key(&mut e, Key::Escape, none());
     assert_eq!(e.selection, vec![port(&main, "1")]);
     assert_eq!(e.project.label(&e.selection[0]), "D1");
@@ -831,7 +843,7 @@ fn the_auto_rule_fills_ports_in_order() {
     assert!(patch.unpatched.is_empty() && patch.problems.is_empty());
     // The ring display's lamps: r1 then r2, in data order, from pixel 0.
     let d0: Vec<(String, std::ops::Range<u32>, u32)> = patch
-        .spans
+        .pixel_runs
         .iter()
         .filter(|s| s.output == main && s.port == "0")
         .map(|s| (s.object.key.clone(), s.lamps.clone(), s.start_pixel))
@@ -964,16 +976,24 @@ fn deleting_an_output_leaves_problems_not_retargets() {
         .map(|x| p.node_name(&x.fixture))
         .collect();
     assert_eq!(broken, vec!["ring display", "strip"]);
-    assert!(patch.problems.iter().all(|x| x.missing == main));
+    assert!(
+        patch
+            .problems
+            .iter()
+            .all(|x| x.gone == Gone::Output(main.clone()))
+    );
     let ring = node_id(&e, "ring display");
     assert_eq!(
-        p.fixture(&ring).unwrap().rules,
-        vec![PatchRule::Auto {
-            output: main.clone()
-        }],
-        "the rule still names main"
+        p.fixture(&ring).unwrap().places,
+        vec![auto_onto(&main)],
+        "the placement still names main"
     );
-    assert!(patch.spans.iter().all(|s| s.fixture == node_id(&e, "tail")));
+    assert!(
+        patch
+            .pixel_runs
+            .iter()
+            .all(|s| s.fixture == node_id(&e, "tail"))
+    );
     // The notice says so.
     let n = e.notice.clone().unwrap();
     assert!(n.why.unwrap().contains("ring display and strip"));
@@ -1194,8 +1214,8 @@ fn clicking_points_builds_a_path() {
     assert_eq!(e.tool, Tool::Select);
     assert!(e.path_draft.is_empty());
 
-    // Enter finishes too; L is the same tool as P.
-    key(&mut e, Key::Char('l'), none());
+    // Enter finishes too.
+    key(&mut e, Key::Char('p'), none());
     assert_eq!(e.tool, Tool::Path);
     let at = place(&e, "scarf", 10.0, 80.0);
     click_at(&mut e, at, none());
@@ -1535,7 +1555,7 @@ fn every_offered_key_does_something() {
         e.select(vec![start.clone()]);
         let bar = e.hint_bar();
         if matches!(start, Target::Object(_)) {
-            for keys in ["Esc", "Enter", "r", "− ="] {
+            for keys in ["Esc", "Enter", "R", "− ="] {
                 assert!(
                     bar.hints.iter().any(|h| h.keys == keys),
                     "{keys} is offered"
@@ -1545,7 +1565,7 @@ fn every_offered_key_does_something() {
         for (keys, key_) in [
             ("Esc", Key::Escape),
             ("Enter", Key::Enter),
-            ("r", Key::Char('r')),
+            ("R", Key::Char('r')),
             ("− =", Key::Char('=')),
             ("⌫", Key::Delete),
         ] {
@@ -1927,7 +1947,7 @@ fn drawing_into_the_scarf_lights_the_drafts_pixels() {
     let landed: Vec<usize> = e
         .project
         .effective_patch()
-        .spans
+        .pixel_runs
         .iter()
         .filter(|s| s.object.component == id)
         .flat_map(|s| s.start_pixel as usize..(s.start_pixel + s.lamps.len() as u32) as usize)
@@ -2055,7 +2075,7 @@ fn every_lamp_shows_its_control_products_colour() {
         e.select(selection.clone());
         let frame = e.board_frame(t);
         let patch = e.project.effective_patch();
-        for s in &patch.spans {
+        for s in &patch.pixel_runs {
             let pixels = frame.port(&s.output, &s.port).unwrap();
             let product = frame.control_product(&s.fixture).unwrap();
             for lamp in s.lamps.clone() {
@@ -2529,14 +2549,14 @@ fn the_bar_lead_says_what_youre_doing() {
 #[test]
 fn with_move_and_draw_off_nothing_moves() {
     let mut e = editor();
-    key(&mut e, Key::Char('m'), none());
+    key(&mut e, Key::Char('d'), none());
     assert!(!e.move_draw);
     let before = e.project.clone();
     let refused = |e: &Editor| {
         let n = e.notice.clone().expect("a notice");
         n.kind == NoticeKind::Refused
             && n.why.as_deref() == Some("Move & draw is off")
-            && n.help.unwrap_or_default().starts_with("M turns it on")
+            && n.help.unwrap_or_default().starts_with("D turns it on")
     };
 
     // Selecting works: a click selects circle1, and again its ring.
@@ -2578,7 +2598,7 @@ fn with_move_and_draw_off_nothing_moves() {
         "the bar offers no moving: {:?}",
         bar.hints
     );
-    assert!(bar.hints.iter().any(|h| h.keys == "M"));
+    assert!(bar.hints.iter().any(|h| h.keys == "D"));
 
     // A pixel still lights; a port's own count is patching, not drawing.
     let main = node_id(&e, "main");
@@ -2588,8 +2608,8 @@ fn with_move_and_draw_off_nothing_moves() {
     key(&mut e, Key::Char('='), none());
     assert_eq!(e.project.port_fill(&main, "1"), (30, 31));
 
-    // M turns it back on, and a drag moves again.
-    key(&mut e, Key::Char('m'), none());
+    // D turns it back on, and a drag moves again.
+    key(&mut e, Key::Char('d'), none());
     e.select(vec![comp("circle1")]);
     let at = lamp_screen(&e, "circle1", "r1", 3);
     drag(&mut e, at, at + Vec2::new(40.0, 0.0), none());
@@ -2601,16 +2621,16 @@ fn with_move_and_draw_off_nothing_moves() {
 
 // ---- pixels --------------------------------------------------------------------
 
-/// Clicking a span selects its object; clicking again selects the pixel
-/// under the cursor. The arrow keys walk the pixels, and ⇧-click selects
-/// the run from the first one picked.
+/// Clicking a span selects it; clicking again selects the pixel under the
+/// cursor. The arrow keys walk the pixels, and ⇧-click selects the run
+/// from the first one picked.
 #[test]
 fn clicking_into_a_span_selects_a_pixel() {
     let mut e = editor();
     let main = node_id(&e, "main");
     let at = pixel_centre(&e, &main, "1", 3);
     click_at(&mut e, at, none());
-    assert_eq!(e.selection, vec![comp("path3")]);
+    assert_eq!(e.selection, vec![path3_span(&main)]);
     click_at(&mut e, at, none());
     assert_eq!(e.selection, vec![pixel(&main, "1", 3)]);
     assert_eq!(
@@ -2869,14 +2889,10 @@ fn a_place_rule_puts_an_object_on_a_pixel() {
             ComponentKind::path(pts(&[(10.0, 10.0), (50.0, 10.0)]), 5),
         );
         let object = ObjectId::new(&path, "path");
-        p.fixture_mut(&f).unwrap().rules.push(PatchRule::Place {
-            object: object.clone(),
-            output: out.clone(),
-            port: "0".into(),
-            pixel: 10,
-            reversed,
-            rotation: 2,
-        });
+        p.fixture_mut(&f)
+            .unwrap()
+            .places
+            .push(placed_at(&object, &out, "0", 10, reversed, 2));
         let got: Vec<u32> = (0..5)
             .map(|i| match p.pixel_of_lamp(&object, i) {
                 Some(Target::Pixel { index, .. }) => index,
@@ -2900,7 +2916,7 @@ fn a_run_carries_on_into_the_next_port() {
     p.auto_patch(&f, &out);
     let spans: Vec<(String, std::ops::Range<u32>, u32)> = p
         .effective_patch()
-        .spans
+        .pixel_runs
         .iter()
         .map(|s| (s.port.clone(), s.lamps.clone(), s.start_pixel))
         .collect();
@@ -2939,18 +2955,9 @@ fn auto_flows_after_placed_runs() {
         &a,
         ComponentKind::path(pts(&[(0.0, 5.0), (9.0, 5.0)]), 2),
     );
-    p.fixture_mut(&a).unwrap().rules = vec![
-        PatchRule::Place {
-            object: ObjectId::new(&a2, "path"),
-            output: out.clone(),
-            port: "0".into(),
-            pixel: 10,
-            reversed: false,
-            rotation: 0,
-        },
-        PatchRule::Auto {
-            output: out.clone(),
-        },
+    p.fixture_mut(&a).unwrap().places = vec![
+        placed_at(&ObjectId::new(&a2, "path"), &out, "0", 10, false, 0),
+        auto_onto(&out),
     ];
     let b = p.add_fixture(None, "b").unwrap();
     let b1 = add(
@@ -2961,7 +2968,7 @@ fn auto_flows_after_placed_runs() {
     p.auto_patch(&b, &out);
     let at = |c: &ComponentId| {
         p.effective_patch()
-            .spans
+            .pixel_runs
             .iter()
             .find(|s| &s.object.component == c)
             .map(|s| s.start_pixel)
@@ -2985,16 +2992,16 @@ fn without_an_auto_rule_unplaced_lamps_are_dark() {
         &f,
         ComponentKind::path(pts(&[(0.0, 5.0), (9.0, 5.0)]), 2),
     );
-    p.fixture_mut(&f).unwrap().rules = vec![PatchRule::Place {
-        object: ObjectId::new(&a2, "path"),
-        output: out.clone(),
-        port: "0".into(),
-        pixel: 0,
-        reversed: false,
-        rotation: 0,
-    }];
+    p.fixture_mut(&f).unwrap().places = vec![placed_at(
+        &ObjectId::new(&a2, "path"),
+        &out,
+        "0",
+        0,
+        false,
+        0,
+    )];
     let patch = p.effective_patch();
-    assert_eq!(patch.spans.len(), 1);
+    assert_eq!(patch.pixel_runs.len(), 1);
     assert_eq!(patch.unpatched.len(), 1);
     assert_eq!(patch.unpatched[0].object, ObjectId::new(&a1, "path"));
 }
@@ -3017,7 +3024,7 @@ fn fixtures_share_an_output_in_name_order() {
     }
     let start = |f: &NodeId| {
         p.effective_patch()
-            .spans
+            .pixel_runs
             .iter()
             .find(|s| &s.fixture == f)
             .map(|s| s.start_pixel)
@@ -3036,23 +3043,20 @@ fn a_rule_on_a_gone_port_is_a_problem() {
         &f,
         ComponentKind::path(pts(&[(0.0, 0.0), (9.0, 0.0)]), 3),
     );
-    p.fixture_mut(&f).unwrap().rules = vec![
-        PatchRule::Place {
-            object: ObjectId::new(&a1, "path"),
-            output: out.clone(),
-            port: "7".into(),
-            pixel: 0,
-            reversed: false,
-            rotation: 0,
-        },
-        PatchRule::Auto {
-            output: out.clone(),
-        },
+    p.fixture_mut(&f).unwrap().places = vec![
+        placed_at(&ObjectId::new(&a1, "path"), &out, "7", 0, false, 0),
+        auto_onto(&out),
     ];
     let patch = p.effective_patch();
     assert_eq!(patch.problems.len(), 1);
-    assert_eq!(patch.problems[0].gone, Gone::Port("7".into()));
-    assert_eq!(patch.spans.len(), 1, "auto still places it");
+    assert_eq!(
+        patch.problems[0].gone,
+        Gone::Port {
+            output: out.clone(),
+            port: "7".into()
+        }
+    );
+    assert_eq!(patch.pixel_runs.len(), 1, "auto still places it");
     assert!(patch.problems[0].notice(&p).why.is_some());
 }
 
@@ -3449,11 +3453,11 @@ fn the_overlay_outlines_selection_context_and_hover() {
     e.select(vec![lamp("circle1", "r1", 3)]);
     e.pointer_move(lamp_screen(&e, "circle1", "r1", 10), none());
     let kinds: Vec<OutlineKind> = e.view_overlay().outlines.iter().map(|o| o.kind).collect();
-    // The ring is outlined in its fixture and on its span on D0.
+    // The ring is outlined in its fixture; its span on D0 is a thing of
+    // its own (plan D13).
     assert_eq!(
         kinds,
         vec![
-            OutlineKind::Context,
             OutlineKind::Context,
             OutlineKind::Selected,
             OutlineKind::Hover
@@ -3461,7 +3465,7 @@ fn the_overlay_outlines_selection_context_and_hover() {
     );
     let hover = e.hover_target().unwrap();
     let area = e.project.area(&e.camera, &hover).unwrap();
-    assert_eq!(e.view_overlay().outlines[3].path, area.outline_path());
+    assert_eq!(e.view_overlay().outlines[2].path, area.outline_path());
 }
 
 /// With nothing selected the inspector lists the project's facts; with a
@@ -3885,4 +3889,45 @@ fn local_lamps(p: &Project, id: &ComponentId, k: usize) -> Vec<Vec2> {
         .iter()
         .map(|l| l.pos)
         .collect()
+}
+
+/// An object on `pixel` of `port`, reversed and turned: its own placement.
+fn placed_at(
+    object: &ObjectId,
+    output: &NodeId,
+    port: &str,
+    pixel: u32,
+    reversed: bool,
+    rotation: u32,
+) -> PatchPlace {
+    PatchPlace {
+        on: PatchTarget::Object(object.clone()),
+        wire: Some(Wire::At {
+            output: output.clone(),
+            port: port.into(),
+            pixel,
+        }),
+        direction: reversed.then_some(Direction::Reversed),
+        turn: (rotation != 0).then_some(rotation),
+    }
+}
+
+/// The fixture's own wire, auto onto `output`.
+fn auto_onto(output: &NodeId) -> PatchPlace {
+    PatchPlace {
+        wire: Some(Wire::Auto {
+            output: output.clone(),
+        }),
+        ..PatchPlace::on(PatchTarget::Fixture)
+    }
+}
+
+/// path3's span on D1 of main.
+fn path3_span(main: &NodeId) -> Target {
+    Target::Span {
+        output: main.clone(),
+        key: "1".into(),
+        object: Some(ObjectId::new(&ComponentId::new("path3"), "path")),
+        start: 0,
+    }
 }

@@ -251,7 +251,7 @@ mod tests {
                 title: "Move this board's files?".to_string(),
                 body: "The new firmware lays its files out differently.".to_string(),
                 warning: None,
-                download: board().child("disconnect"),
+                download: Some(board().child("disconnect")),
                 continue_action: None,
                 cancel: None,
             }),
@@ -282,10 +282,9 @@ mod tests {
             // it): what it draws while it reads the board.
             UiDetailPanel::Wifi(_) => ("Reading", None),
             UiDetailPanel::LinkCounters(_) => ("Link", None),
-            UiDetailPanel::Layout(layout) => (
-                "lays its files out differently",
-                Some(layout.download.clone()),
-            ),
+            UiDetailPanel::Layout(layout) => {
+                ("lays its files out differently", layout.download.clone())
+            }
             UiDetailPanel::OtherVersion { install, .. } => ("Other version", Some(install.clone())),
             UiDetailPanel::RestoreFromFile { offer, .. } => {
                 ("Restore from a backup file", Some(offer.clone()))

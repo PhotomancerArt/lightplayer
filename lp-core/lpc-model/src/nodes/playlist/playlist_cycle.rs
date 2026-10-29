@@ -10,7 +10,8 @@
 //!   the same words as [`crate::GradientConfig::is_frozen`]:
 //!   [`PlaylistCycle::is_frozen`] is the one place it lives here. A frozen
 //!   cycle behaves exactly like [`PlaylistCycle::Hold`] — the playlist's
-//!   idle entry, triggers and per-entry durations, unchanged (vision D17).
+//!   picked entry holds, and triggers' excursions play their durations
+//!   (playlists-on-the-bus vision D7).
 //!
 //! Storage is a flattened record, because [`LpValue`] has no union: both
 //! variants write the same three fields and `kind` says how to read them
@@ -47,8 +48,9 @@ const CYCLE_KIND_TAG: &str = "cycle";
 /// Static|Cycle, for patterns (vision D13).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub enum PlaylistCycle {
-    /// Stay where the playlist is: the idle entry, triggers and per-entry
-    /// durations, exactly as a playlist without a cycle behaves.
+    /// Stay where the playlist is: the picked entry holds, and a trigger's
+    /// excursion plays its duration and comes back (playlists-on-the-bus
+    /// D7), exactly as a playlist without a cycle behaves.
     #[default]
     Hold,
     /// Walk every enabled entry in key order, one step each, wrapping.

@@ -1185,6 +1185,16 @@ pub(crate) fn playlist_strip_offers() -> lpa_studio_core::UiOfferTree {
         failed: Vec::new(),
         cycle_target: None,
         skip_target: None,
+        // The strip's chips press `play`, which is a pick on this channel.
+        entry_target: Some(lpa_studio_core::UiPanelTarget {
+            scope: lpc_wire::WireScopeRef::Module {
+                owner: lpc_model::NodeId::new(1),
+            },
+            channel: lpc_model::PLAYLIST_ENTRY_CHANNEL.to_string(),
+            engaged: false,
+        }),
+        picked: face.active,
+        stepping_from: face.active,
     };
     let mut tree = lpa_studio_core::UiOfferTree::new();
     for offer in lpa_studio_core::app::project::node::playlist_offers(&facts) {

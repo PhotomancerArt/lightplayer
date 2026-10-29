@@ -3,7 +3,7 @@
 //!
 //! The cycle's **stops** are the authored entries in key order that may play
 //! ([`super::PlaylistEntryReason::is_playable`]): skipped (`Disabled`) and
-//! failed entries are passed over. The idle entry is an ordinary stop (plan
+//! failed entries are passed over. The picked entry is an ordinary stop (plan
 //! A2).
 //!
 //! The **anchor** `(entry, time)` is where the cycle last started counting:

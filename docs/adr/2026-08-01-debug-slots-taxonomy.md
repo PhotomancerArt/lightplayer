@@ -84,6 +84,10 @@ it *is*, not by which machinery is convenient:
 
 - an **event** has no value to hold (activate this entry, press this button)
   — it is a poke on the runtime command channel;
+  *(2026-10-20: the playlist activate turned out to have a value to hold —
+  the picked entry — and became a panel write on `playlist.entry`; the
+  command channel, left with no command, was deleted.
+  `2026-10-20-the-picked-pattern-is-a-bus-setting.md`.)*
 - **ephemeral state** has a value that must persist for the session and reach
   the engine every frame — it is a Debug slot riding the overlay;
 - **produced state** is written by the runtime and read by everyone else — it

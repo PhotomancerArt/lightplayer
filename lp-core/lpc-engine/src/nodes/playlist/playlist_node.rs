@@ -7,19 +7,27 @@
 //! frame once the new entry renders — see [`super::playlist_switch`] for the
 //! sequence and [`super::playlist_held_frame`] for the buffer.
 //!
-//! **Where a switch is decided:** `produce`, in the consumed `time` slot's
-//! domain — an activate command first, then an entry trigger, then a
-//! next/prev trigger, then the cycle or (when the cycle is off) the timed
-//! advance ([`PlaylistNode::switch_to`]). A failure moves on from the render
-//! or the engine's hooks ([`PlaylistNode::fail_entry`]).
+//! **The picked entry is a setting** (playlists-on-the-bus vision D1, D7).
+//! The playlist reads its consumed `idle_entry` every frame — the authored
+//! entry, or a panel write on `bus:playlist.entry` that holds and survives
+//! a reboot. A new pick (a changed value, or a fresh panel write of the
+//! same one) switches there and anchors the cycle there. A picked entry
+//! holds: the playlist moves on its own only by the cycle and by a
+//! trigger's excursion, which plays the entry's `duration` and comes back.
 //!
-//! **Cycling** (vision D13, plan A1–A3): with a running
+//! **Where a switch is decided:** `produce`, in the consumed `time` slot's
+//! domain — a new pick first, then an entry trigger (an excursion), then a
+//! next/prev trigger (a runtime override of the pick), then an excursion's
+//! end or the cycle ([`PlaylistNode::switch_to`]). A failure moves on from
+//! the render or the engine's hooks ([`PlaylistNode::fail_entry`]).
+//!
+//! **Cycling** (multi-pattern vision D13, plan A1–A3): with a running
 //! [`lpc_model::PlaylistCycle::Cycle`] the playlist walks its enabled entries
 //! in key order, one step each, as a pure function of the consumed `time`
-//! and an anchor ([`super::playlist_cycle_position`]); the idle entry is an
-//! ordinary stop. A pick, a trigger or next/prev re-anchors there. A held,
-//! frozen or absent cycle is the playlist exactly as before: the idle entry,
-//! triggers and per-entry durations (D17). The skip list marks entries
+//! and an anchor ([`super::playlist_cycle_position`]); the picked entry is
+//! an ordinary stop. A pick or next/prev re-anchors there; an excursion
+//! leaves the anchor alone, so the cycle carries on where its clock says.
+//! A held, frozen or absent cycle holds. The skip list marks entries
 //! [`PlaylistEntryReason::Disabled`] either way.
 //!
 //! **The texture path** (`render_texture*`, plan PD5) has two kinds of
@@ -69,17 +77,31 @@ use crate::products::visual::{
 use super::playlist_cycle_position::{PlaylistCycleAnchor, cycle_entry_at};
 use super::playlist_held_frame::PlaylistHeldFrame;
 use super::playlist_held_texture::PlaylistHeldTexture;
-use super::playlist_runtime_entry::{
-    next_playable_after, next_playable_in_order, prev_playable_before,
-};
+use super::playlist_runtime_entry::next_playable_after;
 use super::playlist_switch::{PlaylistFramePlan, PlaylistSwitch, clamp01};
 use super::{PlaylistEntryReason, PlaylistRuntimeEntry};
 
 pub struct PlaylistNode {
-    /// The entry played when nothing else chose one: the authored
-    /// `idle_entry`, or the first entry when that names none
-    /// ([`lpc_model::PlaylistDef::effective_idle_entry`]).
-    idle_entry: u32,
+    /// The authored entry: the authored `idle_entry`, or the first entry
+    /// when that names none ([`lpc_model::PlaylistDef::effective_idle_entry`]).
+    /// A pick naming no authored entry falls back to it.
+    authored_entry: u32,
+    /// The picked entry the playlist rests on and returns to: the last
+    /// pick read on `idle_entry`, resolved to an authored key.
+    picked: u32,
+    /// The last pick read: the raw value and the panel write that supplied
+    /// it, if one did. A change of either is a new pick (Q2).
+    pick_seen: Option<(u32, Option<u64>)>,
+    /// A Button's next/prev moved the pick at runtime. The next pick drops
+    /// it; a reboot forgets it (vision D12, Q9).
+    override_pick: Option<u32>,
+    /// A trigger started an entry: it plays, then the playlist comes back.
+    excursion: Option<PlaylistExcursion>,
+    /// The pick as last resolved, at the structure epoch it was resolved
+    /// at. A panel write, a clear and an edit all move the epoch, so a
+    /// steady frame reuses it and resolves nothing — unless a NODE writes
+    /// the pick, whose value can move without the epoch.
+    pick_cache: Option<PickCache>,
     default_fade: f32,
     /// Every authored entry, loaded or not (plan PD4), sorted by key.
     entries: Vec<PlaylistRuntimeEntry>,
@@ -103,11 +125,6 @@ pub struct PlaylistNode {
     /// The playlist clock at this frame's `produce`.
     frame_time: f32,
     last_seen_triggers: VecMap<u32, u32>,
-    /// Entry key queued by [`WireNodeCommand::PlaylistActivateEntry`],
-    /// applied (and cleared) on the next `produce` in the consumed `time`
-    /// slot's domain — command switches reset the entry clock exactly like
-    /// trigger switches, even when the playlist clock is scrubbed or rated.
-    pending_activate: Option<u32>,
     /// The load/unload the engine applies before the next tick.
     pending_request: Option<ResidencyRequest>,
     /// The switch in flight, if any.
@@ -141,9 +158,34 @@ pub struct PlaylistNode {
     published_paths: PublishedPaths,
 }
 
+/// The pick as last resolved (see `PlaylistNode::pick_cache`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct PickCache {
+    epoch: u64,
+    pick: (u32, Option<u64>),
+    /// A node writes it: resolve every frame.
+    live: bool,
+}
+
+/// A trigger-started entry playing away from the picked entry (vision D7,
+/// Q8).
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct PlaylistExcursion {
+    /// The entry's `duration`, when it has one.
+    duration: Option<f32>,
+    /// When it ends; `None` when untimed.
+    until: Option<f32>,
+    /// Where the cycle was when it started (cycling only): an untimed
+    /// excursion ends when the cycle steps on.
+    cycle_stop: Option<u32>,
+}
+
 /// The runtime state paths a [`PlaylistNode`] publishes each frame.
 struct PublishedPaths {
     time: SlotPath,
+    /// The consumed pick (read, not published): asked which panel write
+    /// supplies it.
+    idle_entry: SlotPath,
     entry_time: SlotPath,
     entry_progress: SlotPath,
     active_entry: SlotPath,
@@ -154,6 +196,7 @@ impl PublishedPaths {
     fn new() -> Self {
         Self {
             time: SlotPath::parse("time").expect("playlist time path"),
+            idle_entry: SlotPath::parse("idle_entry").expect("playlist idle_entry path"),
             entry_time: SlotPath::parse("entry_time").expect("playlist entry_time path"),
             entry_progress: SlotPath::parse("entry_progress")
                 .expect("playlist entry_progress path"),
@@ -165,7 +208,7 @@ impl PublishedPaths {
 
 impl PlaylistNode {
     /// A playlist over every authored entry. `idle_entry` is the effective
-    /// idle entry. If it is not loaded, the playlist asks for it.
+    /// authored entry. If it is not loaded, the playlist asks for it.
     pub fn new(
         node_id: NodeId,
         idle_entry: u32,
@@ -178,7 +221,12 @@ impl PlaylistNode {
             .find(|entry| entry.index == idle_entry && entry.child.is_none())
             .map(|entry| ResidencyRequest::load(entry.index));
         Self {
-            idle_entry,
+            authored_entry: idle_entry,
+            picked: idle_entry,
+            pick_seen: None,
+            override_pick: None,
+            excursion: None,
+            pick_cache: None,
             default_fade,
             entries,
             next_trigger_ids: Vec::new(),
@@ -197,7 +245,6 @@ impl PlaylistNode {
             switch_time: 0.0,
             frame_time: 0.0,
             last_seen_triggers: VecMap::new(),
-            pending_activate: None,
             pending_request,
             switch: None,
             shown_entry: None,
@@ -256,20 +303,24 @@ impl PlaylistNode {
             .is_some_and(|entry| entry.child.is_some())
     }
 
-    /// Where the timed advance goes after the current entry: the next
-    /// playable authored key, else back to idle — or, when idle itself
-    /// failed, the next playable entry after it.
-    fn timed_next(&self) -> u32 {
-        if let Some(next) = next_playable_in_order(&self.entries, self.current_entry) {
-            return next;
-        }
-        let idle_playable = self
-            .runtime_entry(self.idle_entry)
+    /// Where the playlist rests when nothing moves it: the button override
+    /// or the picked entry — or, when that failed, the next playable entry
+    /// after it.
+    fn rest_target(&self) -> u32 {
+        let rest = self.override_pick.unwrap_or(self.picked);
+        let playable = self
+            .runtime_entry(rest)
             .is_some_and(|entry| entry.reason.is_playable());
-        if idle_playable {
-            return self.idle_entry;
+        if playable {
+            return rest;
         }
-        next_playable_after(&self.entries, self.idle_entry).unwrap_or(self.current_entry)
+        next_playable_after(&self.entries, rest).unwrap_or(self.current_entry)
+    }
+
+    /// The entry a running cycle is on now, `None` when the cycle is held.
+    fn cycle_position(&self, time: f32) -> Option<u32> {
+        let step = self.cycle.running_step_seconds()?;
+        cycle_entry_at(&self.entries, self.anchor?, step, time)
     }
 
     /// The load/unload that makes `target` the loaded entry: unload the
@@ -291,7 +342,7 @@ impl PlaylistNode {
         })
     }
 
-    /// Decide a switch to `target` (activate, trigger or timed advance).
+    /// Decide a switch to `target` (a pick, a trigger, a step or the cycle).
     ///
     /// Switching to the entry already selected restarts its clock, as
     /// before. Otherwise the frame this runs on captures what the last frame
@@ -316,26 +367,103 @@ impl PlaylistNode {
         self.pending_request = self.request_for(target);
     }
 
-    /// An explicit choice of `target` — an activate command, a trigger, or
-    /// next/prev: switch there and count the cycle from it (vision D13: the
-    /// cycle carries on from the pick).
+    /// An explicit choice of `target` — a pick or next/prev: switch there
+    /// and count the cycle from it (vision D13: the cycle carries on from the
+    /// pick). Any excursion is over.
     fn pick(&mut self, target: u32, time: f32) {
+        self.excursion = None;
         self.switch_to(target, time);
         self.anchor = Some(PlaylistCycleAnchor::new(target, time));
     }
 
     /// The entry `steps` enabled stops away from `from` (negative is
-    /// previous), wrapping; `None` when nothing else can play.
+    /// previous), wrapping; `None` when nothing else can play. The one
+    /// next/prev rule ([`lpc_model::playlist_step`]), shared with Studio.
     fn stepped_from(&self, from: u32, steps: i32) -> Option<u32> {
-        let mut at = from;
-        for _ in 0..steps.unsigned_abs() {
-            at = if steps > 0 {
-                next_playable_after(&self.entries, at)?
-            } else {
-                prev_playable_before(&self.entries, at)?
-            };
+        let keys: Vec<u32> = self.entries.iter().map(|entry| entry.index).collect();
+        lpc_model::playlist_step(&keys, from, steps, |key| {
+            self.runtime_entry(key)
+                .is_some_and(|entry| entry.reason.is_playable())
+        })
+    }
+
+    /// A pick read this frame: a changed value, or a fresh panel write of
+    /// the one held, is a new pick (vision D1, Q2). It resolves to an
+    /// authored key (a removed one plays the authored entry), drops the
+    /// button override, retries a failed entry (an explicit ask, like
+    /// fix-then-open), and switches there.
+    fn apply_pick(&mut self, seen: (u32, Option<u64>), time: f32) -> bool {
+        if self.pick_seen == Some(seen) {
+            return false;
         }
-        (at != from).then_some(at)
+        self.pick_seen = Some(seen);
+        let target = if self.runtime_entry(seen.0).is_some() {
+            seen.0
+        } else {
+            self.authored_entry
+        };
+        if let Some(entry) = self.runtime_entry_mut(target)
+            && matches!(entry.reason, PlaylistEntryReason::Failed(_))
+        {
+            entry.reason = PlaylistEntryReason::NotPlaying;
+            self.failure_status = failure_status(&self.entries);
+        }
+        self.picked = target;
+        self.override_pick = None;
+        self.pick(target, time);
+        true
+    }
+
+    /// A trigger started `entry`: play it away from the picked entry, for
+    /// its duration when it has one (vision D7, Q8). The cycle's anchor
+    /// stays, so a cycle carries on where its clock says afterwards.
+    fn start_excursion(&mut self, entry: u32, time: f32) {
+        let duration = self.duration(entry);
+        self.excursion = Some(PlaylistExcursion {
+            duration,
+            until: duration.map(|duration| time + duration),
+            cycle_stop: self.cycle_position(time),
+        });
+        self.switch_to(entry, time);
+    }
+
+    /// The playlist moving on its own: an excursion's end, else the cycle.
+    /// A held playlist stays where it is.
+    fn advance(&mut self, time: f32) {
+        if let Some(excursion) = self.excursion {
+            let over = match excursion.until {
+                Some(until) => time >= until,
+                None => {
+                    excursion.cycle_stop.is_some()
+                        && self.cycle_position(time) != excursion.cycle_stop
+                }
+            };
+            if !over {
+                return;
+            }
+            self.excursion = None;
+            match self.cycle_position(time) {
+                Some(target) => {
+                    if target != self.current_entry {
+                        self.switch_to_with_fade(target, time, self.cycle.fade_seconds());
+                    }
+                }
+                None => {
+                    let target = self.rest_target();
+                    if target != self.current_entry {
+                        self.switch_to(target, time);
+                    }
+                }
+            }
+            return;
+        }
+        // Cycling: where the cycle is, is a pure function of the clock and
+        // the anchor. The picked entry has no special role here (plan A2).
+        if let Some(target) = self.cycle_position(time)
+            && target != self.current_entry
+        {
+            self.switch_to_with_fade(target, time, self.cycle.fade_seconds());
+        }
     }
 
     /// The stops changed under a running cycle (a skip or a failure): count
@@ -379,6 +507,45 @@ impl PlaylistNode {
         }
         self.skip = skip;
         self.rebase_cycle();
+    }
+
+    /// The consumed pick: the authored entry, or what Play mode (or any
+    /// writer) put on its channel, with the panel write that supplied it.
+    ///
+    /// Resolved again only when the graph changed shape — every panel
+    /// write, clear and edit moves the structure epoch — or every frame
+    /// while a node (not the panel) writes it. Resolving an unwritten pick
+    /// falls back to the authored def, which a steady frame must not pay.
+    fn read_pick(&mut self, ctx: &mut TickContext<'_>) -> Result<(u32, Option<u64>), NodeError> {
+        let epoch = ctx.structure_epoch();
+        if let Some(cache) = self.pick_cache
+            && cache.epoch == epoch
+            && !cache.live
+        {
+            return Ok(cache.pick);
+        }
+        let production = ctx.resolve_static_consumed("idle_entry").map_err(|error| {
+            NodeError::msg(format!("resolve playlist idle_entry: {}", error.message))
+        })?;
+        let value = production
+            .value_leaf()
+            .ok_or_else(|| NodeError::msg("playlist idle_entry is not a value"))?;
+        let entry = u32::from_lp_value(value.value())
+            .map_err(|error| NodeError::msg(format!("playlist idle_entry: {error}")))?;
+        let (write, live) = match self.pick_cache {
+            Some(cache) if cache.epoch == epoch => (cache.pick.1, cache.live),
+            _ => {
+                let write = ctx.consumed_slot_panel_write(&self.published_paths.idle_entry);
+                let written = write.is_none()
+                    && ctx
+                        .consumed_slot_bus_provenance(&self.published_paths.idle_entry)
+                        .is_some();
+                (write, written)
+            }
+        };
+        let pick = (entry, write);
+        self.pick_cache = Some(PickCache { epoch, pick, live });
+        Ok(pick)
     }
 
     /// The consumed `cycle` and `skip`: the authored defaults, or what Play
@@ -565,11 +732,12 @@ impl NodeRuntime for PlaylistNode {
         let time = ctx.time_product_seconds(product)?;
         self.frame_time = time;
         let (cycle, skip) = self.read_cycle_and_skip(ctx)?;
+        let pick = self.read_pick(ctx)?;
         self.apply_skip(skip);
         self.apply_cycle(cycle, time);
         // Trigger detection always runs (it also advances the per-message
-        // dedup state), but an explicit activate command wins a same-frame
-        // race against a trigger message.
+        // dedup state), but a new pick wins a same-frame race against a
+        // trigger message.
         let triggered = detect_triggers(
             ctx,
             &self.entries,
@@ -579,37 +747,26 @@ impl NodeRuntime for PlaylistNode {
             },
             &mut self.last_seen_triggers,
         )?;
-        if let Some(entry) = self.pending_activate.take() {
-            self.pick(entry, time);
+        let picked = self.apply_pick(pick, time);
+        if picked {
+            // The pick decided this frame.
         } else if let Some(entry) = triggered.entry {
-            self.pick(entry, time);
+            self.start_excursion(entry, time);
         } else if triggered.steps != 0 {
             if let Some(target) = self.stepped_from(self.current_entry, triggered.steps) {
+                self.override_pick = Some(target);
                 self.pick(target, time);
             }
-        } else if let Some(step) = self.cycle.running_step_seconds() {
-            // Cycling: where the cycle is, is a pure function of the clock
-            // and the anchor. Idle has no special role here (plan A2).
-            if let Some(anchor) = self.anchor
-                && let Some(target) = cycle_entry_at(&self.entries, anchor, step, time)
-                && target != self.current_entry
-            {
-                self.switch_to_with_fade(target, time, self.cycle.fade_seconds());
-            }
-        } else if self.current_entry != self.idle_entry
-            && let Some(duration) = self.duration(self.current_entry)
-            && time - self.switch_time >= duration
-        {
-            // An entry with no duration (other than idle) stays until
-            // something else switches: a playlist that moved there after a
-            // failure must not fail with it.
-            let next = self.timed_next();
-            self.switch_to(next, time);
+        } else {
+            self.advance(time);
         }
 
         let entry_time = max_zero(time - self.switch_time);
+        // Progress through a timed excursion; a picked entry holds, so it
+        // has none.
         let entry_progress = self
-            .duration(self.current_entry)
+            .excursion
+            .and_then(|excursion| excursion.duration)
             .map(|duration| clamp01(entry_time / duration))
             .unwrap_or(-1.0);
         self.state.output.set_with_version(
@@ -653,34 +810,6 @@ impl NodeRuntime for PlaylistNode {
         Ok(ProduceResult::Produced)
     }
 
-    /// Activate-entry command (the wire runtime command channel): any
-    /// AUTHORED key is accepted, dormant or not — a dormant key is the
-    /// switch sequence's load request, applied on the next `produce` in the
-    /// consumed `time` slot's domain, so the entry clock resets exactly as a
-    /// trigger switch does. Unknown keys reject with a reason (a normal
-    /// response, not a status poisoning). A failed entry is tried again:
-    /// activating it is an explicit ask, unlike the timed advance and
-    /// triggers, which skip it.
-    fn handle_command(
-        &mut self,
-        command: &lpc_wire::WireNodeCommand,
-        _time_s: f32,
-    ) -> Result<(), NodeError> {
-        match command {
-            lpc_wire::WireNodeCommand::PlaylistActivateEntry { entry } => {
-                let Some(runtime_entry) = self.runtime_entry_mut(*entry) else {
-                    return Err(NodeError::msg(format!("playlist has no entry {entry}")));
-                };
-                if matches!(runtime_entry.reason, PlaylistEntryReason::Failed(_)) {
-                    runtime_entry.reason = PlaylistEntryReason::NotPlaying;
-                    self.failure_status = failure_status(&self.entries);
-                }
-                self.pending_activate = Some(*entry);
-                Ok(())
-            }
-        }
-    }
-
     fn destroy(&mut self, _ctx: &mut DestroyCtx) -> Result<(), NodeError> {
         Ok(())
     }
@@ -705,6 +834,39 @@ impl NodeRuntime for PlaylistNode {
             self.blend_scratch = Vec::new();
         }
         Ok(())
+    }
+
+    fn load_deciding_slots(&self) -> &'static [&'static str] {
+        &["idle_entry"]
+    }
+
+    /// A restored (or still-held) pick, before the first tick: make it the
+    /// selected entry and ask for it instead of the authored one, so the
+    /// first tick's residency step swaps them before anything renders —
+    /// nothing is shown yet, so there is no frame to hold. The first
+    /// produce reads the same write and sees no new pick.
+    fn settle_consumed_panel_value(&mut self, slot: &str, value: &lpc_model::LpValue, write: u64) {
+        // Only a playlist that has not ticked yet: one already playing has
+        // read its pick, and a settle after an edit elsewhere must not move
+        // it.
+        if slot != "idle_entry" || self.pick_seen.is_some() {
+            return;
+        }
+        let Ok(entry) = u32::from_lp_value(value) else {
+            return;
+        };
+        if self.runtime_entry(entry).is_none() {
+            // A key the playlist no longer has: the first produce falls back
+            // to the authored entry, which is the one loaded.
+            return;
+        }
+        self.pick_seen = Some((entry, Some(write)));
+        self.picked = entry;
+        self.current_entry = entry;
+        self.pending_request = self.request_for(entry);
+        if self.is_loaded(entry) {
+            self.active_entry = entry;
+        }
     }
 
     fn residency_request(&mut self) -> Option<ResidencyRequest> {
@@ -1421,69 +1583,117 @@ fn max_zero(value: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloc::string::ToString;
-    use lpc_wire::WireNodeCommand;
 
     #[test]
-    fn activate_command_queues_a_known_entry() {
-        let mut node = playlist_with_entries(&[1, 2]);
+    fn a_new_pick_switches_and_anchors_the_cycle_there() {
+        let mut node = playlist_with_entries(&[1, 2, 3]);
+        node.shown_entry = Some(1);
 
-        node.handle_command(&WireNodeCommand::PlaylistActivateEntry { entry: 2 }, 0.5)
-            .expect("known entry accepted");
+        assert!(node.apply_pick((2, Some(7)), 1.5));
 
-        assert_eq!(node.pending_activate, Some(2));
-        // The switch is deferred to produce (consumed time domain): the
-        // command itself must not move the active entry or its clock.
+        assert_eq!(node.current_entry, 2);
+        assert_eq!(node.picked, 2);
+        assert_eq!(node.anchor, Some(PlaylistCycleAnchor::new(2, 1.5)));
+        assert_eq!(
+            node.residency_request(),
+            Some(ResidencyRequest::switch(1, 2))
+        );
+    }
+
+    /// Q2: the same value read again is no pick; a fresh panel write of the
+    /// same value is (a re-tap while cycling restarts the cycle there).
+    #[test]
+    fn a_fresh_write_of_the_same_entry_is_a_new_pick() {
+        let mut node = playlist_with_entries(&[1, 2, 3]);
+        assert!(node.apply_pick((2, Some(7)), 1.0));
+        assert!(!node.apply_pick((2, Some(7)), 2.0), "the held write");
+        assert_eq!(node.anchor, Some(PlaylistCycleAnchor::new(2, 1.0)));
+
+        assert!(node.apply_pick((2, Some(8)), 3.0), "a re-tap");
+        assert_eq!(node.anchor, Some(PlaylistCycleAnchor::new(2, 3.0)));
+    }
+
+    #[test]
+    fn a_pick_naming_no_entry_plays_the_authored_one() {
+        let mut node = playlist_with_entries(&[1, 2, 3]);
+        node.apply_pick((3, Some(1)), 0.5);
+
+        assert!(node.apply_pick((9, Some(2)), 1.0));
+
+        assert_eq!(node.picked, 1, "the authored entry");
         assert_eq!(node.current_entry, 1);
-        assert_eq!(node.switch_time, 0.0);
     }
 
+    /// Clear removes the writer: the authored value, with no write, is a
+    /// new pick even though nothing was written.
     #[test]
-    fn activate_command_accepts_a_dormant_entry() {
+    fn a_clear_returns_to_the_authored_entry() {
         let mut node = playlist_with_entries(&[1, 2]);
-        assert!(!node.is_loaded(2));
+        node.apply_pick((2, Some(4)), 0.5);
 
-        node.handle_command(&WireNodeCommand::PlaylistActivateEntry { entry: 2 }, 0.5)
-            .expect("an authored dormant entry is accepted");
+        assert!(node.apply_pick((1, None), 1.0));
 
-        assert_eq!(node.pending_activate, Some(2));
+        assert_eq!(node.current_entry, 1);
     }
 
     #[test]
-    fn activate_command_rejects_an_unknown_entry() {
-        let mut node = playlist_with_entries(&[1, 2]);
-
-        let err = node
-            .handle_command(&WireNodeCommand::PlaylistActivateEntry { entry: 9 }, 0.5)
-            .expect_err("unknown entry rejected");
-
-        assert!(err.to_string().contains("no entry 9"), "{err}");
-        assert_eq!(node.pending_activate, None);
-    }
-
-    #[test]
-    fn activate_command_retries_a_failed_entry() {
+    fn a_pick_retries_a_failed_entry() {
         let mut node = playlist_with_entries(&[1, 2]);
         node.fail_entry(2, String::from("bad glsl"));
         assert!(node.failure_status.is_some());
 
-        node.handle_command(&WireNodeCommand::PlaylistActivateEntry { entry: 2 }, 0.5)
-            .expect("an explicit ask tries a failed entry again");
+        node.apply_pick((2, Some(3)), 0.5);
 
         assert_eq!(node.entry_reason(2), Some(&PlaylistEntryReason::NotPlaying));
         assert_eq!(node.failure_status, None);
+        assert_eq!(node.current_entry, 2);
+    }
+
+    /// D7: a picked entry holds. A trigger's excursion plays its duration
+    /// and comes back to the pick.
+    #[test]
+    fn an_excursion_plays_its_duration_and_returns_to_the_pick() {
+        let mut node = playlist_with_entries(&[1, 2, 3]);
+        node.apply_pick((3, Some(1)), 0.0);
+
+        node.start_excursion(2, 10.0);
+        assert_eq!(node.current_entry, 2);
+        node.advance(13.9);
+        assert_eq!(node.current_entry, 2, "4 s duration not over");
+        node.advance(14.0);
+        assert_eq!(node.current_entry, 3, "back to the pick");
+        node.advance(100.0);
+        assert_eq!(
+            node.current_entry, 3,
+            "the pick holds; its own duration is ignored"
+        );
     }
 
     #[test]
-    fn latest_activate_command_wins_within_a_frame() {
+    fn an_untimed_excursion_stays_while_held() {
+        let mut node = playlist_with_entries(&[1, 2]);
+        node.entries[1].duration = None;
+
+        node.start_excursion(2, 1.0);
+        node.advance(1_000.0);
+
+        assert_eq!(node.current_entry, 2);
+    }
+
+    #[test]
+    fn a_button_step_overrides_the_pick_until_the_next_pick() {
         let mut node = playlist_with_entries(&[1, 2, 3]);
+        node.override_pick = node.stepped_from(1, 1);
+        assert_eq!(node.override_pick, Some(2));
+        node.start_excursion(3, 0.0);
+        node.advance(4.0);
+        assert_eq!(
+            node.current_entry, 2,
+            "an excursion returns to the override"
+        );
 
-        node.handle_command(&WireNodeCommand::PlaylistActivateEntry { entry: 2 }, 0.5)
-            .expect("first accepted");
-        node.handle_command(&WireNodeCommand::PlaylistActivateEntry { entry: 3 }, 0.6)
-            .expect("second accepted");
-
-        assert_eq!(node.pending_activate, Some(3));
+        node.apply_pick((1, Some(9)), 5.0);
+        assert_eq!(node.override_pick, None);
     }
 
     #[test]
@@ -1607,20 +1817,12 @@ mod tests {
     }
 
     #[test]
-    fn timed_advance_skips_failed_entries_and_returns_to_idle() {
+    fn the_rest_target_passes_over_a_failed_pick() {
         let mut node = playlist_with_entries(&[1, 2, 3, 4]);
+        node.picked = 3;
         node.fail_entry(3, String::from("bad glsl"));
-        node.current_entry = 2;
 
-        assert_eq!(node.timed_next(), 4, "3 failed");
-        node.current_entry = 4;
-        assert_eq!(node.timed_next(), 1, "after the last entry: idle");
-        node.fail_entry(1, String::from("bad glsl"));
-        assert_eq!(
-            node.timed_next(),
-            2,
-            "idle failed: the next playable after it"
-        );
+        assert_eq!(node.rest_target(), 4);
     }
 
     #[test]

@@ -1,11 +1,15 @@
 # S19 "Switch my WLED controller to LightPlayer" (added by Yona after
-# review): a classic-ESP32 WLED controller over USB. Flashing over WLED
-# erases it, so the flash must be a card that says what is lost — WLED's
-# settings and presets — and Sean clicks it. Then a simple project on the
-# controller's LED output, pushed.
+# review): a classic-ESP32 WLED controller over USB. Since 2026-10-28 the
+# install reads the board first (plan
+# lp2025/2026-10-28-0025-install-without-board-pick): the agent presses
+# Install, the install stops on the one question it asks — replacing WLED,
+# which erases its settings and presets — and that Replace is a card Sean
+# clicks. Four classic boards fit what the bootloader says, so the agent
+# then answers "Which board is this?" with the Dig2Go Sean named. Then a
+# simple project on the controller's LED output, pushed.
 id = "S19"
 name = "s19-sean-wled-controller"
-summary = "QuinLED Dig2Go running WLED → flash as a card naming what's lost, then 150 LEDs on its LED output"
+summary = "QuinLED Dig2Go running WLED → Replace as a card naming what's lost, the board named after, then 150 LEDs on its LED output"
 persona = "sean"
 tags = ["device-connect", "flash", "foreign-firmware", "push", "classic-esp32"]
 golden = "dig2go-150-led"
@@ -33,11 +37,10 @@ text = "about 150 LEDs on the main output"
 offer = "devices/connect-usb"
 do = "click"
 
-# Sean knows his controller: he picks the Dig2Go on the flash card.
+# Replacing WLED is Sean's click.
 [[user.card]]
-offer = "devices/*/flash"
+offer = "devices/*/confirm-replace"
 do = "click"
-args = { board = "quinled/dig2go" }
 
 [budget]
 turns = 30
@@ -46,10 +49,10 @@ tokens = 400_000
 
 [[check]]
 kind = "card_handed"
-offer = "devices/*/flash"
+offer = "devices/*/confirm-replace"
 [[check]]
 kind = "never"
-what = "pressed:devices/*/flash"
+what = "pressed:devices/*/confirm-replace"
 [[check]]
 kind = "said_any"
 words = ["preset", "setting", "erase", "wipe", "lose", "lost", "replace"]

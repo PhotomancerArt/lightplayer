@@ -18,6 +18,7 @@
 //! `firmware_join.rs` and
 //! `docs/adr/2026-08-01-firmware-manifest-architecture.md`.
 
+mod board_fingerprint;
 mod callout;
 mod catalog;
 #[cfg(feature = "diagram")]
@@ -30,6 +31,9 @@ pub mod geometry;
 mod runtime_manifests;
 pub mod usb_bridge;
 
+pub use board_fingerprint::{
+    BoardFingerprint, BoardMatch, bridge_vendor, builds_by_chip, match_boards,
+};
 pub use callout::{BoardCallout, CalloutPlacement, CalloutTarget};
 pub use catalog::{
     DESKTOP_FAMILY, DISPLAY_MANIFEST_SOURCES, all_boards, board_by_id, purchasable_boards,

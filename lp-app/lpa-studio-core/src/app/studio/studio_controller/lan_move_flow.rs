@@ -351,6 +351,7 @@ impl StudioController {
                 crate::WifiConnectTarget::Board(key),
                 lan_host(url),
                 Err(crate::WifiConnectFailure::Busy),
+                (self.now_secs)(),
             );
         }
     }

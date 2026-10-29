@@ -125,6 +125,13 @@ it wrong is a red CI run on a correct change.
   on its own. The branch's C6 image
   is byte-identical to main's but for its build stamp, so this test's figure
   cannot be the branch's. Six of six on the building run.
+- 2026-10-25 (#1303, S3 updates M7 P11 checks) — the seventh, byte for byte:
+  `just test-emu-c6`'s first `emu_serve_walk` (building the reference image)
+  read `220468 B free / 105068 B used` and ended `test-emu-c6-boot` there.
+  `test-emu-c6-cli`, which it had skipped, passed on its own;
+  `test-emu-serve`, re-run, passed whole (load average ~30–45). The PR's C6
+  jobs were path-skipped, so this local run was the merge's evidence (the
+  diff touched `fw-esp32s3` only). Seven of seven on the building run.
 
 **Exit criteria** — one build environment for the reference images: a pinned
 container (`Dockerfile.ci`, or a pinned image in the gated `emu-c6` job) that

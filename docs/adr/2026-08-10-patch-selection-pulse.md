@@ -84,7 +84,8 @@ over its live frame.**
 ## Alternatives Considered
 
 - **A runtime command (`WireNodeCommand`) with a TTL.** Rejected: the
-  command channel is for events; the pulse is ephemeral *state* the
+  command channel is for events; (the channel was deleted
+  2026-10-20, `2026-10-20-the-picked-pattern-is-a-bus-setting.md`) the pulse is ephemeral *state* the
   engine must see every frame — the Debug slot is its ratified home,
   and PR #233's lease machinery was already rejected for this shape.
 - **Client-side only (no engine surface).** Ships in the surface

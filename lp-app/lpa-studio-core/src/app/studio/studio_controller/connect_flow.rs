@@ -827,12 +827,15 @@ impl StudioController {
         }
     }
 
-    /// Let a failed Wi‑Fi or lightplayer.app connect's words go once a link
-    /// of this tab reaches the board by any road: plugged in after it
-    /// failed, the card would otherwise keep saying Studio couldn't reach it.
-    pub(super) fn settle_wifi_connect_failures(&mut self) {
+    /// Settle the cards' Wi‑Fi and lightplayer.app connects against the
+    /// links of this tab ([`crate::WifiConnects::settle`]): a connect whose
+    /// board said hello is over, and so are a failed one's words once a link
+    /// reaches the board by any road (plugged in after it failed, the card
+    /// would otherwise keep saying Studio couldn't reach it); one whose
+    /// board never said hello gives up after the grace.
+    pub(super) fn settle_wifi_connects(&mut self) {
         let mut connects = core::mem::take(&mut self.wifi_connects);
-        if connects.settle_reached(|key| self.reaches_board(key)) {
+        if connects.settle(|key| self.reaches_board(key), (self.now_secs)()) {
             self.mark_dirty();
         }
         self.wifi_connects = connects;

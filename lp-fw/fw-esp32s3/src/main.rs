@@ -970,6 +970,12 @@ fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
 #[cfg(not(fw_harness))]
 #[inline(never)]
 pub(crate) fn lp_engine_entry(core: CoreBoot) {
+    // Test images only (never in a build def): an engine that dies at its
+    // entry on every boot — what the core's "engine keeps crashing" exists for.
+    #[cfg(all(lp_split, feature = "fixture-engine-dies"))]
+    if core::hint::black_box(true) {
+        panic!("fixture-engine-dies: the engine dies at its entry");
+    }
     // JIT code in PSRAM runs only once published (M10 P5): the engine's JIT
     // calls this firmware's routine for every buffer it links there.
     #[cfg(feature = "psram")]

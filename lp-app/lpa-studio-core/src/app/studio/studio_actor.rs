@@ -287,8 +287,10 @@ where
     /// [`StudioCommand::Shutdown`] is processed.
     ///
     /// Each iteration: await a coalesced command batch, plan it (coalesce ticks,
-    /// order actions first), execute, then emit **one** snapshot if the
-    /// controller's change gate says the view changed.
+    /// order actions first), execute, then emit a snapshot if the
+    /// controller's change gate says the view changed — once after the
+    /// batch's actions, so a gesture's result never waits behind the tick,
+    /// and once at the end.
     pub async fn run(mut self) {
         // Emit the initial view so the UI has a first snapshot before any command.
         self.emit_if_changed();
@@ -374,8 +376,16 @@ where
         }
         // The one asynchronous half: registry writes the folds asked for.
         self.controller.settle_device_records().await;
+        let acted = !plan.actions.is_empty();
         for action in plan.actions {
             self.run_action(action).await;
+        }
+        // What the gestures did is published now, not after the tick's pull
+        // and the graph and library settles: a rename's new name reaches its
+        // card at once instead of waiting behind a slow wire read. The
+        // batch's last snapshot still follows below (change-gated).
+        if acted {
+            self.emit_if_changed();
         }
         // A login step parked because the editor lens holds that board.s
         // wire runs through the lens.s own client (BLE M6).

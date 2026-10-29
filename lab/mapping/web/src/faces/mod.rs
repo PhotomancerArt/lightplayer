@@ -16,11 +16,20 @@ pub use source_face::SourceFace;
 
 use lab_mapping_model::{Emphasis, Rgb};
 
-/// A lamp's radius on screen: it grows with zoom, within limits, so it
-/// stays readable.
-pub fn lamp_radius_px(zoom: f64) -> f64 {
-    (zoom * 0.55).clamp(1.8, 6.0)
+/// A lamp's radius on screen: a third of the gap to the next lamp, so
+/// lamps are as big as they can be with a clear gap between them, however
+/// the fixture is spaced (`pitch`, in the units `zoom` is pixels per). Never
+/// smaller than a dot you can see, nor a blob when zoomed right in.
+pub fn lamp_radius_px(zoom: f64, pitch: f64) -> f64 {
+    (zoom * pitch * LAMP_SHARE).clamp(1.8, 14.0)
 }
+
+/// How much of the gap between two lamps each one's radius takes.
+const LAMP_SHARE: f64 = 0.33;
+
+/// The drawing tools' lamp spacing, for lamps drawn without a fixture's own
+/// (a draft being drawn).
+pub const DRAFT_PITCH: f64 = 2.4;
 
 /// The class every element with this emphasis wears: one style each.
 pub fn emphasis_class(e: Emphasis) -> &'static str {

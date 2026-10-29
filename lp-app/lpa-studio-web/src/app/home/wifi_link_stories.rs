@@ -76,6 +76,7 @@ fn wifi_card() -> DeviceView {
         // alike. The LAN carries the update channel (OTA M8), so the
         // over-the-air update is not.
         firmware_blocked: Some(FIRMWARE_NEEDS_USB.to_string()),
+        usb: None,
         update_blocked: None,
         ..usb_card()
     }

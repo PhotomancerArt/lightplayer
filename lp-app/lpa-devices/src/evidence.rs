@@ -197,6 +197,12 @@ pub struct Evidence {
     /// detach.
     #[serde(default)]
     link_carries_update_channel: bool,
+    /// The current link's USB vendor/product, as its [`LinkInfo`](crate::LinkInfo)
+    /// said at attach and open — which bridge the board sits behind
+    /// (Espressif's native USB, a CH340, …), for the install's board guess
+    /// and whether it parks the chip first. Cleared on detach.
+    #[serde(default)]
+    link_usb: Option<crate::link::UsbIds>,
     observations: Observations,
 }
 
@@ -223,6 +229,7 @@ impl Evidence {
                     since: now,
                 };
                 self.link_carries_update_channel = info.carries_update_channel;
+                self.link_usb = info.usb;
                 self.begin_window(now);
                 // A borrow belongs to the link it was taken on. This is a
                 // different link, so nothing is holding it.
@@ -237,6 +244,7 @@ impl Evidence {
             Event::LinkDetached { .. } => {
                 self.presence = Presence::Detached { since: now };
                 self.link_carries_update_channel = false;
+                self.link_usb = None;
                 self.begin_window(now);
                 // Unplugged mid-effect: the release event the effect will
                 // eventually raise addresses a link this device no longer
@@ -442,12 +450,27 @@ impl Evidence {
     /// state in this window. What the effects layer reads to decide an
     /// update, and what the core-only face is made of.
     pub fn update_facts(&self) -> Option<&UpdateFacts> {
-        self.observations.update_facts.as_ref().or_else(|| {
-            self.observations
-                .hello
-                .as_ref()
-                .and_then(|hello| hello.update.as_ref())
-        })
+        self.observations
+            .update_facts
+            .as_ref()
+            .or_else(|| {
+                self.observations
+                    .hello
+                    .as_ref()
+                    .and_then(|hello| hello.update.as_ref())
+            })
+            // A hello from another wire carries the same manifest: its
+            // update rides channel 3, whatever wire the board speaks.
+            .or(self.observations.other_wire_update.as_ref())
+    }
+
+    /// Whether a hello from another wire said the board's files are in the
+    /// tree store, when one was heard this window and said. A hello this
+    /// build reads says it in [`HelloFacts`] instead.
+    pub fn other_wire_tree_store(&self) -> Option<bool> {
+        self.observations
+            .other_wire_tree_store
+            .filter(|_| self.observations.other_wire_hello.is_some())
     }
 
     /// Whether the board announced channel 3 in this window: a hello that
@@ -465,6 +488,11 @@ impl Evidence {
     /// [`Self::announced_update_channel`].
     pub fn carries_update_channel(&self) -> bool {
         self.link_carries_update_channel && self.presence.is_attached()
+    }
+
+    /// The current link's USB vendor/product, when it is a USB link.
+    pub fn link_usb(&self) -> Option<crate::link::UsbIds> {
+        self.link_usb.filter(|_| self.presence.is_attached())
     }
 
     pub fn recovery(&self) -> Option<&RecoveryFacts> {
@@ -591,6 +619,7 @@ impl Evidence {
             LinkEvent::Opened { info } => {
                 self.presence = Presence::Open { link, since: now };
                 self.link_carries_update_channel = info.carries_update_channel;
+                self.link_usb = info.usb;
                 // It opened, so no other tab holds it now.
                 self.link_held_by_tab = false;
                 // A fresh port is a fresh window: whatever we concluded
@@ -741,6 +770,13 @@ impl Evidence {
                     }
                 };
                 self.push_output(TerminalKind::Studio, &line);
+                Vec::new()
+            }
+            // So is the identification: which chip, which build, which
+            // board, and what it ran before — the terminal is where a wrong
+            // guess shows first.
+            ActivityMarker::BoardIdentified { identity } => {
+                self.push_output(TerminalKind::Studio, identity.terminal_line());
                 Vec::new()
             }
             // An update LEG's end is not the activity's: the activity's own
@@ -1066,6 +1102,14 @@ struct Observations {
     /// The board that hello named, when it named one.
     #[serde(default)]
     other_wire_board: Option<String>,
+    /// Whether that hello said the board's files are in the tree store,
+    /// when it said.
+    #[serde(default)]
+    other_wire_tree_store: Option<bool>,
+    /// The board manifest that hello carried — its announcement of the
+    /// update channel, which its update rides whatever wire it speaks.
+    #[serde(default)]
+    other_wire_update: Option<UpdateFacts>,
     /// When this window's hello was heard. The Flash ladder asks whether a
     /// hello is NEWER than its write effect's end: a close does not clear
     /// the window, so a board that ran LightPlayer before a flash still
@@ -1168,10 +1212,18 @@ impl Observations {
             }
             // A hello all the same, on a wire this build cannot read: kept
             // as its version, the one fact read off it. See `classify`.
-            ServerFrameBody::HelloOnOtherWire { proto, board_id } => {
+            ServerFrameBody::HelloOnOtherWire {
+                proto,
+                board_id,
+                tree_store,
+                update,
+                ..
+            } => {
                 self.frames_seen += 1;
                 self.other_wire_hello = Some(*proto);
                 self.other_wire_board = board_id.clone();
+                self.other_wire_tree_store = *tree_store;
+                self.other_wire_update = update.clone();
             }
         }
     }
@@ -1401,8 +1453,22 @@ fn wire_summary(body: &ServerFrameBody) -> String {
         } => heartbeat_summary(loaded, recovery),
         ServerFrameBody::Loaded { loaded } => loaded_summary(loaded),
         ServerFrameBody::Other { label } => label.clone(),
-        ServerFrameBody::HelloOnOtherWire { proto, board_id } => format!(
+        ServerFrameBody::HelloOnOtherWire {
+            proto,
+            board_id,
+            update: None,
+            ..
+        } => format!(
             "hello · proto {proto} · {} · another wire: only its version and board were read",
+            board_id.as_deref().unwrap_or("?"),
+        ),
+        ServerFrameBody::HelloOnOtherWire {
+            proto,
+            board_id,
+            update: Some(_),
+            ..
+        } => format!(
+            "hello · proto {proto} · {} · another wire: its version, board and update facts were read",
             board_id.as_deref().unwrap_or("?"),
         ),
     }
@@ -2037,6 +2103,46 @@ mod tests {
         ));
         evidence.fold(Millis(900), &hello, &mut identity, &config);
         assert!(evidence.classification.is_light_player());
+    }
+
+    /// A board on an older wire whose hello carries its board manifest (a
+    /// split image): an older LightPlayer still, whose update facts, tree
+    /// store and MAC are read — its update rides channel 3, not this wire.
+    #[test]
+    fn an_older_hello_with_a_manifest_announces_the_update_channel_and_names_the_board() {
+        let config = studio_config();
+        let mut evidence = Evidence::default();
+        let mut identity = IdentityChain::default();
+        evidence.fold(Millis(0), &opened(), &mut identity, &config);
+        let mac = crate::identity::MacAddress("10:bd:a3:b0:8e:30".to_string());
+        evidence.fold(
+            Millis(20),
+            &frame(
+                ServerFrame::hello_on_other_wire(0, 37, None).with_other_wire_update(
+                    Some(PeerIdentity {
+                        mac: Some(mac.clone()),
+                        ..PeerIdentity::default()
+                    }),
+                    Some(true),
+                    Some(update_facts(UpdateBoardState::Running, "2026.10.25-1")),
+                ),
+            ),
+            &mut identity,
+            &config,
+        );
+        // Still an older LightPlayer: nothing else of its hello is read.
+        assert_eq!(
+            evidence.classification,
+            Classification::OlderLightPlayer { proto: Some(37) }
+        );
+        // But its update rides channel 3, which the wire never changes.
+        assert_eq!(
+            evidence.update_facts().and_then(|f| f.version.as_deref()),
+            Some("2026.10.25-1")
+        );
+        assert!(evidence.announced_update_channel());
+        assert_eq!(evidence.other_wire_tree_store(), Some(true));
+        assert_eq!(identity.mac, Some(mac), "who the board is, as a cable says");
     }
 
     /// G1-F1: a hello from another wire that this build could not decode —

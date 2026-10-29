@@ -98,10 +98,9 @@ pub use project::{
     WireRuntimeBufferPayload, WireTextureFormat, linear16_to_srgb8, srgb8_to_linear16,
 };
 pub use project_command::{
-    WireCreateNodeRequest, WireCreateNodeResponse, WireNodeCommand, WireNodeCommandResponse,
-    WirePanelAutoSaveRequest, WirePanelClearRequest, WirePanelCommandResponse,
-    WirePanelWriteRequest, WireProjectCommand, WireProjectCommandResponse, WireRemoveNodeRequest,
-    WireRemoveNodeResponse,
+    WireCreateNodeRequest, WireCreateNodeResponse, WirePanelAutoSaveRequest, WirePanelClearRequest,
+    WirePanelCommandResponse, WirePanelWriteRequest, WireProjectCommand,
+    WireProjectCommandResponse, WireRemoveNodeRequest, WireRemoveNodeResponse,
 };
 pub use project_inventory::{
     WireProjectInventoryReadRequest, WireProjectInventoryReadResponse,
@@ -122,8 +121,8 @@ pub use server::{
     HardwareIdentity, HeardNetwork, HeartbeatIdentity, HelloAuth, HelloIdentity, LastAttempt,
     LinkCounters, LinkResets, LoadedProject, MemoryStats, NetworkScan, NetworkStatus,
     ProjectFaultWire, RelayRefusal, RelayState, SampleStats, SavedNetworkInfo, ServerConfig,
-    ServerHello, ServerMsgBody, StationFailure, StationState, WIRE_PROTO_VERSION, hello_board_id,
-    hello_proto,
+    ServerHello, ServerMsgBody, StationFailure, StationState, WIRE_PROTO_VERSION, hello_base_mac,
+    hello_board_id, hello_device_uid, hello_firmware, hello_on_tree_store, hello_proto,
 };
 pub use slot::{
     WireSlotChange, WireSlotData, WireSlotFullSync, WireSlotPatch, WireSlotRootSnapshot,

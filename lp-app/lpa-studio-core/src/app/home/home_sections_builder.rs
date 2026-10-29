@@ -16,6 +16,7 @@
 use std::collections::BTreeMap;
 
 use crate::{BoardPlays, DeviceId, DeviceRosterView, OfferPath, split_roster};
+use lpa_devices::view::FirmwareFace;
 
 use super::ui_home_sections::{UiHomeBoard, UiHomeBoardKind, UiHomeConnect, UiHomeSections};
 use super::ui_package_card::UiPackageCard;
@@ -23,6 +24,8 @@ use super::ui_package_card::UiPackageCard;
 /// The Connect a board section's verbs under `devices/`, in the order the
 /// section draws them.
 const CONNECT_VERBS: [&str; 3] = ["connect-usb", "connect-ble", "connect-wifi-address"];
+/// A reconnecting board's row status ([`crate::app::devices::reconnect_grace`]).
+const RECONNECTING: &str = "Reconnecting\u{2026}";
 /// "Start a board here": published only when the page has a transport to
 /// start a board on (`StudioController::publish_device_offers`).
 const NEW_SIM_VERB: &str = "new-sim";
@@ -57,32 +60,55 @@ pub fn build_home_sections(
         .map(|device| (device.id, device.state_label.as_str()))
         .collect();
 
-    let mut online: Vec<UiHomeBoard> = devices
-        .roster
-        .pending
+    // Online boards in the roster's order (first added first), then the
+    // links still saying who they are: last, where a new board lands, so
+    // its card does not move when it becomes one. A board that turns out to
+    // be one already listed takes that one's place instead.
+    let reconnecting =
+        |id: DeviceId| devices.connections.get(&id) == Some(&crate::BoardConnection::Reconnecting);
+    let mut online: Vec<UiHomeBoard> = split
+        .connected
         .iter()
-        .map(|pending| UiHomeBoard {
-            id: pending.device,
-            kind: UiHomeBoardKind::Pending,
-            title: pending.title.clone(),
-            status: pending.state_label.clone(),
-            project: None,
-            row_verbs: Vec::new(),
+        .map(|device| UiHomeBoard {
+            id: device.id,
+            kind: UiHomeBoardKind::Connected,
+            title: device.title.clone(),
+            status: match reconnecting(device.id) {
+                true => RECONNECTING.to_string(),
+                false => device.state_label.clone(),
+            },
+            project: project_of(device.id),
+            // A plugged-in board nobody has connected yet offers Connect;
+            // once connected its row has nothing more to say.
+            row_verbs: match device.status == lpa_devices::device::DeviceStatus::Attached {
+                true => vec!["connect"],
+                false => Vec::new(),
+            },
         })
         .collect();
-    online.extend(split.connected.iter().map(|device| UiHomeBoard {
-        id: device.id,
-        kind: UiHomeBoardKind::Connected,
-        title: device.title.clone(),
-        status: device.state_label.clone(),
-        project: project_of(device.id),
-        // A plugged-in board nobody has connected yet offers Connect; once
-        // connected its row has nothing more to say.
-        row_verbs: match device.status == lpa_devices::device::DeviceStatus::Attached {
-            true => vec!["connect"],
-            false => Vec::new(),
-        },
-    }));
+    // While a board is reconnecting, a link still identifying is presumed
+    // to be it coming back (a rebooted board re-enumerates on a fresh
+    // link): it draws no card of its own beside the board's. If it turns
+    // out to be another board, it is drawn the moment it says so, or when
+    // the grace ends.
+    let a_board_reconnects = split.connected.iter().any(|device| reconnecting(device.id));
+    online.extend(
+        devices
+            .roster
+            .pending
+            .iter()
+            .filter(|pending| {
+                !(a_board_reconnects && pending.firmware_face == FirmwareFace::Unknown)
+            })
+            .map(|pending| UiHomeBoard {
+                id: pending.device,
+                kind: UiHomeBoardKind::Pending,
+                title: pending.title.clone(),
+                status: pending.state_label.clone(),
+                project: None,
+                row_verbs: Vec::new(),
+            }),
+    );
 
     let offline: Vec<UiHomeBoard> = split
         .remembered
@@ -222,8 +248,11 @@ mod tests {
         assert!(!sections.newcomer, "a pattern is library content too");
     }
 
+    /// A link still identifying is listed last, where the board it turns
+    /// into lands: its card does not move when it becomes one
+    /// (stable board order, 2026-10-28).
     #[test]
-    fn a_pending_link_comes_first_then_the_connected_boards_in_roster_order() {
+    fn the_connected_boards_in_roster_order_then_a_pending_link_last() {
         let devices = roster(
             vec![
                 board(7, "Second", DeviceStatus::Ready),
@@ -232,11 +261,39 @@ mod tests {
             vec![pending(9, "New board")],
         );
         let sections = build_home_sections(&[], &devices);
-        assert_eq!(titles(&sections.online), ["New board", "Second", "First"]);
-        assert_eq!(sections.online[0].kind, UiHomeBoardKind::Pending);
-        assert_eq!(sections.online[0].id, DeviceId(9));
-        assert_eq!(sections.online[1].kind, UiHomeBoardKind::Connected);
-        assert_eq!(sections.online[0].project, None);
+        assert_eq!(titles(&sections.online), ["Second", "First", "New board"]);
+        assert_eq!(sections.online[0].kind, UiHomeBoardKind::Connected);
+        assert_eq!(sections.online[2].kind, UiHomeBoardKind::Pending);
+        assert_eq!(sections.online[2].id, DeviceId(9));
+        assert_eq!(sections.online[2].project, None);
+    }
+
+    /// A board rebooting under setup stays in Online boards, in its place,
+    /// and says it is reconnecting; the link it comes back on draws no card
+    /// of its own while it is still identifying.
+    #[test]
+    fn a_reconnecting_board_holds_its_place_and_its_link_draws_no_card() {
+        let mut devices = roster(
+            vec![
+                board(1, "Porch", DeviceStatus::Ready),
+                board(2, "Desk C6", DeviceStatus::Offline),
+                board(3, "Truck", DeviceStatus::Offline),
+            ],
+            vec![pending(9, "New board")],
+        );
+        devices
+            .connections
+            .insert(DeviceId(2), crate::BoardConnection::Reconnecting);
+
+        let sections = build_home_sections(&[], &devices);
+        assert_eq!(titles(&sections.online), ["Porch", "Desk C6"]);
+        assert_eq!(sections.online[1].status, "Reconnecting\u{2026}");
+        assert_eq!(titles(&sections.offline), ["Truck"]);
+
+        // A link that has said what it is is drawn, reconnect or not.
+        devices.roster.pending[0].firmware_face = FirmwareFace::Blank;
+        let sections = build_home_sections(&[], &devices);
+        assert_eq!(titles(&sections.online), ["Porch", "Desk C6", "New board"]);
     }
 
     #[test]
@@ -265,9 +322,9 @@ mod tests {
             vec![pending(4, "Identifying")],
         );
         let sections = build_home_sections(&[], &devices);
-        assert_eq!(sections.online[0].row_verbs, Vec::<&str>::new(), "pending");
-        assert_eq!(sections.online[1].row_verbs, Vec::<&str>::new(), "ready");
-        assert_eq!(sections.online[2].row_verbs, ["connect"], "attached only");
+        assert_eq!(sections.online[0].row_verbs, Vec::<&str>::new(), "ready");
+        assert_eq!(sections.online[1].row_verbs, ["connect"], "attached only");
+        assert_eq!(sections.online[2].row_verbs, Vec::<&str>::new(), "pending");
         assert_eq!(sections.offline[0].row_verbs, ["connect-wifi", "reconnect"]);
     }
 
@@ -281,8 +338,8 @@ mod tests {
             vec![pending(4, "Identifying")],
         );
         let sections = build_home_sections(&[], &devices);
-        assert_eq!(sections.online[0].status, "Identifying\u{2026}");
-        assert_eq!(sections.online[1].status, "Ready");
+        assert_eq!(sections.online[0].status, "Ready");
+        assert_eq!(sections.online[1].status, "Identifying\u{2026}");
         assert_eq!(sections.offline[0].status, "last heard 2 weeks ago");
         assert_eq!(
             sections.offline[1].status, "Offline",
@@ -570,6 +627,7 @@ mod tests {
             detected_chip: None,
             mac: None,
             firmware_blocked: None,
+            usb: None,
             held_by_tab: false,
             escapes: Vec::new(),
         }
@@ -588,6 +646,7 @@ mod tests {
             detail: None,
             freshness_label: None,
             heard_age_ms: None,
+            detached_age_ms: None,
             identity_label: None,
             detected_chip: None,
             board_id: None,
@@ -604,6 +663,7 @@ mod tests {
             terminal: Vec::new(),
             terminal_dropped: 0,
             firmware_blocked: None,
+            usb: None,
             held_elsewhere: None,
             escapes: Vec::new(),
             update_blocked: None,

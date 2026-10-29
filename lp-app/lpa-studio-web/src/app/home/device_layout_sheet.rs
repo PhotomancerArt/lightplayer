@@ -46,11 +46,13 @@ pub(crate) fn DeviceLayoutSheet(
                 p { class: WARNING_CLASS, "{warning}" }
             }
             div { class: "tw:flex tw:flex-wrap tw:items-center tw:gap-2 tw:pt-1",
-                OfferAction {
-                    key: "{\"layout-download\"}",
-                    path: panel.download.clone(),
-                    variant: ActionButtonVariant::Quiet,
-                    on_action,
+                if let Some(download) = panel.download.clone() {
+                    OfferAction {
+                        key: "{\"layout-download\"}",
+                        path: download,
+                        variant: ActionButtonVariant::Quiet,
+                        on_action,
+                    }
                 }
                 span { class: "tw:min-w-0 tw:flex-1" }
                 if let Some(close) = on_close {
@@ -144,7 +146,7 @@ mod tests {
             title: "Move this board's files?".to_string(),
             body: "The new firmware lays its files out differently.".to_string(),
             warning: None,
-            download: board().child("disconnect"),
+            download: Some(board().child("disconnect")),
             continue_action: Some(board().child("forget")),
             cancel: Some(board().child("reset-board")),
         };

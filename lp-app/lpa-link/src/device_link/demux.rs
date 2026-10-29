@@ -16,12 +16,15 @@
 
 use std::collections::VecDeque;
 
+use lpa_devices::identity::{DeviceUid, MacAddress, PeerIdentity};
 use lpa_devices::link::{APP_CONVERSATION_ID_BASE, LinkEvent};
 use lpa_devices::wire::ServerFrame;
 use lpc_wire::{WireChunk, WireServerMessage, WireStream};
 
+use crate::device_link::update_facts_mirror::update_facts_from_manifest;
 use crate::device_link::wire::{decode_server_message, server_frame};
 use crate::device_link::wire_reader::{ReadFrame, WireRead};
+use crate::provider::base_mac::normalize_base_mac;
 
 /// Demux one whole serial line into the event it is.
 ///
@@ -97,12 +100,17 @@ pub fn demux_read(read: WireRead) -> LinkEvent {
 /// [`demux_line`] for the resync and the app-range rule.
 ///
 /// A hello from another wire that this build cannot decode is still a
-/// hello: its version and the board it names are read (and nothing else —
-/// `lpc_wire::hello_proto`, `lpc_wire::hello_board_id`) and it becomes
+/// hello: its version and the board it names are read
+/// (`lpc_wire::hello_proto`, `lpc_wire::hello_board_id`) and it becomes
 /// [`ServerFrameBody::HelloOnOtherWire`], so the board reads as an older
 /// (or newer) LightPlayer of a known board instead of one that never said
-/// hello (G1-F1). A hello that claims THIS wire and does not decode is malformed,
-/// and stays an anomaly.
+/// hello (G1-F1). What its firmware update needs is read beside them —
+/// who the board is, whether its files are in the tree store, and its
+/// board manifest (`lpc_wire::hello_base_mac`, `hello_device_uid`,
+/// `hello_on_tree_store`, `hello_firmware`) — because that update rides
+/// lp-link's update channel, which never changes with this wire. Nothing
+/// else is read. A hello that claims THIS wire and does not decode is
+/// malformed, and stays an anomaly.
 ///
 /// [`ServerFrameBody::HelloOnOtherWire`]: lpa_devices::wire::ServerFrameBody::HelloOnOtherWire
 fn demux_frame_json(mut frame_json: &str) -> LinkEvent {
@@ -142,11 +150,28 @@ fn hello_on_other_wire(frame_json: &str, proto: u32) -> Option<ServerFrame> {
     if id >= u64::from(APP_CONVERSATION_ID_BASE) {
         return None;
     }
-    Some(ServerFrame::hello_on_other_wire(
-        u32::try_from(id).unwrap_or(u32::MAX),
-        proto,
-        lpc_wire::hello_board_id(frame_json),
-    ))
+    let identity = PeerIdentity {
+        uid: lpc_wire::hello_device_uid(frame_json).map(DeviceUid),
+        mac: lpc_wire::hello_base_mac(frame_json)
+            .as_deref()
+            .and_then(normalize_base_mac)
+            .map(MacAddress),
+        name: None,
+    };
+    Some(
+        ServerFrame::hello_on_other_wire(
+            u32::try_from(id).unwrap_or(u32::MAX),
+            proto,
+            lpc_wire::hello_board_id(frame_json),
+        )
+        .with_other_wire_update(
+            Some(identity),
+            lpc_wire::hello_on_tree_store(frame_json),
+            lpc_wire::hello_firmware(frame_json)
+                .as_ref()
+                .map(update_facts_from_manifest),
+        ),
+    )
 }
 
 /// A decoded message → the model's frame, or an app conversation's
@@ -279,11 +304,92 @@ mod tests {
             frame.body,
             ServerFrameBody::HelloOnOtherWire {
                 proto: 32,
-                // The board the stamp named — the one other fact read off
-                // it (G1 walk, 2026-10-03).
+                // The board the stamp named (G1 walk, 2026-10-03).
                 board_id: Some("seeed/xiao-esp32-c6".to_string()),
+                // Who it is: its MAC, as a USB serial number would say it.
+                identity: Some(PeerIdentity {
+                    mac: Some(MacAddress("10:bd:a3:b0:8e:30".to_string())),
+                    ..PeerIdentity::default()
+                }),
+                // A littlefs build (no `fs.tree`, no `fs`): it says so.
+                tree_store: Some(false),
+                // A single image of wire 32 carries no manifest: no update
+                // channel to speak.
+                update: None,
             }
         );
+    }
+
+    /// A board on an older wire whose hello carries its board manifest (a
+    /// split image) is an older LightPlayer whose update facts reach the
+    /// fold, whatever the rest of its hello holds: its update rides lp-link's
+    /// update channel, which the wire never changes.
+    #[test]
+    fn an_older_hello_with_a_manifest_carries_its_update_facts() {
+        let manifest = lpc_update::BoardManifest {
+            proto: 1,
+            target: "esp32c6-4mb".to_string(),
+            chip: "esp32c6".to_string(),
+            version: "2026.10.25-1".to_string(),
+            build_id: "2026.10.25-1+62f8e82610b2".to_string(),
+            wire_proto: 44,
+            core_sha256: "11".repeat(32),
+            core_len: 1_160_000,
+            engine_sha256: "22".repeat(32),
+            engine_len: Some(1_830_000),
+            layout: 1,
+            loader: 1,
+            region_len: 3_375_104,
+            state: lpc_update::BoardState::Running,
+            refused_build: None,
+            transfer: None,
+        };
+        let hello =
+            include_str!("../../../../lp-core/lpc-wire/testdata/hello-proto32-xiao-c6.json")
+                .trim()
+                .replace(r#""proto":32"#, r#""proto":44"#)
+                .replace(r#""features":["#, r#""features":["fs.tree","#)
+                .replace(
+                    r#""deviceUid":null"#,
+                    r#""deviceUid":"dev00000000000000a1""#,
+                )
+                .replace(
+                    r#""packFormat":2"#,
+                    &format!(
+                        r#""packFormat":2,"firmware":{}"#,
+                        String::from_utf8(manifest.to_json()).unwrap()
+                    ),
+                );
+        let LinkEvent::Frame(frame) = demux_line(&format!("M!{hello}")) else {
+            panic!("a hello");
+        };
+        let ServerFrameBody::HelloOnOtherWire {
+            proto,
+            identity,
+            tree_store,
+            update,
+            ..
+        } = &frame.body
+        else {
+            panic!("a hello from another wire: {frame:?}");
+        };
+        assert_eq!(*proto, 44);
+        let identity = identity.as_ref().expect("who the board is");
+        assert_eq!(
+            identity.uid,
+            Some(DeviceUid("dev00000000000000a1".to_string()))
+        );
+        assert_eq!(
+            identity.mac,
+            Some(MacAddress("10:bd:a3:b0:8e:30".to_string()))
+        );
+        assert_eq!(*tree_store, Some(true));
+        assert_eq!(
+            update.as_ref(),
+            Some(&update_facts_from_manifest(&manifest)),
+            "the same facts `M` would carry"
+        );
+        assert_eq!(frame.identity(), Some(identity));
     }
 
     #[test]

@@ -148,7 +148,7 @@ programmatic sweep. Both go through the same runner.
 | `device.rs` | `Device::handle`, supervision (cancel → grace → evict → recover) |
 | `evidence.rs` | The fold: presence, classification, freshness, observations |
 | `intent.rs` | The prescriptive half |
-| `activity/` | Supervision machinery + the `Identify` reducer |
+| `activity/` | Supervision machinery + the reducers. `flash.rs` installs with no board picked first: its inspection's `BoardIdentified` marker (`board_identity.rs`) brings the build and board, and somebody else's firmware waits on `ConfirmFlashReplace` (`docs/adr/2026-10-28-install-identifies-the-board-first.md`); `set_board.rs` saves "Which board is this?" on a running board |
 | `identity.rs` | The bindings chain: endpoint → MAC → uid → name |
 | `board_key.rs` | `BoardKey`: a board's id, its MAC as 12 lowercase hex |
 | `held_elsewhere.rs` | The fact "another tab of this browser holds this board" (`HeldElsewhere`: its way in, its level, whether this tab let go on request). It rides the board, addressed by MAC (`Event::BoardHeld`), and marks a port the tab must not open (`Event::LinkHeld`); the roster keeps it so arrival order does not matter, and `DeviceView.held_elsewhere` carries it. No tab id or key is in it |

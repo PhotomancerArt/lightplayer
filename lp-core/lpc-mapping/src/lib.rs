@@ -35,15 +35,20 @@
 extern crate alloc;
 
 pub mod corpus;
+#[cfg(feature = "edit")]
+pub mod edit;
 mod editor_meta;
 pub mod import;
+pub mod map2d6;
 mod map2d_doc;
 mod map2d_error;
 mod map2d_fit;
 mod map2d_object_id;
 mod map2d_resolve;
 mod map_object_path;
+pub mod part;
 mod patch;
+pub mod patching;
 
 pub use editor_meta::{
     EDITOR_META_FORMAT, EditorFootprint, EditorMetaDoc, EditorMetaError, EditorNodeMeta,

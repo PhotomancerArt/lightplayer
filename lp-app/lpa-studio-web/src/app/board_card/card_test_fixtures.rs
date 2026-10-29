@@ -11,6 +11,7 @@ use lpa_studio_core::{
     device_edit_offer, device_offers,
 };
 
+use super::card_action::CardPreviews;
 use super::{BoardCard, CardPart};
 use crate::core::OffersProvider;
 
@@ -29,6 +30,7 @@ pub(crate) fn porch_view() -> DeviceView {
         detail: Some("LightPlayer · seeed/xiao-esp32-c6".to_string()),
         freshness_label: None,
         heard_age_ms: None,
+        detached_age_ms: None,
         identity_label: Some("a0:f2:62:87:b4:8c".to_string()),
         detected_chip: Some("esp32c6".to_string()),
         board_id: Some("seeed/xiao-esp32-c6".to_string()),
@@ -51,6 +53,7 @@ pub(crate) fn porch_view() -> DeviceView {
         terminal: Vec::new(),
         terminal_dropped: 0,
         firmware_blocked: None,
+        usb: None,
         held_elsewhere: None,
         escapes: vec![DeviceEscape::Disconnect, DeviceEscape::Forget],
         update_blocked: None,
@@ -63,6 +66,7 @@ pub(crate) fn porch_view() -> DeviceView {
 pub(crate) fn card_and_tree(view: &DeviceView) -> (UiBoardCard, UiOfferTree) {
     let facts = DeviceOfferFacts {
         prefix: board(),
+        which_board: &[],
         face: DeviceFace::Wire,
         autoconnect: false,
         locked: false,
@@ -85,6 +89,7 @@ pub(crate) fn card_and_tree(view: &DeviceView) -> (UiBoardCard, UiOfferTree) {
         label: "porch".to_string(),
     };
     let card = board_card(&BoardCardInput {
+        which_board: &[],
         view,
         board: &board(),
         offers: &verbs,
@@ -116,16 +121,39 @@ pub(crate) fn card_and_tree(view: &DeviceView) -> (UiBoardCard, UiOfferTree) {
 
 /// `card` under `tree`, rendered to markup with `open`'s details open.
 pub(crate) fn render_card(card: UiBoardCard, tree: UiOfferTree, open: Option<CardPart>) -> String {
-    render(CardRoot, CardRootProps { card, tree, open })
+    render_card_with(card, tree, open, CardPreviews::default())
+}
+
+/// [`render_card`] mounted in a state a render cannot click to.
+pub(crate) fn render_card_with(
+    card: UiBoardCard,
+    tree: UiOfferTree,
+    open: Option<CardPart>,
+    previews: CardPreviews,
+) -> String {
+    render(
+        CardRoot,
+        CardRootProps {
+            card,
+            tree,
+            open,
+            previews,
+        },
+    )
 }
 
 /// A card under its board's tree, as the shell provides it.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn CardRoot(card: UiBoardCard, tree: UiOfferTree, open: Option<CardPart>) -> Element {
+fn CardRoot(
+    card: UiBoardCard,
+    tree: UiOfferTree,
+    open: Option<CardPart>,
+    previews: CardPreviews,
+) -> Element {
     rsx! {
         OffersProvider { offers: tree,
-            BoardCard { card, details_open: open, on_action: |_| {} }
+            BoardCard { card, details_open: open, previews, on_action: |_| {} }
         }
     }
 }

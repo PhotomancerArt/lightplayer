@@ -348,6 +348,14 @@ impl<'r> TickContext<'r> {
         self.resolver.structure_epoch()
     }
 
+    /// Which panel write supplies this node's consumed `slot`, when an
+    /// engaged panel writer wins it: unique per write, so a fresh write of
+    /// the value already held is still told apart. `None` for any other
+    /// source.
+    pub fn consumed_slot_panel_write(&self, slot: &SlotPath) -> Option<u64> {
+        self.resolver.consumed_slot_panel_write(self.node_id, slot)
+    }
+
     /// Publish one of this node's runtime state slots for the current frame.
     ///
     /// `slot` is borrowed: a node publishes the same path every frame, so
@@ -625,6 +633,28 @@ impl<'r> TickContext<'r> {
     /// at — the fixture's dangling-entry check caches on the revision.
     pub fn known_output_names(&self) -> (alloc::vec::Vec<alloc::string::String>, Revision) {
         self.resolver.known_output_names()
+    }
+
+    /// What the port tables [`Self::control_patch_outputs`] gives this node
+    /// were read under: cheap, read every frame; ask for the tables only
+    /// when it moved ([`crate::node::PortTablesKey`]).
+    pub fn port_tables_key(&self) -> crate::node::PortTablesKey {
+        crate::node::PortTablesKey {
+            structure_epoch: self.structure_epoch(),
+            output_identities: self.output_identity_revision(),
+        }
+    }
+
+    /// The named outputs that read this node's bus channel, with their port
+    /// tables, and the key they were read under. Allocates: ask only when
+    /// [`Self::port_tables_key`] moved.
+    pub fn control_patch_outputs(
+        &self,
+    ) -> (crate::node::ReachableOutputs, crate::node::PortTablesKey) {
+        (
+            self.resolver.control_patch_outputs(self.node_id),
+            self.port_tables_key(),
+        )
     }
 
     /// Publishes this node's timebase for the current tick.

@@ -1,8 +1,127 @@
 # lpc-mapping
 
-The LED fixture mapping domain: the authored mapping **document** schema, the
-per-fixture **patch** document, and the single deterministic **resolver**
-shared by the engine, the device, and Studio.
+The LED fixture mapping domain, shared by the engine, the device and Studio:
+**mapping = layout + patching**. A fixture's mapping says where each lamp is
+and where on the hardware its data goes.
+
+The crate holds two generations side by side until M3 (project format 12)
+of the mapping rebuild (planning `lp2025/2026-10-27-0114-mapping-rebuild`;
+ADR `docs/adr/2026-10-27-mapping-model-parts-segments-patcher.md`):
+
+- **The mapping model and map2d format 6** (`part`, `patching`, `map2d6`):
+  parts, segments and the patcher, in one file. Built in M1; nothing outside
+  the crate calls it yet. The engine moves onto it in M2, every project in
+  M3, Studio's Graph in M4.
+- **Today's documents** (map2d formats 1–5, the patch document): what the
+  engine, the device and Studio run until M3 retires them (below).
+
+## The mapping model
+
+The words are names.html's (draft 3): **part, shape, segment, lamp,
+address, span, gap, patching, patcher, cursor, start, flow, override,
+direction, offset, problem**. A lamp is one addressable light; a channel is
+one number a port sends (an RGB lamp takes three).
+
+**Parts make a tree; its leaves are segments.** A fixture's parts are shapes
+(path, polygon, circle, grid, filled polygon, points), groups and repeats.
+`part::render` turns them into the rendered tree: a repeat's copies are
+generated parts (`panel@2`), a circle's rings and a split path's subpaths
+are generated segments (`circle1/r3`, `path1/s2`), and every other shape is
+its own segment. A **segment** is one run of lamps on one port, the only
+thing that holds lamps; one segment never has two addresses. The segments in
+tree order are the fixture's lamp order, and their positions sit in one
+exact-size buffer.
+
+- Geometry is today's arithmetic, never a copy: each shape's lamps come
+  from `resolve_into` on a one-object document, so a layout renders the
+  lamps `resolve()` gives, bit for bit.
+- A circle holds rings with keys (`r1`, `r2`…), listed outside in, drawn
+  from the outside or the inside, one segment each or one for all
+  (`split: "one"`: today's ring set, which `Circle::from_ring_set` turns
+  into a circle with every lamp where it was). A ring of radius 0 is the
+  centre and holds one lamp.
+- Ids are flat and never reused: `[a-z][a-z0-9_-]*` for a part, minted from
+  the kind and a counter (`path3`); a node adds its key and its repeat
+  copies, innermost first, trailing zeros dropped (`x@0@3`).
+
+**The patcher** (`patching::patch_mapping`) walks one fixture's tree with a
+**cursor** (output, port, channel) and gives every segment its **address**:
+
+1. Entering a node, each field takes one step: the node's override, else its
+   part's start, else its parent's flow, else Keep. A step keeps, sets or
+   adds; amounts are in lamps or channels, converted at the segment.
+2. Flows (`end_to_end`, `one_per_port`) render starts for children; the
+   patcher sees starts only.
+3. A segment lays its run at the cursor and moves it on. One that doesn't
+   fit what is left of its port wraps to the next port, unless it is the
+   first after a port or channel Set: that one stays, is reported, and
+   lands as far as the port reaches.
+4. Past the last port, nothing lands until a port is Set again. Off lays
+   nothing and moves nothing. Leaving a node never moves the cursor.
+5. Overrides are by id and never retargeted. Nothing flows across fixtures.
+6. What it can't do it reports (`Problem`), naming the node or port.
+
+The result (`Patching`) holds every segment's address, direction and
+offset, each port as a row of **spans** (segments and gaps), the problems,
+and what each node did and why (`Walked`).
+
+## Map2d format 6
+
+One `*.map2d.json` per fixture holds both halves (`map2d6::{read, write,
+peek_format}`). The four journeys' documents are in `tests/format6/`; the
+circular display as soldered:
+
+```json
+{
+  "format": 6,
+  "next": { "circle": 2 },
+  "start": { "output": { "set": "main" }, "port": { "set": 0 },
+             "channel": { "set": { "lamps": 0 } } },
+  "parts": [ { "id": "circle1", "name": "display", "kind": { "circle": {
+    "center": [50.0, 50.0], "start_angle_deg": -90.0, "dir": "cw",
+    "drawn_from": "outside", "next_ring": 6, "rings": [
+      { "key": "r1", "radius": 42.0, "count": 24 },
+      { "key": "r2", "radius": 32.0, "count": 16 },
+      { "key": "r3", "radius": 22.0, "count": 12 },
+      { "key": "r4", "radius": 12.0, "count": 8 },
+      { "key": "r5", "radius": 0.0, "count": 1 } ] } } } ],
+  "overrides": { "circle1/r3": { "port": { "set": 1 },
+    "channel": { "set": { "lamps": 0 } }, "direction": "reverse" } }
+}
+```
+
+- Kinds: `path` (`d`: SVG path data, `M` and `L`; `H`/`V` read as lines;
+  `Z`, curves and arcs refused by name until built; a move inside a path is
+  the jumper; `split: "subpaths"`), `polygon`, `grid`, `filled_polygon`
+  (today's fields), `circle`, `points` (`at`), `group` (`parts`), `repeat`
+  (`center`, `count`, `part`).
+- Starts are per-field ops, an absent field Keep: `{"set": "main"}`,
+  `{"set": 0}`, `{"add": 1}`, `{"set": {"lamps": 0}}`,
+  `{"add": {"channels": 13}}`. Outputs are named in the ops; there is no
+  outputs list. A part's `start` and `flow` apply to every copy of it.
+- Overrides are keyed by node id; their fields are ops (an explicit
+  `"keep"` holds the cursor), `off`, `direction` (`"forward"`/`"reverse"`)
+  and `offset` (lamps). One naming no node is kept.
+- Counters: `next` (per kind word), `next_ring` (per circle). Format 6
+  saves no lamp facts; the lamp-model plan adds them with its own bump.
+- The format is peeked first: a newer document is refused as newer, 1–5
+  go to today's reader. Writing gives one canonical form, so a document
+  read and written back is the same bytes.
+
+## Modules
+
+| Module | What |
+|---|---|
+| `part/` | The parts, the rendered tree, ids, segments, `render` |
+| `patching/` | Starts, flows, overrides, the cursor, `patch_mapping`, spans, problems |
+| `map2d6/` | Format 6: its document structs, path data, `read`, `write` |
+| `map2d_doc`, `map2d_resolve`, `map2d_fit`, `map2d_object_id` | Today's document and resolver; the resolver is also the new model's geometry |
+| `patch` | Today's patch document (until M3) |
+| `editor_meta` | Studio's `editor.json` |
+| `import/` | SVG import into today's document |
+| `corpus` | Shared test scenes |
+
+## Today's map2d document (formats 1–5, until M3)
 
 A mapping document (`fixture.map2d.json`) is a format-versioned JSON asset,
 opaque to the slot system, holding parametric objects whose order **is** the
@@ -97,9 +216,9 @@ dependency graph (Content-machinery flash cost — `scripts/check-serde-content.
 `repeat`'s inner shape is boxed for the same reason a nested enum usually is:
 to keep `Map2dShape` small.
 
-`resolve(doc)` produces the ordered lamp list — doc-space positions plus
-derived DMX-style addresses (auto-flow at 170 RGB lamps/universe; wiring
-order is primary, addresses are always derived from it). `resolve_into` is
+`resolve(doc)` produces the ordered lamp list — doc-space positions in
+wiring order; a lamp's index in that order is its one address here (the
+resolver derives no wire-side addresses). `resolve_into` is
 its streaming form: positions and spans into caller-owned buffers, one
 exact-size 8 B/lamp allocation and no per-lamp rows — what the engine loads
 through, since at dome scale the rows were the load's largest single ask.
@@ -115,9 +234,10 @@ not a runtime source of truth. CLI form:
 cargo run -p lpc-mapping --example svg_to_map2d -- path/to/mapping.svg > fixture.map2d.json
 ```
 
-## The patch document
+## The patch document (until M3)
 
-Mapping says where a lamp *is*; **patching** says which physical jack the
+Format 6 retires it: its rows become starts and overrides in the map2d file
+(M3). Until then: mapping says where a lamp *is*; **patching** says which physical jack the
 strand ended up in. A fixture is mapped once and re-patched on every install,
 so the patch is its own document (`fixture.patch.json`) beside the mapping —
 clearing a patch never disturbs a lamp position.
@@ -146,8 +266,9 @@ would have produced — clearing restores the default rather than going dark, an
 partial patching is the ordinary case. Two entries of one fixture claiming the
 same lamp, or the same wire channel, are a document error (two *different*
 fixtures colliding on one output is a runtime condition the engine degrades and
-reports). `at.output` and a rotation `offset` are reserved in the schema and
-refused by this build rather than silently ignored.
+reports). Format 2 added rows by object path (`/id/k`), outputs by name and
+a rotation offset; format 3 a `flow` (`auto` or `manual`); `PatchDoc`'s
+module doc holds the full form.
 
 ## Boundary
 
@@ -158,6 +279,9 @@ no_std and deterministic (pure `f32` + `libm` — identical output on every
 platform).
 
 ## Schema evolution
+
+The first three rules hold for every map2d format, 6 included; format 6's
+writer always stamps 6, since no older format can hold its document.
 
 **Additive fields need no bump.** Unknown fields are ignored, so a new
 optional field stays readable by older parsers. Dense geometry is plain JSON

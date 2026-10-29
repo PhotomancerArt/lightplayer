@@ -161,6 +161,7 @@ fn details(input: &BoardCardInput<'_>, status: Option<&NetworkStatus>) -> UiBarD
                 turn_on: card::ENABLE_WIFI,
             },
         )
+        .waiting(input.wifi.is_some_and(|wifi| wifi.writing))
     });
     match (live, on) {
         (Some(_), Some(false)) => {

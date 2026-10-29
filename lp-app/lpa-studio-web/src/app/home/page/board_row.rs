@@ -199,21 +199,25 @@ mod tests {
     fn the_open_link_follows_the_cards_rule() {
         let address = Some("dev0000000000000001");
         let nothing_loaded = DeviceView {
+            usb: None,
             loaded_project: DeviceLoadedProject::Empty,
             ..running_card()
         };
         assert_eq!(row_open_href(Some(&nothing_loaded), address), None);
         let unlinked = DeviceView {
+            usb: None,
             escapes: vec![DeviceEscape::Forget],
             ..running_card()
         };
         assert_eq!(row_open_href(Some(&unlinked), address), None);
         let attached = DeviceView {
+            usb: None,
             status: DeviceStatus::Attached,
             ..running_card()
         };
         assert_eq!(row_open_href(Some(&attached), address), None);
         let degraded = DeviceView {
+            usb: None,
             status: DeviceStatus::Degraded,
             ..running_card()
         };
@@ -289,6 +293,7 @@ mod tests {
             detail: None,
             freshness_label: None,
             heard_age_ms: None,
+            detached_age_ms: None,
             identity_label: None,
             detected_chip: None,
             board_id: None,
@@ -307,6 +312,7 @@ mod tests {
             terminal: Vec::new(),
             terminal_dropped: 0,
             firmware_blocked: None,
+            usb: None,
             held_elsewhere: None,
             escapes: vec![DeviceEscape::Disconnect, DeviceEscape::Forget],
             update_blocked: None,

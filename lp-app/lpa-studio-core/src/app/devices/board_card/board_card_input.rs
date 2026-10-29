@@ -64,6 +64,10 @@ pub struct BoardCardInput<'a> {
     pub sending: Option<&'a str>,
     /// The board's files across a layout change, and the project note.
     pub layout: Option<&'a UiDeviceLayout>,
+    /// The catalog boards this board's install found fit, when it could not
+    /// tell which it is: the Hardware row asks "Which board is this?".
+    /// Empty when nothing is to ask.
+    pub which_board: &'a [String],
     /// Which project the board plays ([`crate::BoardProjects`]).
     pub plays: &'a BoardPlays,
     /// How many boards play the same library project (this one included).

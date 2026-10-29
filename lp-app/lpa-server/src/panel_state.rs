@@ -200,6 +200,10 @@ pub fn restore(fs: &dyn LpFs, engine: &mut Engine, registry: &ProjectRegistry) -
         }
         restored += 1;
     }
+    // A restored playlist pick decides which entry loads: settle it now, so
+    // the first tick loads the picked entry, not the authored one, before
+    // anything renders (playlists-on-the-bus Q3).
+    engine.settle_load_deciding_panel_values();
     log::info!(
         "panel state: restored {} of {} engaged control(s) (auto_save={})",
         restored,

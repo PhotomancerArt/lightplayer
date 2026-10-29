@@ -17,7 +17,7 @@ use lab_mapping_model::{
 };
 
 use crate::edge_layer::EdgeLayer;
-use crate::faces::lamp_radius_px;
+use crate::faces::{DRAFT_PITCH, lamp_radius_px};
 use crate::graph_editor::GraphEditor;
 
 #[component]
@@ -41,7 +41,7 @@ pub fn Overlay(
             Some((n, r))
         })
         .collect();
-    let lamp_r = lamp_radius_px(camera.scale);
+    let lamp_r = lamp_radius_px(camera.scale, DRAFT_PITCH);
     let (vw, vh) = (viewport.x, viewport.y);
     rsx! {
         svg { class: "overlay", width: "{vw}", height: "{vh}",

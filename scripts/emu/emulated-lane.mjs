@@ -67,8 +67,8 @@ const STEP_DEADLINE_MS = 90_000;
 /// The same kind of deadline for a `flash` step: the ROM's download console
 /// writes ~2.4 MB and the guest then boots it (walk-no-board's figure).
 const FLASH_DEADLINE_MS = 900_000;
-/// The board a `flash` step picks in the card's board pick when the spec
-/// names none (walk-no-board's).
+/// The board a `flash` step answers "Which board is this?" with, when the
+/// install asks and the spec names none (walk-no-board's).
 const DEFAULT_BOARD_MODEL = "XIAO ESP32-C6";
 
 // --- the door -------------------------------------------------------------
@@ -434,19 +434,22 @@ async function runStep(step, ctx) {
     }
     case "flash": {
       // A blank board's card, the way a person does it: its firmware bar
-      // says "No firmware", the primary Install (`flash`) opens the board
-      // pick, picking `model` is the press, and the flash is the firmware
-      // bar's work, which must start and then finish (`flashBlank`).
+      // says "No firmware", the primary Install (`flash`) is one press, and
+      // the flash is the firmware bar's work, which must start and then
+      // finish; `model` answers "Which board is this?" when the install
+      // could not tell (`flashBlank`).
       if (step.verb) {
-        throw new Error("`flash` no longer clicks a verb by its words: it presses `flash`; name the board pick's `model`");
+        throw new Error("`flash` no longer clicks a verb by its words: it presses `flash`; name the board's `model`");
       }
       const model = step.model ?? DEFAULT_BOARD_MODEL;
-      await driver.flashBlank(model, {
+      const how = await driver.flashBlank(model, {
         board: await boardOf(step, ctx),
         timeoutMs: STEP_DEADLINE_MS,
         flashTimeoutMs: FLASH_DEADLINE_MS,
       });
-      return `flashed through the card's Install (\`flash\`), picking ${JSON.stringify(model)}`;
+      return how === "asked"
+        ? `flashed through the card's Install (\`flash\`), then answered which board: ${JSON.stringify(model)}`
+        : `flashed through the card's Install (\`flash\`); the install recognised the board`;
     }
     case "project": {
       // `push`: an empty board's primary ("Add a project"),

@@ -30,7 +30,7 @@ pub enum GraphVerb {
     More,
     /// r: which way the data runs.
     Reverse,
-    /// U: give a pinned node back to the layout.
+    /// ⌥U: give a pinned node back to the layout.
     Unpin,
     /// ⌘A: climb a level of everything.
     SelectAll,
@@ -40,8 +40,38 @@ pub enum GraphVerb {
     PathTool,
     /// O
     CircleTool,
-    /// M: Move & draw on or off.
+    /// D: Move & draw on or off.
     MoveDraw,
+    /// A: arm a patch from the selection (`patching.rs`).
+    Patch,
+    /// M: patch, then on to the next free segment, still armed.
+    PatchNext,
+    /// U: take the selected objects off the wire.
+    Unpatch,
+    /// S: arm a swap.
+    Swap,
+    /// K: turn one lamp.
+    Turn,
+    /// L: turn one lamp back.
+    TurnBack,
+    /// ;: turn a third.
+    TurnThird,
+    /// ': turn a third back.
+    TurnThirdBack,
+    /// ]: shift a pixel up the port.
+    Shift,
+    /// [: shift a pixel down the port.
+    ShiftBack,
+    /// ⇧→: the next place on the wire.
+    WireNext,
+    /// ⇧←: the previous place on the wire.
+    WirePrevious,
+    /// .: the next port's first free segment.
+    NextPort,
+    /// ⇧A: the fixture's auto on or off.
+    Auto,
+    /// ⇧U: every object of the fixture off the wire.
+    UnpatchAll,
     /// ⌘Z
     Undo,
     /// ⇧⌘Z
@@ -49,7 +79,7 @@ pub enum GraphVerb {
 }
 
 impl GraphVerb {
-    pub const ALL: [GraphVerb; 16] = [
+    pub const ALL: [GraphVerb; 31] = [
         GraphVerb::Up,
         GraphVerb::GoIn,
         GraphVerb::Previous,
@@ -64,6 +94,21 @@ impl GraphVerb {
         GraphVerb::PathTool,
         GraphVerb::CircleTool,
         GraphVerb::MoveDraw,
+        GraphVerb::Patch,
+        GraphVerb::PatchNext,
+        GraphVerb::Unpatch,
+        GraphVerb::Swap,
+        GraphVerb::Turn,
+        GraphVerb::TurnBack,
+        GraphVerb::TurnThird,
+        GraphVerb::TurnThirdBack,
+        GraphVerb::Shift,
+        GraphVerb::ShiftBack,
+        GraphVerb::WireNext,
+        GraphVerb::WirePrevious,
+        GraphVerb::NextPort,
+        GraphVerb::Auto,
+        GraphVerb::UnpatchAll,
         GraphVerb::Undo,
         GraphVerb::Redo,
     ];
@@ -86,6 +131,21 @@ impl GraphVerb {
             GraphVerb::PathTool => "path-tool",
             GraphVerb::CircleTool => "circle-tool",
             GraphVerb::MoveDraw => "move-and-draw",
+            GraphVerb::Patch => "patch",
+            GraphVerb::PatchNext => "patch-next",
+            GraphVerb::Unpatch => "unpatch",
+            GraphVerb::Swap => "swap",
+            GraphVerb::Turn => "turn",
+            GraphVerb::TurnBack => "turn-back",
+            GraphVerb::TurnThird => "turn-third",
+            GraphVerb::TurnThirdBack => "turn-third-back",
+            GraphVerb::Shift => "shift",
+            GraphVerb::ShiftBack => "shift-back",
+            GraphVerb::WireNext => "wire-next",
+            GraphVerb::WirePrevious => "wire-previous",
+            GraphVerb::NextPort => "next-port",
+            GraphVerb::Auto => "auto",
+            GraphVerb::UnpatchAll => "unpatch-all",
             GraphVerb::Undo => "undo",
             GraphVerb::Redo => "redo",
         }
@@ -113,6 +173,21 @@ impl GraphVerb {
             GraphVerb::PathTool => "Path",
             GraphVerb::CircleTool => "Circle",
             GraphVerb::MoveDraw => "Move & draw",
+            GraphVerb::Patch => "Patch",
+            GraphVerb::PatchNext => "Patch & next",
+            GraphVerb::Unpatch => "Unpatch",
+            GraphVerb::Swap => "Swap",
+            GraphVerb::Turn => "Turn",
+            GraphVerb::TurnBack => "Turn back",
+            GraphVerb::TurnThird => "Turn ⅓",
+            GraphVerb::TurnThirdBack => "Turn ⅓ back",
+            GraphVerb::Shift => "Shift",
+            GraphVerb::ShiftBack => "Shift back",
+            GraphVerb::WireNext => "Next on wire",
+            GraphVerb::WirePrevious => "Previous on wire",
+            GraphVerb::NextPort => "Next port",
+            GraphVerb::Auto => "Auto",
+            GraphVerb::UnpatchAll => "Unpatch all",
             GraphVerb::Undo => "Undo",
             GraphVerb::Redo => "Redo",
         }
@@ -129,12 +204,27 @@ impl GraphVerb {
             GraphVerb::Fewer => "−",
             GraphVerb::More => "=",
             GraphVerb::Reverse => "R",
-            GraphVerb::Unpin => "U",
+            GraphVerb::Unpin => "⌥U",
             GraphVerb::SelectAll => "⌘A",
             GraphVerb::SelectTool => "V",
             GraphVerb::PathTool => "P",
             GraphVerb::CircleTool => "O",
-            GraphVerb::MoveDraw => "M",
+            GraphVerb::MoveDraw => "D",
+            GraphVerb::Patch => "A",
+            GraphVerb::PatchNext => "M",
+            GraphVerb::Unpatch => "U",
+            GraphVerb::Swap => "S",
+            GraphVerb::Turn => "K",
+            GraphVerb::TurnBack => "L",
+            GraphVerb::TurnThird => ";",
+            GraphVerb::TurnThirdBack => "'",
+            GraphVerb::Shift => "]",
+            GraphVerb::ShiftBack => "[",
+            GraphVerb::WireNext => "⇧→",
+            GraphVerb::WirePrevious => "⇧←",
+            GraphVerb::NextPort => ".",
+            GraphVerb::Auto => "⇧A",
+            GraphVerb::UnpatchAll => "⇧U",
             GraphVerb::Undo => "⌘Z",
             GraphVerb::Redo => "⇧⌘Z",
         }
@@ -147,6 +237,14 @@ impl GraphVerb {
             command: true,
             ..Mods::default()
         };
+        let shift = Mods {
+            shift: true,
+            ..Mods::default()
+        };
+        let alt = Mods {
+            alt: true,
+            ..Mods::default()
+        };
         match self {
             GraphVerb::Up => (Key::Escape, plain),
             GraphVerb::GoIn => (Key::Enter, plain),
@@ -156,12 +254,27 @@ impl GraphVerb {
             GraphVerb::Fewer => (Key::Char('-'), plain),
             GraphVerb::More => (Key::Char('='), plain),
             GraphVerb::Reverse => (Key::Char('r'), plain),
-            GraphVerb::Unpin => (Key::Char('u'), plain),
+            GraphVerb::Unpin => (Key::Char('u'), alt),
             GraphVerb::SelectAll => (Key::Char('a'), command),
             GraphVerb::SelectTool => (Key::Char('v'), plain),
             GraphVerb::PathTool => (Key::Char('p'), plain),
             GraphVerb::CircleTool => (Key::Char('o'), plain),
-            GraphVerb::MoveDraw => (Key::Char('m'), plain),
+            GraphVerb::MoveDraw => (Key::Char('d'), plain),
+            GraphVerb::Patch => (Key::Char('a'), plain),
+            GraphVerb::PatchNext => (Key::Char('m'), plain),
+            GraphVerb::Unpatch => (Key::Char('u'), plain),
+            GraphVerb::Swap => (Key::Char('s'), plain),
+            GraphVerb::Turn => (Key::Char('k'), plain),
+            GraphVerb::TurnBack => (Key::Char('l'), plain),
+            GraphVerb::TurnThird => (Key::Char(';'), plain),
+            GraphVerb::TurnThirdBack => (Key::Char('\''), plain),
+            GraphVerb::Shift => (Key::Char(']'), plain),
+            GraphVerb::ShiftBack => (Key::Char('['), plain),
+            GraphVerb::WireNext => (Key::Right, shift),
+            GraphVerb::WirePrevious => (Key::Left, shift),
+            GraphVerb::NextPort => (Key::Char('.'), plain),
+            GraphVerb::Auto => (Key::Char('a'), shift),
+            GraphVerb::UnpatchAll => (Key::Char('u'), shift),
             GraphVerb::Undo => (Key::Char('z'), command),
             GraphVerb::Redo => (
                 Key::Char('z'),

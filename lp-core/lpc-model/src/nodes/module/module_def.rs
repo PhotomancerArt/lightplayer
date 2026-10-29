@@ -1,7 +1,10 @@
 use alloc::string::String;
 
 use crate::nodes::ProvenanceDef;
-use crate::{BindingDefs, BindingRef, MapSlot, NodeInvocationSlot, OptionSlot, Slotted, ValueSlot};
+use crate::{
+    BindingDefs, BindingRef, ChannelNameListSlot, MapSlot, NodeInvocationSlot, OptionSlot, Slotted,
+    ValueSlot,
+};
 
 use super::ChannelMetaDef;
 
@@ -29,10 +32,18 @@ pub struct ModuleDef {
     /// ambiguous until the author picks") becomes authorable, and where an
     /// export slot publishes outward.
     pub bindings: BindingDefs,
+    /// The channels this module takes from wherever it is placed (bare
+    /// names: `["palette", "detail"]`). The mirror of an export: a declared
+    /// input lists in the module's host scope — through a playlist entry's
+    /// sink, to the playlist's level — so the host's panel offers one
+    /// control every module that declares it follows, until a module's own
+    /// value cuts it loose (modules.md R2/R7; playlists-on-the-bus D3–D5).
+    /// Names only: label and range come from the slots bound to the
+    /// channel (R9). Absent declares nothing.
+    pub inputs: OptionSlot<ChannelNameListSlot>,
     /// Authored exports (R7): local produced-slot name → the inner-scope
-    /// channel it mirrors (`bus:` ref form). The runtime interpretation —
-    /// the slot mirroring the inner channel and publishing per R4 —
-    /// arrives with the module runtime; here the def only carries data.
+    /// channel it mirrors (`bus:` ref form), registered by the loader as
+    /// a binding that publishes into the containing scope (R4).
     pub exports: MapSlot<String, ValueSlot<BindingRef>>,
     /// Per-channel authored meta overrides for this module's scope
     /// (R9 / Q1 curation escape hatch).
@@ -209,12 +220,46 @@ mod tests {
         let bare = NodeDef::read_json(&registry, r#"{ "kind": "Module", "nodes": {} }"#)
             .expect("bare module");
         let text = bare.write_json(&registry).expect("write bare");
-        for key in ["bindings", "exports", "meta", "provenance"] {
+        for key in ["bindings", "inputs", "exports", "meta", "provenance"] {
             assert!(
                 !text.contains(key),
                 "{key} must not serialize when absent: {text}"
             );
         }
+    }
+
+    /// A pattern declares what it takes (playlists-on-the-bus D4): the list
+    /// round-trips byte for byte, beside `exports`, and a module without it
+    /// writes nothing new.
+    #[test]
+    fn declared_inputs_round_trip_byte_identically() {
+        let registry = registry();
+        let json = r#"{
+  "kind": "Module",
+  "nodes": {
+    "shader": {
+      "ref": "./shader.json"
+    }
+  },
+  "inputs": [
+    "palette",
+    "detail"
+  ],
+  "provenance": {
+    "author": "Photomancer",
+    "version": "1",
+    "license": "CC0-1.0"
+  }
+}
+"#;
+        let def = NodeDef::read_json(&registry, json).expect("inputs parse");
+        let NodeDef::Module(module) = &def else {
+            panic!("expected module def");
+        };
+        let inputs = module.inputs.data.as_ref().expect("inputs");
+        assert!(inputs.value().contains("palette"));
+        assert!(inputs.value().contains("detail"));
+        assert_eq!(def.write_json(&registry).expect("re-write"), json);
     }
 
     fn registry() -> SlotShapeRegistry {

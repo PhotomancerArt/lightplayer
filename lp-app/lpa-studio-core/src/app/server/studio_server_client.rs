@@ -15,8 +15,8 @@ use lpc_model::{
 };
 use lpc_wire::{
     ProjectReadEvent, ProjectReadRequest, WireCreateNodeRequest, WireCreateNodeResponse,
-    WireNodeCommand, WireNodeCommandResponse, WireOverlayMutationRequest, WireProjectHandle,
-    WireProjectInventoryReadResponse, WireRemoveNodeRequest, WireRemoveNodeResponse,
+    WireOverlayMutationRequest, WireProjectHandle, WireProjectInventoryReadResponse,
+    WireRemoveNodeRequest, WireRemoveNodeResponse,
 };
 
 use crate::app::project::demo_project::{
@@ -545,12 +545,6 @@ pub struct StudioRemoveNode {
     pub logs: Vec<UiLogDraft>,
 }
 
-/// Outcome of a runtime node command dispatch.
-pub struct StudioNodeCommand {
-    pub response: WireNodeCommandResponse,
-    pub logs: Vec<UiLogDraft>,
-}
-
 /// A panel command's response plus any server logs it produced.
 pub struct StudioPanelCommand {
     pub response: lpc_wire::WirePanelCommandResponse,
@@ -760,25 +754,6 @@ impl StudioServerClient {
         let mut logs = map_client_events(response.events);
         logs.extend(self.take_pending_logs());
         Ok(StudioPanelCommand {
-            response: response.value,
-            logs,
-        })
-    }
-
-    pub async fn node_command(
-        &mut self,
-        handle_id: u32,
-        node: NodeId,
-        command: WireNodeCommand,
-    ) -> Result<StudioNodeCommand, UiError> {
-        let response = self
-            .client
-            .project_node_command(WireProjectHandle::new(handle_id), node, command)
-            .await
-            .map_err(map_client_error)?;
-        let mut logs = self.absorb_events(response.events);
-        logs.extend(self.take_pending_logs());
-        Ok(StudioNodeCommand {
             response: response.value,
             logs,
         })

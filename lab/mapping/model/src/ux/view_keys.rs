@@ -13,6 +13,8 @@ use crate::domain::node::NodeId;
 use crate::domain::placement::Placement;
 use crate::domain::target::Target;
 use crate::ux::editor::Editor;
+use crate::ux::patching::Armed;
+use crate::ux::port_grouping::PortGrouping;
 use crate::ux::ui::LayoutKind;
 
 /// What the nodes and their faces depend on (`Editor::view_nodes`).
@@ -25,6 +27,8 @@ pub struct NodesKey {
     scale: f64,
     pinning: bool,
     layout: LayoutKind,
+    armed: Option<Armed>,
+    grouping: PortGrouping,
 }
 
 /// What the edges depend on (`Editor::view_edges`).
@@ -55,6 +59,8 @@ impl PartialEq for NodesKey {
             && self.scale == o.scale
             && self.pinning == o.pinning
             && self.layout == o.layout
+            && self.armed == o.armed
+            && self.grouping == o.grouping
     }
 }
 
@@ -77,6 +83,8 @@ impl Editor {
             scale: self.camera.scale,
             pinning: self.debug.pinning,
             layout: self.layout(),
+            armed: self.armed.clone(),
+            grouping: self.grouping,
         }
     }
 

@@ -12,11 +12,13 @@
 //! its action does, so the bar stays still while you point around.
 
 use crate::domain::component::ComponentKind;
+use crate::domain::patch_edits::OnWire;
 use crate::domain::project::Project;
 use crate::domain::target::Target;
 use crate::ux::editor::{Editor, Gesture, Tool};
 use crate::ux::graph_verb::GraphVerb;
 use crate::ux::handle::{HandleKind, SizeEdge};
+use crate::ux::patching::{ArmVerb, Armed, PairEnd};
 use crate::ux::props::common_props;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -83,6 +85,13 @@ impl Editor {
             h("⇧2", "frame selection"),
             hv("⌘Z", "undo", &[GraphVerb::Undo]),
         ];
+        if let Some(armed) = &self.armed {
+            return HintBar {
+                lead: self.armed_lead(armed),
+                hints: self.armed_hints(),
+                view,
+            };
+        }
         let (lead, hints) = match &self.gesture {
             Gesture::Moving { .. } => (
                 "Moving".into(),
@@ -229,8 +238,8 @@ impl Editor {
                     &[GraphVerb::Fewer, GraphVerb::More],
                 ));
             }
-            if sel.iter().all(|t| f.has_direction(t)) {
-                out.push(hv("r", "reverse", &[GraphVerb::Reverse]));
+            if self.move_draw && sel.iter().all(|t| f.has_direction(t)) {
+                out.push(hv("R", "reverse", &[GraphVerb::Reverse]));
             }
             if self.move_draw
                 && self
@@ -238,8 +247,9 @@ impl Editor {
                     .iter()
                     .any(|n| f.node(n).is_some_and(|x| x.pinned.is_some()))
             {
-                out.push(hv("U", "unpin", &[GraphVerb::Unpin]));
+                out.push(hv("⌥U", "unpin", &[GraphVerb::Unpin]));
             }
+            out.extend(self.patch_hints());
         }
         out.push(hv("⌘A", "select all", &[GraphVerb::SelectAll]));
         if self.move_draw {
@@ -249,13 +259,145 @@ impl Editor {
                 &[GraphVerb::PathTool, GraphVerb::CircleTool],
             ));
         }
-        out.push(hv("M", "move & draw", &[GraphVerb::MoveDraw]));
+        out.push(hv("D", "move & draw", &[GraphVerb::MoveDraw]));
+        out
+    }
+
+    /// The patching keys for the selection (`patching.rs`): what a hand
+    /// patch can do to it right now.
+    fn patch_hints(&self) -> Vec<Hint> {
+        let p = &self.project;
+        let mut out = Vec::new();
+        let objects = self.selected_objects();
+        let on_wire = !objects.is_empty()
+            && objects.len() == self.selection.len()
+            && objects
+                .iter()
+                .all(|o| !matches!(p.on_wire(o), OnWire::Nowhere));
+        if let Some(end) = self.selected_end() {
+            out.push(hv(
+                "A · M",
+                "patch",
+                &[GraphVerb::Patch, GraphVerb::PatchNext],
+            ));
+            if matches!(end, PairEnd::Object(_)) && on_wire {
+                out.push(hv("S", "swap", &[GraphVerb::Swap]));
+            }
+        }
+        if on_wire {
+            if !self.move_draw {
+                out.push(hv("R", "reverse", &[GraphVerb::Reverse]));
+            }
+            out.push(hv("K L", "turn", &[GraphVerb::Turn, GraphVerb::TurnBack]));
+            out.push(hv(
+                "; '",
+                "turn ⅓",
+                &[GraphVerb::TurnThird, GraphVerb::TurnThirdBack],
+            ));
+            out.push(hv(
+                "[ ]",
+                "shift",
+                &[GraphVerb::ShiftBack, GraphVerb::Shift],
+            ));
+            if objects
+                .iter()
+                .all(|o| matches!(p.on_wire(o), OnWire::Placed { .. }))
+            {
+                out.push(hv("U", "unpatch", &[GraphVerb::Unpatch]));
+            }
+        }
+        let on_ports = !p.wire_ports().is_empty()
+            && (on_wire
+                || self.selected_end().is_some()
+                || self
+                    .selection
+                    .iter()
+                    .any(|t| matches!(t, Target::Port { .. } | Target::Pixel { .. })));
+        if on_ports && self.wire_has_places() {
+            out.push(hv(
+                "⇧← ⇧→",
+                "along the wire",
+                &[GraphVerb::WirePrevious, GraphVerb::WireNext],
+            ));
+        }
+        if on_ports && self.next_port_segment().is_some() {
+            out.push(hv(".", "next port", &[GraphVerb::NextPort]));
+        }
+        if let Some(fixture) = self.selection.first().and_then(|t| p.fixture_of_target(t)) {
+            out.push(hv(
+                "⇧A",
+                if p.is_auto(&fixture) {
+                    "auto off"
+                } else {
+                    "auto on"
+                },
+                &[GraphVerb::Auto],
+            ));
+            let placed = p.fixture(&fixture).is_some_and(|f| {
+                f.places.iter().any(|r| {
+                    r.on != crate::domain::patch_place::PatchTarget::Fixture && r.wire.is_some()
+                })
+            });
+            if placed {
+                out.push(hv("⇧U", "unpatch all", &[GraphVerb::UnpatchAll]));
+            }
+        }
+        out
+    }
+
+    /// The bar's lead while armed: what the pair is waiting for.
+    /// It names the candidate in focus too, the cursor note's words, since
+    /// at the keyboard the cursor may be nowhere near.
+    fn armed_lead(&self, armed: &Armed) -> String {
+        if let Some(note) = self.cursor_note() {
+            return note;
+        }
+        let from = self.end_words(&armed.from);
+        match armed.verb {
+            ArmVerb::Patch => format!("Patching {from} · nothing to pair with"),
+            ArmVerb::Swap => format!("Swapping {from} · nothing to swap with"),
+        }
+    }
+
+    fn armed_hints(&self) -> Vec<Hint> {
+        let swap = self.armed.as_ref().is_some_and(|a| a.verb == ArmVerb::Swap);
+        let mut out = vec![
+            h("← →", "candidates"),
+            h("click", if swap { "swap with this" } else { "patch here" }),
+            h("Enter", if swap { "swap" } else { "patch" }),
+        ];
+        if !swap {
+            out.push(hv("M", "patch & next", &[GraphVerb::PatchNext]));
+        }
+        out.push(h("Esc", "cancel"));
         out
     }
 
     /// The note beside the cursor during a gesture.
     pub fn cursor_note(&self) -> Option<String> {
         let f = &self.project;
+        if let Some(armed) = &self.armed {
+            let other = self.focused_candidate()?;
+            let (verb, a, b) = match armed.verb {
+                ArmVerb::Patch => ("Patch", &armed.from, &other),
+                ArmVerb::Swap => ("Swap", &armed.from, &other),
+            };
+            // Say the object first: "Patch panel 7 to Box 1 port 2 …".
+            let (object, place) = match (a, b) {
+                (PairEnd::Segment { .. }, o) => (o, a),
+                _ => (a, b),
+            };
+            let joint = if armed.verb == ArmVerb::Swap {
+                "with"
+            } else {
+                "to"
+            };
+            return Some(format!(
+                "{verb} {} {joint} {}",
+                self.end_words(object),
+                self.end_words(place)
+            ));
+        }
         match &self.gesture {
             Gesture::Boxing { .. } => {
                 let n = self.selection.len();

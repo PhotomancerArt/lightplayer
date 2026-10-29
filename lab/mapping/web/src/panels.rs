@@ -4,8 +4,8 @@
 
 use dioxus::prelude::*;
 use lab_mapping_model::{
-    GraphInput, Hint, HintBar as Bar, HintKind, Notice, NoticeKind, Prop, PropEdit, PropKind,
-    PropValue, UiInspector, UiItem, UiTree,
+    GraphInput, Hint, HintBar as Bar, HintKind, Notice, NoticeKind, PatchInput, Prop, PropEdit,
+    PropKind, PropValue, UiInspector, UiItem, UiTree,
 };
 
 use crate::graph_editor::GraphEditor;
@@ -134,6 +134,174 @@ fn InspectorItem(ed: GraphEditor, item: UiItem) -> Element {
             }
         },
         UiItem::Prop { prop, locked } => rsx! { PropRow { ed: ed.clone(), prop, locked } },
+        UiItem::PatchChoice {
+            label,
+            options,
+            chosen,
+            reset,
+            field,
+        } => {
+            let choose = ed.clone();
+            rsx! {
+                div { class: "prop",
+                    span { class: "prop-label", "{label}" }
+                    div { class: "patch-own",
+                        select {
+                            class: "choice",
+                            onkeydown: move |evt| evt.stop_propagation(),
+                            onchange: move |evt| {
+                                if let Ok(option) = evt.value().parse::<usize>() {
+                                    choose.input(GraphInput::Patch(PatchInput::Choose { field, option }));
+                                }
+                            },
+                            if chosen.is_none() {
+                                option { value: "", selected: true, disabled: true, "mixed" }
+                            }
+                            for (i, word) in options.iter().enumerate() {
+                                option { value: "{i}", selected: chosen == Some(i), "{word}" }
+                            }
+                        }
+                        if let Some(parent) = reset {
+                            button {
+                                class: "patch-button",
+                                tabindex: "-1",
+                                title: "Follow {parent} again",
+                                onmousedown: move |evt| evt.prevent_default(),
+                                onclick: move |_| {
+                                    ed.input(GraphInput::Patch(PatchInput::Reset { field }));
+                                },
+                                "Reset"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        UiItem::PatchInherited {
+            label,
+            value,
+            from,
+            field,
+        } => {
+            let over = ed.clone();
+            rsx! {
+                div { class: "prop",
+                    span { class: "prop-label", "{label}" }
+                    div { class: "patch-inherited",
+                        div { class: "patch-inherited-line",
+                            span { class: "patch-value", "{value}" }
+                            button {
+                                class: "patch-button",
+                                tabindex: "-1",
+                                title: "Give it a {label} of its own",
+                                onmousedown: move |evt| evt.prevent_default(),
+                                onclick: move |_| {
+                                    over.input(GraphInput::Patch(PatchInput::Override { field }));
+                                },
+                                "Override"
+                            }
+                        }
+                        if let Some((words, target)) = from {
+                            button {
+                                class: "patch-from",
+                                tabindex: "-1",
+                                title: "Select {words}",
+                                onmousedown: move |evt| evt.prevent_default(),
+                                onclick: move |_| {
+                                    ed.input(GraphInput::Select(vec![target.clone()]));
+                                },
+                                "from {words} ↗"
+                            }
+                        } else {
+                            span { class: "patch-from-default", "by default" }
+                        }
+                    }
+                }
+            }
+        }
+        UiItem::Select { text, target } => rsx! {
+            div { class: "fact action-fact",
+                button {
+                    class: "action-fact-button",
+                    tabindex: "-1",
+                    onmousedown: move |evt| evt.prevent_default(),
+                    onclick: move |_| {
+                        ed.input(GraphInput::Select(vec![target.clone()]));
+                    },
+                    "{text}"
+                }
+            }
+        },
+        UiItem::PatchHere { options } => rsx! {
+            div { class: "prop",
+                span { class: "prop-label", "Patch here" }
+                select {
+                    class: "choice",
+                    onkeydown: move |evt| evt.stop_propagation(),
+                    onchange: move |evt| {
+                        if let Ok(option) = evt.value().parse::<usize>() {
+                            ed.input(GraphInput::Patch(PatchInput::PatchHere { option }));
+                        }
+                    },
+                    option { value: "", selected: true, disabled: true, "Choose an object…" }
+                    for (i, word) in options.iter().enumerate() {
+                        option { value: "{i}", "{word}" }
+                    }
+                }
+            }
+        },
+        UiItem::PatchNumber {
+            label,
+            value,
+            note,
+            field,
+        } => {
+            let (down, up) = (ed.clone(), ed.clone());
+            let shown = value.map_or_else(|| "mixed".to_string(), |v| v.to_string());
+            rsx! {
+                div { class: "prop",
+                    span { class: "prop-label", "{label}" }
+                    div { class: "num",
+                        button {
+                            tabindex: "-1",
+                            onmousedown: move |evt| evt.prevent_default(),
+                            onclick: move |_| {
+                                down.input(GraphInput::Patch(PatchInput::Nudge { field, by: -1 }));
+                            },
+                            "−"
+                        }
+                        span { class: "num-value", "{shown}" }
+                        button {
+                            tabindex: "-1",
+                            onmousedown: move |evt| evt.prevent_default(),
+                            onclick: move |_| {
+                                up.input(GraphInput::Patch(PatchInput::Nudge { field, by: 1 }));
+                            },
+                            "+"
+                        }
+                        if let Some(note) = note {
+                            span { class: "num-note", "{note}" }
+                        }
+                    }
+                }
+            }
+        }
+        UiItem::Action { text, verb } => rsx! {
+            div { class: "fact action-fact",
+                span { "{text}" }
+                button {
+                    class: "action-fact-button",
+                    title: "{verb.keys()}",
+                    tabindex: "-1",
+                    onmousedown: move |evt| evt.prevent_default(),
+                    onclick: move |_| {
+                        ed.input(GraphInput::Verb(verb));
+                    },
+                    "{verb.label()} "
+                    kbd { "{verb.keys()}" }
+                }
+            }
+        },
     }
 }
 
@@ -241,7 +409,7 @@ fn PropRow(ed: GraphEditor, prop: Prop, locked: bool) -> Element {
     rsx! {
         div {
             class: "prop",
-            title: if locked { "Move & draw is off · M turns it on" } else { "" },
+            title: if locked { "Move & draw is off · D turns it on" } else { "" },
             span { class: "prop-label", "{prop.desc.label}" }
             {control}
             if mixed {

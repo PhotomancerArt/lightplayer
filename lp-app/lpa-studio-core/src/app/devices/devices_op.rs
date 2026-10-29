@@ -226,17 +226,46 @@ impl ControllerOp for DevicesOp {
                  The backup stays in this browser.",
                 "continue",
             )),
+            // The install's one question: the board runs somebody else's
+            // firmware, and installing LightPlayer replaces it. The user's
+            // decision, never an assistant's (D7: Lasting). The card's
+            // offer replaces this copy with words that name what is there
+            // (`device_replace_view`).
+            Action::ConfirmFlashReplace { .. } => ActionMeta::new(
+                "Replace",
+                "Install LightPlayer over the firmware this board runs.",
+                ActionPriority::Primary,
+            )
+            .lasting(ActionConfirmation::new(
+                "Replace what this board runs?",
+                "Installing LightPlayer replaces the firmware on this board, and anything \
+                 stored with it may go too. Your library copies are untouched.",
+                "replace",
+            )),
+            // Which board it is: a file on the board, written again by the
+            // next answer, and the board restarts to read it. Routine; the
+            // agent may answer it.
+            Action::SetBoard { .. } => ActionMeta::new(
+                "Which board is this?",
+                "Pick the board so its pins are right. Studio saves it on the board and \
+                 restarts it.",
+                ActionPriority::Secondary,
+            ),
             Action::Identify { .. } => ActionMeta::new(
                 "Identify again",
                 "Ask the board what it is, right now.",
                 ActionPriority::Secondary,
             ),
-            // Whatever the chip ran before is gone: the user's call, even
-            // when an assistant proposes it (D7: Lasting, so the button arms
-            // and the agent hands it over).
+            // The op's own level is Lasting (D7): a current LightPlayer's
+            // USB update keeps it. The install offers (a needs-firmware
+            // face, an older LightPlayer) are Routine at the press — the
+            // board is read before anything is written, and replacing
+            // somebody else's firmware is asked inside the activity
+            // (`ConfirmFlashReplace`).
             Action::Flash { .. } => ActionMeta::new(
                 "Flash firmware",
-                "Write LightPlayer firmware for the picked board onto this chip.",
+                "Install LightPlayer on this board. Studio reads which chip it is and writes \
+                 the firmware for it.",
                 ActionPriority::Primary,
             )
             .lasting(ActionConfirmation::new(
@@ -401,8 +430,8 @@ mod tests {
             Action::Identify { device },
             Action::Flash {
                 device,
-                board_id: "seeed-xiao-esp32c6".to_string(),
-                build_id: "esp32c6-4mb".to_string(),
+                board_id: Some("seeed-xiao-esp32c6".to_string()),
+                build: lpa_devices::FlashBuildChoice::Fixed("esp32c6-4mb".to_string()),
                 park_first: false,
                 name: None,
                 restore_backup: false,
@@ -436,8 +465,8 @@ mod tests {
         let device = DeviceId(1);
         let flash = Action::Flash {
             device,
-            board_id: "seeed/xiao-esp32-c6".to_string(),
-            build_id: "esp32c6-4mb".to_string(),
+            board_id: Some("seeed/xiao-esp32-c6".to_string()),
+            build: lpa_devices::FlashBuildChoice::Fixed("esp32c6-4mb".to_string()),
             park_first: false,
             name: None,
             restore_backup: false,

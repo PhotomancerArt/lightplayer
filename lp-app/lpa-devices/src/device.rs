@@ -23,16 +23,17 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::activity::FlashBuildChoice;
 use crate::activity::activity_cell::Reducer;
 use crate::activity::erase::EraseActivity;
 use crate::activity::flash::FlashActivity;
 use crate::activity::identify::IdentifyActivity;
 use crate::activity::push::PushActivity;
 use crate::activity::remove_project::RemoveProjectActivity;
+use crate::activity::set_board::SetBoardActivity;
 use crate::activity::update::{UPDATE_DEADLINE_MS, UpdateActivity};
 use crate::activity::{
-    ActivityCell, ActivityCtx, ActivityKind, ActivityOutcome, ActivityProgress, ActivityStep,
-    UpdateIntentFacts,
+    ActivityCell, ActivityCtx, ActivityKind, ActivityOutcome, ActivityStep, UpdateIntentFacts,
 };
 use crate::event::{Action, ActivityMarker, Command, EffectId, Event, Input};
 use crate::evidence::{Classification, Evidence};
@@ -113,6 +114,11 @@ pub struct Device {
     /// board shows, and the erase cleared the record's firmware label.
     #[serde(default)]
     erased: bool,
+    /// When this browser first met the board ([`DeviceRecord::added_at`]):
+    /// the roster view's order. `None` on a link still identifying; set
+    /// when the roster makes it a device, and from the record on load.
+    #[serde(default)]
+    pub added_at: Option<Millis>,
 }
 
 impl Device {
@@ -129,6 +135,7 @@ impl Device {
             late_hello_reidentifies: false,
             next_effect_id: 0,
             erased: false,
+            added_at: None,
         }
     }
 
@@ -136,6 +143,7 @@ impl Device {
         let mut device = Self::new(record.device, record.identity.clone());
         device.intent.name = record.name.clone();
         device.intent.autoconnect = record.autoconnect;
+        device.added_at = record.added_at;
         device.record = Some(record);
         device
     }
@@ -324,6 +332,7 @@ impl Device {
             Some(endpoint) => endpoint.is_bluetooth(),
             None => record.last_over_bluetooth,
         };
+        record.added_at = earliest_added(self.added_at, record.added_at);
         self.record = Some(record.clone());
         record
     }
@@ -445,13 +454,14 @@ impl Device {
     }
 
     /// Spawn the Flash activity, unless the device is already busy (I5) or
-    /// has no link to flash over. The build id was resolved by the app from
-    /// (board, detected chip); the model treats both as opaque.
+    /// has no link to flash over. The build is the app's chip table (or one
+    /// build), answered in the bootloader session; the model treats both
+    /// the build and the board as opaque.
     pub(crate) fn spawn_flash(
         &mut self,
         now: Millis,
-        board_id: &str,
-        build_id: &str,
+        board_id: Option<&str>,
+        build: &FlashBuildChoice,
         park_first: bool,
         restore_backup: bool,
         ctx: &mut ModelCtx<'_>,
@@ -462,8 +472,8 @@ impl Device {
         let effect_id = self.mint_effect_id();
         let mut reducer = FlashActivity::new(
             self.id,
-            board_id.to_string(),
-            build_id.to_string(),
+            board_id.map(str::to_string),
+            build.clone(),
             park_first,
         )
         .with_restore_backup(restore_backup);
@@ -540,6 +550,38 @@ impl Device {
             now,
             now.plus_ms(ctx.config.push_deadline_ms),
             Reducer::RemoveProject(reducer),
+        );
+        self.install_activity(now, cell, effect_id, &commands, ctx);
+        commands
+    }
+
+    /// Spawn the Set-board activity ("Which board is this?"): save
+    /// `board_id` as the board's model. Only on a board that answers the
+    /// app protocol — the write is a conversation with its firmware.
+    pub(crate) fn spawn_set_board(
+        &mut self,
+        now: Millis,
+        board_id: &str,
+        ctx: &mut ModelCtx<'_>,
+    ) -> Vec<Command> {
+        if self.activity.is_some() || self.link().is_none() || !self.evidence.has_hello() {
+            return Vec::new();
+        }
+        let effect_id = self.mint_effect_id();
+        let reducer = SetBoardActivity::new(self.id, board_id.to_string());
+        let commands = {
+            let activity_ctx = ActivityCtx {
+                link: self.evidence.link(),
+                evidence: &self.evidence,
+                config: ctx.config,
+                effect_id,
+            };
+            reducer.spawn_commands(&activity_ctx)
+        };
+        let cell = ActivityCell::new(
+            now,
+            now.plus_ms(ctx.config.stamp_deadline_ms),
+            Reducer::SetBoard(reducer),
         );
         self.install_activity(now, cell, effect_id, &commands, ctx);
         commands
@@ -679,7 +721,7 @@ impl Device {
                 self.identify_retries = 0;
                 self.spawn_identify(now, ctx)
             }
-            Action::ConfirmFlashLayout { .. } => {
+            Action::ConfirmFlashLayout { .. } | Action::ConfirmFlashReplace { .. } => {
                 // The user said yes to moving the board's files: the write
                 // starts now, so its supervision budget starts now too —
                 // the consent wait must not have eaten it.
@@ -695,7 +737,7 @@ impl Device {
             }
             Action::Flash {
                 board_id,
-                build_id,
+                build,
                 park_first,
                 name,
                 restore_backup,
@@ -709,7 +751,19 @@ impl Device {
                 if let Some(name) = name {
                     self.intent.name = Some(name.clone());
                 }
-                self.spawn_flash(now, board_id, build_id, *park_first, *restore_backup, ctx)
+                self.spawn_flash(
+                    now,
+                    board_id.as_deref(),
+                    build,
+                    *park_first,
+                    *restore_backup,
+                    ctx,
+                )
+            }
+            Action::SetBoard { board_id, .. } => {
+                // Saving the model implies staying connected to see it boot.
+                self.intent.connection = ConnectionIntent::Connected;
+                self.spawn_set_board(now, board_id, ctx)
             }
             Action::Push { .. } => {
                 // Sending a project implies wanting the board connected.
@@ -724,38 +778,11 @@ impl Device {
             Action::ResetBoard { .. } => {
                 // A reset is a direct gesture, not an activity: one command,
                 // then whatever boots is read. Refused while an activity
-                // runs (I5 — a reset under a flash would wreck it) and
-                // without a link there is nothing to pulse or ask.
+                // runs (I5 — a reset under a flash would wreck it).
                 if self.activity.is_some() {
                     return Vec::new();
                 }
-                let Some(link) = self.link() else {
-                    return Vec::new();
-                };
-                if self.resets_by_request() {
-                    // No reset lines on this link: ask the board to restart
-                    // itself. It answers, THEN resets, which drops the link;
-                    // the transport's own reconnect brings it back and the
-                    // new link identifies like any other. So nothing here
-                    // waits for a boot: a board that does not honour the
-                    // request (below the edit tier, or an embedder with no
-                    // way to reset) answers an error, the card keeps what
-                    // it had, and no ladder is left waiting for a boot that
-                    // never comes.
-                    if !self.evidence.presence.is_open() {
-                        return Vec::new();
-                    }
-                    return vec![Command::Link {
-                        link,
-                        command: LinkCommand::SendFrame(ClientFrame::reboot(REBOOT_REQUEST_ID)),
-                    }];
-                }
-                let mut commands = vec![Command::Link {
-                    link,
-                    command: crate::link::LinkCommand::RunReset(crate::link::ResetKind::Normal),
-                }];
-                commands.extend(self.spawn_identify(now, ctx));
-                commands
+                self.restart(now, ctx)
             }
             Action::ClearFaults { .. } => {
                 // A direct gesture like ResetBoard, and for the same reason:
@@ -903,10 +930,7 @@ impl Device {
         } = event
         {
             if let Some(cell) = &mut self.activity {
-                cell.progress = Some(ActivityProgress {
-                    label: label.clone(),
-                    percent: *percent,
-                });
+                cell.land_progress(label, *percent);
             }
             ctx.journal.note(
                 now,
@@ -1023,8 +1047,23 @@ impl Device {
             effect_id,
         };
         let step = cell.handle(now, input, &mut activity_ctx);
+        // A step's percent belongs to the effect that counted it: when that
+        // effect ends, or another starts, it is over. Kept past it, the
+        // layout read's 100 % stood through the manifest load, the loader
+        // and the baud change before the write's first tick (Yona's phone
+        // install, 2026-10-25).
+        if let Input::Event(Event::ActivityMarker {
+            effect: Some(effect),
+            marker: ActivityMarker::Ended { .. },
+            ..
+        }) = input
+            && cell.current_effect == Some(*effect)
+        {
+            cell.progress = None;
+        }
         if starts_effect(step_commands(&step), effect_id) {
             cell.current_effect = Some(effect_id);
+            cell.progress = None;
         }
         // A reducer waiting on the user (the Flash's layout consent) is
         // bounded by its own deadline; supervision must not evict it first.
@@ -1082,9 +1121,18 @@ impl Device {
                     // is over (its hello would say so too).
                     ActivityKind::Flash | ActivityKind::Update if outcome.is_success() => {
                         self.erased = false;
+                        // The flash ended on the new firmware's own hello: it
+                        // has been heard, so a hello in this same event is not
+                        // the late one an earlier identify was waiting for
+                        // (re-identifying would replace the install's outcome
+                        // on the card with the identify's).
+                        self.late_hello_reidentifies = false;
                     }
                     _ => {}
                 }
+                // A saved board model takes effect at boot: restart the
+                // board now, as Restart would, once the activity is gone.
+                let restart_after = cell.kind == ActivityKind::SetBoard && outcome.is_success();
                 // An update's typed ending outlives the activity on the
                 // evidence (the card's words are made of it) — the driver's
                 // word, or the model's own when the board never came back.
@@ -1100,6 +1148,9 @@ impl Device {
                     ctx,
                 );
                 commands.push(Command::PersistRecord(self.record_snapshot()));
+                if restart_after {
+                    commands.extend(self.restart(now, ctx));
+                }
                 // Silence is the one failure identify can end in, and one
                 // flaky boot window must not strand the card at "no
                 // response" while the intent is still Connected: re-ask on
@@ -1131,6 +1182,41 @@ impl Device {
                 commands
             }
         }
+    }
+
+    /// Restart the board and read what boots: the USB link's reset lines,
+    /// or the wire's `Reboot` request on a network link (which has none).
+    /// Without a link there is nothing to pulse or ask. Shared by
+    /// [`Action::ResetBoard`] and a saved board model (the firmware reads
+    /// its manifest at boot).
+    fn restart(&mut self, now: Millis, ctx: &mut ModelCtx<'_>) -> Vec<Command> {
+        let Some(link) = self.link() else {
+            return Vec::new();
+        };
+        if self.resets_by_request() {
+            // No reset lines on this link: ask the board to restart
+            // itself. It answers, THEN resets, which drops the link;
+            // the transport's own reconnect brings it back and the
+            // new link identifies like any other. So nothing here
+            // waits for a boot: a board that does not honour the
+            // request (below the edit tier, or an embedder with no
+            // way to reset) answers an error, the card keeps what
+            // it had, and no ladder is left waiting for a boot that
+            // never comes.
+            if !self.evidence.presence.is_open() {
+                return Vec::new();
+            }
+            return vec![Command::Link {
+                link,
+                command: LinkCommand::SendFrame(ClientFrame::reboot(REBOOT_REQUEST_ID)),
+            }];
+        }
+        let mut commands = vec![Command::Link {
+            link,
+            command: crate::link::LinkCommand::RunReset(crate::link::ResetKind::Normal),
+        }];
+        commands.extend(self.spawn_identify(now, ctx));
+        commands
     }
 
     fn supervise(&mut self, now: Millis, ctx: &mut ModelCtx<'_>) -> Vec<Command> {
@@ -1395,6 +1481,16 @@ impl Device {
     /// The activity kind currently running, if any.
     pub fn activity_kind(&self) -> Option<ActivityKind> {
         self.activity.as_ref().map(|cell| cell.kind)
+    }
+}
+
+/// The earlier of two first-added times, where `None` (not known yet) never
+/// wins over a time: a link still identifying has none, and merging it into
+/// a board must not forget the board's.
+pub(crate) fn earliest_added(a: Option<Millis>, b: Option<Millis>) -> Option<Millis> {
+    match (a, b) {
+        (Some(a), Some(b)) => Some(a.min(b)),
+        (a, b) => a.or(b),
     }
 }
 

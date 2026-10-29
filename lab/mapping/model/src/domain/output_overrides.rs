@@ -4,7 +4,8 @@
 //! which paint only the output's buffer.
 //!
 //! A selected output breathes across every port, a selected port across
-//! its whole range, and a selected pixel (or a run of them) on its own —
+//! its whole range, a span across its pixels, and a selected pixel (or a
+//! run of them) on its own —
 //! patched or not, so the user can always reach the hardware (D13, D47).
 //! While nothing inside a fixture is selected too, every other pixel of
 //! every output dims to [`DIM`], so the selection is always shown (D16).
@@ -43,6 +44,15 @@ impl OutputOverrides {
                 }
                 Target::Pixel { output, key, index } => {
                     picks.push((output.clone(), Some(key.clone()), Some(*index)))
+                }
+                // A span breathes its own pixels, as a run of selected
+                // pixels does.
+                Target::Span { output, key, .. } => {
+                    if let Some(s) = project.span_of(t) {
+                        for px in s.pixels {
+                            picks.push((output.clone(), Some(key.clone()), Some(px)));
+                        }
+                    }
                 }
                 _ => {}
             }

@@ -237,6 +237,11 @@ fn lp_type_tokens(ty: &Type) -> Result<TokenStream> {
             ::lpc_model::LpType::List(::lpc_model::__private::Box::new(::lpc_model::LpType::U32))
         });
     }
+    if type_is_vec_of(ty, "String") {
+        return Ok(quote! {
+            ::lpc_model::LpType::List(::lpc_model::__private::Box::new(::lpc_model::LpType::String))
+        });
+    }
     Err(syn::Error::new_spanned(
         ty,
         "SlotValue derive cannot infer an LpType for this field yet",
@@ -268,6 +273,11 @@ fn static_lp_type_tokens(ty: &Type) -> Result<TokenStream> {
     if type_is_vec_of(ty, "u32") {
         return Ok(quote! {
             ::lpc_model::StaticLpType::List(&::lpc_model::StaticLpType::U32)
+        });
+    }
+    if type_is_vec_of(ty, "String") {
+        return Ok(quote! {
+            ::lpc_model::StaticLpType::List(&::lpc_model::StaticLpType::String)
         });
     }
     Err(syn::Error::new_spanned(

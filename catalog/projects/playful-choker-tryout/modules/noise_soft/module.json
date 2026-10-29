@@ -5,6 +5,10 @@
       "ref": "./shader.json"
     }
   },
+  "inputs": [
+    "palette",
+    "detail"
+  ],
   "provenance": {
     "author": "Photomancer",
     "version": "1",

@@ -350,22 +350,20 @@ fn option_class(selected: bool) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use lpa_studio_core::{
-        ActionEnablement, DeviceId, FLASH_ALL_BOARDS_PARAM, FLASH_BOARD_PARAM, OfferPath,
-        flash_pending_offer,
-    };
+    use lpa_studio_core::{OfferPath, SET_BOARD_ALL_PARAM, SET_BOARD_PARAM, set_board_offer};
 
     use super::*;
+    use crate::app::board_card::card_test_fixtures::porch_view;
 
     #[test]
     fn a_widened_option_is_drawn_only_with_its_toggle_on() {
-        let offer = blank_c6_flash();
+        let offer = which_board();
         let board = &offer.params()[0];
         let narrowed = visible_options(&offer, board, &OfferArgs::new());
         let widened = visible_options(
             &offer,
             board,
-            &OfferArgs::new().with(FLASH_ALL_BOARDS_PARAM, "true"),
+            &OfferArgs::new().with(SET_BOARD_ALL_PARAM, "true"),
         );
         assert!(!narrowed.is_empty());
         assert!(widened.len() > narrowed.len(), "show all widens the list");
@@ -374,30 +372,30 @@ mod tests {
 
     #[test]
     fn a_stale_pick_falls_back_to_the_offers_own_default() {
-        let offer = blank_c6_flash();
+        let offer = which_board();
         let board = &offer.params()[0];
         let wider = visible_options(
             &offer,
             board,
-            &OfferArgs::new().with(FLASH_ALL_BOARDS_PARAM, "true"),
+            &OfferArgs::new().with(SET_BOARD_ALL_PARAM, "true"),
         )
         .into_iter()
         .find(|option| option.only_with.is_some())
-        .expect("a board outside the chip")
+        .expect("a board outside the fits")
         .value
         .clone();
 
         // Picked while widened, then show-all turned off: the pick is gone.
         let args = OfferArgs::new()
-            .with(FLASH_BOARD_PARAM, &wider)
-            .with(FLASH_ALL_BOARDS_PARAM, "false");
-        assert_eq!(resolved_args(&offer, &args).choice(FLASH_BOARD_PARAM), None);
+            .with(SET_BOARD_PARAM, &wider)
+            .with(SET_BOARD_ALL_PARAM, "false");
+        assert_eq!(resolved_args(&offer, &args).choice(SET_BOARD_PARAM), None);
         assert_eq!(picked_choice(&offer, board, &args), board.default_value());
 
         // Still widened: it stands, and the press binds it.
         let args = OfferArgs::new()
-            .with(FLASH_BOARD_PARAM, &wider)
-            .with(FLASH_ALL_BOARDS_PARAM, "true");
+            .with(SET_BOARD_PARAM, &wider)
+            .with(SET_BOARD_ALL_PARAM, "true");
         assert_eq!(picked_choice(&offer, board, &args), Some(wider));
         assert!(
             pressed_or_refused(&offer, &args)
@@ -409,37 +407,30 @@ mod tests {
 
     #[test]
     fn a_press_that_does_not_bind_reads_as_the_verb_disabled_with_why() {
-        let offer = flash_pending_offer(&pending(None), prefix()).unwrap();
+        let mut view = porch_view();
+        view.board_id = None;
+        let offer = set_board_offer(&view, prefix(), &[]).expect("a C6 fits two");
         let action = pressed_or_refused(&offer, &OfferArgs::new());
         assert_eq!(action.meta().label, offer.label());
         assert!(matches!(
             &action.meta().enablement,
-            ActionEnablement::Disabled { reason } if reason.contains("choose a board")
+            lpa_studio_core::ActionEnablement::Disabled { reason } if reason.contains("choose a board")
         ));
     }
 
-    fn blank_c6_flash() -> UiOffer {
-        flash_pending_offer(&pending(Some("esp32c6")), prefix()).expect("a blank chip flashes")
+    /// "Which board is this?" on a running C6, after an install whose
+    /// fingerprint fit only the XIAO: the other C6 board waits behind the
+    /// toggle.
+    fn which_board() -> UiOffer {
+        set_board_offer(
+            &porch_view(),
+            prefix(),
+            &["seeed/xiao-esp32-c6".to_string()],
+        )
+        .expect("a C6 fits two")
     }
 
     fn prefix() -> OfferPath {
         OfferPath::board(&lpa_studio_core::BoardRef::New(3))
-    }
-
-    fn pending(chip: Option<&str>) -> lpa_studio_core::PendingLinkView {
-        lpa_studio_core::PendingLinkView {
-            link: lpa_studio_core::DeviceLinkId(4),
-            device: DeviceId(3),
-            title: "New device".to_string(),
-            state_label: "New device found".to_string(),
-            detail: None,
-            can_adopt: true,
-            firmware_face: lpa_studio_core::DeviceFirmwareFace::Blank,
-            detected_chip: chip.map(str::to_string),
-            mac: None,
-            firmware_blocked: None,
-            held_by_tab: false,
-            escapes: vec![lpa_studio_core::DeviceEscape::Forget],
-        }
     }
 }

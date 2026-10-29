@@ -44,7 +44,7 @@ pub use pattern_project::{
 pub use playlist::{
     PLAYLIST_CYCLE_SHAPE_NAME, PlaylistCycle, PlaylistDef, PlaylistDefView, PlaylistEntry,
     PlaylistEntryView, PlaylistState, PlaylistStateView, format_playlist_failure_status,
-    parse_playlist_failed_entries, playlist_cycle_lp_type,
+    parse_playlist_failed_entries, playlist_cycle_lp_type, playlist_step,
 };
 pub use power_button::{
     PowerButtonDef, PowerButtonDefView, PowerButtonMode, PowerButtonState, PowerButtonStateView,

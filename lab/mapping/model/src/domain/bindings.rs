@@ -7,7 +7,7 @@
 //!   nearest one — in its own module first, then outward, a module at a
 //!   time (fit-check §6: reads look outward, writes stay local). Among
 //!   writers in one module, the first in attach order (by name).
-//! - **Fixture → output**, over a control channel: the lab's patch rules
+//! - **Fixture → output**, over a control channel: the lab's placements
 //!   ARE this binding, read the product's way (fit-check §1, §6). A rule
 //!   naming an output means the fixture writes the channel that output
 //!   reads, so the rule's output decides the channel and the binding's
@@ -85,15 +85,17 @@ impl Project {
     }
 
     /// The outputs a fixture's control product goes to: every output its
-    /// rules name that is still there, in rule order.
+    /// placements name that is still there, in their order.
     pub fn control_outputs(&self, fixture: &NodeId) -> Vec<NodeId> {
         let mut out: Vec<NodeId> = Vec::new();
         for r in self
             .fixture(fixture)
-            .map(|f| f.rules.as_slice())
+            .map(|f| f.places.as_slice())
             .unwrap_or_default()
         {
-            let o = r.output();
+            let Some(o) = r.wire.as_ref().and_then(|w| w.output()) else {
+                continue;
+            };
             if self.output(o).is_some() && !out.contains(o) {
                 out.push(o.clone());
             }

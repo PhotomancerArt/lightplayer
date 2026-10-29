@@ -17,6 +17,7 @@ use super::flash::FlashActivity;
 use super::identify::IdentifyActivity;
 use super::push::PushActivity;
 use super::remove_project::RemoveProjectActivity;
+use super::set_board::SetBoardActivity;
 use super::update::UpdateActivity;
 use super::update_activity_view::UpdateActivityView;
 use super::update_outcome_facts::UpdateOutcomeFacts;
@@ -33,6 +34,8 @@ pub enum ActivityKind {
     RemoveProject,
     /// An over-the-air update, run in legs across the board's resets.
     Update,
+    /// Saving the board model on a running board ("Which board is this?").
+    SetBoard,
 }
 
 impl ActivityKind {
@@ -45,6 +48,7 @@ impl ActivityKind {
             Self::Erase => "Erasing the flash",
             Self::RemoveProject => "Removing the project",
             Self::Update => "Updating firmware",
+            Self::SetBoard => "Saving the board model",
         }
     }
 
@@ -73,6 +77,9 @@ impl ActivityKind {
             // An update's cancel is never held: it is accepted only while
             // nothing on the board has changed, and then it ends at once.
             Self::Update => config.cancel_grace_ms,
+            // A half-written manifest is the one state to avoid; the push's
+            // grace is the same physics (a short conversation on the wire).
+            Self::SetBoard => config.push_cancel_grace_ms,
         }
     }
 }
@@ -247,25 +254,73 @@ impl ActivityCell {
     }
 
     /// The percent the card shows beside [`Self::label`]: the coarse
-    /// effect's latest, except while a Flash waits for the user's answer —
-    /// the read's closing 100 % is not a reading of the question.
+    /// effect's latest, while its step has work to count. A Flash shows
+    /// none while it waits for the user's answer, restarts or saves the
+    /// board model, nor for the few-kilobyte layout read — whose 100 % came
+    /// almost at once and read as the install being done
+    /// ([`super::FlashStep::shows_percent`]).
     pub fn percent(&self) -> Option<u8> {
-        let waiting = match &self.reducer {
-            Reducer::Flash(flash) => flash.step(None) == super::FlashStep::WaitingForAnswer,
+        let label = self
+            .progress
+            .as_ref()
+            .map(|progress| progress.label.as_str());
+        let shows = match &self.reducer {
+            Reducer::Flash(flash) => flash.step(label).shows_percent(label),
             // An update's percent is its stage's, kept across a gap.
             Reducer::Update(update) => return update.percent(),
-            _ => false,
+            _ => true,
         };
-        match waiting {
-            true => None,
-            false => self.progress.as_ref().and_then(|progress| progress.percent),
+        match shows {
+            true => self.progress.as_ref().and_then(|progress| progress.percent),
+            false => None,
         }
+    }
+
+    /// A Flash activity's step, for the card's words.
+    pub fn flash_step(&self) -> Option<super::FlashStep> {
+        match &self.reducer {
+            Reducer::Flash(flash) => Some(
+                flash.step(
+                    self.progress
+                        .as_ref()
+                        .map(|progress| progress.label.as_str()),
+                ),
+            ),
+            _ => None,
+        }
+    }
+
+    /// Land a coarse effect's progress on the cell. A step's percent
+    /// belongs to its step: a line with no percent (an esptool log, which
+    /// the effects layer forwards as label-only progress so the terminal
+    /// narrates) is narration, and leaves a counted step's label and
+    /// percent standing. Before any percent, it is the best word there is.
+    pub(crate) fn land_progress(&mut self, label: &str, percent: Option<u8>) {
+        let counting = self
+            .progress
+            .as_ref()
+            .is_some_and(|progress| progress.percent.is_some());
+        if percent.is_none() && counting {
+            return;
+        }
+        self.progress = Some(ActivityProgress {
+            label: label.to_string(),
+            percent,
+        });
     }
 
     /// A Flash activity's layout step (C6 repartition), for the card.
     pub fn flash_layout(&self) -> Option<super::FlashLayoutView> {
         match &self.reducer {
             Reducer::Flash(flash) => flash.layout_view(),
+            _ => None,
+        }
+    }
+
+    /// A Flash activity's replace question, while it waits on the user.
+    pub fn flash_replace(&self) -> Option<super::FlashReplaceView> {
+        match &self.reducer {
+            Reducer::Flash(flash) => flash.replace_view(),
             _ => None,
         }
     }
@@ -368,6 +423,7 @@ pub(crate) enum Reducer {
     Erase(EraseActivity),
     RemoveProject(RemoveProjectActivity),
     Update(UpdateActivity),
+    SetBoard(SetBoardActivity),
 }
 
 impl ActivityReducer for Reducer {
@@ -379,6 +435,7 @@ impl ActivityReducer for Reducer {
             Self::Erase(reducer) => reducer.kind(),
             Self::RemoveProject(reducer) => reducer.kind(),
             Self::Update(reducer) => reducer.kind(),
+            Self::SetBoard(reducer) => reducer.kind(),
         }
     }
 
@@ -390,6 +447,7 @@ impl ActivityReducer for Reducer {
             Self::Erase(reducer) => reducer.handle(now, input, ctx),
             Self::RemoveProject(reducer) => reducer.handle(now, input, ctx),
             Self::Update(reducer) => reducer.handle(now, input, ctx),
+            Self::SetBoard(reducer) => reducer.handle(now, input, ctx),
         }
     }
 
@@ -401,6 +459,7 @@ impl ActivityReducer for Reducer {
             Self::Erase(reducer) => reducer.next_deadline(),
             Self::RemoveProject(reducer) => reducer.next_deadline(),
             Self::Update(reducer) => reducer.next_deadline(),
+            Self::SetBoard(reducer) => reducer.next_deadline(),
         }
     }
 }

@@ -3,9 +3,11 @@
 //! and patch, a lamp's place, and the properties you can edit.
 
 use crate::domain::node::{NodeId, NodeKind};
+use crate::domain::patch_edits::OnWire;
 use crate::domain::project::Project;
 use crate::domain::target::Target;
 use crate::ux::editor::Editor;
+use crate::ux::graph_verb::GraphVerb;
 use crate::ux::props::common_props;
 use crate::ux::ui::{UiCrumb, UiInspector, UiItem, UiSection};
 
@@ -74,15 +76,36 @@ impl Editor {
             out.push(section(&format!("{} selected", selection.len()), items));
         }
         if let [t] = selection.as_slice()
-            && let Some(facts) = node_facts(p, t, self.runs_for_real)
+            && let Some(mut facts) = node_facts(p, t, self.runs_for_real)
         {
+            // A fixture's Patch section leads with the same rows as a
+            // component's or an object's (`patch_section.rs`).
+            if let Some(rows) = self.patch_section()
+                && let Some(patch) = facts
+                    .iter_mut()
+                    .find(|x| x.title.as_deref() == Some("Patch"))
+            {
+                patch.items.splice(0..0, rows);
+            }
             out.extend(facts);
+        }
+        if let [t @ Target::Span { .. }] = selection.as_slice()
+            && let Some(span) = p.span_of(t)
+        {
+            out.push(section("Span", self.span_items(t, &span)));
+        }
+        let fixtures_only = selection
+            .iter()
+            .all(|t| matches!(t, Target::Node(id) if p.fixture(id).is_some()));
+        if !fixtures_only && let Some(rows) = self.patch_section() {
+            out.push(section("Patch", rows));
         }
         if let [t @ (Target::Component(_) | Target::Object(_))] = selection.as_slice()
             && let Some(spans) = span_facts(p, t)
         {
             out.push(section("Spans", spans));
         }
+
         if let [t @ Target::Lamp { object, index }] = selection.as_slice()
             && let Some(info) = lamp_fact(p, t, object, *index)
         {
@@ -167,6 +190,34 @@ fn project_facts(p: &Project) -> Vec<String> {
     facts
 }
 
+/// A fixture's patch at a glance: auto, and how many of its objects are
+/// on the wire.
+fn patch_facts(p: &Project, fixture: &NodeId) -> Vec<UiItem> {
+    let objects: Vec<&crate::domain::object::Object> = p
+        .objects_in(fixture)
+        .into_iter()
+        .filter(|o| !o.lamps.is_empty())
+        .collect();
+    let patch = p.effective_patch();
+    let on = objects.iter().filter(|o| patch.lands(&o.id)).count();
+    let by_hand = objects
+        .iter()
+        .filter(|o| matches!(p.on_wire(&o.id), OnWire::Placed { .. }))
+        .count();
+    let mut out = vec![UiItem::Fact(format!(
+        "{on} of {} on the wire · {} waiting",
+        objects.len(),
+        objects.len() - on
+    ))];
+    if by_hand > 0 {
+        out.push(UiItem::Action {
+            text: format!("{by_hand} patched by hand"),
+            verb: GraphVerb::UnpatchAll,
+        });
+    }
+    out
+}
+
 /// Where a drawn thing's lamps land: one line per span, its pixels on its
 /// port. `None` for one with no lamps.
 fn span_facts(p: &Project, t: &Target) -> Option<Vec<UiItem>> {
@@ -183,7 +234,7 @@ fn span_facts(p: &Project, t: &Target) -> Option<Vec<UiItem>> {
     }
     let lines: Vec<UiItem> = p
         .effective_patch()
-        .spans
+        .pixel_runs
         .iter()
         .filter(|s| objects.contains(&s.object))
         .map(|s| {
@@ -287,11 +338,14 @@ fn node_facts(p: &Project, t: &Target, runs_for_real: bool) -> Option<Vec<UiSect
                     }
                     None => format!("Nothing writes {}: its lamps have no colour", fx.reads),
                 }));
-                if fx.rules.is_empty() {
-                    rules.push(UiItem::Rule("No rule: its lamps go nowhere yet".into()));
+                // Auto and how much is on the wire first, with what changes
+                // them (patching by hand), then the rules themselves.
+                rules.extend(patch_facts(p, id));
+                if fx.places.is_empty() {
+                    rules.push(UiItem::Rule("Not placed: its lamps go nowhere yet".into()));
                 }
-                for r in &fx.rules {
-                    rules.push(UiItem::Rule(p.rule_label(r)));
+                for r in &fx.places {
+                    rules.push(UiItem::Rule(p.place_label(id, r)));
                 }
                 let lands: Vec<String> = p.ports_of(t).iter().map(|x| p.long_label(x)).collect();
                 if !lands.is_empty() {
@@ -303,7 +357,12 @@ fn node_facts(p: &Project, t: &Target, runs_for_real: bool) -> Option<Vec<UiSect
                     .filter(|u| &u.fixture == id)
                     .map(|u| u.lamps.len())
                     .sum();
-                let working = fx.rules.iter().any(|r| p.node(r.output()).is_some());
+                let working = fx.places.iter().any(|r| {
+                    r.wire
+                        .as_ref()
+                        .and_then(|w| w.output())
+                        .is_some_and(|o| p.node(o).is_some())
+                });
                 if left > 0 && working {
                     rules.push(UiItem::Rule(format!(
                         "{left} lamps past the end of its ports"
@@ -373,7 +432,7 @@ fn node_facts(p: &Project, t: &Target, runs_for_real: bool) -> Option<Vec<UiSect
             )));
             let mut by: Vec<UiItem> = Vec::new();
             for s in patch
-                .spans
+                .pixel_runs
                 .iter()
                 .filter(|s| &s.output == output && &s.port == key)
             {
@@ -448,5 +507,52 @@ fn orders(p: &Project, output: &NodeId, key: &str) -> String {
         0 => String::new(),
         1 => format!(" · {}", words[0]),
         _ => format!(" · {} (mixed)", words.join(" + ")),
+    }
+}
+
+impl Editor {
+    /// A span in the inspector: what's on it, a way to its object, or for a
+    /// gap, what can be patched here (plan D13).
+    fn span_items(&self, t: &Target, span: &crate::domain::span::Span) -> Vec<UiItem> {
+        let p = &self.project;
+        let port = t
+            .port_of_pixel()
+            .map(|port| p.long_label(&port))
+            .unwrap_or_default();
+        let pixels = if span.pixels.len() == 1 {
+            format!("Pixel {}", span.pixels.start)
+        } else {
+            format!(
+                "Pixels {}–{}",
+                span.pixels.start,
+                span.pixels.end.saturating_sub(1)
+            )
+        };
+        match &span.object {
+            Some(o) => {
+                let target = p.object_target(o);
+                vec![
+                    UiItem::Fact(format!("{pixels} of {port}")),
+                    UiItem::Select {
+                        text: format!("Select {}", p.long_label(&target)),
+                        target,
+                    },
+                ]
+            }
+            None => {
+                let options: Vec<String> = self
+                    .patch_here_options()
+                    .iter()
+                    .map(|o| p.long_label(&p.object_target(o)))
+                    .collect();
+                let mut items = vec![UiItem::Fact(format!("Free · {pixels} of {port}"))];
+                if options.is_empty() {
+                    items.push(UiItem::Hint("Every object is on the wire.".into()));
+                } else {
+                    items.push(UiItem::PatchHere { options });
+                }
+                items
+            }
+        }
     }
 }

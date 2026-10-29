@@ -105,7 +105,23 @@ What each plan holds and its key:
 | engine | output sink configurations, re-read from the defs | structure epoch (checked like a plan in `Check` mode) |
 | output | `OutputFramePlan`: the fragments planned from its producers' placements, their coverage and its status (and the products it was built for) | structure epoch, `output_identity_revision` (a change count), the producers' summed `control_patch_generation` |
 | fixture | `FixtureFramePlan`: the lamp count, the control extent and the full-write control spans | structure epoch, `mapping_version`, the colour order |
+| fixture (format 6) | `FixturePartsPatch`: the runs its patching places and its status (the `Patching` itself is transient) | `mapping_version`, the port tables' key (structure epoch, `output_identity_revision`), the colour order |
 | engine | per dispatch: the recovery-frame name (`RuntimeNodeEntry::recovery_name`, the path rendered once) and the produce call key (the resolver's interned path handle) | the node's path / the epoch's intern table |
+
+**A format-6 fixture patches itself** (mapping rebuild M2,
+`nodes/fixture/parts_*.rs`, `patching_runs.rs`). Built with
+`FixtureNode::with_parts_mapping` from an `lpc_mapping::part::Mapping`, it
+renders its parts once into the compact carrier (the positions moved out of
+the tree, held once), asks the engine for the port tables of the named
+outputs that read its bus channel (`TickContext::control_patch_outputs`,
+cut by the same walk as the wires, `node::output_port_slices`), patches with
+`lpc_mapping::patching::patch_mapping`, and publishes `PatchedRun`s that
+each name their output. It is manual: never auto-flowed, never on the
+default output. A segment part-way into a lamp, of colors other than RGB or
+of an order other than the fixture's is refused by name in its status; the
+rest light where the patcher put them. Format ≤ 5 fixtures keep the
+patch-document path (`PatchDoc`, auto-flow) until project format 12 (M3);
+nothing builds a format-6 fixture from a file until M2 P4.
 
 **Reads a node makes every frame** keep their query id in a
 `frame_plan::PlannedRead` (tagged with the epoch it was interned in) and

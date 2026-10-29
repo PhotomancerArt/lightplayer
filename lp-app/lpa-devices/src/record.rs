@@ -64,6 +64,15 @@ pub struct DeviceRecord {
     /// there is none.
     #[serde(default)]
     pub last_over_bluetooth: bool,
+    /// When this browser first met the board: the home page's board order
+    /// (first added first), so a card holds its place while the board is
+    /// flashed, sent a project, renamed or rebooted. Kept as the earliest
+    /// either side knew when two entries merge, never moved by a later
+    /// sighting. `#[serde(default)]`: a record saved before it existed
+    /// loads with `None`, and [`crate::Roster::load_records`] puts it
+    /// before every board added since, in the order the store lists it.
+    #[serde(default)]
+    pub added_at: Option<Millis>,
 }
 
 impl DeviceRecord {
@@ -78,6 +87,7 @@ impl DeviceRecord {
             chip: None,
             firmware: None,
             last_over_bluetooth: false,
+            added_at: None,
         }
     }
 

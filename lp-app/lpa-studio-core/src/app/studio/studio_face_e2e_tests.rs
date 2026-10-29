@@ -27,10 +27,10 @@ use crate::app::studio::studio_edit_e2e_tests::{
 };
 use crate::{
     ControllerId, NodeCardUiState, NodeUiOp, OfferArgs, PLAYLIST_ENTRY_PARAM, PLAYLIST_PLAY_VERB,
-    PlaylistActivateOp, ProjectController, ProjectEditorOp, ProjectEditorTarget, ProjectOp,
+    PlaylistPickOp, ProjectController, ProjectEditorOp, ProjectEditorTarget, ProjectOp,
     ProjectSlotAddress, SlotEditOp, StudioActor, StudioCommand, StudioController,
-    StudioServerClient, UiAction, UiLogLevel, UiNodeDirtyState, UiNodeFace, UiNodeView,
-    UiPanelControl, UiPanelWidget, UiPlaylistFace, UiSlotValueKind, UiStudioView,
+    StudioServerClient, UiAction, UiNodeDirtyState, UiNodeFace, UiNodeView, UiPanelControl,
+    UiPanelWidget, UiPlaylistFace, UiSlotValueKind, UiStudioView,
 };
 
 #[test]
@@ -481,7 +481,7 @@ fn playlist_face_derives_and_keeps_one_live_surface() {
         .clone()
         .expect("the ACTIVE entry's chip carries the child select action");
     assert!(
-        select_idle.op_as::<PlaylistActivateOp>().is_none(),
+        select_idle.op_as::<PlaylistPickOp>().is_none(),
         "activating what already plays is a no-op — the ACTIVE chip keeps \
          the focus gesture"
     );
@@ -490,8 +490,8 @@ fn playlist_face_derives_and_keeps_one_live_surface() {
     let activate_op = play
         .press(&OfferArgs::new().with(PLAYLIST_ENTRY_PARAM, "2"))
         .expect("the non-active entry plays")
-        .op_as::<PlaylistActivateOp>()
-        .expect("non-active chip clicks are runtime activate pokes")
+        .op_as::<PlaylistPickOp>()
+        .expect("non-active chip clicks are picks")
         .clone();
     assert_eq!(activate_op.entry, 2);
     assert!(
@@ -577,7 +577,7 @@ fn playlist_entry_click_activates_on_the_real_server() {
     let idle_op = playlist_verb(&snapshot, PLAYLIST_PLAY_VERB)
         .press(&OfferArgs::new().with(PLAYLIST_ENTRY_PARAM, "1"))
         .expect("the now-inactive idle entry plays")
-        .op_as::<PlaylistActivateOp>()
+        .op_as::<PlaylistPickOp>()
         .expect("an activate")
         .clone();
     assert_eq!(idle_op.entry, 1);
@@ -586,13 +586,13 @@ fn playlist_entry_click_activates_on_the_real_server() {
         face.entries[1]
             .focus
             .as_ref()
-            .is_some_and(|action| action.op_as::<PlaylistActivateOp>().is_none()),
+            .is_some_and(|action| action.op_as::<PlaylistPickOp>().is_none()),
         "the now-active entry's chip carries the child select action"
     );
 }
 
 #[test]
-fn playlist_activate_rejects_an_unknown_entry_gracefully() {
+fn a_pick_of_an_unknown_entry_plays_the_authored_entry() {
     let server = Rc::new(RefCell::new(playlist_e2e_server(1)));
     let io = InProcessServerIo {
         server: Rc::clone(&server),
@@ -607,36 +607,24 @@ fn playlist_activate_rejects_an_unknown_entry_gracefully() {
     connect_running_project(&handle.tx);
     drive(actor.run_one_batch_for_test());
     let snapshot = view.try_recv().expect("connect emits a snapshot");
-    let node = playlist_verb(&snapshot, PLAYLIST_PLAY_VERB)
+    let pick = playlist_verb(&snapshot, PLAYLIST_PLAY_VERB)
         .press(&OfferArgs::new().with(PLAYLIST_ENTRY_PARAM, "2"))
         .expect("entry 2 plays")
-        .op_as::<PlaylistActivateOp>()
-        .expect("the activate carries the playlist address")
-        .node
+        .op_as::<PlaylistPickOp>()
+        .expect("the pick carries the playlist address and scope")
         .clone();
     let status_before = node_by_kind(&snapshot, "Playlist").header.status.clone();
 
-    // A stale click (the entry vanished between render and dispatch): the
-    // server answers a NORMAL Rejected response — a warning in the console,
-    // never a transport error or a poisoned runtime status.
+    // A stale pick (the entry vanished between render and dispatch) is a
+    // panel write like any other: the playlist plays its authored entry
+    // for a key it does not have — never a transport error or a poisoned
+    // runtime status.
     handle.tx.send(StudioCommand::Action(UiAction::from_op(
         ControllerId::new(ProjectController::NODE_ID),
-        PlaylistActivateOp {
-            node: node.clone(),
-            entry: 9,
-        },
+        PlaylistPickOp { entry: 9, ..pick },
     )));
     drive(actor.run_one_batch_for_test());
-    let snapshot = view.try_recv().expect("rejection emits a snapshot");
-    assert!(
-        snapshot.console.entries.iter().any(|entry| {
-            entry.level == UiLogLevel::Warn
-                && entry.message.contains("Couldn't activate entry 9")
-                && entry.message.contains("no entry 9")
-        }),
-        "the rejection reason surfaces as a console warning: {:?}",
-        snapshot.console.entries
-    );
+    let _ = view.try_recv().expect("the pick emits a snapshot");
 
     handle.tx.send(project_action(ProjectOp::RefreshProject));
     drive(actor.run_one_batch_for_test());
@@ -647,7 +635,7 @@ fn playlist_activate_rejects_an_unknown_entry_gracefully() {
     assert_eq!(face.active, Some(1), "the active entry is untouched");
     assert_eq!(playlist.children.len(), 1);
 
-    // The channel still works after a rejection: a valid activate lands
+    // A valid pick lands after it
     // (the dormant entry loads the frame after the switch is decided).
     let play = playlist_path(&snapshot, PLAYLIST_PLAY_VERB);
     actor_clicks(&mut actor, &handle.tx)

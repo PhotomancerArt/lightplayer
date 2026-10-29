@@ -387,15 +387,22 @@ const PARTITION_TABLE_OFFSET = 0x8000;
 const PARTITION_TABLE_LEN = 0xc00;
 
 /**
- * Read what the board holds relative to the package at `manifestPath`
- * (plan lp2025/2026-10-01-1843-c6-repartition, the layout migration).
+ * Read what the board holds relative to the package its chip gets (plan
+ * lp2025/2026-10-01-1843-c6-repartition, the layout migration; and plan
+ * lp2025/2026-10-28-0025-install-without-board-pick, the install's
+ * identification).
  *
- * A dumb executor (`docs/debt/web-serial-js-untestable.md`): WHAT to read
- * is decided in Rust. `nextRead(chipName, targetTable, lastReadBytes,
- * targetFs)` is called first with `lastReadBytes = null`, then once after
- * every read with
- * that read's bytes, and answers `{offset, length}` or null when it has seen
- * enough. Rust keeps the bytes; this returns only what it alone knows.
+ * A dumb executor (`docs/debt/web-serial-js-untestable.md`): WHICH package
+ * and WHAT to read are decided in Rust. `manifestFor(chipName)` answers the
+ * package's manifest path for the chip the SYNC named, or null when
+ * LightPlayer has no firmware for it — the package is chosen here, after
+ * the chip is certain, so nobody is asked which board it is first.
+ * `nextRead(chipName, targetTable, lastReadBytes, targetFs)` is called
+ * first with `lastReadBytes = null`, then once after every read with that
+ * read's bytes, and answers `{offset, length}` or null when it has seen
+ * enough. Rust keeps the bytes; this returns only what it alone knows —
+ * including the flash chip's JEDEC id (`flashId`, null when the probe read
+ * nothing, as it does on a C6 rev 2 over USB-Serial-JTAG).
  *
  * Ends WITHOUT a reset: the chip stays in ROM download, so the board does
  * not boot its old firmware (which writes to its filesystem) between this
@@ -404,7 +411,7 @@ const PARTITION_TABLE_LEN = 0xc00;
  */
 export async function inspectLayout(
   portId,
-  manifestPath,
+  manifestFor,
   esptoolModulePath,
   knownChipIds,
   nextRead,
@@ -417,31 +424,38 @@ export async function inspectLayout(
   const progress = [];
   const terminal = terminalFor(logs, "esp32-inspect", onEvent);
   try {
-    const manifest = await loadFullManifest(manifestPath);
-    const imageFiles = await loadImageFiles(manifest, manifestPath);
-    const merged = imageFiles.find((image) => image.address === 0);
-    if (!merged || merged.data.length < PARTITION_TABLE_OFFSET + PARTITION_TABLE_LEN) {
-      throw new Error("The firmware package has no merged image at 0x0.");
-    }
-    // Copies, never views (the Safari OPFS lesson applies to every async
-    // sink): these bytes cross into Rust and into esptool-js.
-    const targetTable = merged.data.slice(
-      PARTITION_TABLE_OFFSET,
-      PARTITION_TABLE_OFFSET + PARTITION_TABLE_LEN,
-    );
-    const targetImageLen = Math.max(
-      ...imageFiles.map((image) => image.address + image.data.length),
-    );
-    // What the image mounts: its manifest core lists `fs.tree` (the
-    // package's `core` is the image's own manifest core, verbatim).
-    const targetFs = packageMountsTreeStore(manifest) ? "tree" : "littlefs";
     const esptool = await loadEsptoolModule(esptoolModulePath);
     const port = await getPort(portId);
     await releasePort(portId);
     const { transport, loader, chipName } = await openLoader(esptool, port, 115200, terminal);
     try {
+      const manifestPath = manifestFor(chipName ? String(chipName) : "");
+      if (!manifestPath) {
+        throw new Error(
+          `LightPlayer has no firmware for this chip (${chipName ? String(chipName) : "it did not say which"}).`,
+        );
+      }
+      const manifest = await loadFullManifest(manifestPath);
+      const imageFiles = await loadImageFiles(manifest, manifestPath);
+      const merged = imageFiles.find((image) => image.address === 0);
+      if (!merged || merged.data.length < PARTITION_TABLE_OFFSET + PARTITION_TABLE_LEN) {
+        throw new Error("The firmware package has no merged image at 0x0.");
+      }
+      // Copies, never views (the Safari OPFS lesson applies to every async
+      // sink): these bytes cross into Rust and into esptool-js.
+      const targetTable = merged.data.slice(
+        PARTITION_TABLE_OFFSET,
+        PARTITION_TABLE_OFFSET + PARTITION_TABLE_LEN,
+      );
+      const targetImageLen = Math.max(
+        ...imageFiles.map((image) => image.address + image.data.length),
+      );
+      // What the image mounts: its manifest core lists `fs.tree` (the
+      // package's `core` is the image's own manifest core, verbatim).
+      const targetFs = packageMountsTreeStore(manifest) ? "tree" : "littlefs";
       assertChipMatchesManifest(chipName, manifest, manifestPath, knownChipIds);
       const baseMac = await readBaseMac(loader);
+      const flashId = await readFlashIdSafely(loader, terminal);
       let read = nextRead(
         chipName ? String(chipName) : "",
         new Uint8Array(targetTable),
@@ -474,6 +488,7 @@ export async function inspectLayout(
       return {
         chipName: chipName ? String(chipName) : null,
         baseMac,
+        flashId,
         targetImageLen,
         // The package's own bytes, for Rust to find its embedded manifest
         // in (does this firmware read a tree store?). Copies, never views.
@@ -1176,6 +1191,25 @@ async function loadEsptoolModule(esptoolModulePath) {
     return await import(esptoolModulePath);
   } catch (error) {
     throw new Error(`Failed to import esptool module ${esptoolModulePath}: ${errorMessage(error)}`);
+  }
+}
+
+/// The flash chip's JEDEC id (`0x00MMTTCC`), or null when the probe read
+/// nothing. esptool-js's own `main()` already ran this probe and only warned
+/// when it read 0 — on an ESP32-C6 rev 2 over USB-Serial-JTAG it does, while
+/// stub reads and writes work (bench, 2026-07-31) — so an unreadable id is
+/// an answer (the size is unknown), never a reason to stop. What size the id
+/// names is decided in Rust (`flash_size_from_jedec_id`).
+async function readFlashIdSafely(loader, terminal) {
+  if (typeof loader.readFlashId !== "function") {
+    return null;
+  }
+  try {
+    const id = await loader.readFlashId();
+    return typeof id === "number" && id !== 0 && (id & 0xffffff) !== 0xffffff ? id >>> 0 : null;
+  } catch (error) {
+    terminal.writeLine(`flash id not read: ${errorMessage(error)}`);
+    return null;
   }
 }
 

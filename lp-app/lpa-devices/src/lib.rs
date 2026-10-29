@@ -63,9 +63,10 @@ pub mod view;
 pub mod wire;
 
 pub use activity::{
-    ActivityCell, ActivityKind, ActivityOutcome, CancelPhase, FlashLayoutView, FlashStep,
-    LayoutVerdict, PushActivity, UpdateActivity, UpdateActivityView, UpdateIntentFacts,
-    UpdateOutcomeFacts, UpdateStageFacts,
+    ActivityCell, ActivityKind, ActivityOutcome, BoardIdentity, CancelPhase, ChipBuildRow,
+    FlashBuildChoice, FlashLayoutView, FlashReplaceView, FlashStep, LayoutVerdict, PushActivity,
+    Resident, UpdateActivity, UpdateActivityView, UpdateIntentFacts, UpdateOutcomeFacts,
+    UpdateStageFacts,
 };
 pub use app_version::{AppVersion, DevCommit};
 pub use board_key::{BoardKey, BoardKeyError};

@@ -955,11 +955,7 @@ mod tests {
         );
         let scripts = vec![
             vec![
-                act_turn(
-                    "f1",
-                    "devices/new-1/flash",
-                    &[("board", "seeed/xiao-esp32-c6")],
-                ),
+                act_turn("f1", "devices/new-1/flash", &[]),
                 say("Flashing LightPlayer; I'll push the project once it's done."),
             ],
             vec![
@@ -1024,11 +1020,7 @@ mod tests {
         scenario.start.board.connected = true;
         let scripts = vec![
             vec![
-                act_turn(
-                    "f1",
-                    "devices/new-1/flash",
-                    &[("board", "seeed/xiao-esp32-c6")],
-                ),
+                act_turn("f1", "devices/new-1/flash", &[]),
                 say("Flashing LightPlayer."),
             ],
             vec![say("The flash failed.")],
@@ -1057,11 +1049,7 @@ mod tests {
         let mut scenario = Scenario::load("s18-yona-festival-2am").expect("S18");
         scenario.start.board.connected = true;
         let scripts = vec![vec![
-            act_turn(
-                "f1",
-                "devices/new-1/flash",
-                &[("board", "seeed/xiao-esp32-c6")],
-            ),
+            act_turn("f1", "devices/new-1/flash", &[]),
             say("Flashing LightPlayer."),
         ]];
         let mut seat = DeviceScenarioSeat::new(ModelSource::Scripted(scripts), &scenario);

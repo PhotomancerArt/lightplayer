@@ -312,11 +312,10 @@ async function main() {
         const t0 = Date.now();
         const from = driver.consoleLines().length;
         // `flashBlank`'s steps, without its "Firmware none" precondition:
-        // Install opens the board pick, picking the model presses it, and
-        // the Firmware row's work starts and then ends.
+        // Install is one press (nobody picks a board first, plan
+        // 2026-10-28-0025), and the Firmware row's work starts and then
+        // ends. The board model is the "booted" step's to answer.
         await driver.pressOffer("flash", { board: blank, timeoutMs: STEP_DEADLINE_MS });
-        await driver.waitFor(`Boolean(${PANEL})`, { timeoutMs: STEP_DEADLINE_MS, what: "the board-model picker" });
-        await driver.click(BOARD_MODEL, { scope: PANEL });
         await driver.waitWork("firmware", "running", { board: blank, timeoutMs: STEP_DEADLINE_MS });
         await driver.waitFor(`!${ROW_WORKING}`, { timeoutMs: FLASH_DEADLINE_MS, what: "the install to finish" });
         report.installSeconds = Number(((Date.now() - t0) / 1000).toFixed(1));
@@ -328,6 +327,13 @@ async function main() {
         await driver.waitOffer("push", { board: mac, timeoutMs: STEP_DEADLINE_MS });
         const build = await driver.detailsFact("firmware", "Build", { board: mac, timeoutMs: STEP_DEADLINE_MS });
         await driver.closeDetails({ board: mac });
+        // A C6 whose flash size the probe could not read fits two boards:
+        // its Hardware row asks which, and the walk answers it.
+        if (/which board\?/.test((await driver.barText("hardware", { board: mac })) || "")) {
+          await driver.pressOffer("set-board", { board: mac, timeoutMs: STEP_DEADLINE_MS });
+          await driver.waitFor(`Boolean(${PANEL})`, { timeoutMs: STEP_DEADLINE_MS, what: "the which-board picker" });
+          await driver.click(BOARD_MODEL, { scope: PANEL });
+        }
         if (!build?.startsWith("fw-esp32c6")) throw new Error(`the card's firmware details name no C6 build: ${JSON.stringify(build)}`);
         report.after = build;
         return `Build ${build}${report.before ? ` (was ${report.before})` : " on a board that had none"}`;

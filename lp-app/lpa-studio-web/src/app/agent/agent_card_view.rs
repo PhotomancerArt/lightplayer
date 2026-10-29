@@ -14,7 +14,7 @@
 //! Dismiss is the card's own action from core.
 
 use dioxus::prelude::*;
-use lpa_studio_core::{FLASH_BOARD_PARAM, UiAction, UiAgentCard, UiAgentCardState, UiOffer};
+use lpa_studio_core::{SET_BOARD_PARAM, UiAction, UiAgentCard, UiAgentCardState, UiOffer};
 
 use crate::app::home::device_pick_popover::{BoardPickPanel, ChipSource};
 use crate::core::action::{ActionButton, ActionButtonVariant};
@@ -50,7 +50,7 @@ pub(crate) fn AgentCardView(
                 let board_pick = offer
                     .params()
                     .iter()
-                    .any(|param| param.name == FLASH_BOARD_PARAM);
+                    .any(|param| param.name == SET_BOARD_PARAM);
                 rsx! {
                     div { class: CONTROL_CLASS,
                         if board_pick {

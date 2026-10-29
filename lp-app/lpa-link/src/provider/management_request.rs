@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::LinkOperation;
+use crate::provider::flash_build::FlashBuild;
 use crate::provider::flash_plan::FlashPlan;
 
 /// Provider-neutral request for a low-level link management operation.
@@ -33,19 +34,27 @@ pub enum LinkManagementRequest {
         build_id: Option<String>,
         plan: Option<FlashPlan>,
     },
-    /// Read what the board's flash holds relative to the package `build_id`
+    /// Read what the board's flash holds relative to the package `build`
     /// would write: its partition table, and — as
     /// `crate::layout_migration::LayoutProbe` asks — a superblock pair or a
-    /// whole filesystem region. Answers with the reads verbatim plus the
-    /// package's own table and image length
+    /// whole filesystem region, then what the board runs
+    /// ([`crate::next_resident_read`]). Answers with the reads verbatim plus
+    /// the package's own table and image length
     /// ([`crate::LinkLayoutInspection`]); the caller classifies and plans.
+    ///
+    /// The package is chosen **inside** the session, by the chip its SYNC
+    /// names ([`FlashBuild::build_for_chip`]): a board's chip is only certain
+    /// there, so nobody has to be asked which board it is before the install
+    /// can pick its firmware. The inspection says which build it chose
+    /// ([`crate::LinkLayoutInspection::build_id`]), and the write that follows
+    /// names it as a fixed build.
     ///
     /// One bootloader session, and it **leaves the chip in ROM download**
     /// (no reset at the end), so the board does not boot its old firmware —
     /// and touch its filesystem — between the inspection and the write that
     /// follows it. A caller that ends up not writing resets the board itself
     /// ([`Self::ResetRuntime`]).
-    InspectLayout { build_id: Option<String> },
+    InspectLayout { build: FlashBuild },
     /// Erase device flash so the endpoint returns to a blank state.
     EraseDeviceFlash,
     /// Erase the raw device filesystem partition below the running server.

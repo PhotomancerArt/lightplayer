@@ -12,7 +12,7 @@
 //!
 //! - `1` idle: a position-dependent static gradient, so a held frame that
 //!   replayed samples in the wrong order would not match it;
-//! - `2` green, `4` blue: solid colours with durations, for the timed advance;
+//! - `2` green, `4` blue: solid colours with durations (which a pick ignores);
 //! - `3` broken: a `ref` to a file that does not exist (a load failure);
 //! - `5` bad GLSL: loads, and its first compile fails.
 //!
@@ -24,7 +24,6 @@ use lpc_engine::engine::LoadedProjectRuntime;
 use lpc_engine::node::ScopeRef;
 use lpc_engine::{EngineServices, ProjectLoader};
 use lpc_model::{NodeId, NodeRuntimeStatus, NodeUseLocation, SlotPath, TreePath};
-use lpc_wire::WireNodeCommand;
 use lpfs::{AsLpPath, LpFs, LpFsMemory};
 
 const IDLE: u32 = 1;
@@ -187,41 +186,47 @@ fn a_compile_failure_skips_to_the_next_entry_and_holds_meanwhile() {
 }
 
 #[test]
-fn activate_loads_a_dormant_entry_and_rejects_an_unknown_one() {
+fn a_pick_loads_a_dormant_entry_and_an_unknown_one_plays_the_authored_entry() {
     let (fs, mut rt) = boot();
     steady_idle_frame(&fs, &mut rt);
     assert!(!loaded_entries(&rt).contains(&BLUE), "blue starts dormant");
 
-    let playlist = playlist_id(&rt);
-    let err = rt
-        .engine_mut()
-        .handle_node_command(
-            playlist,
-            &WireNodeCommand::PlaylistActivateEntry { entry: 9 },
-        )
-        .expect_err("an unknown key is rejected");
-    assert!(err.to_string().contains("no entry 9"), "{err}");
+    // A panel write cannot be refused: a key naming no entry falls back to
+    // the authored entry, which is already playing.
+    activate(&mut rt, 9);
+    run(&fs, &mut rt, 10);
+    assert_eq!(
+        loaded_entries(&rt),
+        [IDLE],
+        "an unknown key plays the authored entry"
+    );
 
     activate(&mut rt, BLUE);
     run(&fs, &mut rt, 10);
     assert_eq!(loaded_entries(&rt), [BLUE], "the dormant entry loaded");
 }
 
+/// A picked entry holds: its `duration` times only a trigger's excursion
+/// (playlists-on-the-bus vision D7). A pick that fails moves on to the next
+/// playable entry, which then holds too.
 #[test]
-fn the_timed_advance_walks_authored_keys_and_skips_failed_ones() {
+fn a_picked_entry_holds_and_a_failed_pick_moves_on() {
     let (fs, mut rt) = boot();
     steady_idle_frame(&fs, &mut rt);
 
-    // green (0.5 s) → 3 fails to load → blue (0.5 s) → 5 fails to compile
-    // → back to idle, which stays.
     activate(&mut rt, GREEN);
-    let first_pass = visited(&run(&fs, &mut rt, 150));
-    assert_eq!(first_pass, [IDLE, GREEN, BLUE, BAD_GLSL, IDLE]);
+    let green = visited(&run(&fs, &mut rt, 150));
+    assert_eq!(green, [IDLE, GREEN], "green's 0.5 s duration is not a walk");
 
-    // Second pass: the failed entries are known, so neither is tried again.
-    activate(&mut rt, GREEN);
-    let second_pass = visited(&run(&fs, &mut rt, 150));
-    assert_eq!(second_pass, [IDLE, GREEN, BLUE, IDLE]);
+    // 3 fails to load → blue, which holds.
+    activate(&mut rt, 3);
+    let broken = visited(&run(&fs, &mut rt, 150));
+    assert_eq!(broken, [GREEN, BLUE]);
+
+    // 5 loads, fails to compile → the next playable after it, wrapping.
+    activate(&mut rt, BAD_GLSL);
+    let bad = visited(&run(&fs, &mut rt, 150));
+    assert_eq!(bad, [BLUE, BAD_GLSL, IDLE]);
 }
 
 // ---- fixture ----------------------------------------------------------------
@@ -341,11 +346,17 @@ fn visited(frames: &[Frame]) -> Vec<u32> {
     visited
 }
 
+/// Pick `entry`: a panel write on `playlist.entry` in the playlist's read
+/// scope, as Play mode sends it.
 fn activate(rt: &mut LoadedProjectRuntime, entry: u32) {
     let playlist = playlist_id(rt);
-    rt.engine_mut()
-        .handle_node_command(playlist, &WireNodeCommand::PlaylistActivateEntry { entry })
-        .unwrap_or_else(|e| panic!("activate {entry}: {e}"));
+    let scope = rt.engine().tree().bus_read_scope(playlist).expect("scope");
+    rt.engine_mut().panel_write(
+        scope,
+        lpc_model::ChannelName(String::from(lpc_model::PLAYLIST_ENTRY_CHANNEL)),
+        lpc_model::LpValue::U32(entry),
+        None,
+    );
 }
 
 fn playlist_id(rt: &LoadedProjectRuntime) -> NodeId {

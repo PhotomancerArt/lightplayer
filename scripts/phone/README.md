@@ -64,7 +64,9 @@ with no pairing code (2026-10-17).
 
 - **The phone is a Pixel 8a on Android 14 with Chrome 122** (a refurbished
   phone's factory Chrome). It has no Web Serial; updating Chrome is a Play
-  Store tap on the phone.
+  Store tap on the phone. Chrome 148's release notes say Web Serial now
+  reaches removable USB devices on Android; not yet tried on this phone
+  (2026-10-26), and Studio's USB square still speaks WebUSB there.
 - **Android Chrome's chooser ids are the boards' Bluetooth addresses**: the
   C6's base MAC with its top two bits set. So the walk picks the leased board
   by MAC, whatever project name it advertises.
@@ -86,7 +88,7 @@ with no pairing code (2026-10-17).
 
 ## The USB walk
 
-Chrome on Android has no wired Web Serial, so Studio's USB square speaks to
+Chrome on Android had no wired Web Serial (before Chrome 148), so Studio's USB square speaks to
 a board over WebUSB there (`docs/adr/2026-10-18-android-usb-over-webusb.md`).
 The board is plugged into the PHONE's USB-C port, not the desk hub, and is
 powered by the phone.

@@ -88,6 +88,12 @@
       },
       "type": "object"
     },
+    "inputs": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
     "kind": {
       "const": "Module"
     },

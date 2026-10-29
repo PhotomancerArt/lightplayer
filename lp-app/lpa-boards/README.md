@@ -51,4 +51,20 @@ stylesheet (`lpa-studio-web/src/style.css`), mapped onto the studio palette
 comes from `geometry::BoardLayout`, which is public and deterministic:
 stories compute annotation anchors from the same layout the renderer draws.
 
+## Matching a board to a fingerprint
+
+`match_boards(&BoardFingerprint { chip, flash_bytes, usb_vendor })` answers
+"which catalog board is this?" from what a probe can read with no pick: the
+normalized chip, the flash size from the flash id, and the port's USB vendor.
+Candidates are the chip's boards that resolve a served build (never Desktop);
+a known flash size keeps boards whose `flash_mb` equals it, and a known vendor
+keeps boards with no declared `usb_bridge` or one with that vendor
+(`bridge_vendor`). A step that would leave no board is skipped, because the
+catalog describes the usual unit, not every unit (the C6 DevKitC-1's UART port
+is a CH343). `board_id` is set only when exactly one candidate remains;
+otherwise read `candidates`.
+
+`builds_by_chip()` lists, per chip with a served build, the build a chip-only
+install flashes — the same join the picker uses.
+
 A coming milestone adds the `#/boards` catalog page.

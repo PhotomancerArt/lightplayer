@@ -64,6 +64,16 @@ pub trait ResolveHost {
         None
     }
 
+    /// Which panel write supplies a consumed slot's value, when the writer
+    /// that wins it (after the R5 walk) is an engaged panel writer: its
+    /// [`crate::dataflow::panel_writers::PanelWriter::write`]. `None` when
+    /// the value comes from anything else. Lets a consumer treat a fresh
+    /// write of the same value as a new gesture (a re-tapped playlist
+    /// pick).
+    fn consumed_slot_panel_write(&self, _node: NodeId, _slot: &SlotPath) -> Option<u64> {
+        None
+    }
+
     /// The bus scope `node` writes into and reads from (its inhabited
     /// scope; the root module reads its own introduced scope). `None`
     /// means the host has no scope model — test fakes — and every read
@@ -157,6 +167,15 @@ pub trait ResolveHost {
     /// The registered output-name set and the revision it last changed at.
     fn known_output_names(&self) -> (Vec<alloc::string::String>, Revision) {
         (Vec::new(), Revision::default())
+    }
+
+    /// The named outputs that read `producer`'s bus channel, each with its
+    /// ports' slices of its buffer: what a format-6 fixture patches against.
+    /// Built only when asked (it allocates), so a project with no format-6
+    /// fixture never pays for it. Empty where nothing models outputs.
+    fn control_patch_outputs(&self, producer: NodeId) -> crate::node::ReachableOutputs {
+        let _ = producer;
+        crate::node::ReachableOutputs::default()
     }
 
     fn runtime_buffer_mut(

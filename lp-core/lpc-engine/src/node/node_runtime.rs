@@ -7,7 +7,6 @@ use lpc_model::{
     AssetLocation, NodeId, NodeRuntimeStatus, Revision, SlotAccess, SlotPath, SlotShapeRegistry,
     SlotShapeRegistryError,
 };
-use lpc_wire::WireNodeCommand;
 
 use super::contexts::{
     AssetRefreshContext, DestroyCtx, MemPressureCtx, NodeResourceInitContext, TickContext,
@@ -99,26 +98,23 @@ pub trait NodeRuntime {
         Ok(())
     }
 
-    /// Handle a runtime command addressed to this node (the wire runtime
-    /// command channel, `WireProjectCommand::NodeCommand`).
-    ///
-    /// Commands are immediate runtime pokes — nothing is staged in the
-    /// overlay and nothing persists. `time_s` is the engine's
-    /// project-relative frame time in seconds; nodes whose behavior is
-    /// clocked by a CONSUMED time slot (playlist) should not stamp state
-    /// with it directly — defer the effect to the next `produce`, where the
-    /// node's own time domain is resolvable, so command effects land
-    /// exactly like organic ones (trigger switches).
-    ///
-    /// Returning an error REJECTS the command: the server answers a normal
-    /// `Rejected { reason }` response and the node's runtime status is
-    /// untouched. Default: nodes accept no commands.
-    fn handle_command(
-        &mut self,
-        _command: &WireNodeCommand,
-        _time_s: f32,
-    ) -> Result<(), NodeError> {
-        Err(NodeError::msg("node accepts no runtime commands"))
+    /// The consumed slots whose value decides what this node loads before
+    /// it ever ticks — a playlist's pick decides its resident entry. Before
+    /// the first tick after a load (and after a structural reattach), the
+    /// engine hands each one a panel writer that supplies it
+    /// ([`Self::settle_consumed_panel_value`]). Default: none.
+    fn load_deciding_slots(&self) -> &'static [&'static str] {
+        &[]
+    }
+
+    /// A panel writer supplies `slot` (one of [`Self::load_deciding_slots`])
+    /// before the first tick: adopt it now, so the first tick's residency
+    /// step loads what the node will show instead of what it was authored
+    /// with (playlists-on-the-bus Q3). `write` is the writer's
+    /// [`crate::dataflow::panel_writers::PanelWriter::write`]. Default:
+    /// nothing.
+    fn settle_consumed_panel_value(&mut self, slot: &str, value: &lpc_model::LpValue, write: u64) {
+        let _ = (slot, value, write);
     }
 
     /// Refresh a referenced asset after the project registry reports an effective asset change.
