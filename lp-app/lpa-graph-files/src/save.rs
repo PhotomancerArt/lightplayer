@@ -11,7 +11,7 @@
 //!   overrides sorted), from the fixture's `Mapping` — its parts, ids,
 //!   counters, ring keys, starts, flows and overrides, all of it (mapping
 //!   rebuild M4 P05). It is written when the mapping differs from the one
-//!   the file holds; the canvas follows the fixture's box. Nothing here
+//!   the file holds; the view box follows the fixture's box. Nothing here
 //!   shapes a mapping's JSON by hand.
 //! - **A node file** (module, fixture, output) starts from the JSON it was
 //!   read from, so fields the Graph knows nothing about are kept, and is

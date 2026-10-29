@@ -262,7 +262,7 @@ impl FixtureNode {
     /// Hold a format-6 mapping: render its parts once into the compact
     /// carrier for a `render_width` × `render_height` fixture, and patch
     /// them from the first `produce` on (`parts_patch.rs`). The mapping's
-    /// canvas and sample diameter frame the fit, as a map2d document's do.
+    /// view box frames the fit.
     ///
     /// Replaces whatever mapping the fixture was built with. A mapping that
     /// can't render (a part that can't be drawn, more lamps than memory
