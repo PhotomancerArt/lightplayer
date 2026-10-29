@@ -536,6 +536,7 @@ mod tests {
     fn every_segment_is_a_row_named_by_its_node_id() {
         let doc = r#"{
   "format": 6,
+  "view_box": [0.0, 0.0, 120.0, 120.0],
   "next": { "repeat": 2 },
   "start": { "output": { "set": "1" }, "port": { "set": 0 }, "channel": { "set": { "lamps": 0 } } },
   "parts": [
@@ -556,6 +557,7 @@ mod tests {
     fn a_circles_rings_are_rows() {
         let doc = r#"{
   "format": 6,
+  "view_box": [0.0, 0.0, 100.0, 100.0],
   "next": { "circle": 2 },
   "start": { "output": { "set": "1" }, "port": { "set": 0 }, "channel": { "set": { "lamps": 0 } } },
   "parts": [

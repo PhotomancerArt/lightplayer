@@ -2270,6 +2270,7 @@ const FACE_SHADER: &str = "layout(binding = 0) uniform float speed;\n\nvec4 rend
 /// format 6, starting on the output named "1".
 const FACE_MAP2D: &str = r#"{
   "format": 6,
+  "view_box": [0.0, 0.0, 30.0, 30.0],
   "start": { "output": { "set": "1" }, "port": { "set": 0 }, "channel": { "set": { "lamps": 0 } } },
   "parts": [
     { "id": "panel", "name": "panel", "kind": { "grid": { "origin": [0, 0], "cols": 4, "rows": 4, "pitch": 10 } } }
@@ -3187,6 +3188,7 @@ fn output_face_e2e_server() -> LpServer {
 }"#;
     let map2d_json = r#"{
   "format": 6,
+  "view_box": [0.0, 0.0, 30.0, 30.0],
   "start": { "output": { "set": "1" }, "port": { "set": 0 }, "channel": { "set": { "lamps": 0 } } },
   "parts": [
     { "id": "panel", "name": "panel", "kind": { "grid": { "origin": [0, 0], "cols": 4, "rows": 4, "pitch": 10 } } }
