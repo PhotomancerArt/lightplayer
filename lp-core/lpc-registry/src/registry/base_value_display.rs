@@ -306,20 +306,17 @@ mod tests {
         let shapes = ctx_shapes();
         let ctx = ParseCtx { shapes: &shapes };
         let json = r#"{
-            "kind": "Fixture",
-            "mapping": {
-                "kind": "PathPoints",
-                "paths": { "0": { "kind": "PointList", "first_channel": 5 } }
-            }
+            "kind": "Output",
+            "ports": { "0": { "endpoint": "ws281x:local:IO18", "count": 5 } }
         }"#;
-        let def = NodeDef::read_json(&shapes, json).expect("parse fixture def");
+        let def = NodeDef::read_json(&shapes, json).expect("parse output def");
 
-        let display = base_display_in_def(&def, &path("mapping.PathPoints.paths[0]"), &ctx)
-            .expect("composite display");
+        let display =
+            base_display_in_def(&def, &path("ports[0]"), &ctx).expect("composite display");
 
         assert!(display.starts_with('{'), "{display}");
-        assert!(display.contains("PointList"), "{display}");
-        assert!(display.contains("\"first_channel\":5"), "{display}");
+        assert!(display.contains("ws281x:local:IO18"), "{display}");
+        assert!(display.contains("\"count\":5"), "{display}");
     }
 
     #[test]
@@ -375,20 +372,15 @@ mod tests {
     fn long_composite_display_is_capped_with_ellipsis() {
         let shapes = ctx_shapes();
         let ctx = ParseCtx { shapes: &shapes };
-        // A fixture mapping with enough map entries to overflow the cap.
+        // An output with enough port entries to overflow the cap.
         let entries = (0..40)
-            .map(|index| {
-                format!("\"{index}\": {{ \"kind\": \"PointList\", \"first_channel\": {index} }}")
-            })
+            .map(|index| format!("\"{index}\": {{ \"endpoint\": \"ws281x:local:D10\" }}"))
             .collect::<Vec<_>>()
             .join(", ");
-        let json = format!(
-            r#"{{ "kind": "Fixture", "mapping": {{ "kind": "PathPoints", "paths": {{ {entries} }} }} }}"#
-        );
-        let def = NodeDef::read_json(&shapes, &json).expect("parse fixture def");
+        let json = format!(r#"{{ "kind": "Output", "ports": {{ {entries} }} }}"#);
+        let def = NodeDef::read_json(&shapes, &json).expect("parse output def");
 
-        let display =
-            base_display_in_def(&def, &path("mapping.PathPoints.paths"), &ctx).expect("display");
+        let display = base_display_in_def(&def, &path("ports"), &ctx).expect("display");
 
         assert_eq!(display.chars().count(), COMPOSITE_DISPLAY_CAP);
         assert!(display.ends_with('…'), "{display}");

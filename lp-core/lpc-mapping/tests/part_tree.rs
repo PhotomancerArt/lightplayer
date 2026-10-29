@@ -13,6 +13,7 @@ use support::{bits, today_as_mapping};
 use lpc_mapping::part::{
     Circle, CircleSplit, Colors, Mapping, NodeKind, Order, Part, PartId, PartKind, Path,
     PathCommand, PathSplit, Points, RenderError, Repeat, SegmentKey, Shape, Tree, TreeId, render,
+    render_layout,
 };
 use lpc_mapping::{
     GridCorner, GridRouting, GridShape, Map2dDoc, Map2dShape, PathAlign, PathShape, RingDir,
@@ -519,6 +520,84 @@ fn a_mapping_too_big_for_memory_is_refused() {
     ));
 }
 
+/// Two mappings that differ only in their patching (a start, a flow, an
+/// override, an id counter) have the same layout, and render the same tree.
+#[test]
+fn a_patching_edit_keeps_the_layout() {
+    use lpc_mapping::patching::{Amount, Flow, Override, PortKey, Start};
+
+    let mut m = Mapping::new();
+    add(&mut m, straight(5));
+    let c = add(&mut m, circle(&[(40.0, 24), (20.0, 12)]));
+    let repeat = m.new_part(PartKind::Repeat(Repeat::new(
+        Part::new(pid("panel"), straight(3)),
+        [50.0, 50.0],
+        4,
+    )));
+    m.parts.push(repeat);
+
+    let mut edited = m.clone();
+    edited.start = Start::at("main", 1, Amount::lamps(4));
+    edited.flow = Flow::OnePerPort { from: PortKey(2) };
+    edited.parts[1].flow = Flow::OnePerPort { from: PortKey(0) };
+    edited.parts[0].start = Start::at("main", 3, Amount::lamps(0));
+    let PartKind::Repeat(inner) = &mut edited.parts[2].kind else {
+        unreachable!("the repeat");
+    };
+    inner.part.start = Start::at("main", 0, Amount::lamps(9));
+    edited.overrides.insert(
+        TreeId::generated(&c, SegmentKey::new("r2").unwrap()),
+        Override {
+            off: true,
+            ..Override::default()
+        },
+    );
+    edited.next.raise("path", 40);
+
+    assert!(m.same_layout(&edited));
+    assert_eq!(render(&m).unwrap(), render(&edited).unwrap());
+}
+
+/// A mapping whose lamps moved, or whose parts changed, has another
+/// layout: a shape's geometry, a repeat's count, a part's id, the sample
+/// diameter or the canvas.
+#[test]
+fn a_layout_edit_is_another_layout() {
+    let mut m = Mapping::new();
+    add(&mut m, straight(5));
+    let repeat = m.new_part(PartKind::Repeat(Repeat::new(
+        Part::new(pid("panel"), straight(3)),
+        [50.0, 50.0],
+        4,
+    )));
+    m.parts.push(repeat);
+
+    let edits: [(&str, fn(&mut Mapping)); 5] = [
+        ("a shape's count", |m| {
+            m.parts[0].kind = straight(6);
+        }),
+        ("a repeat's count", |m| {
+            let PartKind::Repeat(r) = &mut m.parts[1].kind else {
+                unreachable!()
+            };
+            r.count = 5;
+        }),
+        ("a repeated part's shape", |m| {
+            let PartKind::Repeat(r) = &mut m.parts[1].kind else {
+                unreachable!()
+            };
+            r.part.kind = straight(4);
+        }),
+        ("a part's id", |m| m.parts[0].id = pid("path9")),
+        ("the view box", |m| m.view_box = [0.0, 0.0, 10.0, 10.0]),
+    ];
+    for (what, edit) in edits {
+        let mut edited = m.clone();
+        edit(&mut edited);
+        assert!(!m.same_layout(&edited), "{what}");
+    }
+}
+
 // ---- parity with today's resolver (A2) ---------------------------------
 
 /// Every corpus document's parts carry exactly the lamps today's
@@ -538,19 +617,73 @@ fn the_corpus_renders_todays_lamps_bit_for_bit() {
     }
 }
 
-/// Every map2d document in the catalog renders today's lamps, bit for bit.
+/// Every format-5-or-older map2d document in the upgrade corpus's inputs
+/// (real projects at the formats they were authored at, the catalog's
+/// among them) renders today's lamps, bit for bit. The catalog itself is at
+/// map2d format 6 since project format 12; its format-11 copies are in
+/// `lp-app/lpa-upgrade/tests/corpus/v11/`.
 #[test]
-fn the_catalog_renders_todays_lamps_bit_for_bit() {
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../catalog");
+fn the_upgrade_corpus_renders_todays_lamps_bit_for_bit() {
+    let root =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../lp-app/lpa-upgrade/tests/corpus");
     let mut files = Vec::new();
     collect_map2d(&root, &mut files);
+    files.retain(|file| {
+        !file
+            .components()
+            .any(|part| part.as_os_str() == "_expected")
+    });
     files.sort();
-    assert!(files.len() >= 30, "found {} catalog documents", files.len());
+    let mut checked = 0usize;
     for file in files {
         let json = std::fs::read_to_string(&file).unwrap();
+        if lpc_mapping::map2d6::peek_format(&json) == Ok(lpc_mapping::map2d6::MAP2D6_FORMAT) {
+            continue;
+        }
         let doc = Map2dDoc::from_json(&json).unwrap();
         assert_parity(&file.display().to_string(), &doc);
+        checked += 1;
     }
+    assert!(checked >= 30, "found {checked} corpus documents");
+}
+
+/// A layout is the render's tree with its lamps unplaced: the same nodes,
+/// the same segments over the same lamp ranges, every lamp at `[0, 0]` —
+/// for every map2d in the repo's projects and catalog, and every document
+/// of the upgrade corpus as parts.
+#[test]
+fn a_layout_is_the_renders_tree_with_its_lamps_unplaced() {
+    let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let mut files = Vec::new();
+    for dir in ["projects", "catalog", "lp-app/lpa-upgrade/tests/corpus"] {
+        collect_map2d(&repo.join(dir), &mut files);
+    }
+    files.sort();
+    let mut checked = 0usize;
+    for file in files {
+        let json = std::fs::read_to_string(&file).unwrap();
+        let mapping = match lpc_mapping::map2d6::peek_format(&json) {
+            Ok(lpc_mapping::map2d6::MAP2D6_FORMAT) => lpc_mapping::map2d6::read(&json).unwrap(),
+            _ => match Map2dDoc::from_json(&json) {
+                Ok(doc) => today_as_mapping(&doc),
+                Err(_) => continue,
+            },
+        };
+        let Ok(placed) = render(&mapping) else {
+            continue;
+        };
+        let name = file.display().to_string();
+        let laid = render_layout(&mapping).expect("a mapping that renders lays out");
+        assert_eq!(laid.nodes(), placed.nodes(), "{name}: the nodes");
+        assert_eq!(laid.segments(), placed.segments(), "{name}: the segments");
+        assert_eq!(laid.positions().len(), placed.positions().len(), "{name}");
+        assert!(
+            laid.positions().iter().all(|p| *p == [0.0; 2]),
+            "{name}: unplaced"
+        );
+        checked += 1;
+    }
+    assert!(checked >= 150, "laid out {checked} documents");
 }
 
 /// Every grid routing and corner, reversed paths with and without jumpers,

@@ -1,14 +1,15 @@
 //! The page's synchronous hold on the Graph's editor.
 //!
-//! The Graph is the mapping lab's canvas, and its editor
-//! (`lab_mapping_model::Editor`) is core's: offers, saves and the board's
+//! The Graph's canvas is lpa-graph-web's, and its editor
+//! (`lpa_graph::Editor`) is core's: offers, saves and the board's
 //! highlight are all built from it here. But a pointer move cannot wait
 //! for the studio actor — the actor runs one batch at a time, a batch can
 //! hold a device read, and every batch rebuilds the whole studio view — so
 //! the page applies its pointer, key and layout facts to the editor
-//! directly, through this handle, the way the lab's page does. It is the
-//! same `Rc<RefCell<…>>` seam as [`StudioHandle`]'s delay cell: built by
-//! core, handed to the page before the controller moves into the actor.
+//! directly, through this handle, the way the mapping lab's page did. It
+//! is the same `Rc<RefCell<…>>` seam as [`StudioHandle`]'s delay cell:
+//! built by core, handed to the page before the controller moves into
+//! the actor.
 //!
 //! Whatever an input changed that the rest of Studio must hear about (the
 //! project, the selection) goes onto the actor's queue as a
@@ -20,7 +21,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use lab_mapping_model::{Editor, GraphInput, Project, Target};
+use lpa_graph::{Editor, GraphInput, Project, Target};
 
 use crate::app::graph::GraphNote;
 use crate::app::studio::studio_command::StudioCommand;

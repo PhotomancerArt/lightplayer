@@ -1,0 +1,45 @@
+{
+  "kind": "Fixture",
+  "bindings": {
+    "input": {
+      "source": "bus:visual.out"
+    },
+    "output": {
+      "target": "bus:control.out"
+    }
+  },
+  "brightness": 1.0,
+  "color_order": "rgb",
+  "diagnostic_mode": "off",
+  "gamma_correction": false,
+  "mapping": {
+    "kind": "Map2d",
+    "source": "fixture.map2d.json"
+  },
+  "patch": {
+    "kind": "File",
+    "source": "fixture.patch.json"
+  },
+  "render_size": {
+    "height": 32,
+    "width": 32
+  },
+  "sampling": "direct",
+  "transform": [
+    [
+      1,
+      0,
+      0
+    ],
+    [
+      0,
+      1,
+      0
+    ],
+    [
+      0,
+      0,
+      1
+    ]
+  ]
+}

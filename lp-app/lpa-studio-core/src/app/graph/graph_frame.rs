@@ -1,11 +1,11 @@
-//! What the board shows, as the Graph draws it: the lab's `BoardFrame`,
+//! What the board shows, as the Graph draws it: lpa-graph's `BoardFrame`,
 //! built from the frames the board itself published.
 //!
 //! Studio reads each output node's published frame on every project read
 //! (`ProjectSync::output_frame`): the output's whole wire, one RGB triple
 //! a lamp, after the board's own colour order, gamma and brightness — and
 //! after its `highlight`, so a selection breathing on the board breathes
-//! here too. A port is a window of that wire (the lab's flat wire: each
+//! here too. A port is a window of that wire (the Graph's flat wire: each
 //! port starts where the one before it ends). The bytes ride in each
 //! fixture's colour order, which the frame's layout says per run; a pixel
 //! no run names (a free one, which only the highlight lights) is read as
@@ -13,12 +13,12 @@
 
 use std::collections::BTreeMap;
 
-use lab_mapping_model::{BoardFrame, NodeId, Project, Rgb};
+use lpa_graph::{BoardFrame, NodeId, Project, Rgb};
 
 use crate::{ColorOrder, ControlSampleEncoding, UiControlProductPreview};
 
 /// The board's frame for `project`, from the published frame of each of
-/// its outputs (`outputs`: the lab's output node → Studio's node).
+/// its outputs (`outputs`: the Graph's output node → Studio's node).
 pub(crate) fn board_frame<'a>(
     project: &Project,
     outputs: &BTreeMap<NodeId, lpc_model::NodeId>,

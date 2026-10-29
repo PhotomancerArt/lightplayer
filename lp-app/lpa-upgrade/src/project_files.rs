@@ -26,6 +26,12 @@ impl ProjectFiles {
         self.files.insert(path.into(), bytes)
     }
 
+    /// Remove a file, returning its bytes. Only a step that retires a file
+    /// (v11→v12: `*.patch.json`) removes one, and its report names it.
+    pub fn remove(&mut self, path: &str) -> Option<Vec<u8>> {
+        self.files.remove(path)
+    }
+
     pub fn get(&self, path: &str) -> Option<&[u8]> {
         self.files.get(path).map(Vec::as_slice)
     }

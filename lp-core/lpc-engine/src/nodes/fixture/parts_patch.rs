@@ -1,10 +1,12 @@
 //! A format-6 fixture's patching, kept current: what it holds between
 //! frames and when it re-patches (lean Q36, Q37, Q42, Q43).
 //!
-//! **Resident:** the mapping (parts and patching), the rendered tree without
-//! its positions (they live once, in the fixture's carrier), the runs it
-//! publishes, and its status. The [`Patching`] itself, with what every node
-//! did and why, lives only inside [`FixturePartsPatch::ensure_with`].
+//! **Resident:** the mapping (parts and patching), the runs it publishes,
+//! and its status. The tree the patcher walks is rendered for each patch
+//! and dropped with it (M2 P6 step 2: resident, it cost a node and a
+//! segment, each owning its id, per segment on the device), and so is the
+//! [`Patching`], made without its walk ([`patch_mapping_placed`], step 1).
+//! The lamps' positions live once, in the fixture's carrier.
 //!
 //! **When:** only when the key moves: the layout's version (a re-render),
 //! the port tables' key (a name, a port, a count, or the outputs on the
@@ -14,13 +16,14 @@
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use lpc_mapping::part::Tree;
-use lpc_mapping::patching::{OutputName, OutputPorts, Patching, Port, PortKey, patch_mapping};
+use lpc_mapping::part::{Mapping, render_layout};
+use lpc_mapping::patching::{
+    OutputName, OutputPorts, Patching, Port, PortKey, patch_mapping_placed,
+};
 use lpc_model::Revision;
 use lpc_model::nodes::fixture::ColorOrder;
 
 use crate::node::{PatchedRun, PortTablesKey, ReachableOutputs, TickContext};
-use crate::nodes::fixture::fixture_parts_source::FixturePartsSource;
 use crate::nodes::fixture::parts_problem_text::{problem_text, refusal_text};
 use crate::nodes::fixture::patching_runs::patching_runs;
 
@@ -29,10 +32,8 @@ pub(crate) type PartsPatchKey = (Revision, PortTablesKey, ColorOrder);
 
 /// A format-6 fixture's patching.
 pub(crate) struct FixturePartsPatch {
-    /// The mapping and its fit facts.
-    pub source: FixturePartsSource,
-    /// The rendered tree, positions taken out.
-    pub tree: Tree,
+    /// The mapping: its parts, its fit facts and its patching.
+    pub mapping: Mapping,
     key: Option<PartsPatchKey>,
     /// The runs the fixture publishes, every one naming its output.
     pub runs: Vec<PatchedRun>,
@@ -42,10 +43,9 @@ pub(crate) struct FixturePartsPatch {
 }
 
 impl FixturePartsPatch {
-    pub fn new(source: FixturePartsSource, tree: Tree) -> Self {
+    pub fn new(mapping: Mapping) -> Self {
         Self {
-            source,
-            tree,
+            mapping,
             key: None,
             runs: Vec::new(),
             status: None,
@@ -64,6 +64,16 @@ impl FixturePartsPatch {
             return false;
         }
         self.repatch(key, ctx.control_patch_outputs().0, color_order)
+    }
+
+    /// Take a mapping that draws the same lamps
+    /// ([`Mapping::same_layout`]) and patch it on the next
+    /// [`Self::ensure`], whatever the key: a patching-only edit keeps the
+    /// layout's version, so nothing else would move the key.
+    pub fn repatch_with(&mut self, mapping: Mapping) {
+        debug_assert!(self.mapping.same_layout(&mapping));
+        self.mapping = mapping;
+        self.key = None;
     }
 
     /// [`Self::ensure`] with the question passed in (a test double of P1's
@@ -89,8 +99,7 @@ impl FixturePartsPatch {
     /// `read_frame_settings`, which every fixture runs every frame on the
     /// C6's main stack. Inlined there, the patcher's working set became part
     /// of that function's frame (6,736 B on the C6 against 3,296 B without
-    /// it, measured in M2 P3), paid by every fixture, format ≤ 5 included,
-    /// on every frame. Out of line, it is paid only while re-patching.
+    /// it, measured in M2 P3), paid by every fixture on every frame. Out of line, it is paid only while re-patching.
     #[cold]
     #[inline(never)]
     fn repatch(
@@ -100,10 +109,25 @@ impl FixturePartsPatch {
         color_order: ColorOrder,
     ) -> bool {
         self.key = Some(key);
+        // The same mapping rendered at load, so only memory can refuse it
+        // now; then nothing lands, and the status says why. Laid out, not
+        // placed: the patch walks the tree's structure and never reads a
+        // position (a circle's `sinf`/`cosf` per lamp, again, for nothing).
+        let mut tree = match render_layout(&self.mapping) {
+            Ok(tree) => tree,
+            Err(error) => {
+                self.status = Some(alloc::format!("render fixture mapping: {error}"));
+                let changed = !self.runs.is_empty();
+                self.runs = Vec::new();
+                return changed;
+            }
+        };
+        drop(tree.take_positions());
         let ports = patcher_ports(&reachable);
-        let patching = patch_mapping(&self.source.mapping, &self.tree, &ports);
+        let patching = patch_mapping_placed(&self.mapping, &tree, &ports);
         drop(ports);
-        let placed = patching_runs(&patching, &self.tree, &reachable.outputs, color_order);
+        let placed = patching_runs(&patching, &tree, &reachable.outputs, color_order);
+        drop(tree);
         self.status = status(&patching, &placed.refusals, &reachable);
         let changed = self.runs != placed.runs;
         self.runs = placed.runs;
@@ -169,7 +193,7 @@ mod tests {
     use super::*;
     use alloc::vec;
     use core::cell::Cell;
-    use lpc_mapping::part::{Mapping, Part, PartId, PartKind, Path, Shape, render};
+    use lpc_mapping::part::{Part, PartId, PartKind, Path, Shape};
     use lpc_mapping::patching::{Amount, Start};
     use lpc_model::ChannelName;
 
@@ -196,13 +220,14 @@ mod tests {
     fn a_port_edit_re_patches() {
         // The fixture starts on port 1, which begins where port 0 ends.
         let mut parts = parts_patch(Start::at("main", 1, Amount::lamps(0)));
+        // path1 and path2 land end to end: one run of both.
         parts.ensure_with(key(1, 1), || reachable(&[3, 10]), ColorOrder::Rgb);
-        assert_eq!(lamps_of(&parts.runs), vec![(0, 3, 3), (3, 1, 6)]);
+        assert_eq!(lamps_of(&parts.runs), vec![(0, 4, 3)]);
         // Port 0 grows to 5 lamps: the edit moved the tables' key (P1).
         assert!(parts.ensure_with(key(1, 2), || reachable(&[5, 10]), ColorOrder::Rgb));
         assert_eq!(
             lamps_of(&parts.runs),
-            vec![(0, 3, 5), (3, 1, 8)],
+            vec![(0, 4, 5)],
             "everything on port 1 moved with its start"
         );
         // Port 1 shrinks to 3 lamps: path2 no longer fits and wraps to port 2,
@@ -211,26 +236,6 @@ mod tests {
         assert_eq!(lamps_of(&parts.runs), vec![(0, 3, 5)]);
         let status = parts.status.as_deref().unwrap_or_default();
         assert!(status.contains("path2 runs past the last port"), "{status}");
-    }
-
-    /// A format-6 fixture never asks to be auto-flowed: it is manual, and it
-    /// answers its placement even before it has a run.
-    #[test]
-    fn a_format_6_fixture_never_asks_to_be_auto_flowed() {
-        use crate::node::NodeRuntime;
-        use lpc_model::nodes::fixture::{FixtureSamplingConfig, MappingConfig};
-
-        let source = parts_patch(Start::at("main", 0, Amount::lamps(0))).source;
-        let fixture = crate::nodes::FixtureNode::new(
-            lpc_model::NodeId::new(1),
-            MappingConfig::path_points_vec(Vec::new(), 1.0),
-            FixtureSamplingConfig::default(),
-            Revision::new(1),
-        )
-        .with_parts_mapping(source, 10, 2);
-        assert!(fixture.control_patch_manual());
-        assert_eq!(fixture.control_patch_placement(), Some(&[][..]));
-        assert_eq!(fixture.runtime_status(), None);
     }
 
     /// A fixture with no start places nothing and says so.
@@ -266,7 +271,48 @@ mod tests {
         let mut parts = parts_patch(Start::at("main", 0, Amount::lamps(0)));
         parts.ensure_with(key(1, 1), || reachable(&[10, 10]), ColorOrder::Rgb);
         assert_eq!(parts.status, None);
-        assert_eq!(parts.runs.len(), 2);
+        assert_eq!(lamps_of(&parts.runs), vec![(0, 4, 0)]);
+    }
+
+    /// A fixture whose segments land end to end publishes one run, and every
+    /// lamp of it lands where `Patching::landing` says.
+    #[test]
+    fn a_fixture_whose_segments_are_contiguous_publishes_one_run() {
+        use lpc_mapping::part::{Repeat, render};
+        use lpc_mapping::patching::patch_mapping;
+
+        // segments-64-6's shape: 64 copies of an 8-lamp spoke, from lamp 0
+        // of port 0 of `main`.
+        let spoke = Part::new(
+            PartId::new("path1").unwrap(),
+            PartKind::Shape(Shape::Path(Path::through(&[[50.0, 40.0], [50.0, 4.0]], 8))),
+        );
+        let mut mapping = Mapping::new();
+        mapping.parts.push(Part::new(
+            PartId::new("spoke").unwrap(),
+            PartKind::Repeat(Repeat::new(spoke, [50.0, 50.0], 64)),
+        ));
+        mapping.start = Start::at("main", 0, Amount::lamps(0));
+        let mut parts = FixturePartsPatch::new(mapping.clone());
+        let lamps = reachable(&[512]);
+        parts.ensure_with(key(1, 1), || lamps.clone(), ColorOrder::Rgb);
+        assert_eq!(parts.status, None);
+        assert_eq!(lamps_of(&parts.runs), vec![(0, 512, 0)], "one run, not 64");
+
+        let tree = render(&mapping).unwrap();
+        let patching = patch_mapping(&mapping, &tree, &patcher_ports(&lamps));
+        let run = &parts.runs[0];
+        for segment in tree.segments() {
+            for j in 0..segment.lamps.len() as u32 {
+                let landed = patching.landing(&segment.id, j).unwrap();
+                assert_eq!(
+                    run.wire_lamp(segment.lamps.start + j - run.start),
+                    landed.channel / 3,
+                    "{} lamp {j}",
+                    segment.id
+                );
+            }
+        }
     }
 
     // --- helpers ---
@@ -284,15 +330,7 @@ mod tests {
             ));
         }
         mapping.start = start;
-        let tree = render(&mapping).unwrap();
-        FixturePartsPatch::new(
-            FixturePartsSource {
-                mapping,
-                canvas: None,
-                sample_diameter: 1.0,
-            },
-            tree,
-        )
+        FixturePartsPatch::new(mapping)
     }
 
     /// Output `main` with ports of these lamp counts, on `bus:control.out`.

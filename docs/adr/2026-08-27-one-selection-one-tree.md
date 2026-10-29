@@ -2,6 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-08-27
+- **Superseded in part (2026-10-28) by** `2026-10-28-graph-is-the-project-canvas.md`: `UiSelection` stays for the Nodes view's Outputs panel; the Mapping dive, multi-fixture transforms and doc-grain reconciliation are deleted with the Map tab, and the Graph keeps its own selection (`lpa-graph`).
 - **Deciders:** Photomancer
 - **Plan:** lp2025/2026-08-25-0800-unified-selection-model (PR #452)
 - **Supersedes:** the dive/breadcrumb presentation of

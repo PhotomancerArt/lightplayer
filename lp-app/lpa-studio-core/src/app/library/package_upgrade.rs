@@ -46,20 +46,30 @@ pub fn migrate_handle_to_current(
     let report =
         upgrade_to_current(&mut files).map_err(|error| LibraryError::Format(error.to_string()))?;
 
-    for path in &report.changed_files {
+    // A step may add files (a fixture's hand-placed lamps moved into their
+    // own map2d) and remove them (a retired patch document) as well as
+    // rewrite them (v11→v12, lean Q60): all three reach the package.
+    for path in report.changed_files.iter().chain(&report.added_files) {
         let bytes = files
             .get(path)
             .ok_or_else(|| {
                 LibraryError::Manifest(format!(
-                    "upgrade reported {path} changed but produced no bytes"
+                    "upgrade reported {path} written but produced no bytes"
                 ))
             })?
             .to_vec();
-        let absolute = format!("/{}", path.trim_start_matches('/'));
-        handle.apply_update(LpPath::new(&absolute), Some(&bytes))?;
+        handle.apply_update(LpPath::new(&package_path(path)), Some(&bytes))?;
+    }
+    for path in &report.removed_files {
+        handle.apply_update(LpPath::new(&package_path(path)), None)?;
     }
     handle.record_save(now)?;
     Ok(Some(report))
+}
+
+/// A report's package-relative path as the package's absolute one.
+fn package_path(path: &str) -> String {
+    format!("/{}", path.trim_start_matches('/'))
 }
 
 #[cfg(test)]
@@ -192,6 +202,35 @@ mod tests {
         assert_eq!(parsed.prefix(), lpc_history::UidPrefix::Project);
     }
 
+    /// The v11→v12 step removes a fixture's patch document and adds a map2d
+    /// for hand-placed lamps: the saved package has the one and not the
+    /// other, exactly as the report says (lean Q60).
+    #[test]
+    fn a_v11_package_gains_and_loses_the_files_its_report_names() {
+        let store = store();
+        let uid = store
+            .install_package("Demo", &v11_package(), PackageProvenance::Created, 1.0)
+            .unwrap()
+            .uid;
+        let mut handle = store.open(uid).unwrap();
+
+        let report = migrate_handle_to_current(&mut handle, 2.0)
+            .unwrap()
+            .expect("a v11 package migrates");
+        assert_eq!(report.removed_files, vec!["strip.patch.json"]);
+        assert_eq!(report.added_files, vec!["lamps.map2d.json"]);
+
+        let package_fs = handle.package_fs.borrow();
+        assert!(
+            package_fs.read_file("/strip.patch.json".as_path()).is_err(),
+            "the removed patch document is gone from the package"
+        );
+        let added = package_fs
+            .read_file("/lamps.map2d.json".as_path())
+            .expect("the added map2d is in the package");
+        assert!(String::from_utf8_lossy(&added).contains("\"format\": 6"));
+    }
+
     #[test]
     fn a_below_floor_package_is_refused_with_the_classifiers_sentence() {
         let store = store();
@@ -204,5 +243,34 @@ mod tests {
         };
         assert!(message.contains('2') && message.ends_with('.'), "{message}");
         assert_eq!(handle.content_hash().unwrap(), before, "nothing written");
+    }
+
+    /// A format-11 package with one patched fixture and one of hand-placed
+    /// lamps.
+    fn v11_package() -> Vec<(String, Vec<u8>)> {
+        [
+            ("project.json", r#"{"format":11,"name":"Demo"}"#),
+            (
+                "module.json",
+                r#"{"kind":"Module","nodes":{"strip":{"ref":"./strip.json"},"lamps":{"ref":"./lamps.json"},"out":{"ref":"./out.json"}}}"#,
+            ),
+            (
+                "strip.json",
+                r#"{"kind":"Fixture","mapping":{"kind":"Map2d","source":"strip.map2d.json"},"patch":{"kind":"File","source":"strip.patch.json"}}"#,
+            ),
+            (
+                "strip.map2d.json",
+                r#"{"format":3,"objects":[{"id":"a","shape":{"path":{"points":[[0,0],[10,0]],"count":4}}}]}"#,
+            ),
+            ("strip.patch.json", r#"{"format":2,"entries":[["/a",-1,0]]}"#),
+            (
+                "lamps.json",
+                r#"{"kind":"Fixture","render_size":{"width":4,"height":4},"mapping":{"kind":"PathPoints","paths":{"0":{"kind":"PointList","first_channel":0,"points":{"0":[0.25,0.25],"1":[0.75,0.75]}}},"sample_diameter":1.0}}"#,
+            ),
+            ("out.json", r#"{"kind":"Output","ports":{"0":{}}}"#),
+        ]
+        .into_iter()
+        .map(|(path, text)| (path.to_string(), text.as_bytes().to_vec()))
+        .collect()
     }
 }

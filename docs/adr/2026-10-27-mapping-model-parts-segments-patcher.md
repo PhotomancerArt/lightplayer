@@ -252,8 +252,243 @@ RGB, and path commands not built (the reader's refusal).
 ## Follow-ups
 
 - M2: the engine's side, an amendment to this ADR (the contract between
-  fixture and output, port tables, refusals).
+  fixture and output, port tables, refusals): written, below.
 - M3: the upgrade, an amendment (the freeze into starts and overrides, the
-  refusals, `PathPoints` fixtures into `points` parts).
+  refusals, `PathPoints` fixtures into `points` parts): written, below.
 - M4: Studio's side, an amendment; "Add centre lamp" adds a ring of
-  radius 0.
+  radius 0: written, below (and `2026-10-28-graph-is-the-project-canvas.md`).
+
+## Amendment (2026-10-27): the engine's side
+
+Mapping rebuild M2 (PRs #1314 and #1319; planning
+`lp2025/2026-10-27-0114-mapping-rebuild`, `notes.md` "M2 planning",
+Q36–Q51). What the engine does with a format-6 map2d, until M3 moves every
+project onto it:
+
+- **Two paths, chosen by the document's format (Q3).** The loader and the
+  asset refresh read a fixture's map2d with today's reader first, unchanged;
+  only a document it refuses as newer goes to `lpc_mapping::map2d6::read`
+  (`nodes/fixture/map2d_document.rs`). A format 1–5 document costs exactly
+  what it did (a peek before every read was one allocation and 8 B per
+  fixture, caught by the engine heap ratchet). A newer document is refused
+  naming 6. A format-6 fixture whose def also names a patch document is
+  refused by name: one file holds the patching (G1, Q14).
+- **The fixture patches itself and publishes runs that name their output
+  (Q36).** The output is unchanged: it filters the fixture's `PatchedRun`s
+  by its own name, as it does a patch document's. The output cannot take
+  the patcher's `SegmentPatch`es because the output node is never gated
+  out while `lpc-mapping` can be (`node-fixture`); and the patcher needs
+  the whole fixture under one cursor, so it cannot run per output.
+- **No default output, no auto-flow (Q37).** A format-6 fixture is always
+  manual; with no start it lights nothing and says so.
+- **Port tables come from the authored output defs through the same walk
+  that cuts the wires** (`node::output_port_slices`, Q38), offered only for
+  named outputs that read the fixture's bus channel. Capacity in channels
+  is the port's samples (`count × 3`; RGB only). An address becomes a wire
+  position as the port's first sample plus the channel (Q39). An unnamed
+  output is not offered (Q40).
+- **Refusals are per segment (Q41):** a start part-way into a lamp, colors
+  other than RGB, an order other than the fixture's colour order. The rest
+  light where the patcher put them, and a refused segment keeps its room on
+  the port. Path commands not built are the reader's refusal and fail the
+  load (keep-last-good on a live edit).
+- **Problems are one status line (Q42):** the first problem in words, then
+  "(and N more)". No wire change: Studio computes the full patching itself
+  (M4).
+- **A patching-only edit renders nothing (Q46).** A re-read mapping whose
+  layout is the same (`Mapping::same_layout`: everything `render` reads)
+  keeps the carrier and the mapping version; only the patching is done
+  again. A document edited across formats switches the fixture's path.
+- **What stays resident (Q43, M2 P6).** The mapping and the runs. The tree
+  is rendered for each patch and dropped with it, and the patching is made
+  without its walk record (`patching::patch_mapping_placed`): at device
+  width the walk was most of a first frame's transient (a 512-lamp,
+  64-segment fixture's largest allocation 29,184 B), and the resident tree a
+  node and a segment, each owning its id, per segment (+13,480 B retained
+  at load for that fixture). Interned ids (P6 step 3) were not done: they
+  change `TreeId`, which Studio's edit operations (M4) build on.
+- **Cost (fw-emu at device width; the C6 split image).** The format-6
+  twins against their format-5 twins, and the image's growth against
+  `main` with M2a, are in PR #1319. Both crossed the plan's bars (lean Q44
+  for heap, Q45's 32 KB for the engine), which went to the director with
+  the numbers rather than being tuned toward them.
+
+## Amendment (2026-10-28): the upgrade (project format 12)
+
+Mapping rebuild M3 (the integration PR #1319; planning
+`lp2025/2026-10-27-0114-mapping-rebuild`, `notes.md` "M3 planning" and "M3
+amended for G1", Q52–Q70, Q99–Q114). Project format 12 moves every project
+onto this model through one `lpa-upgrade` step, `v11_to_v12`, and the engine
+keeps only this model's patching.
+
+- **The freeze (Q7, simple and correct, not minimal).** Per fixture, the
+  step predicts the patcher's cursor over today's landing (flat wire, placed
+  rows first, auto-flow per output in attach order) and writes the
+  fixture's `start` where its first lamp lands, then an override only on a
+  segment that does not simply follow on (the wrap to the next port counts
+  as following on): port and channel Set (channel in lamps), output Set
+  only when it changes, `direction: "reverse"` for a reversed row,
+  `offset` for a rotation. Every Set is followed by a segment that fits
+  where it was set, so the patcher's "the first segment after a Set does
+  not wrap" never changes a landing. The repo froze to 138 fixtures, 622
+  segments and 327 overrides (small-dome 50, radiance-dome 274, peach-1d
+  and -2d one each, eaves-wired one); every other fixture is a start alone.
+- **Dark lamps (Q8, DD18).** A segment that lands nowhere today gets `off`;
+  a fixture none of whose segments lands gets no start and no `off` (an
+  `off` everywhere would keep it dark after someone gives it a start). No
+  repo project has either.
+- **Ids (Q58).** An object with no id takes its name slugged (`F-lower` →
+  `f-lower`) when the slug is valid and no other object of the fixture
+  slugs or is id'd to the same text; otherwise kind and number (`path3`).
+  A repeat's held part takes the object's id (and name), the repeat
+  becomes `repeat<n>`, so today's row `/rim-a/2` is `rim-a@2`. `next`
+  exceeds every minted number. `stride` (11 objects) is dropped with a
+  report line. A repeat holds at most 64 copies, as the Map tab already
+  clamped.
+- **Outputs named (Q59).** Every output a start or override names gets a
+  name if it has none: the lowest free number (`"1"`, `"2"`, …),
+  project-unique, in the output's own file. 133 outputs were named;
+  small-dome's `"Box 2"` was kept. Outputs nothing names stay unnamed.
+- **Shapes.** A ring set becomes one `circle` with `split: "one"` and
+  today's radii (G1 6), every lamp bit-identical, a one-lamp derived ring
+  included (§4). A path's points become `d`. A `PathPoints` fixture (lamps
+  listed inline in the fixture def) gets a new `<def stem>.map2d.json` of
+  `points` parts in `first_channel` order (Q52), on a canvas fitted so every
+  lamp reaches the sampler where it does today; `projects/test/five-wire`
+  needed an offset canvas for that (DD19). The step writes no lamp fields
+  (DD12): `FixtureDef.color_order` stays where it is.
+- **Patch files go (G1, one file).** The fixture's `patch` slot and the
+  `*.patch.json` it named are removed (peach-1d and -2d, small-dome,
+  eaves-wired, radiance-dome). A patch file today's engine could not read
+  froze to what the engine did with it, auto-flow, with a report line
+  (DD8); a missing one is refused, as the engine refused it.
+- **Refusals by name (Q9).** A segment that does not land as one window on
+  one port — a patch row or a port boundary inside it — refuses the whole
+  project, naming the object, where it is cut and the split a person can
+  make today. No repo project is refused. `projects/test/quad-wire-oracle`
+  (one 8 × 8 grid over four 16-lamp ports) was hand-migrated beforehand into
+  four 8 × 2 grids whose positions are the grid's bit for bit (Q70); its old
+  form is kept as a refusal fixture (`lpa-upgrade/tests/refused/`).
+- **The proof is independent of the step (Q54).** Before the bump the live
+  format-11 engine recorded where every lamp of every repo and corpus
+  project landed (output node, port key, channel): the landing goldens,
+  `lp-app/lpa-upgrade/tests/landing/`, never re-blessed. After it,
+  `lpc-engine`'s `upgrade_landing` loads every migrated project through
+  this model and lands every lamp exactly there: 117 projects, 195
+  fixtures, 66,654 lamps, 0 differences. The step's frozen arithmetic is
+  checked against the same goldens separately (`frozen_landing`).
+- **One patching path (M3 P8).** The engine reads only format 6
+  (`map2d6::read`): today's map2d reader, the patch document
+  (`lpc-mapping`'s `patch.rs`), auto-flow, the default output, the lane
+  topology and `MappingConfig::PathPoints` are deleted. `PatchedRun` stays,
+  its output name now required (C26). A fixture with no runs on any output
+  is never rendered, so its shader is not compiled until it is placed.
+- **What the format-12 engine refuses (Q67).** A project at format 11 is
+  refused as a project ("unsupported project format 11 (expected 12)"); a
+  map2d at format 5 or older inside a format-12 project fails its fixture's
+  load in the reader's words on a host ("map2d format N is the older layout
+  document; this reader reads format 6"), and in one sentence on a device
+  (`map2d6::DEVICE_REFUSAL`, DD25). The device keeps every format-6 rule
+  check and drops only the words, so a board accepts exactly what a host
+  accepts (DD41). A fixture def naming a patch document or `PathPoints`
+  does not parse. The upgrade itself is the host's: Studio and lp-cli on
+  open, push and import, and an over-the-air update as its last stage
+  (`2026-10-28-firmware-updates-upgrade-the-boards-projects.md`).
+- **Port capacity stays in lamps (Q57).** An output port's `count` is
+  lamps and the patcher's capacity `count × 3` channels; the lamp-model
+  plan moves it when non-RGB lamps arrive, with its own bump.
+- **What stays until M4 (Q56, C17).** `Map2dDoc`, its resolver and
+  `map2d_fit` (the resolver is this model's geometry: each shape's lamps
+  come from `resolve_into`; the Map tab, hidden, still reads the document),
+  `lpc-mapping`'s corpus, `editor_meta`, `object_instance_spans`. Studio
+  hides the Map tab and the fixture face's mapping toggle, has deleted the
+  Patch tab (keeping what the Nodes view, the patch bay and the Graph's
+  highlight use, C28), and its Graph opens a format-6 fixture to "This
+  fixture uses the new mapping format. Its editor is coming soon." and saves
+  nothing. A fixture added in Studio starts on the first named output its
+  bus channel reaches, and a new output is named on creation (DD28).
+- **Cost on the C6** (split image, against the pre-rebuild base
+  `a35e3cd1f`, with the old path deleted and P13's trims): engine
+  +3,474 B, core +336 to +400 B, gated headroom 236,476 → 233,002 B; the
+  attribution by concept is in M3 P13's result and the G2 ship report.
+
+## Amendment (2026-10-28): Studio's side
+
+Mapping rebuild M4 (landing with M3 in PR #1319; planning
+`lp2025/2026-10-27-0114-mapping-rebuild`, `notes.md` "M4 planning",
+Q71–Q98; G3 passed by Yona). Studio edits this model directly, in its
+Graph; `2026-10-28-graph-is-the-project-canvas.md` records the editor
+itself (the crates, the offers, the Map and Patch tabs deleted).
+
+- **The same patcher in Studio (Q75, Q42).** The Graph computes the full
+  `Patching` itself, with `patch_mapping` over port tables cut by the
+  engine's walk (`lpc_engine::node::output_port_slices`), named outputs that
+  read the fixture's bus channel only. What the engine says in one status
+  line, the Graph says per problem, in words, on the fixture and in the
+  inspector of the node it names; an override whose node is gone is listed
+  with Remove. Its oracle is the landing goldens: every repo project opened
+  in the Graph lands every lamp where the engine does, before and after a
+  save.
+- **The `edit` feature (Q76).** `lpc_mapping::edit` holds the edits that
+  rewrite references: insert, remove and move a part; rename (overrides,
+  copies' keys included); wrap in a repeat, unrepeat (keeps copy 0), expand
+  (copies become parts `x-k`, overrides `x@k` become `x-k`); a repeat's
+  count (overrides of dropped copies are kept, and the patcher reports
+  them); add and remove a ring (keys never reused); a ring's radius, a
+  circle's way round, a lattice; a path's split; set and clear an override
+  field; a part's or the fixture's start and flow. `lpa-graph` enables it;
+  no firmware does, so the C6 image does not compile it.
+- **One tree (Q79, D11).** Parts are the primary rows; generated nodes
+  (rings, copies) are lighter and say what they are in words ("ring r3",
+  "copy 2"), still selectable; a copy's insides are reached on the canvas;
+  a part with one segment and that segment are one row. Ids appear in the
+  inspector's section titles ("Part · circle1", "Segment · circle1/r3"),
+  monospaced, and nowhere else.
+- **Starts read as where they came from (Q81, C35).** Output, Port and
+  Starts at each show their value and its source: "follows ring r2", "from
+  circle1's flow: one per port", "from panel's start, every copy", "from the
+  fixture's start", or "set here" with **Back to the flow**. Direction,
+  offset and off have no recorded source in `Walked`; the Graph derives them
+  from `Mapping.overrides` (the node's own, else the nearest part above with
+  one). At and Next port are choices in the Port row that write per-field
+  ops. Choosing a port on an unnamed output names it (the lowest free
+  numeric name) in the same undo step (Q96).
+- **Single lamp (Q94).** In a circle, Add centre lamp adds a ring of radius
+  0 with one lamp; on its own, a one-click path is a one-lamp path.
+- **The presentation (Q82, Q98): not yet chosen.** Both stay behind the
+  Graph's Debug menu, per browser: A, each value with where it came from
+  (the default); B, the flow's start for the node as a quiet line, then
+  only what is set here. Yona passed G3 without picking; the one not chosen
+  is deleted when he does.
+
+## Amendment (2026-10-29): a required `view_box`, no `sample_diameter`
+
+Before format 6 shipped (F0 of the mapping rebuild; Yona, 2026-10-28:
+"holding makes sense"), two of its top-level fields changed, from the
+fixture and shader space theory (planning
+`lp2025/2026-10-28-0935-fixture-space-theory`, D7, D11, D28). Format 6 had
+not reached a user, so this is no new format number; every writer, the
+upgrade corpus goldens and every committed project changed with it.
+
+- **`canvas` is `view_box`, required.** `Mapping.view_box: [f32; 4]`,
+  `[min_x, min_y, width, height]` in the layout's units, y down: the
+  fixture's coordinate system, an SVG `viewBox` by another name. The reader
+  refuses a format-6 document without one by name; the writer always
+  writes it, after `format`. The fit is unchanged: it frames the view box,
+  and a box of no width or height frames the lamps' own bounds, as a
+  missing canvas did. The upgrade writes a format 1–5 document's `canvas`
+  as its view box, and for one with no canvas the bounds of the lamps the
+  written document renders (`lpa-upgrade` `v11/freeze_view_box.rs`): the
+  box today's fit framed, so every lamp lands where it did. That one
+  branch reads the current model (`lpc-mapping` is now a dependency of
+  `lpa-upgrade`, where lean Q6 had it a dev-dependency only).
+- **No `sample_diameter`.** Lamps have no size field; a format-6 document
+  that gives one is refused by name. The upgrade still reads a format-11
+  `PathPoints` fixture's diameter to choose its canvas, so each fixture's
+  canvas is the one it got before, and writes none. Texture-area sampling,
+  until it retires (D26), reads every lamp at 2 layout units through the
+  fit (`lpc-engine` `AREA_SAMPLE_DIAMETER`: the diameter a map2d that gave
+  none always had).
+- §1's "layout facts `sample_diameter` and `canvas`" are now the one
+  layout fact `view_box`. The Graph's box is the view box (its far corner,
+  from (0, 0)); a resized box writes its view box from the box's corner.

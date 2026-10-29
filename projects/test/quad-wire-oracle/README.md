@@ -18,6 +18,13 @@ oracle needed.
 Channel 3 omits its `count` on purpose: only the highest-keyed channel may,
 and it exercises remainder semantics on silicon.
 
+The mapping is four 8 × 2 grids (`panel`, `panel-2`, `panel-3`,
+`panel-4`), one per wire, origins `6.25 + 25k` down the canvas. Until
+2026-10 it was one 8 × 8 grid that the four 16-lamp ports cut into four;
+project format 12 refuses a segment a port boundary cuts, so it was split
+by hand. Every lamp sits where the 8 × 8 grid put it, bit for bit, and lands
+on the same wire and channel, so the table above is unchanged.
+
 The board manifest declares exactly four `/rmt/ws281xK` resources — never a
 fifth (the 40 µs refill foot-gun, `docs/adr/2026-08-02-classic-hli-refill.md`).
 

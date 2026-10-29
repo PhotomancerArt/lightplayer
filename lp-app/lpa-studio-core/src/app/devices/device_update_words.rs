@@ -14,6 +14,7 @@
 use super::device_update_route::UpdateLink;
 use super::device_update_standing::UpdateStanding;
 use super::device_update_version::{UpdateVersion, UpdateVersionDisplay};
+use super::project_stage_status::ProjectsHeldBack;
 
 /// The three kinds a row reads as, by tone alone: a lit bar is progress,
 /// needs-you text is orange, information is plain.
@@ -329,6 +330,26 @@ pub fn update_words(standing: &UpdateStanding) -> Option<UiDeviceUpdate> {
             None,
             "Ready",
         ),
+        UpdateStanding::UpgradingProjects { done, total, .. } => {
+            let count = projects_count(*done, *total);
+            UiDeviceUpdate {
+                progress: progress(standing.whole_percent(), false),
+                ..words(
+                    Progress,
+                    format!("Upgrading projects{count}"),
+                    format!(
+                        "Upgrading its projects to the new format{count_dash}",
+                        count_dash = projects_dash(*done, *total)
+                    ),
+                    None,
+                    "Upgrading projects",
+                )
+            }
+        }
+        UpdateStanding::ProjectsUnfinished { why, .. } => {
+            let (line, sentence) = held_back_words(why);
+            words(NeedsYou, line, sentence, None, "Ready")
+        }
         UpdateStanding::PlayOnly { board, to } => words(
             Information,
             format!("{} → {} available", board.short(), to.short()),
@@ -399,6 +420,51 @@ pub fn update_session_words(
         run_word,
         stat_line,
     })
+}
+
+/// The project being worked on as " · 1 of 3" (the one being rewritten,
+/// counted from one); nothing before the count is known.
+fn projects_count(done: u32, total: u32) -> String {
+    match total {
+        0 => String::new(),
+        _ => format!(" · {} of {total}", (done + 1).min(total)),
+    }
+}
+
+/// The same for the sentence: " — 1 of 3".
+fn projects_dash(done: u32, total: u32) -> String {
+    match total {
+        0 => String::new(),
+        _ => format!(" — {} of {total}", (done + 1).min(total)),
+    }
+}
+
+/// The line and sentence for older projects this Studio could not finish.
+fn held_back_words(why: &ProjectsHeldBack) -> (String, String) {
+    match why {
+        ProjectsHeldBack::NeedsEdit => (
+            "Projects need upgrading".to_string(),
+            "Its projects need upgrading for this firmware. Someone who can edit this board can \
+             finish it."
+                .to_string(),
+        ),
+        ProjectsHeldBack::StudioTooOld => (
+            "Reload Studio to finish".to_string(),
+            "This board's firmware reads projects newer than this Studio can write. Reload \
+             Studio to finish."
+                .to_string(),
+        ),
+        ProjectsHeldBack::Refused { project, why } => (
+            format!("Couldn't upgrade \u{201c}{project}\u{201d}"),
+            format!("Couldn't upgrade \u{201c}{project}\u{201d}: {why}"),
+        ),
+        ProjectsHeldBack::NotAtomic => (
+            "Projects need upgrading".to_string(),
+            "Its projects need upgrading for this firmware, and this board's files can't be \
+             rewritten safely over a link."
+                .to_string(),
+        ),
+    }
 }
 
 /// The update-available line and sentence: a release one version behind
@@ -486,6 +552,52 @@ mod tests {
         assert_eq!(words.light, light);
         assert_eq!(words.chip, chip);
         words
+    }
+
+    /// M3 P11: the project stage's words — running, counted in projects;
+    /// and each reason older projects were left, in plain words.
+    #[test]
+    fn the_project_stage_says_what_it_does_and_why_it_stopped() {
+        let words = says(
+            &UpdateStanding::UpgradingProjects {
+                board: y(),
+                done: 0,
+                total: 3,
+            },
+            "Upgrading projects · 1 of 3",
+            "Upgrading its projects to the new format — 1 of 3",
+            None,
+            "Upgrading projects",
+        );
+        assert_eq!(words.kind, UpdateRowKind::Progress);
+        let held = |why| UpdateStanding::ProjectsUnfinished { board: y(), why };
+        let words = says(
+            &held(ProjectsHeldBack::NeedsEdit),
+            "Projects need upgrading",
+            "Its projects need upgrading for this firmware. Someone who can edit this board can \
+             finish it.",
+            None,
+            "Ready",
+        );
+        assert_eq!(words.kind, UpdateRowKind::NeedsYou);
+        says(
+            &held(ProjectsHeldBack::StudioTooOld),
+            "Reload Studio to finish",
+            "This board's firmware reads projects newer than this Studio can write. Reload \
+             Studio to finish.",
+            None,
+            "Ready",
+        );
+        says(
+            &held(ProjectsHeldBack::Refused {
+                project: "eaves".to_string(),
+                why: "the step's sentence".to_string(),
+            }),
+            "Couldn't upgrade \u{201c}eaves\u{201d}",
+            "Couldn't upgrade \u{201c}eaves\u{201d}: the step's sentence",
+            None,
+            "Ready",
+        );
     }
 
     #[test]

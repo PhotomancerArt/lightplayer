@@ -74,6 +74,16 @@
 //! ([`UpdateHost::set_watches`]) so the controller can take over with no
 //! click.
 //!
+//! **The project stage is the update's last leg** (M3 P11, Q99): a run the
+//! driver ends up to date does not end there. It enters
+//! [`RunPhase::Projects`], says the stage (`UpgradingProjects`), and waits
+//! while the project-stage controller (`project_stage_controller`) runs
+//! `lpa-update`'s `ProjectStage` over the board's channel 1 — the board's
+//! engine now answers there. The update reports done only once the stage
+//! has ([`UpdateHost::projects_done`]). A link that drops meanwhile ends the
+//! leg like any other; the next leg finds the run still in its project
+//! stage, and the controller runs the stage again, from the board.
+//!
 //! **Misses are remembered** (E13): a run that did not reach its goal
 //! blocks the controller's no-click start for that board's engine until the
 //! board reconnects (a newer link window) or, when the store was the
@@ -415,6 +425,64 @@ impl UpdateHost {
     pub(crate) fn store_lookups(&self) -> StoreLookups {
         self.state.borrow().lookups.clone()
     }
+
+    /// The devices whose update waits for its project stage, each with the
+    /// link its leg runs on: what the project-stage controller runs a stage
+    /// for. A run between legs is not listed (its next leg will be).
+    pub(crate) fn projects_wanted(&self) -> Vec<(DeviceId, LinkId)> {
+        self.state
+            .borrow()
+            .runs
+            .iter()
+            .filter(|(_, run)| matches!(run.phase, RunPhase::Projects))
+            .filter_map(|(device, run)| run.leg.as_ref().map(|leg| (*device, leg.link)))
+            .collect()
+    }
+
+    /// How far `device`'s project stage is: the card's stage, counted in
+    /// projects.
+    pub(crate) fn projects_progress(&self, device: DeviceId, done: u32, total: u32) {
+        let state = self.state.borrow();
+        let (Some(seams), Some(run)) = (state.seams.clone(), state.runs.get(&device)) else {
+            return;
+        };
+        if !matches!(run.phase, RunPhase::Projects) {
+            return;
+        }
+        seams.marker(
+            device,
+            run.last_effect,
+            ActivityMarker::UpdateStage {
+                stage: UpdateStageFacts::UpgradingProjects,
+                done,
+                total,
+            },
+        );
+    }
+
+    /// `device`'s project stage ended (`lines` say how, in Studio's voice):
+    /// the update ends up to date.
+    pub(crate) fn projects_done(&self, device: DeviceId, lines: Vec<String>) {
+        let mut state = self.state.borrow_mut();
+        let Some(seams) = state.seams.clone() else {
+            return;
+        };
+        let Some(run) = state.runs.get_mut(&device) else {
+            return;
+        };
+        if !matches!(run.phase, RunPhase::Projects) {
+            return;
+        }
+        run.projects_done = true;
+        let effect = run
+            .leg
+            .as_ref()
+            .map_or(run.last_effect, |leg| leg.effect_id);
+        for line in lines {
+            seams.say(device, effect, line);
+        }
+        state.finish(device, UpdateOutcomeFacts::UpToDate, None);
+    }
 }
 
 /// A run's remembered failure (see [`UpdateHost::auto_blocked`]).
@@ -470,6 +538,9 @@ struct UpdateRun {
     /// The driver reported a stage past backing up: the board has changed,
     /// so an end without an outcome keeps the backup pinned.
     board_touched: bool,
+    /// The project stage has run to its end for this run: up to date ends
+    /// the run now.
+    projects_done: bool,
 }
 
 enum RunPhase {
@@ -485,6 +556,10 @@ enum RunPhase {
     Waiting {
         next_ask_ms: u64,
     },
+    /// The board runs the update's build: its stored projects are being
+    /// brought to its engine's format over channel 1 (the project stage),
+    /// and the run ends up to date when that is done.
+    Projects,
 }
 
 struct Leg {
@@ -573,6 +648,7 @@ impl HostState {
                     heard_this_leg: false,
                     last_heard_ms: None,
                     board_touched: false,
+                    projects_done: false,
                 },
             );
             spawn_ticks(&seams, self.me.clone(), device, generation);
@@ -614,6 +690,8 @@ impl HostState {
             // The build (or the restore's engine) is on its way; the driver
             // brings this leg's link up when it is made.
             RunPhase::Preparing { .. } => {}
+            // The project stage runs again on this leg, from the board.
+            RunPhase::Projects => {}
         }
     }
 
@@ -1488,7 +1566,7 @@ impl HostState {
                 self.process(device);
             }
             Some(RunPhase::Waiting { .. }) => self.waiting_heard(device, bytes),
-            Some(RunPhase::New | RunPhase::Preparing { .. }) | None => {}
+            Some(RunPhase::New | RunPhase::Preparing { .. } | RunPhase::Projects) | None => {}
         }
     }
 
@@ -1571,6 +1649,9 @@ impl HostState {
         let Some(seams) = self.seams.clone() else {
             return;
         };
+        if outcome.is_up_to_date() && self.enter_projects(&seams, device) {
+            return;
+        }
         let Some(mut run) = self.runs.remove(&device) else {
             return;
         };
@@ -1629,6 +1710,38 @@ impl HostState {
                 },
             );
         }
+    }
+
+    /// Up to date, before the run ends: its project stage, unless it ran
+    /// already (or the run has no leg to run it on). Answers whether the run
+    /// waits for it.
+    fn enter_projects(&mut self, seams: &UpdateSeams, device: DeviceId) -> bool {
+        let Some(run) = self.runs.get_mut(&device) else {
+            return false;
+        };
+        if run.projects_done || run.leg.is_none() {
+            return false;
+        }
+        if !matches!(run.phase, RunPhase::Projects) {
+            log::info!("update: {device:?} is up to date; its projects come next");
+            run.phase = RunPhase::Projects;
+            if let Some(line) =
+                run.narration
+                    .progress(seams.now_ms(), UpdateStageFacts::UpgradingProjects, 0, 0)
+            {
+                seams.say(device, run.last_effect, line);
+            }
+            seams.marker(
+                device,
+                run.last_effect,
+                ActivityMarker::UpdateStage {
+                    stage: UpdateStageFacts::UpgradingProjects,
+                    done: 0,
+                    total: 0,
+                },
+            );
+        }
+        true
     }
 
     /// Let go of `device`'s backup pin. The cache's hold is one flag per
@@ -2190,6 +2303,7 @@ mod tests {
             heard_this_leg: false,
             last_heard_ms: None,
             board_touched: false,
+            projects_done: false,
         }
     }
 

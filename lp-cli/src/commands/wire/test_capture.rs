@@ -177,11 +177,13 @@ pub fn hello(pack_format: u8) -> WireServerMessage {
                 commit: "unknown".to_string(),
                 dirty: false,
                 profile: "release-esp32".to_string(),
+                project_format: lpc_model::PROJECT_FORMAT_VERSION,
             },
             hardware: Default::default(),
             device_uid: None,
             pack_format,
             auth: lpc_wire::HelloAuth::TRUSTED,
+            startup_refused: None,
             firmware: None,
         }),
     )

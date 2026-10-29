@@ -9,7 +9,7 @@
 
 use std::rc::Rc;
 
-use lab_mapping_model::BoardFrame;
+use lpa_graph::BoardFrame;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct UiGraphView {
@@ -31,8 +31,7 @@ pub enum UiGraphState {
         /// Until then lamps are dim and colourless, never a stand-in.
         live: bool,
     },
-    /// The project couldn't be opened on the Graph, and why (Map and
-    /// Patch still open it).
+    /// The project couldn't be opened on the Graph, and why.
     Refused { why: String },
 }
 

@@ -40,9 +40,17 @@ all read this one file.
   app version, a required field. The recorded board predates the field, so
   it is given the value an embedder with no version reports rather than a
   version it never said.
-- **Wire shapes:** proto 35; 36 (Wi-Fi settings) only added messages,
-  and 37 (Bluetooth onto lp-link) moved no message shape, so nothing in
-  the sample changed for either. Every line
+- **Edited since, by hand (proto 46, 2026-10-28, the mapping rebuild's M3
+  P10):** the three hellos' `build` gained `"projectFormat":11` after
+  `"profile"` — the hello now says which project format the build's engine
+  reads, a required field. The value is the one the recorded build's engine
+  read: `PROJECT_FORMAT_VERSION` was 11 at its commit, `2ae10002a596`. 57
+  bytes added (193,491 → 193,548 in the file); the counts above are still the
+  original cut's.
+- **Wire shapes:** proto 46; 36 (Wi-Fi settings) only added messages,
+  37 (Bluetooth onto lp-link) moved no message shape, and nothing between
+  them and 46 changed a shape the sample holds, so nothing else in the
+  sample changed. Every line
   re-parses into the wire types and
   re-serializes byte for byte (`lpc-wire`'s
   `recorded_traffic_reserializes_byte_for_byte`).

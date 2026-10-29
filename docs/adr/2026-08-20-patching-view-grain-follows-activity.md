@@ -2,11 +2,11 @@
 
 - **Status:** Accepted
 - **Date:** 2026-08-20
+- **Superseded (2026-10-28) by** `2026-10-28-graph-is-the-project-canvas.md`: the Patching view is deleted; patching is edited on the Graph.
 - **Deciders:** Photomancer
 - **Plan:** lp2025/2026-08-14-1115-patching-view (PR #436)
 - **Supersedes:** None (extends `2026-08-13-one-project-canvas.md` and
   `2026-08-12-studio-workbench-panel-dock.md`)
-- **Superseded by:** None
 
 ## Context
 

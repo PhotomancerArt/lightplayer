@@ -344,24 +344,19 @@ mod tests {
         }
     }
 
-    /// The mapping-and-patching claim, pinned: the peach's patch documents
-    /// say where the lamps land on the wire, which is a fact about the
-    /// installation and not about how anything samples them. So the 1D and
-    /// 2D peaches — same artwork, opposite declarations — carry the SAME
-    /// patch bytes, and the mapping documents they patch against too. A
-    /// change to one that is not copied to the other breaks this loudly.
+    /// The mapping-and-patching claim, pinned: the peach's map2d documents
+    /// say where the lamps are and where they land on the wire (one file
+    /// since project format 12), which is a fact about the installation and
+    /// not about how anything samples them. So the 1D and 2D peaches — same
+    /// artwork, opposite declarations — carry the SAME map2d bytes. A change
+    /// to one that is not copied to the other breaks this loudly.
     #[test]
     fn the_two_peaches_share_their_patch_and_mapping_bytes() {
         let one_d = embedded_example("catalog/peach-1d").expect("peach-1d is embedded");
         let two_d = embedded_example("catalog/peach-2d").expect("peach-2d is embedded");
         let one_d_files: std::collections::BTreeMap<_, _> = one_d.files().into_iter().collect();
         let two_d_files: std::collections::BTreeMap<_, _> = two_d.files().into_iter().collect();
-        for shared in [
-            "body/peach_body.patch.json",
-            "leaf/peach_leaf.patch.json",
-            "body/peach_body.map2d.json",
-            "leaf/peach_leaf.map2d.json",
-        ] {
+        for shared in ["body/peach_body.map2d.json", "leaf/peach_leaf.map2d.json"] {
             assert_eq!(
                 one_d_files[&shared.to_string()],
                 two_d_files[&shared.to_string()],

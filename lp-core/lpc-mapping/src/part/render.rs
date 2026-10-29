@@ -16,7 +16,6 @@
 //! inlines it into today's resolver, and the firmware image must stay
 //! byte-identical while nothing in it uses this module.
 
-use alloc::collections::BTreeSet;
 use alloc::string::ToString;
 use alloc::vec::Vec;
 
@@ -41,13 +40,41 @@ use crate::part::subpath_runs::subpath_runs;
 use crate::part::tree::Tree;
 use crate::part::tree_id::TreeId;
 use crate::part::tree_node::TreeNode;
+use crate::sorted_set::insert_sorted;
 
 /// Render a mapping: its parts as one tree, its segments' lamps in one
 /// buffer of exactly the size they need.
 pub fn render(mapping: &Mapping) -> Result<Tree, RenderError> {
-    let mut seen = BTreeSet::new();
+    render_as(mapping, Lamps::Placed)
+}
+
+/// [`render`]'s tree without the lamps' positions: the same nodes and
+/// segments, every lamp at `[0, 0]`. For a reader of the structure alone,
+/// the patcher: a patch renders its mapping only to walk the tree, and the
+/// positions — soft-float `sinf`/`cosf` per lamp of a circle on the C6,
+/// ~1.0 M cycles of `projects/test/basic`'s first patch — were dropped
+/// unread.
+///
+/// It refuses what `render` refuses, except a shape whose numbers today's
+/// resolver would refuse (a path of no length, say): that is only found by
+/// placing its lamps. Lay out a mapping that has rendered.
+pub fn render_layout(mapping: &Mapping) -> Result<Tree, RenderError> {
+    render_as(mapping, Lamps::Counted)
+}
+
+/// Whether a render places its lamps.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Lamps {
+    /// Every lamp where today's resolver puts it.
+    Placed,
+    /// Every lamp at `[0, 0]`: the tree's structure alone ([`render_layout`]).
+    Counted,
+}
+
+fn render_as(mapping: &Mapping, mode: Lamps) -> Result<Tree, RenderError> {
+    let mut seen = Vec::new();
     for part in mapping.all_parts() {
-        if !seen.insert(part.id.as_str()) {
+        if !insert_sorted(&mut seen, part.id.as_str()) {
             return Err(RenderError::DuplicateId(part.id.clone()));
         }
     }
@@ -67,18 +94,39 @@ pub fn render(mapping: &Mapping) -> Result<Tree, RenderError> {
         });
     }
 
+    // The nodes and segments at the size they will be, so neither grows by
+    // doubling (65 nodes took a 128-node buffer, 8,192 B on RV32). A count
+    // the heap refuses here is left to the pushes, as before.
+    let (node_total, segment_total) = mapping
+        .parts
+        .iter()
+        .map(node_and_segment_count)
+        .fold((0u64, 0u64), |(n, s), (dn, ds)| {
+            (n.saturating_add(dn), s.saturating_add(ds))
+        });
+    let mut nodes = Vec::new();
+    let mut segments = Vec::new();
+    if let (Ok(n), Ok(s)) = (usize::try_from(node_total), usize::try_from(segment_total)) {
+        let _ = nodes.try_reserve_exact(n);
+        let _ = segments.try_reserve_exact(s);
+    }
+
     let mut tree = Tree {
-        nodes: Vec::new(),
-        segments: Vec::new(),
+        nodes,
+        segments,
         positions,
     };
     for part in &mapping.parts {
-        render_part(&mut tree, part, None, &mapping.lamp)?;
+        render_part(&mut tree, part, None, &mapping.lamp, mode)?;
     }
     debug_assert_eq!(
         tree.positions.len() as u64,
         total,
         "lamp_count drifted from the render: the exact-size reserve is broken"
+    );
+    debug_assert!(
+        tree.nodes.len() as u64 <= node_total && tree.segments.len() as u64 <= segment_total,
+        "node_and_segment_count fell short of the render: the reserve is too small"
     );
     // Every repeat round each node has added its copy: now drop the
     // trailing zeros.
@@ -97,6 +145,7 @@ fn render_part(
     part: &Part,
     parent: Option<usize>,
     lamp_above: &LampRef,
+    mode: Lamps,
 ) -> Result<(), RenderError> {
     let lamp = part.lamp.over(lamp_above);
     let me = tree.nodes.len();
@@ -109,13 +158,13 @@ fn render_part(
         segments: first_segment..first_segment,
     });
     match &part.kind {
-        PartKind::Shape(shape) => render_shape(tree, &part.id, shape, me, &lamp)?,
+        PartKind::Shape(shape) => render_shape(tree, &part.id, shape, me, &lamp, mode)?,
         PartKind::Group { parts } => {
             for child in parts {
-                render_part(tree, child, Some(me), &lamp)?;
+                render_part(tree, child, Some(me), &lamp, mode)?;
             }
         }
-        PartKind::Repeat(repeat) => render_repeat(tree, &part.id, repeat, me, &lamp)?,
+        PartKind::Repeat(repeat) => render_repeat(tree, &part.id, repeat, me, &lamp, mode)?,
     }
     tree.nodes[me].end = tree.nodes.len();
     tree.nodes[me].segments = first_segment..tree.segments.len();
@@ -128,10 +177,16 @@ fn render_shape(
     shape: &Shape,
     me: usize,
     lamp: &LampRef,
+    mode: Lamps,
 ) -> Result<(), RenderError> {
     let today = match shape {
-        Shape::Path(path) => return render_path(tree, id, path, me, lamp),
-        Shape::Circle(circle) => return render_circle(tree, id, circle, me, lamp),
+        Shape::Path(path) => return render_path(tree, id, path, me, lamp, mode),
+        Shape::Circle(circle) => return render_circle(tree, id, circle, me, lamp, mode),
+        _ if mode == Lamps::Counted => {
+            let segment = push_segment(tree, TreeId::of(id), &counted(shape_count(shape)), lamp);
+            tree.nodes[me].segment = Some(segment);
+            return Ok(());
+        }
         Shape::Points(points) => {
             let segment = push_segment(tree, TreeId::of(id), &points.at, lamp);
             tree.nodes[me].segment = Some(segment);
@@ -176,6 +231,7 @@ fn render_path(
     path: &Path,
     me: usize,
     lamp: &LampRef,
+    mode: Lamps,
 ) -> Result<(), RenderError> {
     let today = path
         .to_path_shape()
@@ -183,7 +239,10 @@ fn render_path(
             part: id.clone(),
             reason: reason.to_string(),
         })?;
-    let lamps = resolve_today(id, Map2dShape::Path(today.clone()))?;
+    let lamps = match mode {
+        Lamps::Placed => resolve_today(id, Map2dShape::Path(today.clone()))?,
+        Lamps::Counted => counted(u64::from(path.count)),
+    };
     match path.split {
         PathSplit::One => {
             let segment = push_segment(tree, TreeId::of(id), &lamps, lamp);
@@ -214,10 +273,11 @@ fn render_circle(
     circle: &Circle,
     me: usize,
     lamp: &LampRef,
+    mode: Lamps,
 ) -> Result<(), RenderError> {
     let first = tree.positions.len() as u32;
     for ring in circle.rings_in_order() {
-        let lamps = ring_lamps(id, circle, ring)?;
+        let lamps = ring_lamps(id, circle, ring, mode)?;
         match circle.split {
             CircleSplit::Rings => push_leaf(
                 tree,
@@ -241,9 +301,17 @@ fn render_circle(
 }
 
 /// One ring's lamps: today's single ring, or the centre.
-fn ring_lamps(id: &PartId, circle: &Circle, ring: &Ring) -> Result<Vec<[f32; 2]>, RenderError> {
+fn ring_lamps(
+    id: &PartId,
+    circle: &Circle,
+    ring: &Ring,
+    mode: Lamps,
+) -> Result<Vec<[f32; 2]>, RenderError> {
     if !ring.is_centre() {
-        return resolve_today(id, Map2dShape::Ring(circle.ring_shape(ring)));
+        return match mode {
+            Lamps::Placed => resolve_today(id, Map2dShape::Ring(circle.ring_shape(ring))),
+            Lamps::Counted => Ok(counted(u64::from(ring.count))),
+        };
     }
     if ring.count != 1 {
         return Err(RenderError::InvalidPart {
@@ -255,7 +323,10 @@ fn ring_lamps(id: &PartId, circle: &Circle, ring: &Ring) -> Result<Vec<[f32; 2]>
             ),
         });
     }
-    Ok(alloc::vec![circle.center])
+    Ok(match mode {
+        Lamps::Placed => alloc::vec![circle.center],
+        Lamps::Counted => counted(1),
+    })
 }
 
 /// A repeat: copy 0 is its part's own subtree; copy k the same subtree with
@@ -267,6 +338,7 @@ fn render_repeat(
     repeat: &Repeat,
     me: usize,
     lamp: &LampRef,
+    mode: Lamps,
 ) -> Result<(), RenderError> {
     if repeat.count == 0 {
         return Err(RenderError::InvalidPart {
@@ -277,7 +349,7 @@ fn render_repeat(
     let first_lamp = tree.positions.len();
     let first_node = tree.nodes.len();
     let first_segment = tree.segments.len();
-    render_part(tree, &repeat.part, Some(me), lamp)?;
+    render_part(tree, &repeat.part, Some(me), lamp, mode)?;
     let lamps = tree.positions.len() - first_lamp;
     let nodes = tree.nodes.len() - first_node;
     let segments = tree.segments.len() - first_segment;
@@ -285,10 +357,15 @@ fn render_repeat(
 
     // Copies 1.. from copy 0 as rendered (not yet turned, not yet in a copy).
     for (k, &turn) in degrees.iter().enumerate().skip(1) {
-        let rotation = Rotation2d::about(repeat.center, turn);
-        for i in 0..lamps {
-            let position = tree.positions[first_lamp + i];
-            tree.positions.push(rotation.apply(position));
+        if mode == Lamps::Placed {
+            let rotation = Rotation2d::about(repeat.center, turn);
+            for i in 0..lamps {
+                let position = tree.positions[first_lamp + i];
+                tree.positions.push(rotation.apply(position));
+            }
+        } else {
+            tree.positions
+                .resize(tree.positions.len() + lamps, [0.0; 2]);
         }
         let node_shift = k * nodes;
         let segment_shift = k * segments;
@@ -320,9 +397,11 @@ fn render_repeat(
     }
 
     // Copy 0, last: turned by its own angle, its ids in copy 0.
-    let rotation = Rotation2d::about(repeat.center, degrees[0]);
-    for position in &mut tree.positions[first_lamp..first_lamp + lamps] {
-        *position = rotation.apply(*position);
+    if mode == Lamps::Placed {
+        let rotation = Rotation2d::about(repeat.center, degrees[0]);
+        for position in &mut tree.positions[first_lamp..first_lamp + lamps] {
+            *position = rotation.apply(*position);
+        }
     }
     for node in &mut tree.nodes[first_node..first_node + nodes] {
         node.id.copies.push(0);
@@ -331,6 +410,11 @@ fn render_repeat(
         segment.id.copies.push(0);
     }
     Ok(())
+}
+
+/// `n` lamps at `[0, 0]`: a shape's count, unplaced ([`Lamps::Counted`]).
+fn counted(n: u64) -> Vec<[f32; 2]> {
+    alloc::vec![[0.0; 2]; usize::try_from(n).unwrap_or(usize::MAX)]
 }
 
 /// A generated segment: its own node under `parent`.
@@ -366,6 +450,49 @@ fn lamp_count(part: &Part) -> u64 {
     }
 }
 
+/// How many nodes and segments a part renders: exactly what the render
+/// pushes, except a path split by subpaths, counted at its most (one per
+/// subpath, a subpath with no lamps making none).
+fn node_and_segment_count(part: &Part) -> (u64, u64) {
+    match &part.kind {
+        PartKind::Shape(shape) => {
+            // Leaves under the part's own node, or the node is the segment.
+            let leaves = match shape {
+                Shape::Path(path) if path.split == PathSplit::Subpaths => subpath_most(path),
+                Shape::Circle(circle) if circle.split == CircleSplit::Rings => {
+                    circle.rings.len() as u64
+                }
+                _ => return (1, 1),
+            };
+            (1 + leaves, leaves)
+        }
+        PartKind::Group { parts } => parts
+            .iter()
+            .map(node_and_segment_count)
+            .fold((1u64, 0u64), |(n, s), (dn, ds)| {
+                (n.saturating_add(dn), s.saturating_add(ds))
+            }),
+        PartKind::Repeat(repeat) => {
+            let (n, s) = node_and_segment_count(&repeat.part);
+            let count = u64::from(repeat.count);
+            (
+                n.saturating_mul(count).saturating_add(1),
+                s.saturating_mul(count),
+            )
+        }
+    }
+}
+
+/// The most segments a path split by subpaths renders: one per subpath (a
+/// move after the first command starts another), never more than its lamps.
+fn subpath_most(path: &Path) -> u64 {
+    if path.count == 0 || path.commands.len() < 2 {
+        return 0;
+    }
+    let jumpers = path.commands[1..].iter().filter(|c| c.is_move()).count() as u64;
+    (jumpers + 1).min(u64::from(path.count))
+}
+
 fn shape_count(shape: &Shape) -> u64 {
     match shape {
         Shape::Path(path) => u64::from(path.count),
@@ -374,5 +501,75 @@ fn shape_count(shape: &Shape) -> u64 {
         Shape::Points(points) => points.at.len() as u64,
         Shape::Grid(grid) => u64::from(grid.cols) * u64::from(grid.rows),
         Shape::FilledPolygon(filled) => filled_polygon_cells(filled).len() as u64,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::part::path_command::PathCommand;
+    use crate::part::points::Points;
+    use alloc::vec;
+
+    /// The tree's nodes and segments are allocated at the size they are,
+    /// not grown by doubling: a repeat of 64 spokes, and a group of a circle
+    /// split into rings, a split path and points.
+    #[test]
+    fn the_nodes_and_segments_are_allocated_at_their_size() {
+        let mut m = Mapping::new();
+        let spoke = part("path1", straight(8));
+        m.parts.push(part(
+            "spoke",
+            PartKind::Repeat(Repeat::new(spoke, [50.0, 50.0], 64)),
+        ));
+        let mut split = Path::of(
+            vec![
+                PathCommand::Move([0.0, 0.0]),
+                PathCommand::Line([10.0, 0.0]),
+                PathCommand::Move([20.0, 0.0]),
+                PathCommand::Line([30.0, 0.0]),
+            ],
+            6,
+        );
+        split.split = PathSplit::Subpaths;
+        m.parts.push(part(
+            "group1",
+            PartKind::Group {
+                parts: vec![
+                    part(
+                        "circle1",
+                        PartKind::Shape(Shape::Circle(Circle::new(
+                            [50.0, 50.0],
+                            &[(40.0, 24), (20.0, 12), (0.0, 1)],
+                        ))),
+                    ),
+                    part("path2", PartKind::Shape(Shape::Path(split))),
+                    part(
+                        "points1",
+                        PartKind::Shape(Shape::Points(Points {
+                            at: vec![[1.0, 1.0], [2.0, 2.0]],
+                        })),
+                    ),
+                ],
+            },
+        ));
+        let tree = render(&m).unwrap();
+        // The repeat and its 64 copies; the group, the circle and its 3
+        // rings, the path and its 2 subpaths, the points.
+        assert_eq!(tree.nodes.len(), 65 + 1 + 4 + 3 + 1);
+        assert_eq!(tree.nodes.capacity(), tree.nodes.len());
+        assert_eq!(tree.segments.len(), 64 + 3 + 2 + 1);
+        assert_eq!(tree.segments.capacity(), tree.segments.len());
+    }
+
+    fn part(id: &str, kind: PartKind) -> Part {
+        Part::new(PartId::new(id).unwrap(), kind)
+    }
+
+    fn straight(count: u32) -> PartKind {
+        PartKind::Shape(Shape::Path(Path::through(
+            &[[50.0, 40.0], [50.0, 4.0]],
+            count,
+        )))
     }
 }

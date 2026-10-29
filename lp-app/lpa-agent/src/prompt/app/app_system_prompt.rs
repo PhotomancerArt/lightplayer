@@ -120,26 +120,37 @@ pub fn build_app_system_prompt(reference: &str) -> String {
          `edit_project` `remove_node` that would throw away unsaved edits \
          is refused with the node's `remove` path; `act` that path, which \
          hands the user the button as a card.\n\
-         - Patching (which object of a fixture goes on which output, at \
-         which lamp) is actions too: a fixture's are at \
-         `project/<node path>/patch/…` (`assign`, `re-anchor`, `reverse`, \
-         `rotate`, `clear`, `set-flow`, `unmap-all`), an output's are \
-         `swap-ports` and `shift-port`, and `project/patch/undo` and \
-         `project/patch/redo` walk the patch edits back and forth. The \
-         selected fixture's are listed in full; `read` a fixture or an \
-         output for its own. A `subject` defaults to what the user has \
-         selected; `lamp`, `steps`, `start`, `lamps` and `delta` are whole \
-         numbers.\n\
+         - A fixture's lamp layout and its patching (which output, port \
+         and lamp it starts on) are one file, its `.map2d.json`, in map2d \
+         format 6: `parts` (a `grid`, a `path` whose `d` is SVG path data, \
+         a `circle` of keyed rings, `points`, and groups and repeats of \
+         them, each with an `id`), the fixture's `start` naming its output \
+         by name, port and lamp (`{\"output\": {\"set\": \"1\"}, \
+         \"port\": {\"set\": 0}, \"channel\": {\"set\": {\"lamps\": \
+         0}}}`), and `overrides` keyed by a part's id for a part that \
+         starts somewhere else. The output a start names carries that \
+         `name` in its own definition. It says nothing about the lamps' \
+         colour order (the fixture's `color_order` does). There are no \
+         `.patch.json` files and a fixture has no `patch` field. Write the \
+         file whole with `set_asset`; a strip of N LEDs is a one-row grid \
+         of N columns, as in the worked example.\n\
          - A playlist's live controls are actions on the playlist node: \
          `play` (`entry`: which pattern), `next`, `prev`, `cycle` \
          (`cycling`: on or off), `step-shorter`, `step-longer` and `skip` \
          (`entry`, and `skipped`: on leaves it out of the cycle, off puts \
          it back). They change what plays now, not the saved project; to \
          change the project's own cycle or skip list, use `edit_project`.\n\
-         - Placing a fixture on the arrange canvas is \
-         `project/<node path>/arrange/set` (`x`, `y`, `rotation` in degrees, \
-         `scale`; a value left out stays), and `project/arrange/undo` and \
-         `project/arrange/redo` walk those placements. One pending edit is \
+         - While the Graph is open (the project canvas, where a fixture's \
+         mapping is edited), each of its edits is an action at \
+         `project/graph/<verb>`, most with a `subject` (a part or segment by \
+         its tree id, the selection by default): `set-output`, `set-port`, \
+         `set-starts-at`, `set-direction`, `set-offset`, `turn-off`, \
+         `turn-on`, `back-to-the-flow`, `set-flow`, `set-fixture-start`, \
+         `set-part-start`, `rename`, `repeat`, `unrepeat`, `expand`, \
+         `set-count`, `add-ring`, `add-centre-lamp`, `remove-ring`, \
+         `set-radius`, `set-port-lamps`; `project/graph/undo` and \
+         `project/graph/redo` walk them. With the Graph closed, write the \
+         `.map2d.json` with `set_asset` as above. One pending edit is \
          reverted with `project/revert-edit` (`edit`: which one), and a \
          built-in example is kept as the user's own with \
          `project/save-copy`.\n\

@@ -1,0 +1,21 @@
+{
+  "recorded_at": "unknown",
+  "project_format": 11,
+  "fixtures": {
+    "/body/peach_body.json": {
+      "lamps": 44,
+      "runs": [
+        [0, 22, "/output.json", "0", 0, 3],
+        [22, 22, "/output.json", "0", 165, -3]
+      ],
+      "dark": []
+    },
+    "/leaf/peach_leaf.json": {
+      "lamps": 12,
+      "runs": [
+        [0, 12, "/output.json", "0", 66, 3]
+      ],
+      "dark": []
+    }
+  }
+}

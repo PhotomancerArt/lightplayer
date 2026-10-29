@@ -14,12 +14,12 @@
 //! - a module says nothing on its own (as in Patch).
 //!
 //! An object or a lamp counts in its fixture's own lamp numbering (the
-//! lab resolves lamps in the product's order, `lab-mapping-fit-tests`),
+//! Graph resolves lamps in the product's order),
 //! which core maps through the board's own placements; an output, a port
 //! or a pixel counts on the output's wire.
 //!
 //! **On a board whose fixtures have the `selection` slot** (plan M4b) the
-//! fixture side is the lab's own rules ([`board_selection`]): each fixture
+//! fixture side is the Graph's own rules ([`board_selection`]): each fixture
 //! is told what to do to its own lamps — every object under the selection
 //! chases, a lamp breathes, every other lamp in every fixture dims — and
 //! only an output, a port or a pixel goes through `highlight`. A board
@@ -27,11 +27,11 @@
 
 use std::collections::BTreeMap;
 
-use lab_mapping_model::{NodeId, Project, Target};
+use lpa_graph::{NodeId, Project, Target};
 
 use crate::{PatchPulseLamps, PatchPulseLanguage, PatchPulseOp, PatchPulseSubject};
 
-/// The pulse for `selection` (`nodes`: the lab's nodes as Studio's).
+/// The pulse for `selection` (`nodes`: the Graph's nodes as Studio's).
 pub(crate) fn highlight_of(
     project: &Project,
     nodes: &BTreeMap<NodeId, lpc_model::NodeId>,
@@ -75,7 +75,10 @@ pub(crate) fn highlight_of(
                     range: Some(range),
                 }));
             }
-            Target::Lamp { object, index } => {
+            Target::Lamp {
+                segment: object,
+                index,
+            } => {
                 if let Some((node, first, _)) = fixture_lamps(project, nodes, object) {
                     subjects.push(breath(PatchPulseLamps::Fixture {
                         node,
@@ -83,10 +86,10 @@ pub(crate) fn highlight_of(
                     }));
                 }
             }
-            Target::Component(_) | Target::Object(_) => {
+            Target::Part(_) | Target::Generated(_) => {
                 // Every object under it, once.
                 for (i, (_, o)) in placed.list.iter().enumerate() {
-                    if project.chain(&project.object_target(&o.id)).contains(t)
+                    if project.chain(&project.tree_target(&o.id)).contains(t)
                         && !objects.contains(&i)
                     {
                         objects.push(i);
@@ -120,7 +123,7 @@ pub(crate) fn highlight_of(
 fn fixture_lamps(
     project: &Project,
     nodes: &BTreeMap<NodeId, lpc_model::NodeId>,
-    object: &lab_mapping_model::ObjectId,
+    object: &lpa_graph::TreeRef,
 ) -> Option<(lpc_model::NodeId, u32, u32)> {
     let placed = project.placed();
     let i = placed.index_of(object)?;
@@ -163,7 +166,10 @@ pub(crate) fn board_selection(
             Target::Port { .. } | Target::Span { .. } | Target::Pixel { .. } => {
                 output_side.push(t.clone())
             }
-            Target::Lamp { object, index } => {
+            Target::Lamp {
+                segment: object,
+                index,
+            } => {
                 fixture_side = true;
                 if let Some(i) = placed.index_of(object) {
                     let (fixture, _) = &placed.list[i];
@@ -176,12 +182,12 @@ pub(crate) fn board_selection(
                     }
                 }
             }
-            Target::Node(_) | Target::Component(_) | Target::Object(_) => {
+            Target::Node(_) | Target::Part(_) | Target::Generated(_) => {
                 fixture_side = true;
                 for (i, (fixture, o)) in placed.list.iter().enumerate() {
                     let under = match t {
                         Target::Node(id) => fixture == id,
-                        _ => project.chain(&project.object_target(&o.id)).contains(t),
+                        _ => project.chain(&project.tree_target(&o.id)).contains(t),
                     };
                     if !under {
                         continue;

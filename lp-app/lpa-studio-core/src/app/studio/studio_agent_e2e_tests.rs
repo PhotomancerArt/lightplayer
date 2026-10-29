@@ -148,6 +148,23 @@ fn agent_turn_stages_an_overlay_edit_end_to_end() {
     assert!(requests[0].system.contains(ASSET_SHADER_V1));
     assert!(requests[0].system.contains("Shader node: Shader"));
     assert!(requests[0].system.contains("`time` (float)"));
+    // The fixture's lamps are its map2d's, rendered (never the def's
+    // mapping slot, which only names the document).
+    let lamps = lpc_mapping::part::render(
+        &lpc_mapping::map2d6::read(lpc_model::nodes::starter::STARTER_FIXTURE_MAP2D)
+            .expect("the starter map2d reads"),
+    )
+    .expect("and renders")
+    .positions()
+    .len();
+    assert!(lamps > 0);
+    assert!(
+        requests[0]
+            .system
+            .contains(&format!("({lamps} LEDs, map2d document mapping)")),
+        "the fixture line counts the map2d's lamps: {}",
+        requests[0].system
+    );
     assert!(
         requests[1].system.contains(GREEN_SHADER),
         "turn 2 sees the staged source"

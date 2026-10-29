@@ -23,6 +23,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::server::fs_boot_state::FsBootState;
 use crate::server::hello_auth::HelloAuth;
+use crate::server::startup_refusal::StartupRefusal;
 
 /// Wire protocol version spoken by this build of the workspace.
 ///
@@ -37,6 +38,20 @@ use crate::server::hello_auth::HelloAuth;
 ///
 /// # History
 ///
+/// - 46: the hello says which project format the engine reads — `BuildFacts`
+///   gains the required `projectFormat` (`lpc_model::PROJECT_FORMAT_VERSION`,
+///   filled by the server, 12 at this bump). A host reads it to upgrade a
+///   board's stored projects as the last stage of a firmware update
+///   (`lpa-update`'s `projects`; plan `lp2025/2026-10-27-0114-mapping-rebuild`,
+///   M3 P10, Q102), comparing each stored `project.json` against it. A
+///   required field: an old client cannot decode a new hello, and a board at
+///   45 reads as older LightPlayer firmware through its `proto`, as before.
+///   Same bump (unreleased, so no second one): the hello's optional
+///   `startupRefused` ([`StartupRefusal`]) names a startup project the
+///   engine refused at boot for its project format, until anything is
+///   loaded, unloaded or stopped — what lets the stage load a startup
+///   project left current and not running by a dropped link (M3 P11b,
+///   DD30). `PACK_FORMAT_VERSION` is unchanged.
 /// - 45: a playlist pick is a panel write (plan
 ///   `lp2025/2026-10-20-0001-playlists-on-the-bus`, vision D1/D15) — the
 ///   runtime node-command channel is gone: `WireProjectCommand::NodeCommand`,
@@ -463,7 +478,7 @@ use crate::server::hello_auth::HelloAuth;
 /// as `None` on new Studio and a new firmware's extra fields are ignored
 /// by old Studio. Bumping for those would mark every board running
 /// current firmware Incompatible in exchange for nothing.
-pub const WIRE_PROTO_VERSION: u32 = 45;
+pub const WIRE_PROTO_VERSION: u32 = 46;
 
 /// Unsolicited/boot-time server identity, version, and capability report.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -505,6 +520,14 @@ pub struct ServerHello {
     /// `Q` there (DM9).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub firmware: Option<lpc_update::BoardManifest>,
+    /// The startup project this engine refused at boot for its project
+    /// format, while nothing has been loaded, unloaded or stopped since
+    /// ([`StartupRefusal`], wire 46). What tells a host finishing the
+    /// board's projects to load the startup project once it is current;
+    /// absent, a current startup project that is not running was stopped on
+    /// purpose. Set and cleared by the server, never by an embedder.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub startup_refused: Option<StartupRefusal>,
 }
 
 /// Build facts of the firmware/server binary answering the hello: its
@@ -543,6 +566,14 @@ pub struct BuildFacts {
     pub dirty: bool,
     /// Cargo profile the binary was built with (`release-esp32`, …).
     pub profile: String,
+    /// The project format this build's engine reads
+    /// (`lpc_model::PROJECT_FORMAT_VERSION`). An engine refuses a stored
+    /// project at any other format; a host compares each stored project's
+    /// `project.json` against this to know which ones to upgrade (the
+    /// update's last stage, `lpa-update`'s `projects`). Filled by the
+    /// server from the engine it links, never by an embedder: what an
+    /// engine reads is the build's own fact.
+    pub project_format: u32,
 }
 
 /// Hardware facts of the unit answering the hello — runtime truth about
@@ -718,6 +749,7 @@ mod tests {
                 commit: "abc123456789".to_string(),
                 dirty: true,
                 profile: "release-esp32".to_string(),
+                project_format: lpc_model::PROJECT_FORMAT_VERSION,
             },
             hardware: HardwareFacts {
                 radio: true,
@@ -728,6 +760,7 @@ mod tests {
             device_uid: Some("dev0000000000000001".to_string()),
             pack_format: lp_json_pack::PACK_FORMAT_VERSION,
             auth: HelloAuth::TRUSTED,
+            startup_refused: None,
             firmware: None,
         };
         let json = crate::json::to_string(&hello).unwrap();
@@ -776,11 +809,13 @@ mod tests {
                 commit: "abc123456789".to_string(),
                 dirty: false,
                 profile: "release-esp32".to_string(),
+                project_format: lpc_model::PROJECT_FORMAT_VERSION,
             },
             hardware: HardwareFacts::default(),
             device_uid: None,
             pack_format: 0,
             auth: HelloAuth::TRUSTED,
+            startup_refused: None,
             firmware: Some(manifest.clone()),
         };
         let json = crate::json::to_string(&hello).unwrap();
@@ -804,6 +839,50 @@ mod tests {
         assert_eq!(back.firmware, None);
     }
 
+    /// A board that refused its startup project for its format says so,
+    /// naming the project and the format it found; one that did not sends no
+    /// key at all, so its hello's bytes are what they were.
+    #[test]
+    fn the_hello_names_a_startup_project_refused_for_its_format_or_says_nothing() {
+        let hello = ServerHello {
+            proto: WIRE_PROTO_VERSION,
+            build: BuildFacts {
+                features: vec![],
+                package: "fw-esp32c6".to_string(),
+                version: "unknown".into(),
+                commit: "unknown".to_string(),
+                dirty: false,
+                profile: "release-esp32".to_string(),
+                project_format: 12,
+            },
+            hardware: HardwareFacts::default(),
+            device_uid: None,
+            pack_format: 0,
+            auth: HelloAuth::TRUSTED,
+            firmware: None,
+            startup_refused: Some(StartupRefusal {
+                project: "/projects/eaves".to_string(),
+                found: Some(11),
+            }),
+        };
+        let json = crate::json::to_string(&hello).unwrap();
+        assert!(
+            json.ends_with(",\"startupRefused\":{\"project\":\"/projects/eaves\",\"found\":11}}"),
+            "{json}"
+        );
+        let back: ServerHello = crate::json::from_str(&json).unwrap();
+        assert_eq!(back, hello);
+
+        let without = ServerHello {
+            startup_refused: None,
+            ..hello
+        };
+        let json = crate::json::to_string(&without).unwrap();
+        assert!(!json.contains("startupRefused"), "{json}");
+        let back: ServerHello = crate::json::from_str(&json).unwrap();
+        assert_eq!(back.startup_refused, None);
+    }
+
     /// An empty feature list and an absent board id survive the round trip
     /// as themselves — absence is a fact, never a default filled in on
     /// decode.
@@ -818,6 +897,7 @@ mod tests {
                 commit: "unknown".to_string(),
                 dirty: false,
                 profile: "release-emu".to_string(),
+                project_format: lpc_model::PROJECT_FORMAT_VERSION,
             },
             hardware: HardwareFacts {
                 radio: false,
@@ -831,6 +911,7 @@ mod tests {
                 required: true,
                 granted: None,
             },
+            startup_refused: None,
             firmware: None,
         };
         let json = crate::json::to_string(&hello).unwrap();
@@ -852,6 +933,7 @@ mod tests {
                 commit: "unknown".to_string(),
                 dirty: false,
                 profile: "debug".to_string(),
+                project_format: lpc_model::PROJECT_FORMAT_VERSION,
             },
             hardware: HardwareFacts {
                 radio: false,
@@ -865,6 +947,7 @@ mod tests {
                 required: true,
                 granted: None,
             },
+            startup_refused: None,
             firmware: None,
         };
         let frame = ServerMessage::new(0, ServerMsgBody::Hello(hello.clone()));
@@ -894,7 +977,7 @@ mod tests {
     #[test]
     fn the_proto_version_is_pinned_to_its_history() {
         assert_eq!(
-            WIRE_PROTO_VERSION, 45,
+            WIRE_PROTO_VERSION, 46,
             "if you meant to bump, add the History entry in this file's \
              doc comment and update this pin"
         );

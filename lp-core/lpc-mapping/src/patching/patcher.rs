@@ -57,7 +57,6 @@
 //! one up to the port's capacity (a port that takes the rest has no
 //! trailing gap).
 
-use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 
 use crate::part::{Mapping, Part, PartId, Tree};
@@ -81,10 +80,30 @@ use crate::patching::walked::Walked;
 /// outputs' ports (rules in the module doc).
 #[must_use]
 pub fn patch_mapping(mapping: &Mapping, tree: &Tree, outputs: &[OutputPorts]) -> Patching {
-    let mut parts = BTreeMap::new();
-    for part in mapping.all_parts() {
-        parts.insert(&part.id, part);
-    }
+    patch(mapping, tree, outputs, true)
+}
+
+/// [`patch_mapping`] without the record of the walk: the same segments,
+/// spans and problems, and [`Patching::walked`] left empty.
+///
+/// For a reader that needs only where each segment landed and what is
+/// wrong: the engine on a device. The walk holds one entry per node of the
+/// tree (its id, its steps and where they came from, the cursor after
+/// them), which at a few hundred bytes each was most of a patching's
+/// memory (mapping rebuild M2 P6).
+#[must_use]
+pub fn patch_mapping_placed(mapping: &Mapping, tree: &Tree, outputs: &[OutputPorts]) -> Patching {
+    patch(mapping, tree, outputs, false)
+}
+
+fn patch(mapping: &Mapping, tree: &Tree, outputs: &[OutputPorts], record_walk: bool) -> Patching {
+    // By id, sorted for a binary search; a later part of one id wins, as
+    // a map's insert would have it (a rendered tree has none: the render
+    // refuses two parts of one id).
+    let mut parts = mapping.all_parts();
+    parts.reverse();
+    parts.sort_by(|a, b| a.id.cmp(&b.id));
+    parts.dedup_by(|later, kept| later.id == kept.id);
     let outputs: Vec<(&OutputName, Vec<Port>)> = outputs
         .iter()
         .map(|o| {
@@ -104,6 +123,7 @@ pub fn patch_mapping(mapping: &Mapping, tree: &Tree, outputs: &[OutputPorts]) ->
         fresh_set: false,
         output_from: PatchTarget::Fixture,
         port_from: PatchTarget::Fixture,
+        record_walk,
         out: Patching::default(),
     };
     // 7. Overrides whose node is gone, and 8. orders that don't fit.
@@ -139,7 +159,8 @@ pub fn patch_mapping(mapping: &Mapping, tree: &Tree, outputs: &[OutputPorts]) ->
 struct Patcher<'a> {
     mapping: &'a Mapping,
     tree: &'a Tree,
-    parts: BTreeMap<&'a PartId, &'a Part>,
+    /// Every part, sorted by id (one per id).
+    parts: Vec<&'a Part>,
     /// Each output's ports, in key order.
     outputs: Vec<(&'a OutputName, Vec<Port>)>,
     cursor: Cursor,
@@ -153,6 +174,8 @@ struct Patcher<'a> {
     /// reported against.
     output_from: PatchTarget,
     port_from: PatchTarget,
+    /// Whether [`Patching::walked`] is kept.
+    record_walk: bool,
     out: Patching,
 }
 
@@ -173,7 +196,11 @@ impl Patcher<'_> {
         // A part's own node (in any copy) carries its part's start and
         // flow; a generated segment has none.
         let part = if node.id.is_part_node() {
-            self.parts.get(&node.id.part).copied()
+            let id: &PartId = &node.id.part;
+            self.parts
+                .binary_search_by(|p| p.id.cmp(id))
+                .ok()
+                .map(|at| self.parts[at])
         } else {
             None
         };
@@ -217,15 +244,17 @@ impl Patcher<'_> {
             };
             self.step(&steps, &whom(&output_source), &whom(&port_source));
         }
-        self.out.walked.push(Walked {
-            id: node.id.clone(),
-            steps,
-            sources: [output_source, port_source, channel_source],
-            at: self.cursor.clone(),
-            off,
-            direction,
-            offset,
-        });
+        if self.record_walk {
+            self.out.walked.push(Walked {
+                id: node.id.clone(),
+                steps,
+                sources: [output_source, port_source, channel_source],
+                at: self.cursor.clone(),
+                off,
+                direction,
+                offset,
+            });
+        }
 
         if let Some(segment) = node.segment {
             if !off {

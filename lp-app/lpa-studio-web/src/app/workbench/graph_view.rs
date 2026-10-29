@@ -1,31 +1,31 @@
-//! The Graph view: the mapping lab's canvas on the open project
-//! (`lab-mapping-web`'s components, over core's editor).
+//! The Graph view: the Graph's canvas on the open project
+//! (`lpa-graph-web`'s components, over core's editor).
 //!
 //! Core owns the editor (`lpa_studio_core::app::graph`) and shares it
 //! through a [`GraphHandle`] the app provides as context. This page wraps
-//! that handle as the lab's [`GraphEditor`]: the components read the
+//! that handle as lpa-graph-web's [`GraphEditor`]: the components read the
 //! editor through it and hand every pointer, key and layout fact to core
 //! through it, synchronously. What core changes on its own (it opened the
 //! project, or rebuilt it for an edit made elsewhere) arrives as the
 //! Graph's `generation` on the studio view, and the page draws again.
 //!
 //! The center is the canvas, its toolbar and the hint bar; the workbench's
-//! own docks carry the lab's tree (left) and inspector (Props, right). The
+//! own docks carry the Graph's tree (left) and inspector (Props, right). The
 //! colours are the board's own frames (`UiGraphView::frame`), except while
 //! a drawing is in progress: nothing of it has reached the board yet, so
-//! its lamps light from the lab's simulated board.
+//! its lamps light from the Graph's simulated board.
 
 use std::rc::Rc;
 
 use dioxus::prelude::*;
-use lab_mapping_model::{BoardFrame, GraphInput, GraphVerb, LayoutKind, SizeClass, Tool};
-use lab_mapping_web::{
-    Canvas, GRAPH_CSS, GraphEditor, HintBar, Inspector, TreePane, View, use_view,
+use lpa_graph::{BoardFrame, GraphInput, GraphVerb, LayoutKind, Presentation, SizeClass, Tool};
+use lpa_graph_web::{
+    Canvas, GRAPH_CSS, GraphEditor, HintBar, Inspector, InspectorDebug, TreePane, View,
+    use_remembered_inspector_debug, use_view,
 };
 use lpa_studio_core::app::graph::{GraphHandle, UiGraphState, UiGraphView, graph_verb_path};
 use lpa_studio_core::{OfferPath, UiAction, UiOffer};
 
-use crate::base::{InlineButtonTone, inline_text_button_class};
 use crate::core::offer::offers_context::use_verbs_of;
 
 /// The Graph's editor, its view parts and the board's frame: built once
@@ -68,6 +68,8 @@ pub fn use_graph_page_with(handle: GraphHandle, graph: Option<UiGraphView>) -> G
     let mut published = use_signal(|| None::<lpa_studio_core::app::graph::UiGraphFrame>);
     let latest = graph.map(|g| g.frame);
     use_effect(use_reactive!(|latest| published.set(latest)));
+    // The inspector's Debug switches, as this browser last left them.
+    use_remembered_inspector_debug(ed.clone());
     let view = use_view(ed.clone());
     let drawing = use_memo({
         let ed = ed.clone();
@@ -77,7 +79,7 @@ pub fn use_graph_page_with(handle: GraphHandle, graph: Option<UiGraphView>) -> G
         let ed = ed.clone();
         move || {
             // A drawing in progress hasn't reached the board: light it
-            // from the simulated board, as the lab does — again as the
+            // from the Graph's simulated board — again as the
             // draft moves, and only then.
             if drawing() {
                 let _ = ed.read();
@@ -99,10 +101,6 @@ pub fn use_graph_page_with(handle: GraphHandle, graph: Option<UiGraphView>) -> G
 pub fn GraphCenter(
     page: GraphPage,
     state: Option<UiGraphState>,
-    /// The Map view's address, the way forward when the Graph can't open
-    /// the project (docs/ux P7). `None` off a lens.
-    #[props(default)]
-    map_href: Option<String>,
     on_action: EventHandler<UiAction>,
 ) -> Element {
     let body = match state {
@@ -112,16 +110,6 @@ pub fn GraphCenter(
         Some(UiGraphState::Refused { why }) => rsx! {
             div { class: "tw:m-auto tw:grid tw:max-w-md tw:gap-2 tw:text-center tw:text-sm tw:text-muted-foreground",
                 div { class: "tw:font-semibold tw:text-strong-foreground", "The Graph can't open this project" }
-                div { "Open it in Map to see and edit its mapping." }
-                if let Some(href) = map_href {
-                    div {
-                        a {
-                            class: inline_text_button_class(InlineButtonTone::Action, false),
-                            href: "{href}",
-                            "Open in Map"
-                        }
-                    }
-                }
                 div { class: "tw:text-xs tw:text-subtle-foreground", "{why}" }
             }
         },
@@ -159,7 +147,7 @@ fn GraphCanvas(page: GraphPage, live: bool, on_action: EventHandler<UiAction>) -
         div {
             class: "graph-keys tw:flex tw:min-h-0 tw:flex-1 tw:flex-col tw:outline-none",
             tabindex: "0",
-            // The size class, from the window's width, as in the lab.
+            // The size class, from the window's width.
             onresize: move |evt| {
                 if let Ok(size) = evt.get_content_box_size() {
                     let width = web_sys::window()
@@ -174,8 +162,8 @@ fn GraphCanvas(page: GraphPage, live: bool, on_action: EventHandler<UiAction>) -
             // A press on the canvas keeps its keys here (the canvas
             // stops the browser moving focus).
             onmousedown: move |_| focus_keys(),
-            onkeydown: move |evt| lab_mapping_web::input::key_down(&on_down, evt),
-            onkeyup: move |evt| lab_mapping_web::input::key_up(&on_up, evt),
+            onkeydown: move |evt| lpa_graph_web::input::key_down(&on_down, evt),
+            onkeyup: move |evt| lpa_graph_web::input::key_up(&on_up, evt),
             div { class: "graph-bar top tw:flex tw:flex-wrap tw:items-center tw:gap-3",
                 for group in TOOLBAR {
                     div { class: "tools",
@@ -210,14 +198,48 @@ fn GraphCanvas(page: GraphPage, live: bool, on_action: EventHandler<UiAction>) -
                         }
                     }
                 }
-                span { class: "tw:ml-auto tw:text-xs tw:text-subtle-foreground",
-                    if live { "Colours from the board" } else { "Waiting for the board's first frame" }
+                // The board's word and Debug stay together at the bar's
+                // end, on one line, however the tools wrap.
+                div { class: "tw:ml-auto tw:flex tw:flex-none tw:items-center tw:gap-3 tw:whitespace-nowrap",
+                    span { class: "tw:text-xs tw:text-subtle-foreground",
+                        if live { "Colours from the board" } else { "Waiting for the board's first frame" }
+                    }
+                    GraphDebug {
+                        ed: ed.clone(),
+                        presentation: toolbar.presentation,
+                        cursor_ops: toolbar.cursor_ops,
+                    }
                 }
             }
             div { class: "canvas-wrap tw:relative tw:min-h-0 tw:flex-1",
                 Canvas { ed: ed.clone(), view, frame }
             }
             footer { class: "hints", HintBar { hints: view.hints } }
+        }
+    }
+}
+
+/// Debug, at the toolbar's right end: the inspector's presentation and its
+/// cursor ops (view state, remembered per browser; never an offer). Open
+/// or shut is the page's own state.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn GraphDebug(ed: GraphEditor, presentation: Presentation, cursor_ops: bool) -> Element {
+    let mut open = use_signal(|| false);
+    rsx! {
+        div { class: "debug",
+            button {
+                class: if open() { "tool on" } else { "tool" },
+                tabindex: "-1",
+                onmousedown: move |evt| evt.prevent_default(),
+                onclick: move |_| open.toggle(),
+                "Debug ▾"
+            }
+            if open() {
+                div { class: "debug-menu",
+                    InspectorDebug { ed, presentation, cursor_ops }
+                }
+            }
         }
     }
 }
@@ -266,7 +288,7 @@ fn OfferTool(
     }
 }
 
-/// The Tree dock's body on the Graph: the lab's outline.
+/// The Tree dock's body on the Graph: the Graph's outline.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn GraphTreePanel(page: GraphPage) -> Element {
@@ -275,7 +297,7 @@ pub fn GraphTreePanel(page: GraphPage) -> Element {
     }
 }
 
-/// The Props dock's body on the Graph: the lab's inspector.
+/// The Props dock's body on the Graph: the Graph's inspector.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn GraphPropsPanel(page: GraphPage) -> Element {

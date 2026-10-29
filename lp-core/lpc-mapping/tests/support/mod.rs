@@ -7,7 +7,7 @@
 use lpc_mapping::part::{
     Circle, Mapping, Part, PartId, PartKind, Path, PathCommand, Repeat, Shape,
 };
-use lpc_mapping::{Map2dDoc, Map2dShape};
+use lpc_mapping::{Map2dDoc, Map2dShape, bounds_of_points, resolve};
 
 /// Today's document as a mapping: one part per object, in order. A part's
 /// id is the object's id, else its name lower-cased when that is a valid id
@@ -16,8 +16,7 @@ use lpc_mapping::{Map2dDoc, Map2dShape};
 /// circle split one; a path's gaps become moves.
 pub fn today_as_mapping(doc: &Map2dDoc) -> Mapping {
     let mut m = Mapping::new();
-    m.sample_diameter = doc.sample_diameter;
-    m.canvas = doc.canvas;
+    m.view_box = doc.canvas.unwrap_or_else(|| lamp_bounds(doc));
     for object in &doc.objects {
         let kind = kind_of(&object.shape, &mut m);
         let named = object
@@ -35,6 +34,13 @@ pub fn today_as_mapping(doc: &Map2dDoc) -> Mapping {
         m.parts.push(part);
     }
     m
+}
+
+/// The box today's fit frames when a document has no canvas: its lamps'
+/// own bounds (format 6's view box is required).
+fn lamp_bounds(doc: &Map2dDoc) -> [f32; 4] {
+    let positions = resolve(doc).map(|r| r.positions()).unwrap_or_default();
+    bounds_of_points(&positions).map_or([0.0; 4], |b| [b.min_x, b.min_y, b.width, b.height])
 }
 
 /// Today's shape as a part kind.

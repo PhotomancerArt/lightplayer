@@ -1,5 +1,5 @@
-//! Mapping view options and the toggle bar shared across the output
-//! section's view ⇄ edit flip.
+//! Mapping view options and the toggle bar above a fixture's output
+//! section.
 //!
 //! Wiring instruments — `numbers`, `arrows` — are **edit-mode
 //! tools**: inspecting how a fixture is wired is an authoring activity, so
@@ -7,13 +7,8 @@
 //! toggles. View mode is a product display: `live` colors lamps from the
 //! control frame, off paints the neutral layout, and that is the whole
 //! surface (see `LampView`).
-//!
-//! These options are still the bridge type for the shared toggle state: the
-//! bar survives the flip, so one state feeds the display renderer and the
-//! editor canvas.
 
 use dioxus::prelude::*;
-use lpa_mapping_editor::EditorViewOptions;
 
 use crate::base::icon::{StudioIcon, StudioIconName};
 
@@ -33,42 +28,6 @@ impl Default for MapViewOptions {
             arrows: false,
             live: true,
         }
-    }
-}
-
-// One view state serves both faces of the output section (the toggle bar
-// stays live across the view ⇄ edit flip): the editor's options are the
-// superset, these conversions carry the shared fields.
-impl From<EditorViewOptions> for MapViewOptions {
-    fn from(opts: EditorViewOptions) -> Self {
-        Self {
-            numbers: opts.numbers,
-            arrows: opts.arrows,
-            live: opts.live,
-        }
-    }
-}
-
-impl MapViewOptions {
-    /// Editor options with these shared fields and editor-only fields at
-    /// their defaults (initial face state).
-    #[must_use]
-    pub fn into_editor(self) -> EditorViewOptions {
-        EditorViewOptions {
-            numbers: self.numbers,
-            arrows: self.arrows,
-            live: self.live,
-            fit_preview: false,
-            reference: true,
-        }
-    }
-
-    /// Write the shared fields into `editor`, preserving editor-only state
-    /// (fit preview).
-    pub fn apply_to_editor(self, editor: &mut EditorViewOptions) {
-        editor.numbers = self.numbers;
-        editor.arrows = self.arrows;
-        editor.live = self.live;
     }
 }
 

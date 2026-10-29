@@ -1,27 +1,20 @@
 //! The project-scoped PATCH SURFACE (D36, slice 2): every output's ports
-//! and cells, every producing fixture's runs and instances, one shared
-//! selection — the full-page editing home the face bays are read-only
-//! mirrors of.
+//! and cells, every producing fixture's runs and instances, and the
+//! modules above them — the face bays' derivation widened to project
+//! scope, with one shared selection.
 //!
 //! Built by the project controller from what the bay derivation already
-//! computes, widened to project scope: the sidebar walks
-//! [`UiPatchSurface::outputs`] as an output → port tree, the canvas draws
-//! each output's lamps from its published frame (layout + bytes, the same
-//! [`crate::UiControlProductPreview`] the bay cells read), and the bay
-//! section reuses the two-sided cells verbatim. Instance structure (the
-//! `/sector/2` grain) parses out of each fixture's OWN map2d document —
-//! the same bytes its mapping editor holds — so the surface's grain is the
-//! patch format's grain by construction.
+//! computes: the Nodes view's Outputs panel walks
+//! [`UiPatchSurface::outputs`] as a module → output → port tree, each
+//! output's bay carries its lamps' published frame (layout + bytes, the
+//! same [`crate::UiControlProductPreview`] the bay cells read), and the
+//! two-sided cells are the face bays' own. Instance structure (one row per
+//! segment, `sector@2`) comes out of each fixture's OWN map2d document
+//! (format 6), the same bytes its mapping holds.
 //!
-//! Read-only in P5: the DTO carries selection TARGETS (stable strings the
-//! ui-state stores), not slot addresses. P6 fills in the verb actions.
-//!
-//! Since the unified-editor pass this surface is also the **editor shell's**
-//! view DTO (extend, don't fork): the same fixtures/outputs feed the
-//! workbench panels and the Arrange canvas, and the surface carries the
-//! project-level `editor.json` facts — per-fixture [`UiArrangeMeta`] plus
-//! the loaded-flag/artifact pair pages drive the editor-meta prefetch from
-//! (never hand-code a fetch a flag doesn't ask for — the #409 lesson).
+//! Read-only: the DTO carries selection TARGETS (stable strings the
+//! ui-state stores), not slot addresses. The Patch tab's verbs went with
+//! the patch file (project format 12); the mapping's new editor is M4's.
 
 use lpc_model::NodeId;
 
@@ -37,28 +30,11 @@ pub struct UiPatchSurface {
     /// [`UiPatchSurfaceOutput::module`].
     pub modules: Vec<UiPatchSurfaceModule>,
     /// Every bus-consuming output that has answered a frame probe, with its
-    /// bay (ports + cells) — the sidebar's tree and the canvas's wires.
+    /// bay (ports + cells) — the Outputs panel's tree.
     pub outputs: Vec<UiPatchSurfaceOutput>,
     /// Every producing fixture on any of those wires, with its runs and its
     /// instance table.
     pub fixtures: Vec<UiPatchSurfaceFixture>,
-    /// THE chase for the selected UNMAPPED object, computed once here (Q9)
-    /// — the panel strip and the canvas sprites both paint these colors, so
-    /// the two views can never disagree about what the object is doing.
-    /// `None` whenever the selection is mapped (its chase is in the
-    /// published bytes), wire-side, or absent. See
-    /// [`crate::UiPatchChasePreview`].
-    pub chase_preview: Option<crate::UiPatchChasePreview>,
-    /// The project-level `editor.json` settled locally (cached content, or
-    /// the file is known absent). While false, pages dispatch
-    /// [`crate::EditorMetaFetchOp`] against [`Self::editor_meta_artifact`]
-    /// and fixtures carry `arrange: None`.
-    pub editor_meta_loaded: bool,
-    /// A present-but-unreadable `editor.json` (newer format, parse error).
-    /// Arrange edits refuse rather than rewrite over it.
-    pub editor_meta_error: Option<String>,
-    /// Where `editor.json` lives — the prefetch and write target.
-    pub editor_meta_artifact: Option<lpc_model::ArtifactLocation>,
 }
 
 impl UiPatchSurface {
@@ -139,111 +115,38 @@ pub struct UiPatchSurfaceFixture {
     /// dispatches [`crate::AssetContentFetchOp`] against to resolve the
     /// instance table below.
     pub mapping_artifact: Option<lpc_model::ArtifactLocation>,
-    /// The fixture's `{stem}.patch.json` artifact — the P6 verbs' write
-    /// target. A fixture without one cannot be patched from the surface
-    /// (the verbs say so rather than inventing a file).
-    pub patch_artifact: Option<lpc_model::ArtifactLocation>,
     /// The map2d body was resolvable at build time. False = the fetch has
     /// not landed yet; the page dispatches it and the table fills on the
     /// next snapshot.
     pub mapping_loaded: bool,
-    /// The patch body was resolvable at build time. False = the fetch has
-    /// not landed yet; the page dispatches it so verbs have their document
-    /// (a verb before it lands blocks honestly).
-    pub patch_loaded: bool,
-    /// The fixture's patch declares MANUAL flow (`flow: "manual"`, P5b):
-    /// only authored entries place, and an object with no entry is
-    /// genuinely unmapped — dark on the piece, no wire chip here.
-    ///
-    /// False = auto-mapped, the historical behaviour: the lamps no entry
-    /// names flow on after the last anchor, so nothing is ever unmapped for
-    /// long. Read from the patch BODY (the same bytes the verbs transform),
-    /// so it is `false` while the body is still loading and while it is
-    /// unreadable — silence is not the manual claim.
-    pub manual_flow: bool,
-    /// The addressable instance table (`/sector/0` …), parsed from the
-    /// fixture's map2d document. EMPTY for shape-less strips and for docs
-    /// without object ids — the fixture then patches at range grain only
-    /// (the peach), which the surface renders honestly rather than
-    /// inventing instances.
+    /// One row per segment of the fixture's map2d document (format 6), in
+    /// lamp order. EMPTY for a fixture with no mapping document and for one
+    /// that does not read or render.
     pub instances: Vec<UiPatchInstance>,
-    /// The fixture's Arrange-canvas facts from `editor.json`. `None` until
-    /// the editor-meta fetch settles (see
-    /// [`UiPatchSurface::editor_meta_loaded`]).
-    pub arrange: Option<UiArrangeMeta>,
     /// The nearest enclosing module on [`UiPatchSurface::modules`], `None`
     /// when the fixture sits above every module face.
     pub module: Option<NodeId>,
 }
 
-/// One addressable node of a fixture's object tree: an instance (or a
-/// whole non-repeated object), with the lamp range it currently occupies.
+/// One segment of a fixture's mapping, with the lamp range it occupies.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct UiPatchInstance {
-    /// The D46 path (`/sector/2`) — the patch entry's `from`, verbatim.
-    /// EMPTY when the owning object has no sticky id yet: the strand still
-    /// displays and selects (at range grain, `UiPatchTarget::Range`), but
-    /// no patch entry can address it until ensure-ids stamps the document.
+    /// The segment's node id (`sector@2`, `circle1/r3`): what an override
+    /// keys on in the map2d document.
     pub path: String,
-    /// Display label (`sector 2`).
+    /// Display label: the same id.
     pub label: String,
     /// First lamp in the fixture's own numbering (derived — shown, never
     /// stored).
     pub start: u32,
     pub lamps: u32,
-    /// The rotation stride the UI steps offsets by (the addressed node's
-    /// shape stride — a polygon door's lamps-per-side).
+    /// The step an offset moves by: one whole segment (map2d format 6
+    /// authors no stride).
     pub stride: u32,
     /// Some patch entry places this instance's lamps on a wire (derived
     /// from the fixture's resolved runs, never stored) — the tree's
     /// mapped/unmapped dot.
     pub placed: bool,
-}
-
-/// A fixture's Arrange-canvas placement facts, from the project-level
-/// `editor.json` — presentation only, NEVER a sampling input.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct UiArrangeMeta {
-    /// The fixture has a `"mapping"` entry in `editor.json`. False = it has
-    /// never been dragged: the canvas auto-packs it in the bottom row, and
-    /// the first drag writes its entry.
-    pub arranged: bool,
-    /// Placement in the conceptual space (identity while unarranged).
-    pub transform: UiArrangeTransform,
-    /// Cached placeholder footprint (doc-space bbox + lamps) for rendering
-    /// the fixture before its map2d body loads. `None` = never cached; the
-    /// canvas falls back to the fixture's lamp count alone.
-    pub footprint: Option<UiArrangeFootprint>,
-}
-
-/// Translate + rotate + uniform scale, no shear (ratified) — the DTO twin
-/// of [`lpc_mapping::EditorTransform`].
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct UiArrangeTransform {
-    /// Translation in doc-space units.
-    pub t: [f64; 2],
-    /// Rotation in degrees.
-    pub r: f64,
-    /// Uniform scale.
-    pub s: f64,
-}
-
-impl Default for UiArrangeTransform {
-    fn default() -> Self {
-        Self {
-            t: [0.0, 0.0],
-            r: 0.0,
-            s: 1.0,
-        }
-    }
-}
-
-/// The cached placeholder facts mirrored from `editor.json`.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct UiArrangeFootprint {
-    /// `[x, y, w, h]` in the fixture's own doc space.
-    pub bbox: [f64; 4],
-    pub lamps: u32,
 }
 
 /// What the surface's one shared selection points at (P5: highlight only;
@@ -252,7 +155,7 @@ pub struct UiArrangeFootprint {
 pub enum UiPatchTarget {
     /// A module level above the fixtures/outputs (tree context row).
     Module { node: NodeId },
-    /// A whole output (sidebar header).
+    /// A whole output (its section header).
     Output { node: NodeId },
     /// One port of an output.
     Port { node: NodeId, port: u32 },
@@ -596,83 +499,29 @@ fn derived_entered(targets: &[UiPatchTarget]) -> Option<NodeId> {
     }
 }
 
-/// Parse a fixture's map2d body into its instance table.
-///
-/// The resolver expands EVERY object — repeats and all — so the effective
-/// tree always displays, whatever the document's format age (grain
-/// robustness: old data must never collapse the Patch view). The sticky id
-/// gates only ADDRESSABILITY: an id-bearing strand gets its D46 path
-/// (`/sector/2`, what patch entries key on); an id-less strand gets an
-/// empty path — it displays, selects, and pulses at range grain, and
-/// becomes path-addressable the moment ensure-ids stamps the document.
+/// A fixture's map2d body (format 6) as its instance table: one row per
+/// segment, in lamp order. A body that does not read or render gives none.
 pub(crate) fn instances_from_map2d(text: &str) -> Vec<UiPatchInstance> {
-    let Ok(doc) = lpc_mapping::Map2dDoc::from_json(text) else {
+    let Ok(mapping) = lpc_mapping::map2d6::read(text) else {
         return Vec::new();
     };
-    let Ok(resolved) = lpc_mapping::resolve(&doc) else {
+    let Ok(tree) = lpc_mapping::part::render(&mapping) else {
         return Vec::new();
     };
-    let spans = lpc_mapping::object_instance_spans(&doc, &resolved);
-    spans
+    tree.segments()
         .iter()
-        .filter_map(|span| {
-            let object = doc.objects.get(span.object)?;
-            let path = span
-                .id
-                .as_ref()
-                .map(|id| {
-                    lpc_mapping::MapObjectPath {
-                        id: id.clone(),
-                        instances: span.instances.clone(),
-                    }
-                    .to_text()
-                })
-                .unwrap_or_default();
-            // The stride of the ADDRESSED node: descend the object's shape
-            // through the instance steps (a door instance's stride is the
-            // polygon's side, not the repeat's whole inner count).
-            let mut shape = &object.shape;
-            for _ in &span.instances {
-                if let lpc_mapping::Map2dShape::Repeat(repeat) = shape {
-                    shape = &repeat.shape;
-                }
-            }
-            let stride = object
-                .stride
-                .filter(|stride| *stride > 0)
-                .unwrap_or_else(|| lpc_mapping::shape_stride(shape));
-            // Display name: the id when there is one, else the authored
-            // name, else an honest positional fallback.
-            let base = span
-                .id
-                .as_ref()
-                .map(|id| id.as_str().to_string())
-                .filter(|base| !base.is_empty())
-                .or_else(|| Some(object.name.clone()).filter(|name| !name.is_empty()))
-                .unwrap_or_else(|| format!("object {}", span.object + 1));
-            let label = if span.instances.is_empty() {
-                base
-            } else {
-                format!(
-                    "{} {}",
-                    base,
-                    span.instances
-                        .iter()
-                        .map(|instance| instance.to_string())
-                        .collect::<Vec<_>>()
-                        .join(".")
-                )
-            };
-            Some(UiPatchInstance {
-                path,
-                label,
-                start: span.start,
-                lamps: span.count,
-                stride,
+        .map(|segment| {
+            let id = segment.id.to_string();
+            UiPatchInstance {
+                path: id.clone(),
+                label: id,
+                start: segment.lamps.start,
+                lamps: segment.count(),
+                stride: segment.count(),
                 // Derived against the fixture's resolved runs at surface
                 // build; parsing alone cannot know.
                 placed: false,
-            })
+            }
         })
         .collect()
 }
@@ -681,66 +530,56 @@ pub(crate) fn instances_from_map2d(text: &str) -> Vec<UiPatchInstance> {
 mod tests {
     use super::*;
 
-    /// The small-dome's doors document, in miniature: instances address by
-    /// path, and the stride is the ADDRESSED node's (the polygon's side,
-    /// not the repeat's inner count).
+    /// Every segment is a row, in lamp order, named by its node id: a
+    /// repeat's copies are `door`, `door@1`, `door@2`.
     #[test]
-    fn instances_parse_with_the_addressed_nodes_stride() {
+    fn every_segment_is_a_row_named_by_its_node_id() {
         let doc = r#"{
-  "format": 3,
-  "objects": [
-    { "name": "door", "id": "door", "shape": { "repeat": {
-        "shape": { "polygon": { "points": [[0.0,0.0],[12.0,0.0],[6.0,10.4]], "count": 9 } },
-        "center": [60.0,60.0], "count": 3 } } }
+  "format": 6,
+  "view_box": [0.0, 0.0, 120.0, 120.0],
+  "next": { "repeat": 2 },
+  "start": { "output": { "set": "1" }, "port": { "set": 0 }, "channel": { "set": { "lamps": 0 } } },
+  "parts": [
+    { "id": "repeat1", "kind": { "repeat": { "center": [60.0, 60.0], "count": 3,
+      "part": { "id": "door", "kind": { "polygon": {
+        "points": [[0.0, 0.0], [12.0, 0.0], [6.0, 10.4]], "count": 9 } } } } } }
   ]
 }"#;
         let instances = instances_from_map2d(doc);
         assert_eq!(instances.len(), 3);
-        assert_eq!(instances[1].path, "/door/1");
-        assert_eq!(instances[1].label, "door 1");
+        assert_eq!(instances[1].path, "door@1");
+        assert_eq!(instances[1].label, "door@1");
         assert_eq!((instances[1].start, instances[1].lamps), (9, 9));
-        assert_eq!(instances[1].stride, 3, "one polygon side, not 9");
     }
 
-    /// A document without ids still DISPLAYS its effective expansion —
-    /// old-format data must never collapse the Patch tree (G1 R2, the
-    /// zook lesson) — but the rows carry EMPTY paths: no address grain is
-    /// invented that the patch format cannot store, so they select and
-    /// pulse as ranges until ensure-ids stamps the document.
+    /// A circle's rings are its segments: `circle1/r1`, `circle1/r2`.
     #[test]
-    fn documents_without_ids_display_but_are_not_addressable() {
+    fn a_circles_rings_are_rows() {
         let doc = r#"{
-  "format": 1,
-  "objects": [
-    { "name": "sector", "shape": { "repeat": {
-        "shape": { "grid": { "origin": [0.5,0.5], "cols": 8, "rows": 1, "pitch": 1 } },
-        "center": [60.0,60.0], "count": 5 } } }
+  "format": 6,
+  "view_box": [0.0, 0.0, 100.0, 100.0],
+  "next": { "circle": 2 },
+  "start": { "output": { "set": "1" }, "port": { "set": 0 }, "channel": { "set": { "lamps": 0 } } },
+  "parts": [
+    { "id": "circle1", "kind": { "circle": { "center": [50.0, 50.0], "next_ring": 3,
+      "rings": [ { "key": "r1", "radius": 40.0, "count": 24 },
+                 { "key": "r2", "radius": 20.0, "count": 12 } ] } } }
   ]
 }"#;
         let instances = instances_from_map2d(doc);
-        assert_eq!(instances.len(), 5, "the repeat expands for display");
-        assert_eq!(instances[2].label, "sector 2");
-        assert_eq!(
-            instances[2].path, "",
-            "no id, no address — range grain until ensure-ids"
-        );
-        assert_eq!((instances[2].start, instances[2].lamps), (16, 8));
+        let rows: Vec<(&str, u32, u32)> = instances
+            .iter()
+            .map(|row| (row.path.as_str(), row.start, row.lamps))
+            .collect();
+        assert_eq!(rows, [("circle1/r1", 0, 24), ("circle1/r2", 24, 12)]);
     }
 
-    /// An explicit object-level stride override beats the derivation.
+    /// A body that is not format 6 has no rows (the engine refuses it too).
     #[test]
-    fn the_authored_stride_override_wins() {
-        let doc = r#"{
-  "format": 3,
-  "objects": [
-    { "name": "sector", "id": "sector", "stride": 6, "shape": { "repeat": {
-        "shape": { "path": { "points": [[0.0,0.0],[30.0,0.0]], "count": 30 } },
-        "center": [60.0,60.0], "count": 5 } } }
-  ]
-}"#;
-        let instances = instances_from_map2d(doc);
-        assert_eq!(instances.len(), 5);
-        assert!(instances.iter().all(|instance| instance.stride == 6));
+    fn an_older_document_has_no_rows() {
+        let doc = r#"{ "format": 1, "objects": [ { "name": "strip", "shape": { "grid": {
+            "origin": [0.5, 0.5], "cols": 8, "rows": 1, "pitch": 1 } } } ] }"#;
+        assert!(instances_from_map2d(doc).is_empty());
     }
 
     fn fixture(node: u32) -> UiPatchTarget {

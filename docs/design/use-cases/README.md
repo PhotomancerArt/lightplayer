@@ -33,6 +33,12 @@ before the flag existed reads exactly as it always did.
 panel shows the flag on the object section and toggles it (undoable),
 with **unmap all** beside it once a fixture is manual.
 
+**2026-10-28:** `patch.rs`, the patch file and the Patching panel are
+gone. A fixture's patching lives in its map2d format 6 mapping now (a
+flow on the fixture or a part, and overrides by segment), and the Graph,
+Studio's one project canvas, edits it; `⇧U` turns every segment off to
+patch a fixture by hand from nothing (`lp-app/lpa-graph/README.md`).
+
 ## What is still owed
 
 - **A real-hardware walk of all three cases.** Everything here is

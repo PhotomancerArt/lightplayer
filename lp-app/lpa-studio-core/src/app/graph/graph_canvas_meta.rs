@@ -12,7 +12,7 @@
 //! this needs no format bump. Nodes are keyed as the Map view keys them:
 //! by their tree path.
 
-use lab_mapping_model::{NodeId, Project, Vec2};
+use lpa_graph::{NodeId, Project, Vec2};
 use lpc_mapping::EditorMetaDoc;
 use serde_json::{Value, json};
 
@@ -22,7 +22,7 @@ pub(crate) const EDITOR_JSON: &str = "editor.json";
 pub(crate) const CANVAS_SURFACE: &str = "canvas";
 
 /// Pin every node `editor.json` (`text`) says is pinned. `address_of`
-/// names a lab node as `editor.json` keys it.
+/// names a Graph node as `editor.json` keys it.
 pub(crate) fn apply_pins(
     project: &mut Project,
     text: Option<&str>,

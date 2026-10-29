@@ -35,7 +35,7 @@ pub const BROKEN: u32 = 3;
 /// - entry 3 `broken`: a ref to a file that does not exist.
 pub fn project_fs() -> LpFsMemory {
     let fs = LpFsMemory::new();
-    write(&fs, "/project.json", b"{\n  \"format\": 11\n}\n");
+    write(&fs, "/project.json", b"{\n  \"format\": 12\n}\n");
     write(
         &fs,
         "/module.json",

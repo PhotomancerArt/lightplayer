@@ -123,40 +123,40 @@ struct Fixture {
     lamps: u32,
 }
 
+/// The most copies one format-6 repeat holds.
+const MAX_REPEAT: u32 = 64;
+
 /// The largest lamp count one authored output port carries in the synthetic
 /// projects — under `WS281X_MAX_LEDS_PER_PORT` (1,024) so no wire is capped.
 const SYNTHETIC_LAMPS_PER_PORT: u32 = 1000;
 
-/// The patch that cuts a five-sector zook into five runs, one per sector,
-/// laid on the wire in REVERSE sector order so no run auto-flows: one run is
+/// The overrides that lay a five-sector zook's copies on the wire in
+/// REVERSE sector order, one per 300-lamp port, so none follows on: one is
 /// reversed and one rotated, the two placements a patched install actually
 /// uses. Every fragment is then a partial run of the product — the path a
-/// patched fixture pays for and an unpatched one never sees.
-///
-/// Rows are `[path, out#, lamp, flags?, offset?]` (`lpc_mapping::patch`);
-/// `-1` = the default output, so the single unnamed output takes them all.
-const ZOOK_PATCH: &str = r#"{
-  "format": 2,
-  "entries": [
-    ["/sector/0", -1, 1200],
-    ["/sector/1", -1, 900, "r"],
-    ["/sector/2", -1, 600, "", 40],
-    ["/sector/3", -1, 300],
-    ["/sector/4", -1, 0]
-  ]
-}
-"#;
+/// patched fixture pays for and one that flows never sees. (Until project
+/// format 12 this was a patch document of the same five rows on a flat
+/// wire; format 6 lays each copy whole on one port.)
+const ZOOK_OVERRIDES: &str = r#"{
+  "sector": { "port": { "set": 4 }, "channel": { "set": { "lamps": 0 } } },
+  "sector@1": { "port": { "set": 3 }, "channel": { "set": { "lamps": 0 } }, "direction": "reverse" },
+  "sector@2": { "port": { "set": 2 }, "channel": { "set": { "lamps": 0 } }, "offset": 40 },
+  "sector@3": { "port": { "set": 1 }, "channel": { "set": { "lamps": 0 } } },
+  "sector@4": { "port": { "set": 0 }, "channel": { "set": { "lamps": 0 } } }
+}"#;
 
 /// Generate a zook-shaped project in a temp dir: `strands` rotated copies of
-/// a `per_strand`-lamp path, and output ports summing to exactly that many
-/// lamps. Everything else (shader, clock, fixture settings) is zook's. With
-/// `patch`, the fixture also carries that patch document, so its product
-/// reaches the output as partial runs instead of one auto-flowed whole.
+/// a `per_strand`-lamp path, and output ports of `per_port` lamps summing to
+/// exactly that many lamps. Everything else (shader, clock, fixture
+/// settings) is zook's. With `overrides`, the map2d also carries them, so
+/// its product reaches the output as partial runs instead of one run that
+/// flows on.
 fn synthetic_from_zook(
     label: &'static str,
     strands: u32,
     per_strand: u32,
-    patch: Option<&str>,
+    per_port: u32,
+    overrides: Option<&str>,
 ) -> Fixture {
     let src = workspace_dir().join("catalog/projects/zook-dome");
     let dir = std::env::temp_dir().join(format!(
@@ -173,9 +173,29 @@ fn synthetic_from_zook(
     let mut map: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(src.join("fixture.map2d.json")).unwrap())
             .expect("zook map2d parses");
-    let repeat = &mut map["objects"][0]["shape"]["repeat"];
-    repeat["count"] = serde_json::json!(strands);
-    repeat["shape"]["path"]["count"] = serde_json::json!(per_strand);
+    let repeat = &mut map["parts"][0]["kind"]["repeat"];
+    repeat["part"]["kind"]["path"]["count"] = serde_json::json!(per_strand);
+    if strands <= MAX_REPEAT {
+        repeat["count"] = serde_json::json!(strands);
+    } else {
+        // Format 6 holds at most 64 copies in one repeat: the dome-scale
+        // copies are a repeat of repeats, `outer` × `inner` round the same
+        // centre (the lamp count is what the slope reads, not the angles).
+        let inner = (1..=MAX_REPEAT)
+            .rev()
+            .find(|inner| strands % inner == 0 && strands / inner <= MAX_REPEAT)
+            .expect("the strands factor into two repeats of at most 64");
+        let held = repeat["part"].take();
+        repeat["count"] = serde_json::json!(strands / inner);
+        repeat["part"] = serde_json::json!({
+            "id": "repeat2",
+            "kind": { "repeat": { "center": repeat["center"].clone(), "count": inner, "part": held } }
+        });
+        map["next"] = serde_json::json!({ "repeat": 3 });
+    }
+    if let Some(overrides) = overrides {
+        map["overrides"] = serde_json::from_str(overrides).expect("overrides parse");
+    }
     std::fs::write(
         dir.join("fixture.map2d.json"),
         serde_json::to_string_pretty(&map).unwrap(),
@@ -190,7 +210,7 @@ fn synthetic_from_zook(
     let mut remaining = lamps;
     let mut port = 0u32;
     while remaining > 0 {
-        let count = remaining.min(SYNTHETIC_LAMPS_PER_PORT);
+        let count = remaining.min(per_port);
         if port > 0 {
             ports.push_str(",\n");
         }
@@ -201,27 +221,9 @@ fn synthetic_from_zook(
         port += 1;
     }
     let output = format!(
-        "{{\n  \"kind\": \"Output\",\n  \"ports\": {{\n{ports}\n  }},\n  \"bindings\": {{ \"input\": {{ \"source\": \"bus:control.out\" }} }}\n}}\n"
+        "{{\n  \"kind\": \"Output\",\n  \"name\": \"1\",\n  \"ports\": {{\n{ports}\n  }},\n  \"bindings\": {{ \"input\": {{ \"source\": \"bus:control.out\" }} }}\n}}\n"
     );
     std::fs::write(dir.join("output.json"), output).expect("write output.json");
-
-    if let Some(patch) = patch {
-        std::fs::write(dir.join("fixture.patch.json"), patch).expect("write patch");
-        // A text edit, not a `Value` round trip, for the same reason as the
-        // output above: `kind` has to stay the first key.
-        let fixture = std::fs::read_to_string(src.join("fixture.json")).expect("read fixture");
-        let anchor = "\"kind\": \"Fixture\",";
-        assert!(
-            fixture.contains(anchor),
-            "zook fixture.json starts with its kind"
-        );
-        let fixture = fixture.replacen(
-            anchor,
-            "\"kind\": \"Fixture\",\n  \"patch\": { \"kind\": \"File\", \"source\": \"fixture.patch.json\" },",
-            1,
-        );
-        std::fs::write(dir.join("fixture.json"), fixture).expect("write fixture.json");
-    }
 
     Fixture { label, dir, lamps }
 }
@@ -233,17 +235,18 @@ fn fixtures() -> Vec<Fixture> {
             dir: workspace_dir().join("catalog/projects/zook-dome"),
             lamps: 1500,
         },
-        synthetic_from_zook("zook-2x", 10, 300, None),
-        // zook's own shape and lamp count, cut into runs by a patch: the
-        // difference from the `zook` row is what a patch costs per frame.
-        synthetic_from_zook("zook-patched", 5, 300, Some(ZOOK_PATCH)),
+        synthetic_from_zook("zook-2x", 10, 300, SYNTHETIC_LAMPS_PER_PORT, None),
+        // zook's own shape and lamp count, every copy overridden onto its own
+        // port: the difference from the `zook` row is what patching costs
+        // per frame.
+        synthetic_from_zook("zook-patched", 5, 300, 300, Some(ZOOK_OVERRIDES)),
         Fixture {
             label: "small-dome",
             dir: workspace_dir().join("catalog/projects/small-dome"),
             lamps: 6310,
         },
-        synthetic_from_zook("dome-scale", 190, 119, None),
-        synthetic_from_zook("dome-scale-2x", 380, 119, None),
+        synthetic_from_zook("dome-scale", 190, 119, SYNTHETIC_LAMPS_PER_PORT, None),
+        synthetic_from_zook("dome-scale-2x", 380, 119, SYNTHETIC_LAMPS_PER_PORT, None),
     ]
 }
 

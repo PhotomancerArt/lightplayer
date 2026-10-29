@@ -12,14 +12,24 @@
 //! is held, and the rows never take focus): ↑/↓ move the highlight over
 //! the pressable rows, Enter presses it (a Lasting row arms first), Esc
 //! closes. The grammar itself is [`PaletteCursor`], a plain value.
+//!
+//! **A verb that takes values** (the Graph's "Set direction", which needs
+//! a segment and a direction) is a row too, its label ending in "…": a
+//! press opens its form in the palette — the offer's own parameters, drawn
+//! by [`OfferParamsForm`], the selection already picked as its subject when
+//! it is one — and the form's button presses the offer with what it holds
+//! (Enter does too); Esc goes back to the list. The palette never builds
+//! the verb's action: core's offer binds it.
 
 use dioxus::prelude::*;
 use gloo_timers::future::TimeoutFuture;
-use lpa_studio_core::{UiAction, UiOfferTree};
+use lpa_studio_core::{ActionEnablement, OfferArgs, OfferPath, UiAction, UiOffer, UiOfferTree};
 
 use super::palette_cursor::{PaletteCursor, PaletteKey, PaletteOutcome};
 use crate::core::action::armed_confirm_button::ARMED_CONFIRM_WINDOW_MS;
-use crate::core::{ActionButton, ActionButtonVariant};
+use crate::core::{
+    ActionButton, ActionButtonVariant, OfferParamsForm, OfferPressButton, pressed_or_refused,
+};
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
@@ -41,6 +51,9 @@ pub(crate) fn CommandPaletteDialog(
     /// Lasting row leaves it.
     #[props(default)]
     armed_preview: bool,
+    /// Stories: start with this row's form open (a capture cannot press).
+    #[props(default)]
+    initial_fill: Option<String>,
 ) -> Element {
     let mut query = use_signal(|| initial_query.clone());
     let mut cursor = use_signal(|| {
@@ -56,8 +69,42 @@ pub(crate) fn CommandPaletteDialog(
         cursor
     });
     let mut arm_generation = use_signal(|| 0u64);
+    // The row whose form is open (a verb that takes values), and its values.
+    let mut filling = use_signal(|| {
+        initial_fill
+            .as_deref()
+            .and_then(|path| OfferPath::parse(path).ok())
+    });
+    let mut fill_args = use_signal(OfferArgs::new);
     let list_id = use_hook(next_list_id);
     use_restore_focus(inline);
+
+    let filled: Option<UiOffer> = filling
+        .read()
+        .as_ref()
+        .and_then(|path| offers.iter().find(|offer| &offer.path == path).cloned());
+    if let Some(offer) = filled {
+        return rsx! {
+            div { class: if inline { INLINE_FRAME_CLASS } else { OVERLAY_CLASS },
+                if !inline {
+                    div {
+                        class: "tw:absolute tw:inset-0 tw:bg-black/50",
+                        aria_hidden: "true",
+                        onclick: move |_| on_close.call(()),
+                    }
+                }
+                PaletteForm {
+                    offer,
+                    args: fill_args,
+                    on_back: move |_| filling.set(None),
+                    on_action: move |action: UiAction| {
+                        on_action.call(action);
+                        on_close.call(());
+                    },
+                }
+            }
+        };
+    }
 
     let typed = query.read().clone();
     let rows = offers.search(&typed);
@@ -104,6 +151,10 @@ pub(crate) fn CommandPaletteDialog(
             PaletteOutcome::Press(action) => {
                 on_action.call(action);
                 on_close.call(());
+            }
+            PaletteOutcome::Fill(path) => {
+                fill_args.set(OfferArgs::new());
+                filling.set(Some(path));
             }
             PaletteOutcome::Close => on_close.call(()),
         }
@@ -173,10 +224,17 @@ pub(crate) fn CommandPaletteDialog(
                             let armed = cursor.read().is_armed(&offer.path);
                             let hovered = (*offer).clone();
                             let published = offer.action.clone();
+                            // A verb only a value short opens its form.
+                            let fills = (!offer.is_enabled() && offer.awaits_a_value())
+                                .then(|| offer.path.clone());
                             // The row draws with the offer's icon token, the
                             // one every surface draws it with; the press
                             // dispatches the action exactly as published.
-                            let shown = offer.action.clone().with_icon(offer.icon.clone());
+                            let shown = match fills.is_some() {
+                                true => opens_a_form(offer),
+                                false => offer.action.clone(),
+                            }
+                            .with_icon(offer.icon.clone());
                             rsx! {
                                 div {
                                     // The arm is part of the key: arming from
@@ -196,9 +254,15 @@ pub(crate) fn CommandPaletteDialog(
                                             running: false,
                                             variant: ActionButtonVariant::MenuItem,
                                             armed_preview: armed,
-                                            on_action: move |_| {
-                                                on_action.call(published.clone());
-                                                on_close.call(());
+                                            on_action: move |_| match fills.clone() {
+                                                Some(path) => {
+                                                    fill_args.set(OfferArgs::new());
+                                                    filling.set(Some(path));
+                                                }
+                                                None => {
+                                                    on_action.call(published.clone());
+                                                    on_close.call(());
+                                                }
                                             },
                                         }
                                     }
@@ -222,6 +286,86 @@ pub(crate) fn CommandPaletteDialog(
             }
         }
     }
+}
+
+/// One verb's form in the palette: its name, its parameters
+/// ([`OfferParamsForm`]), Back, and its press ([`OfferPressButton`]), which
+/// binds what the form holds through the offer. Enter presses when the
+/// values bind; Esc goes back to the list.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn PaletteForm(
+    offer: UiOffer,
+    args: Signal<OfferArgs>,
+    on_back: EventHandler<()>,
+    on_action: EventHandler<UiAction>,
+) -> Element {
+    let current = args.read().clone();
+    let verb = offer.action.meta().label.clone();
+    let path = offer.path.to_string();
+    let keys_offer = offer.clone();
+    let on_keydown = move |event: KeyboardEvent| match event.key() {
+        Key::Escape => {
+            event.prevent_default();
+            on_back.call(());
+        }
+        Key::Enter => {
+            event.prevent_default();
+            let press = pressed_or_refused(&keys_offer, &args.read());
+            // A Lasting press arms on its button; Enter never skips that.
+            if press.meta().enablement.is_enabled() && !press.meta().consequence.arms() {
+                on_action.call(press);
+            }
+        }
+        _ => {}
+    };
+    rsx! {
+        div {
+            class: PANEL_CLASS,
+            role: "dialog",
+            aria_modal: "true",
+            aria_label: "{verb}",
+            tabindex: "-1",
+            onmounted: move |event| {
+                spawn(async move {
+                    let _ = event.data().set_focus(true).await;
+                });
+            },
+            onkeydown: on_keydown,
+            div { class: FORM_HEAD_CLASS,
+                span { class: "tw:text-base tw:font-bold tw:text-strong-foreground", "{verb}" }
+                span { class: PATH_CLASS, dir: "rtl", title: "{path}",
+                    bdi { dir: "ltr", "{path}" }
+                }
+            }
+            div { class: FORM_BODY_CLASS,
+                OfferParamsForm { offer: offer.clone(), args }
+            }
+            div { class: FORM_FOOT_CLASS,
+                button {
+                    class: BACK_CLASS,
+                    r#type: "button",
+                    onclick: move |_| on_back.call(()),
+                    "Back"
+                }
+                OfferPressButton {
+                    offer,
+                    args: current,
+                    variant: ActionButtonVariant::Outline,
+                    on_action,
+                }
+            }
+        }
+    }
+}
+
+/// A verb that takes values, drawn as the row that opens its form: its own
+/// label with "…" (more to say before it does anything), pressable.
+fn opens_a_form(offer: &UiOffer) -> UiAction {
+    let mut meta = offer.action.meta().clone();
+    meta.label = format!("{}…", meta.label);
+    meta.enablement = ActionEnablement::Enabled;
+    offer.action.clone().with_meta(meta)
 }
 
 /// Put focus back where it was when the palette opened (a field, the
@@ -309,5 +453,14 @@ const PATH_CLASS: &str =
 
 const EMPTY_CLASS: &str =
     "tw:m-0 tw:px-2.5 tw:py-6 tw:text-center tw:text-sm tw:text-muted-foreground";
+
+const FORM_HEAD_CLASS: &str = "tw:flex tw:min-w-0 tw:items-baseline tw:justify-between tw:gap-3 tw:border-0 tw:border-b tw:border-solid tw:border-border-subtle tw:px-4 tw:py-3";
+
+const FORM_BODY_CLASS: &str =
+    "tw:max-h-[min(60vh,420px)] tw:min-w-0 tw:overflow-y-auto tw:px-4 tw:py-3";
+
+const FORM_FOOT_CLASS: &str = "tw:flex tw:items-center tw:justify-between tw:gap-3 tw:border-0 tw:border-t tw:border-solid tw:border-border-subtle tw:px-4 tw:py-2.5";
+
+const BACK_CLASS: &str = "tw:cursor-pointer tw:appearance-none tw:border-0 tw:bg-transparent tw:p-0 tw:text-sm tw:text-muted-foreground tw:hover:text-strong-foreground ux-focus-ring";
 
 const FOOTER_CLASS: &str = "tw:flex tw:gap-4 tw:border-0 tw:border-t tw:border-solid tw:border-border-subtle tw:px-4 tw:py-2 tw:text-xs tw:text-dim-foreground";

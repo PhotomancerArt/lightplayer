@@ -9,7 +9,6 @@
 use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 
-use crate::map2d_doc::DEFAULT_SAMPLE_DIAMETER;
 use crate::part::id_counters::IdCounters;
 use crate::part::lamp_ref::LampRef;
 use crate::part::part::Part;
@@ -21,12 +20,12 @@ use crate::patching::{Flow, Override, Start};
 /// One fixture's mapping.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Mapping {
-    /// Each lamp's sample diameter, in the layout's units (a layout fact,
-    /// as today's `Map2dDoc` holds it).
-    pub sample_diameter: f32,
-    /// The authored canvas `[min_x, min_y, width, height]`, when there is
-    /// one: what the fit frames instead of the lamps' bounds.
-    pub canvas: Option<[f32; 4]>,
+    /// The fixture's coordinate system, `[min_x, min_y, width, height]` in
+    /// the layout's units, y down: an SVG `viewBox` (fixture-space theory,
+    /// D7, D11). Every format-6 document has one; it is what the fit
+    /// frames. A box of no width or height frames the lamps' own bounds, as
+    /// the fit always has (the default, until a writer gives one).
+    pub view_box: [f32; 4],
     /// The top-level parts, in order: the order their segments come.
     pub parts: Vec<Part>,
     /// The fixture's lamp facts: what every part inherits.
@@ -45,8 +44,7 @@ pub struct Mapping {
 impl Default for Mapping {
     fn default() -> Self {
         Self {
-            sample_diameter: DEFAULT_SAMPLE_DIAMETER,
-            canvas: None,
+            view_box: [0.0; 4],
             parts: Vec::new(),
             lamp: LampRef::default(),
             next: IdCounters::default(),
@@ -58,8 +56,8 @@ impl Default for Mapping {
 }
 
 impl Mapping {
-    /// An empty mapping: no parts, today's default sample diameter, no
-    /// canvas.
+    /// An empty mapping: no parts, and a view box of no size (the fit
+    /// frames the lamps until a writer gives it one).
     #[must_use]
     pub fn new() -> Self {
         Self::default()

@@ -106,6 +106,7 @@ pub fn release_fixture() -> ReleaseFixture {
         version: "2026.10.05-3".into(),
         commit: "103285d5d05e0c2223260f7a3ccf69eb32cf40cc".into(),
         wire_proto: 36,
+        project_format: None,
         requires: Requires {
             fs_tree: false,
             layout: 1,

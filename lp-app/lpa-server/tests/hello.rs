@@ -52,6 +52,35 @@ fn hello_request_returns_injected_provenance_with_live_device_uid() {
     }
 }
 
+/// The hello says which project format the engine reads (wire 46): the
+/// server fills it from the engine it links, before and after an embedder
+/// injects its identity, and the answer to `ClientRequest::Hello` carries it
+/// on the wire as `build.projectFormat`.
+#[test]
+fn the_hello_says_which_project_format_the_engine_reads() {
+    let (mut server, output_provider, graphics) = server_with_injected_hello();
+    assert_eq!(
+        server.hello().build.project_format,
+        lpc_model::PROJECT_FORMAT_VERSION
+    );
+    let response = dispatch_hello(&mut server, &output_provider, &graphics);
+    let lpc_wire::server::ServerMsgBody::Hello(hello) = response else {
+        panic!("expected hello response, got {response:?}");
+    };
+    assert_eq!(
+        hello.build.project_format,
+        lpc_model::PROJECT_FORMAT_VERSION
+    );
+    let json = lpc_wire::json::to_string(&hello).unwrap();
+    assert!(
+        json.contains(&format!(
+            "\"projectFormat\":{}",
+            lpc_model::PROJECT_FORMAT_VERSION
+        )),
+        "{json}"
+    );
+}
+
 fn server_with_injected_hello() -> (
     LpServer,
     Rc<RefCell<dyn lpc_shared::output::OutputProvider>>,

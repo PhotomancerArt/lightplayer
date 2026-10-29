@@ -58,6 +58,140 @@ fn a_strict_manifest_parser_would_have_died_before_the_version_check() {
     assert_eq!(classify(&files), FormatClass::BelowFloor { found: None });
 }
 
+// --- v11→v12: what the step will not freeze ----------------------------------
+
+/// Fixture-range rows that split a path (lamps 0–1 of a 4-lamp path at wire
+/// lamp 10, lamps 2–3 at wire lamp 0) cut it: format 6 lays each object whole
+/// on one window (lean Q9).
+#[test]
+fn a_range_row_that_cuts_a_path_is_refused_by_name() {
+    let files = v11_fixture_project(
+        r#"{"format":3,"objects":[{"id":"run","shape":{"path":{"points":[[0,0],[10,0]],"count":4}}}]}"#,
+        Some(r#"{"format":2,"entries":[[[0,2],-1,10],[[2,2],-1,0]]}"#),
+        r#"{"0":{}}"#,
+    );
+    let message = assert_step_refuses(&files);
+    assert!(message.contains("`run`"), "names the object: {message}");
+    assert!(message.contains("f.json"), "names the fixture: {message}");
+}
+
+/// A row that places a sub-span of a node (`[path, start, count]`) cuts it
+/// the same way.
+#[test]
+fn a_sub_span_row_is_refused_by_name() {
+    let files = v11_fixture_project(
+        r#"{"format":3,"objects":[{"id":"run","shape":{"path":{"points":[[0,0],[10,0]],"count":6}}}]}"#,
+        Some(r#"{"format":2,"entries":[[["/run",2,2],-1,20]]}"#),
+        r#"{"0":{}}"#,
+    );
+    let message = assert_step_refuses(&files);
+    assert!(message.contains("`run`"), "names the object: {message}");
+}
+
+/// The old quad-wire-oracle (before it was split by hand into a grid per
+/// wire, M3 P4): one 64-lamp grid its four 16-lamp ports cut into four.
+#[test]
+fn a_grid_across_a_port_boundary_is_refused_by_name() {
+    let files = read_tree(&refused_fixture("quad-wire-oracle"));
+    let message = assert_step_refuses(&files);
+    assert!(message.contains("`panel`"), "names the object: {message}");
+    assert!(
+        message.contains("port boundary"),
+        "says what cuts it: {message}"
+    );
+    assert!(
+        message.contains("split `panel`"),
+        "offers a remedy a person can do: {message}"
+    );
+}
+
+/// Hand-placed lamps whose second path does not start where the first ends
+/// (`first_channel` 0 with 2 lamps, then 5): today the gap is dark wire,
+/// which a `points` part laid by the patcher cannot say.
+#[test]
+fn a_path_points_gap_is_refused_by_name() {
+    let files: ProjectFiles = [
+        ("project.json", r#"{"format":11,"name":"t"}"#),
+        (
+            "module.json",
+            r#"{"kind":"Module","nodes":{"f":{"ref":"./f.json"},"o":{"ref":"./o.json"}}}"#,
+        ),
+        (
+            "f.json",
+            r#"{"kind":"Fixture","render_size":{"width":4,"height":4},"mapping":{"kind":"PathPoints",
+            "paths":{"0":{"kind":"PointList","first_channel":0,"points":{"0":[0.25,0.25],"1":[0.5,0.25]}},
+                     "1":{"kind":"PointList","first_channel":5,"points":{"0":[0.25,0.75],"1":[0.5,0.75]}}},
+            "sample_diameter":1.0}}"#,
+        ),
+        ("o.json", r#"{"kind":"Output","ports":{"0":{}}}"#),
+    ]
+    .into_iter()
+    .map(|(path, text)| (path.to_string(), text.as_bytes().to_vec()))
+    .collect();
+    let message = assert_step_refuses(&files);
+    assert!(message.contains("f.json"), "names the fixture: {message}");
+}
+
+/// Asserts the v11→v12 step refuses the project, that nothing was touched,
+/// and returns the message.
+fn assert_step_refuses(files: &ProjectFiles) -> String {
+    let mut mutated = files.clone();
+    let error = upgrade_to_current(&mut mutated).expect_err("must refuse");
+    assert_eq!(
+        &mutated, files,
+        "a refused upgrade must not touch the files"
+    );
+    assert!(
+        matches!(error, UpgradeError::Refused { .. }),
+        "expected the step's refusal, got {error:?}"
+    );
+    let message = error.to_string();
+    eprintln!("refused: {message}");
+    message
+}
+
+/// One fixture `f` (map2d `f.map2d.json`, and `f.patch.json` when given) on
+/// one output `o` with these ports, at format 11.
+fn v11_fixture_project(map2d: &str, patch: Option<&str>, ports: &str) -> ProjectFiles {
+    let fixture = match patch {
+        Some(_) => {
+            r#"{"kind":"Fixture","mapping":{"kind":"Map2d","source":"f.map2d.json"},"patch":{"kind":"File","source":"f.patch.json"}}"#
+        }
+        None => r#"{"kind":"Fixture","mapping":{"kind":"Map2d","source":"f.map2d.json"}}"#,
+    };
+    let mut files = vec![
+        (
+            String::from("project.json"),
+            String::from(r#"{"format":11,"name":"t"}"#),
+        ),
+        (
+            String::from("module.json"),
+            String::from(
+                r#"{"kind":"Module","nodes":{"f":{"ref":"./f.json"},"o":{"ref":"./o.json"}}}"#,
+            ),
+        ),
+        (String::from("f.json"), String::from(fixture)),
+        (String::from("f.map2d.json"), String::from(map2d)),
+        (
+            String::from("o.json"),
+            format!(r#"{{"kind":"Output","ports":{ports}}}"#),
+        ),
+    ];
+    if let Some(patch) = patch {
+        files.push((String::from("f.patch.json"), String::from(patch)));
+    }
+    files
+        .into_iter()
+        .map(|(path, text)| (path, text.into_bytes()))
+        .collect()
+}
+
+fn refused_fixture(name: &str) -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/refused")
+        .join(name)
+}
+
 /// Asserts the project is refused, that nothing was touched, and that the
 /// message is actionable. Returns the message so callers can check specifics.
 fn assert_refused(files: &ProjectFiles) -> String {

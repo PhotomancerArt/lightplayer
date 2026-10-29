@@ -1,38 +1,40 @@
 {
-  "format": 4,
-  "sample_diameter": 1.0,
-  "canvas": [
+  "format": 6,
+  "view_box": [
     0.0,
     0.0,
     120.0,
     120.0
   ],
-  "objects": [
+  "start": {
+    "output": {
+      "set": "1"
+    },
+    "port": {
+      "set": 12
+    },
+    "channel": {
+      "set": {
+        "lamps": 119
+      }
+    }
+  },
+  "parts": [
     {
-      "name": "door",
       "id": "door",
-      "stride": 180,
-      "shape": {
+      "name": "door",
+      "kind": {
         "path": {
-          "points": [
-            [
-              90.6,
-              102.1
-            ],
-            [
-              60.0,
-              83.0
-            ],
-            [
-              29.4,
-              102.1
-            ]
-          ],
+          "d": "M 90.6 102.1 L 60 83 L 29.4 102.1",
           "count": 360,
-          "reversed": false,
           "align": "inside"
         }
       }
     }
-  ]
+  ],
+  "overrides": {
+    "door": {
+      "offset": 180
+    }
+  }
 }

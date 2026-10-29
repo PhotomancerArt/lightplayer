@@ -44,6 +44,12 @@ lpc-relay = { path = "../../lp-core/lpc-relay" }
 # The deflate plan of a push (`push_files`): miniz_oxide, cut into chunks that
 # each fit one tree-store record. No hasher, no store; wasm-safe.
 lp-tree-store = { path = "../../lp-base/lp-tree-store", default-features = false, features = ["deflate-plan"] }
+# `project-stage` only: the update's project stage (`project_stage_run`), the
+# one edge Studio and lp-cli run it through. Host and wasm only: no firmware
+# enables it, and `scripts/check-upgrade-fw.sh` proves neither crate reaches
+# a firmware graph.
+lpa-update = { path = "../lpa-update", optional = true }
+lpa-upgrade = { path = "../lpa-upgrade", optional = true }
 
 [features]
 default = ["host"]
@@ -80,6 +86,8 @@ lan = [
 # `WsByteStream`: the raw-byte `serial:ws://…` sibling of `serial:tcp://…`.
 # Distinct from `ws`, which is the lpc-wire protocol against an `lpa-server`.
 ws-stream = ["dep:tungstenite"]
+# The update's project stage over channel 1 (`project_stage_run`, M3 P11).
+project-stage = ["dep:lpa-update", "dep:lpa-upgrade"]
 
 [dev-dependencies]
 lp-riscv-elf = { path = "../../lp-riscv/lp-riscv-elf", features = ["std"] }

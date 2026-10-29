@@ -1,12 +1,11 @@
 //! Compact resolved geometry for document-sourced fixture mappings.
 //!
-//! A `*.map2d.json` document (and the legacy SVG import that funnels through
-//! the same resolver) produces its lamp positions already compact: fitted
-//! texture-space centers plus one contiguous span per document object. The
-//! engine used to repackage that into [`MappingConfig::PathPoints`] slots —
-//! 24 B per lamp of slot tuple, in a `VecMap` whose power-of-two capacity
-//! overshoot made it 41 B/LED live — to carry 8 B of coordinate.
-//! [`ResolvedMappingCompact`] carries it as it comes out of the resolver
+//! A `*.map2d.json` document renders its lamp positions already compact:
+//! fitted texture-space centers plus one contiguous span per segment. The
+//! engine once repackaged resolved geometry into slot-modelled `PathPoints`
+//! paths — 24 B per lamp of slot tuple, in a `VecMap` whose power-of-two
+//! capacity overshoot made it 41 B/LED live — to carry 8 B of coordinate.
+//! [`ResolvedMappingCompact`] carries it as it comes out of the render
 //! instead.
 //!
 //! **Non-goals, deliberately:**
@@ -17,14 +16,13 @@
 //! - *Not slot-modelled.* It carries no [`crate::Revision`]s of its own and
 //!   answers no slot paths. The fixture's `mapping_version` stays the sole
 //!   downstream change signal.
-//! - *Not a replacement for authored `PathPoints`.* Hand-placed lamps stay
-//!   in the slot form, where Studio's generic slot UI can edit individual
-//!   points and overlay mutations can address them. This type is only ever
-//!   built by resolving a document.
+//! - *Built only by rendering a document.* Hand-placed lamps are a
+//!   document's `points` parts (project format 12 retired the slot-modelled
+//!   `PathPoints`).
 //!
-//! [`MappingRef`] is the two-armed borrowed view every mapping consumer
-//! takes, so the same point-generation and span logic serves both
-//! representations.
+//! [`MappingRef`] is the borrowed view every mapping consumer takes: the
+//! compact carrier, or the slot form ([`MappingConfig`]), which holds no
+//! lamps (unset, or a map2d source not yet read).
 
 use alloc::vec::Vec;
 
@@ -82,16 +80,15 @@ impl ResolvedMappingCompact {
     }
 }
 
-/// A borrowed view of either fixture mapping representation.
+/// A borrowed view of a fixture's mapping.
 ///
-/// The slot form ([`MappingConfig`]) and the compact document form are two
-/// encodings of the same thing — an ordered list of lamps grouped into
-/// paths. Every consumer (point generation, path spans, precompute, display
-/// layout) takes this view so neither encoding gets its own copy of the
-/// ordering rules.
+/// The compact carrier holds the lamps, an ordered list grouped into paths;
+/// the slot form ([`MappingConfig`]) holds none. Every consumer (point
+/// generation, path spans, precompute, display layout) takes this view.
 #[derive(Debug, Clone, Copy)]
 pub enum MappingRef<'a> {
-    /// Authored (or legacy resolved) slot-modelled mapping.
+    /// The authored slot form: unset, or a map2d source not yet read. No
+    /// lamps.
     Slots(&'a MappingConfig),
     /// Resolved document geometry.
     Compact(&'a ResolvedMappingCompact),

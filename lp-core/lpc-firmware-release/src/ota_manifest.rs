@@ -88,6 +88,15 @@ pub struct OtaManifest {
     pub commit: String,
     /// The device wire protocol version, from the image's manifest core.
     pub wire_proto: u32,
+    /// The project format this build's engine reads
+    /// (`lpc_model::PROJECT_FORMAT_VERSION` of the build; its hello's
+    /// `build.projectFormat`): what tells a host, before it installs the
+    /// build, whether the board's stored projects will need the update's
+    /// project stage — or will not load at all on an older build.
+    /// Additive (format 1): absent in every manifest written before it, which
+    /// a reader takes as "not said" (`None`), never as a format.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_format: Option<u32>,
     /// What a board must have to take this build without USB.
     pub requires: Requires,
     /// `core.bin`.
@@ -325,6 +334,7 @@ pub(crate) mod tests {
             version: "2026.10.05-3".into(),
             commit: "abc1234567890123456789012345678901234567".into(),
             wire_proto: 36,
+            project_format: None,
             requires: Requires {
                 fs_tree: false,
                 layout: 1,
@@ -413,6 +423,31 @@ pub(crate) mod tests {
                 .contains("\"fsTree\": true")
         );
         assert!(OtaManifest::parse_valid(&bytes).unwrap().requires.fs_tree);
+    }
+
+    /// `projectFormat` is additive: a manifest without it (every one
+    /// written before it) reads `None` and writes no key, so its bytes are
+    /// unchanged; one that says it survives a round trip.
+    #[test]
+    fn project_format_is_additive_and_absent_until_said() {
+        let m = sample();
+        let text = String::from_utf8(m.to_json_bytes()).unwrap();
+        assert!(!text.contains("projectFormat"), "{text}");
+        assert_eq!(
+            OtaManifest::parse_valid(text.as_bytes())
+                .unwrap()
+                .project_format,
+            None
+        );
+        let mut said = sample();
+        said.project_format = Some(12);
+        let bytes = said.to_json_bytes();
+        assert!(
+            String::from_utf8(bytes.clone())
+                .unwrap()
+                .contains("\"wireProto\": 36,\n  \"projectFormat\": 12,"),
+        );
+        assert_eq!(OtaManifest::parse_valid(&bytes).unwrap(), said);
     }
 
     #[test]

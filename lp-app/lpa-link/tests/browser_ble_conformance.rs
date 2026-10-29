@@ -1149,6 +1149,7 @@ fn hello() -> lpc_wire::WireServerMessage {
                 commit: "unknown".to_string(),
                 dirty: false,
                 profile: "release-esp32".to_string(),
+                project_format: lpc_model::PROJECT_FORMAT_VERSION,
             },
             hardware: HardwareFacts::default(),
             device_uid: None,
@@ -1156,6 +1157,7 @@ fn hello() -> lpc_wire::WireServerMessage {
             // is the board's plain JSON.
             pack_format: 0,
             auth: lpc_wire::HelloAuth::TRUSTED,
+            startup_refused: None,
             firmware: None,
         }),
     )

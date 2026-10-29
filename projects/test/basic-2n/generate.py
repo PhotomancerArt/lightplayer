@@ -70,15 +70,18 @@ def half_counts(counts: list[int]) -> list[int]:
     return [max(1, c // 2) for c in counts]
 
 
-def write_map2d(dest: Path, half: bool) -> int:
-    """Write one fixture's map2d; returns the lamp count it resolves to."""
+def write_map2d(dest: Path, index: int, half: bool) -> int:
+    """Write pair `index`'s map2d (format 6, like the parent's): the parent's
+    parts, its `start` on output `index`; returns the lamp count it resolves to."""
     doc = load_ordered(PARENT / "fixture.map2d.json")
-    lamps = 1  # the "center" 1×1 grid object
-    ring = doc["objects"][1]["shape"]["ring"]
+    assert doc["format"] == 6, "the parent's map2d is format 6"
+    doc["start"]["output"]["set"] = str(index)
+    lamps = 1  # the "center" 1×1 grid part
+    rings = next(p for p in doc["parts"] if p["id"] == "disc")["kind"]["circle"]["rings"]
     if half:
-        ring["counts"] = half_counts(ring["counts"])
-        ring["outer_count"] = ring["counts"][0]
-    lamps += sum(ring["counts"])
+        for ring, count in zip(rings, half_counts([r["count"] for r in rings])):
+            ring["count"] = count
+    lamps += sum(r["count"] for r in rings)
     dump_ordered(dest, doc)
     return lamps
 
@@ -92,8 +95,15 @@ def write_fixture(dest: Path, index: int) -> None:
 
 
 def write_output(dest: Path, index: int) -> None:
-    """Pair `index`'s output: the parent's, on its own pin and bus channel."""
-    doc = load_ordered(PARENT / "output.json")
+    """Pair `index`'s output: the parent's, named `index` (the name its map2d's
+    `start` sets), on its own pin and bus channel."""
+    parent = load_ordered(PARENT / "output.json")
+    doc = OrderedDict()
+    for key, value in parent.items():
+        if key != "name":
+            doc[key] = value
+        if key == "kind":
+            doc["name"] = str(index)
     doc["ports"]["0"]["endpoint"] = f"ws281x:local:{PINS[index - 1]}"
     doc["bindings"]["input"]["source"] = f"bus:control.out/ch{index}"
     dump_ordered(dest, doc)
@@ -111,7 +121,7 @@ def generate(name: str, title: str, pairs: int, half: bool) -> int:
     nodes["shader"] = OrderedDict(ref="./shader.json")
     lamps = 0
     for index in range(1, pairs + 1):
-        lamps += write_map2d(out / f"fixture{index}.map2d.json", half)
+        lamps += write_map2d(out / f"fixture{index}.map2d.json", index, half)
         write_fixture(out / f"fixture{index}.json", index)
         write_output(out / f"output{index}.json", index)
         nodes[f"fixture{index}"] = OrderedDict(ref=f"./fixture{index}.json")

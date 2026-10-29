@@ -364,15 +364,11 @@ jobs:
               - 'lp-app/lpa-board-editor/**'
               - 'lp-app/lpa-boards/**'
               - 'lp-app/lpa-palettes/**'
-              - 'lp-app/lpa-mapping-editor/**'
               - 'lp-core/lpc-mapping/**'
-              # The mapping lab's crates: Studio's Graph mounts them, and
-              # test-studio-host runs their statements (nothing else does).
-              - 'lab/mapping/model/**'
-              - 'lab/mapping/web/**'
-              - 'lab/mapping/files/**'
-              - 'lab/mapping/layout/**'
-              - 'lab/mapping/arrows/**'
+              # The Graph's crates (lpa-graph, -web, -files, -layout,
+              # -arrows): the Graph stories draw them. Their statements run
+              # in test-rust-core (default members), on the `core` gate.
+              - 'lp-app/lpa-graph*/**'
               - 'docs/user-guide/**'
               - 'justfile'
               - '.github/workflows/pre-merge.yml'

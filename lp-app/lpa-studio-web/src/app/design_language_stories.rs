@@ -113,8 +113,7 @@ fn page() -> Element {
                 rule: "Selection and navigation are separate concepts and never share a mark. Nav's mark is a STATIC spectrum line on the nav axis's edge — full rainbow on tab/nav underlines, cool sweep on small side lines like the story-book nav — so a place never looks like a chosen thing, and static light never blurs with the moving hover light.",
                 div { class: "tw:flex tw:items-center tw:rounded-md tw:border tw:border-border-muted tw:bg-background tw:px-2",
                     span { class: "{mini_tab} ux-here-line-x tw:text-heading", "Nodes" }
-                    span { class: "{mini_tab} tw:text-subtle-foreground", "Map" }
-                    span { class: "{mini_tab} tw:text-subtle-foreground", "Patch" }
+                    span { class: "{mini_tab} tw:text-subtle-foreground", "Graph" }
                 }
                 div { class: "tw:grid tw:w-44 tw:gap-0.5 tw:rounded-md tw:border tw:border-border-muted tw:bg-card tw:p-1.5",
                     span { class: "{mini_nav_row} tw:text-muted-foreground", "inline_button" }

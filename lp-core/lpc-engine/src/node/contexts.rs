@@ -494,17 +494,12 @@ impl<'r> TickContext<'r> {
     }
 
     /// Where a control product's producer says its lamps land on THIS
-    /// node's wire: the producer's resolved runs, filtered to the ones
-    /// addressed to the current (output) node — `None` for auto-flow,
-    /// `Some(vec![])` for "patched, nothing lands here" (D40; the
-    /// distinction is documented on the engine's implementation).
+    /// node's wire: the producer's runs naming the current (output) node.
+    /// Empty when none does: nothing of it lands here.
     ///
     /// The output asks this once per producer per frame, between resolving
     /// its input (which ticks the producer) and rendering.
-    pub fn control_patch_placement(
-        &self,
-        product: ControlProduct,
-    ) -> Option<alloc::vec::Vec<PatchedRun>> {
+    pub fn control_patch_placement(&self, product: ControlProduct) -> alloc::vec::Vec<PatchedRun> {
         self.resolver.control_patch_placement(product, self.node_id)
     }
 
@@ -627,12 +622,6 @@ impl<'r> TickContext<'r> {
     ) -> Result<Production, ResolveError> {
         let node = self.node_id;
         self.resolver.resolve_consumed_accessor(node, accessor)
-    }
-
-    /// Every registered output name plus the revision the set last changed
-    /// at — the fixture's dangling-entry check caches on the revision.
-    pub fn known_output_names(&self) -> (alloc::vec::Vec<alloc::string::String>, Revision) {
-        self.resolver.known_output_names()
     }
 
     /// What the port tables [`Self::control_patch_outputs`] gives this node

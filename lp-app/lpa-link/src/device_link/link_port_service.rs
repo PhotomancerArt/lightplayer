@@ -1454,11 +1454,13 @@ mod tests {
                     commit: "unknown".to_string(),
                     dirty: false,
                     profile: "release-esp32".to_string(),
+                    project_format: lpc_model::PROJECT_FORMAT_VERSION,
                 },
                 hardware: HardwareFacts::default(),
                 device_uid: None,
                 pack_format: PACK_FORMAT_VERSION,
                 auth: lpc_wire::HelloAuth::TRUSTED,
+                startup_refused: None,
                 firmware: None,
             }),
         )

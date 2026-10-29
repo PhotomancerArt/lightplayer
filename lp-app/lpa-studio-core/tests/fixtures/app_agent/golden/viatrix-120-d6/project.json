@@ -1,5 +1,5 @@
 {
-  "format": 11,
+  "format": 12,
   "name": "Light-up skirt",
   "target": "seeed/xiao-esp32-c6"
 }

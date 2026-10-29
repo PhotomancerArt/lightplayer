@@ -663,8 +663,8 @@ fn load_project_tolerates_library_artifacts() {
                 // (ProjectManifest::write_json field order).
                 let text = String::from_utf8(content).unwrap();
                 let patched = text.replacen(
-                    "\"format\": 11",
-                    "\"format\": 11,\n  \"uid\": \"prj0000000000000042\"",
+                    "\"format\": 12",
+                    "\"format\": 12,\n  \"uid\": \"prj0000000000000042\"",
                     1,
                 );
                 assert_ne!(patched, text, "format anchor not found in manifest");

@@ -260,6 +260,13 @@ pub fn hello_facts(hello: &ServerHello) -> HelloFacts {
             .firmware
             .as_ref()
             .map(crate::device_link::update_facts_mirror::update_facts_from_manifest),
+        // The project format the board's engine reads (wire 46): whether
+        // its stored projects need the update's project stage, and whether a
+        // project may be pushed to it (M3 P11).
+        project_format: Some(hello.build.project_format),
+        // The board refused its startup project for its format and nothing
+        // ran since (wire 46): the project stage may load it once current.
+        startup_refused: hello.startup_refused.is_some(),
     }
 }
 
@@ -781,11 +788,13 @@ mod tests {
                 commit: "abc1234".to_string(),
                 dirty: false,
                 profile: "release-esp32".to_string(),
+                project_format: lpc_model::PROJECT_FORMAT_VERSION,
             },
             hardware: lpc_wire::HardwareFacts::default(),
             device_uid: None,
             pack_format: lpc_wire::PACK_FORMAT_VERSION,
             auth: lpc_wire::HelloAuth::TRUSTED,
+            startup_refused: None,
             firmware: None,
         }
     }
@@ -800,6 +809,7 @@ mod tests {
                 commit: "abc1234".to_string(),
                 dirty: false,
                 profile: "release-esp32".to_string(),
+                project_format: lpc_model::PROJECT_FORMAT_VERSION,
             },
             hardware: lpc_wire::HardwareFacts {
                 base_mac: base_mac.map(str::to_string),
@@ -809,6 +819,7 @@ mod tests {
             device_uid: Some(uid.to_string()),
             pack_format: lpc_wire::PACK_FORMAT_VERSION,
             auth: lpc_wire::HelloAuth::TRUSTED,
+            startup_refused: None,
             firmware: None,
         };
         lpc_wire::json::to_string(&WireServerMessage::new(7, ServerMsgBody::Hello(hello)))

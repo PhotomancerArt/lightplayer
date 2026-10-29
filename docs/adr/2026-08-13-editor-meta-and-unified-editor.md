@@ -2,6 +2,7 @@
 
 - Status: accepted
 - Date: 2026-08-13
+- Superseded in part (2026-10-28) by `2026-10-28-graph-is-the-project-canvas.md`: the unified editor (Map and Patch modes in one shell) is deleted with the Map tab; `editor.json` stays, and its live surface is the Graph's `canvas` (pinned positions).
 - Plan: `2026-08-11-2325-unified-editor-shell` (PR #415)
 - Design records: `spikes/unified-editor-shell/index.html` (rounds 1–5),
   `spikes/studio-chrome/index.html` (the workbench redirect),

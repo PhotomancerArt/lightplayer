@@ -560,7 +560,7 @@ fn pattern_set_e2e_server(pattern_module: &'static str) -> LpServer {
   }
 }"#;
     let mut files: Vec<(String, &str)> = vec![
-        ("project.json".into(), "{\n  \"format\": 11\n}\n"),
+        ("project.json".into(), "{\n  \"format\": 12\n}\n"),
         ("module.json".into(), module_json),
         ("clock.json".into(), clock_json),
         ("playlist.json".into(), playlist_json),

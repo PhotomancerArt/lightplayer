@@ -57,7 +57,10 @@
 //! | Says nothing (it never said hello) | firmware · attention | "This board doesn't respond." "Install the firmware to use it." | Install firmware |
 //! | Locked | lock · neutral | "This board is locked." "Unlock it to connect." | Unlock |
 //! | Its port closed | link · neutral | "Studio isn't connected to this board." "Connect over USB to use it." | Connect |
-//! | A shader error | project · error | "This board's project has an error." "Edit the project to fix it." | Edit project |
+//! | A node of its project faulted | project · error | "Aurora drift has an error in /show.module/orbit.shader: orbit.shader:12: 'tme' is not declared." "Edit the project to fix it." | Edit project |
+//! | Its last start didn't finish loading a project (the board's own words, which name that project), and it runs another now | project · attention | "Zook dome didn't fit in memory at startup, so no project is running." "This board runs Circular display now." | Edit project (what it runs, named) |
+//! | …and it runs nothing | project · attention | the board's words, then "Add a project to play on it." | Add a project |
+//! | Its recovery state (watched or disabled paths, safe mode) | project · error | the state, as a sentence: "Recovery red: /show.module/fire disabled after repeated crashes." "Edit the project to fix it." | Edit project |
 //! | Runs no project | project · neutral | "This board has no project yet." "Add a project to play on it." | Add a project |
 //! | The editor holds it (its last frame) | edit · neutral | "This board is open in the editor." | Done |
 //! | The session open, or the editor showing it | — | the live picture, no words | Done |
@@ -94,7 +97,7 @@ use crate::app::devices::device_update_standing::UpdateStanding;
 use crate::app::devices::device_update_words::UpdateRowKind;
 use crate::app::devices::ui_link_kind::UiLinkKind;
 use crate::core::data_kinds::age_spoken;
-use crate::{ConnectReach, RuntimeOp, UiOffer, UiStatusKind};
+use crate::{ConnectReach, DeviceDegradedCause, RuntimeOp, UiOffer, UiStatusKind};
 
 /// The state the card's surface says: the table in the module docs, first
 /// match wins. [`super::primary_action`] reads the same state, so the
@@ -694,8 +697,7 @@ fn words(input: &BoardCardInput<'_>, state: SurfaceState) -> Option<Words> {
         .then_press("Retry to remove it."),
         DataLost => Words::new("project", Attention, "This board's files were lost.")
             .then_press("Restore them from a backup, or reset the board."),
-        ProjectError => Words::new("project", Error, "This board's project has an error.")
-            .then_press("Edit the project to fix it."),
+        ProjectError => project_error_words(input),
         NoProject => Words::new("project", Neutral, "This board has no project yet.")
             .then_press("Add a project to play on it."),
         Locked => {
@@ -709,6 +711,50 @@ fn words(input: &BoardCardInput<'_>, state: SurfaceState) -> Option<Words> {
         ),
         state => firmware_words(state),
     })
+}
+
+/// What a degraded board's surface says (P7, card words name their
+/// subject): what is wrong, about which project, and what to do.
+///
+/// - A node of its project faulted: the project by name, the node and the
+///   board's message; Edit the project fixes it.
+/// - Its last start didn't finish loading a project: the board's own
+///   words, which name that project — history, so Attention, not Error.
+///   The board keeps them for the whole boot, so when it runs another
+///   project now (a project sent since), the second sentence names that
+///   one: the card and the editor then talk about the project they say.
+///   Running nothing, Add a project is the way out.
+/// - Its recovery state: the state, as a sentence.
+fn project_error_words(input: &BoardCardInput<'_>) -> Words {
+    use UiStatusKind::*;
+    let running = match &input.view.loaded_project {
+        LoadedProject::Running { label } => Some(label.clone()),
+        _ => None,
+    };
+    let Some(degraded) = input.view.degraded.as_ref() else {
+        return Words::new("project", Error, "This board's project has an error.")
+            .then_press("Edit the project to fix it.");
+    };
+    match &degraded.cause {
+        DeviceDegradedCause::NodeFault { node, message } => {
+            let project = running.unwrap_or_else(|| "This board's project".to_string());
+            Words::new(
+                "project",
+                Error,
+                sentence(&format!("{project} has an error in {node}: {message}")),
+            )
+            .then_press("Edit the project to fix it.")
+        }
+        DeviceDegradedCause::LoadNotice => {
+            let words = Words::new("project", Attention, sentence(&degraded.line));
+            match running {
+                Some(label) => words.then_fact(format!("This board runs {label} now.")),
+                None => words.then_press("Add a project to play on it."),
+            }
+        }
+        DeviceDegradedCause::Recovery => Words::new("project", Error, sentence(&degraded.line))
+            .then_press("Edit the project to fix it."),
+    }
 }
 
 /// Why the firmware fix `state` names isn't offered on this card, and what
@@ -1156,7 +1202,58 @@ mod tests {
     /// fixtures that reach it.
     #[test]
     fn every_state_says_its_words_and_names_its_primary() {
-        for (mut fixture, state, first, second, primary) in table() {
+        says_its_words(table());
+    }
+
+    /// A degraded board says which project and what to do (Yona at G3,
+    /// 2026-10-28): its startup project's load notice is the board's own
+    /// words, about that project; when another one runs now the second
+    /// sentence names it (the one Edit opens), and when nothing runs, Add a
+    /// project is the way out.
+    #[test]
+    fn a_degraded_board_says_which_project_and_what_to_do() {
+        says_its_words(degraded_rows());
+    }
+
+    fn degraded_rows() -> Vec<Row> {
+        use SurfaceState::ProjectError;
+        let mut rows = Vec::new();
+        // Its startup project didn't fit; one sent since runs now: the
+        // card names both (Yona at G3: zook's notice over the circular
+        // display the editor opened).
+        let mut startup = CardFixture::ready();
+        startup.view.status = DeviceStatus::Degraded;
+        startup.view.degraded = Some(crate::DeviceDegraded::load_notice(
+            "Zook dome didn't fit in memory at startup, so no project is running",
+        ));
+        rows.push((
+            startup,
+            ProjectError,
+            "Zook dome didn't fit in memory at startup, so no project is running.",
+            Some("This board runs porch now."),
+            Some("Edit project"),
+        ));
+        // …and nothing runs: Add a project is the way out.
+        let mut nothing = CardFixture::ready();
+        nothing.view.status = DeviceStatus::Degraded;
+        nothing.view.loaded_project = LoadedProject::Empty;
+        nothing.view.can_remove_project = false;
+        nothing.plays = BoardPlays::Nothing;
+        nothing.view.degraded = Some(crate::DeviceDegraded::load_notice(
+            "Zook dome didn't fit in memory at startup, so no project is running",
+        ));
+        rows.push((
+            nothing,
+            ProjectError,
+            "Zook dome didn't fit in memory at startup, so no project is running.",
+            Some("Add a project to play on it."),
+            Some("Add a project"),
+        ));
+        rows
+    }
+
+    fn says_its_words(rows: Vec<Row>) {
+        for (mut fixture, state, first, second, primary) in rows {
             let card = board_card(&fixture.input());
             assert_eq!(card.surface.state, state, "{first}");
             let notice = card.surface.notice.clone();
@@ -1593,11 +1690,14 @@ mod tests {
         ));
         let mut faulted = CardFixture::ready();
         faulted.view.status = DeviceStatus::Degraded;
-        faulted.view.degraded = Some("orbit.shader:12 'tme' is not declared".to_string());
+        faulted.view.degraded = Some(crate::DeviceDegraded::node_fault(
+            "/studio.show/orbit.shader",
+            "orbit.shader:12 'tme' is not declared",
+        ));
         rows.push((
             faulted,
             ProjectError,
-            "This board's project has an error.",
+            "porch has an error in /studio.show/orbit.shader: orbit.shader:12 'tme' is not declared.",
             Some("Edit the project to fix it."),
             Some("Edit project"),
         ));
