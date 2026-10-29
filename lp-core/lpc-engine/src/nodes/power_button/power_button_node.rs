@@ -441,6 +441,9 @@ fn request_power_off(
             PowerButtonMode::Hold => PowerWakeLevel::Low,
             PowerButtonMode::Switch => PowerWakeLevel::High,
         },
+        // A held button asks while it is still down; a switch asks once it
+        // has read off.
+        pin_at_rest: config.mode == PowerButtonMode::Switch,
     };
     service.request_power_off(request).map_err(|error| {
         log::warn!("PowerButton: power-off refused: {error}");
@@ -516,6 +519,7 @@ mod tests {
         let requests = h.power.requests.borrow();
         assert_eq!(requests.len(), 1, "one request per hold");
         assert_eq!(requests[0].wake_level, PowerWakeLevel::Low);
+        assert!(!requests[0].pin_at_rest, "the button is still held");
         assert_eq!(requests[0].endpoint.as_str(), "button:local:D1");
         assert!(!h.saw_click, "a hold that powered off is not also a click");
         assert!(h.tick_errors.is_empty(), "{:?}", h.tick_errors);
@@ -535,6 +539,10 @@ mod tests {
         let requests = h.power.requests.borrow();
         assert_eq!(requests.len(), 1);
         assert_eq!(requests[0].wake_level, PowerWakeLevel::High);
+        assert!(
+            requests[0].pin_at_rest,
+            "a switch asks once it reads off, so on again is a wake"
+        );
     }
 
     #[test]
