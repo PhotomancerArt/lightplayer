@@ -543,6 +543,44 @@ fn action_preempts_in_flight_passive_refresh() {
 }
 
 // ---------------------------------------------------------------------------
+// A gesture's result is published before the batch's tick: a card renamed
+// beside a slow pull shows its new name while the pull is still running.
+// ---------------------------------------------------------------------------
+#[test]
+fn an_actions_result_is_published_before_the_batchs_tick() {
+    let (controller, handle) = connected_controller();
+    // The tick's pull never ends, so the batch's closing snapshot never comes.
+    handle.set_endless_frames(true);
+    let (actor, studio_handle) = StudioActor::new(controller, never_timer());
+    let StudioHandle { tx, mut view, .. } = studio_handle;
+
+    // One batch: an action whose outcome changes the view (it is refused,
+    // and the refusal is a console line), then the tick.
+    tx.send(StudioCommand::Action(
+        crate::DeviceRestoreFromFileOp::action_for(crate::DeviceId(1)),
+    ));
+    tx.send(StudioCommand::RefreshTick);
+    let waker = Waker::from(Arc::new(NoopWake));
+    let mut cx = StdContext::from_waker(&waker);
+    let mut run = Box::pin(actor.run());
+    for _ in 0..50 {
+        assert!(run.as_mut().poll(&mut cx).is_pending());
+    }
+    assert_eq!(handle.read_count(), 1, "the tick's pull is in flight");
+
+    let published = view.try_recv().expect("the action's result was published");
+    assert!(
+        published
+            .console
+            .entries
+            .iter()
+            .any(|entry| entry.message.contains("pick a backup file")),
+        "the refusal is in the published view: {:?}",
+        published.console.entries
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Live-control drag: a CONTINUOUS stream of foreground actions — the shape of
 // dragging a fader, knob, or clock tape — must not starve the passive pull.
 // Every panel write is Foreground, so every one of them preempts an in-flight

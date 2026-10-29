@@ -11,6 +11,7 @@ use lpa_studio_core::{
     device_edit_offer, device_offers,
 };
 
+use super::card_action::CardPreviews;
 use super::{BoardCard, CardPart};
 use crate::core::OffersProvider;
 
@@ -119,16 +120,39 @@ pub(crate) fn card_and_tree(view: &DeviceView) -> (UiBoardCard, UiOfferTree) {
 
 /// `card` under `tree`, rendered to markup with `open`'s details open.
 pub(crate) fn render_card(card: UiBoardCard, tree: UiOfferTree, open: Option<CardPart>) -> String {
-    render(CardRoot, CardRootProps { card, tree, open })
+    render_card_with(card, tree, open, CardPreviews::default())
+}
+
+/// [`render_card`] mounted in a state a render cannot click to.
+pub(crate) fn render_card_with(
+    card: UiBoardCard,
+    tree: UiOfferTree,
+    open: Option<CardPart>,
+    previews: CardPreviews,
+) -> String {
+    render(
+        CardRoot,
+        CardRootProps {
+            card,
+            tree,
+            open,
+            previews,
+        },
+    )
 }
 
 /// A card under its board's tree, as the shell provides it.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn CardRoot(card: UiBoardCard, tree: UiOfferTree, open: Option<CardPart>) -> Element {
+fn CardRoot(
+    card: UiBoardCard,
+    tree: UiOfferTree,
+    open: Option<CardPart>,
+    previews: CardPreviews,
+) -> Element {
     rsx! {
         OffersProvider { offers: tree,
-            BoardCard { card, details_open: open, on_action: |_| {} }
+            BoardCard { card, details_open: open, previews, on_action: |_| {} }
         }
     }
 }
