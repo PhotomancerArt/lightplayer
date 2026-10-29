@@ -14,8 +14,8 @@
 //! leaves it in `SPI1.W0`: manufacturer in the low byte, then memory type,
 //! then capacity. Every part here keeps QE in status register 2, bit 1
 //! (status bit S9), read with command `0x35` — the common serial-NOR status
-//! layout these XMC parts follow; on both desk parts SR2 reads `0x02` with
-//! the mask ROM's own `0x35` path and with esptool's. A part is added
+//! layout these XMC and GigaDevice parts follow; on every desk part SR2 reads
+//! `0x02` with the mask ROM's own `0x35` path. A part is added
 //! after a desk sitting reads its id, its status register and its eFuse flash
 //! fields on silicon, and runs the read-back soak in QIO. Nothing here is
 //! guessed from a part family.
@@ -23,8 +23,7 @@
 //! **Each chip has its own list.** The evidence is a part read on a chip's
 //! own controller and a QIO soak through it, so a part read on a C6 is not
 //! evidence for an S3's controller: [`QIO_PARTS`] is the C6's,
-//! [`ESP32S3_QIO_PARTS`] the S3's (empty until an S3 sitting reads FS3's
-//! part). [`qio_ready_on`] takes the list; [`qio_ready`] is the C6's.
+//! [`ESP32S3_QIO_PARTS`] the S3's. [`qio_ready_on`] takes the list; [`qio_ready`] is the C6's.
 
 /// One part the core may read in QIO.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -49,10 +48,15 @@ pub const QIO_PARTS: &[QioPart] = &[
     },
 ];
 
-/// The S3's parts. None yet: FS3's (a XIAO ESP32-S3 Plus, 16 MB) has not had
-/// its id read on silicon, so every S3 reads in DIO until a sitting adds it
-/// with the evidence above (`fw-esp32s3/src/flash_qio.rs`).
-pub const ESP32S3_QIO_PARTS: &[QioPart] = &[];
+/// The S3's parts (`fw-esp32s3/src/flash_qio.rs`). The plain XIAO ESP32-S3's
+/// GigaDevice GD25Q64 (8 MB, eFuse `FLASH_TYPE` 4 lines, QE set at the
+/// factory) was read and soaked on XS1 on 2026-10-29. FS3's part (a XIAO
+/// ESP32-S3 Plus, 16 MB, `85 20 18`, SR2 `0x02`) is read but not soaked, so
+/// it stays DIO until a sitting does.
+pub const ESP32S3_QIO_PARTS: &[QioPart] = &[QioPart {
+    jedec: 0x17_40_c8,
+    seen_on: "XS1, Seeed XIAO ESP32-S3 (GigaDevice GD25Q64)",
+}];
 
 /// Status register 2's QE bit (bit 1), on every part in [`QIO_PARTS`].
 pub const SR2_QE: u32 = 1 << 1;
@@ -123,14 +127,33 @@ mod tests {
         assert_eq!(qio_ready(0xffff_ffff, 0xff), Err(StaysDio::PartNotListed));
     }
 
-    /// A part read on a C6 is not evidence for the S3's controller.
+    /// A part read on a C6 is not evidence for the S3's controller, nor one
+    /// read on an S3 for the C6's.
     #[test]
-    fn the_s3_reads_dio_until_its_own_sitting() {
+    fn each_chip_reads_only_its_own_parts_in_qio() {
         assert_eq!(
             qio_ready_on(ESP32S3_QIO_PARTS, 0x16_40_46, 0x02),
             Err(StaysDio::PartNotListed)
         );
-        assert!(ESP32S3_QIO_PARTS.is_empty());
+        assert_eq!(qio_ready(0x17_40_c8, 0x02), Err(StaysDio::PartNotListed));
+    }
+
+    #[test]
+    fn the_plain_xiao_s3s_part_goes_quad_with_qe_set() {
+        assert_eq!(qio_ready_on(ESP32S3_QIO_PARTS, 0x17_40_c8, 0x02), Ok(()));
+        assert_eq!(
+            qio_ready_on(ESP32S3_QIO_PARTS, 0x17_40_c8, 0x00),
+            Err(StaysDio::QeClear)
+        );
+        // FS3's part, read but not soaked; and the emulator's default chip.
+        assert_eq!(
+            qio_ready_on(ESP32S3_QIO_PARTS, 0x18_20_85, 0x02),
+            Err(StaysDio::PartNotListed)
+        );
+        assert_eq!(
+            qio_ready_on(ESP32S3_QIO_PARTS, 0x17_40_ef, 0x00),
+            Err(StaysDio::PartNotListed)
+        );
     }
 
     #[test]
