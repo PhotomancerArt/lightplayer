@@ -44,6 +44,13 @@ pub const FREAD_DIO: u32 = 1 << 23;
 pub const FREAD_QIO: u32 = 1 << 24;
 /// The QIO read command.
 pub const CMD_QIO_READ: u32 = 0xeb;
+/// `USR_ADDR_BITLEN` (address bits less one) the C6 ROM's QIO read mode sets:
+/// 32, the 24-bit address with the 0xEB read's mode byte sent as its low 8.
+pub const C6_QIO_ADDR_BITLEN: u32 = 31;
+/// The same on the S3: its ROM keeps the 24-bit address and covers the mode
+/// byte in the two extra dummy cycles (read on XS1, a plain XIAO ESP32-S3,
+/// 2026-10-29: `USER1` `0x5c000003` in DIO, `0x5c000005` in QIO).
+pub const S3_QIO_ADDR_BITLEN: u32 = 23;
 /// `SPIMasterReadModeCnfig`'s mode argument for QIO (the ROM's read-mode
 /// enum: QIO, QOUT, DIO, DOUT, FASTRD, SLOWRD — the same on both chips).
 pub const ROM_MODE_QIO: u32 = 0;
@@ -98,18 +105,27 @@ impl Mspi {
         Self::rd(self.spi0 + CTRL)
     }
 
-    /// The QIO switch's verdict: [`NOT_SET_AFTER`] unless both controllers
-    /// read back as the ROM's QIO read mode leaves them (QIO, command `0xEB`,
-    /// a 32-bit address phase, and two more dummy cycles than `saved`, the
-    /// DIO set, had); then [`READ_BACK_DIFFERED`] when `differ` (a
-    /// [`fold_differ`]) is not zero; else [`SWITCH_ON`].
+    /// The QIO switch's verdict on the C6: [`qio_verdict_with`] with the C6
+    /// ROM's 32-bit address phase ([`C6_QIO_ADDR_BITLEN`]).
+    ///
+    /// [`qio_verdict_with`]: Mspi::qio_verdict_with
     #[inline(always)]
     pub fn qio_verdict(self, saved: &SavedReadMode, differ: u32) -> u8 {
+        self.qio_verdict_with(saved, differ, C6_QIO_ADDR_BITLEN)
+    }
+
+    /// The QIO switch's verdict: [`NOT_SET_AFTER`] unless both controllers
+    /// read back as the chip ROM's QIO read mode leaves them (QIO, command
+    /// `0xEB`, an address phase of `addr_bitlen` + 1 bits, and two more dummy
+    /// cycles than `saved`, the DIO set, had); then [`READ_BACK_DIFFERED`]
+    /// when `differ` (a [`fold_differ`]) is not zero; else [`SWITCH_ON`].
+    #[inline(always)]
+    pub fn qio_verdict_with(self, saved: &SavedReadMode, differ: u32, addr_bitlen: u32) -> u8 {
         let user1 = Self::rd(self.spi0 + USER1);
         if Self::rd(self.spi0 + CTRL) & (FREAD_DIO | FREAD_QIO) != FREAD_QIO
             || Self::rd(self.spi1 + CTRL) & (FREAD_DIO | FREAD_QIO) != FREAD_QIO
             || Self::rd(self.spi0 + USER2) & 0xffff != CMD_QIO_READ
-            || user1 >> 26 != 31
+            || user1 >> 26 != addr_bitlen
             || user1 & 0x3f != (saved.spi0_user1 & 0x3f) + 2
         {
             NOT_SET_AFTER
