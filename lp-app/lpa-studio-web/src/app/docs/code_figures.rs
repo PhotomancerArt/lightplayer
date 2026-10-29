@@ -74,15 +74,15 @@ pub(crate) const FIGURES: &[DocsCodeFigure] = &[
         id: "peach-body-patch",
         title: "peach-1d / body/peach_body.map2d.json",
         code: include_str!("../../../../../catalog/projects/peach-1d/body/peach_body.map2d.json"),
-        // Line 55 is the second half of the body's override: the leg that
+        // Line 54 is the second half of the body's override: the leg that
         // lands after the leaves and arrives at the wire from its far end.
         // Plugged in backwards is what the article spends a section on, so
         // the eye should find the line before the prose does. (Since project
         // format 12 the patching lives in the map2d; the article's prose is
         // the docs pass's.)
         highlights: &[DocsCodeHighlight {
-            first_line: 55,
-            last_line: 55,
+            first_line: 54,
+            last_line: 54,
             tone: CodeHighlightTone::Note,
             label: Some("plugged in backwards"),
         }],
@@ -155,11 +155,11 @@ mod tests {
         let line = figure
             .code
             .lines()
-            .nth(54)
-            .expect("the peach body map2d has at least 55 lines");
+            .nth(53)
+            .expect("the peach body map2d has at least 54 lines");
         assert!(
             line.contains("\"direction\": \"reverse\""),
-            "peach-body-patch line 55 is no longer the reversed override \
+            "peach-body-patch line 54 is no longer the reversed override \
              (found {line:?}) — re-author the highlight range"
         );
     }
