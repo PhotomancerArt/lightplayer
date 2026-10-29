@@ -256,7 +256,7 @@ RGB, and path commands not built (the reader's refusal).
 - M3: the upgrade, an amendment (the freeze into starts and overrides, the
   refusals, `PathPoints` fixtures into `points` parts): written, below.
 - M4: Studio's side, an amendment; "Add centre lamp" adds a ring of
-  radius 0.
+  radius 0: written, below (and `2026-10-28-graph-is-the-project-canvas.md`).
 
 ## Amendment (2026-10-27): the engine's side
 
@@ -411,3 +411,52 @@ keeps only this model's patching.
   `a35e3cd1f`, with the old path deleted and P13's trims): engine
   +3,474 B, core +336 to +400 B, gated headroom 236,476 → 233,002 B; the
   attribution by concept is in M3 P13's result and the G2 ship report.
+
+## Amendment (2026-10-28): Studio's side
+
+Mapping rebuild M4 (landing with M3 in PR #1319; planning
+`lp2025/2026-10-27-0114-mapping-rebuild`, `notes.md` "M4 planning",
+Q71–Q98; G3 passed by Yona). Studio edits this model directly, in its
+Graph; `2026-10-28-graph-is-the-project-canvas.md` records the editor
+itself (the crates, the offers, the Map and Patch tabs deleted).
+
+- **The same patcher in Studio (Q75, Q42).** The Graph computes the full
+  `Patching` itself, with `patch_mapping` over port tables cut by the
+  engine's walk (`lpc_engine::node::output_port_slices`), named outputs that
+  read the fixture's bus channel only. What the engine says in one status
+  line, the Graph says per problem, in words, on the fixture and in the
+  inspector of the node it names; an override whose node is gone is listed
+  with Remove. Its oracle is the landing goldens: every repo project opened
+  in the Graph lands every lamp where the engine does, before and after a
+  save.
+- **The `edit` feature (Q76).** `lpc_mapping::edit` holds the edits that
+  rewrite references: insert, remove and move a part; rename (overrides,
+  copies' keys included); wrap in a repeat, unrepeat (keeps copy 0), expand
+  (copies become parts `x-k`, overrides `x@k` become `x-k`); a repeat's
+  count (overrides of dropped copies are kept, and the patcher reports
+  them); add and remove a ring (keys never reused); a ring's radius, a
+  circle's way round, a lattice; a path's split; set and clear an override
+  field; a part's or the fixture's start and flow. `lpa-graph` enables it;
+  no firmware does, so the C6 image does not compile it.
+- **One tree (Q79, D11).** Parts are the primary rows; generated nodes
+  (rings, copies) are lighter and say what they are in words ("ring r3",
+  "copy 2"), still selectable; a copy's insides are reached on the canvas;
+  a part with one segment and that segment are one row. Ids appear in the
+  inspector's section titles ("Part · circle1", "Segment · circle1/r3"),
+  monospaced, and nowhere else.
+- **Starts read as where they came from (Q81, C35).** Output, Port and
+  Starts at each show their value and its source: "follows ring r2", "from
+  circle1's flow: one per port", "from panel's start, every copy", "from the
+  fixture's start", or "set here" with **Back to the flow**. Direction,
+  offset and off have no recorded source in `Walked`; the Graph derives them
+  from `Mapping.overrides` (the node's own, else the nearest part above with
+  one). At and Next port are choices in the Port row that write per-field
+  ops. Choosing a port on an unnamed output names it (the lowest free
+  numeric name) in the same undo step (Q96).
+- **Single lamp (Q94).** In a circle, Add centre lamp adds a ring of radius
+  0 with one lamp; on its own, a one-click path is a one-lamp path.
+- **The presentation (Q82, Q98): not yet chosen.** Both stay behind the
+  Graph's Debug menu, per browser: A, each value with where it came from
+  (the default); B, the flow's start for the node as a quiet line, then
+  only what is set here. Yona passed G3 without picking; the one not chosen
+  is deleted when he does.

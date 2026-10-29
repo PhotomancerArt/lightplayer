@@ -245,6 +245,9 @@ holds the full context.
 | The relay's last picture of a board lives in the hub's memory and is lost at every deploy | `2026-10-06-cloud-relay` (2026-10-09 amendment) | M7's board list (new persisted cloud data, with its own migration) |
 | No `LabelChanged` relay frame: the hub's board name goes stale until the board registers again | `2026-10-06-cloud-relay` (2026-10-09 amendment) | A renamed board's stale name shows up on cloud cards, unless M7 makes the account own the name |
 | The project stage's window: between a new engine's first start and a project's batch commit, the board holds a project it cannot read and lights nothing; closing it needs a channel-3 file service in the core (core flash near its 32 KiB page, a permanent protocol addition) | `2026-10-28-firmware-updates-upgrade-the-boards-projects` | A desk or field walk shows a lamp left dark after an update |
+| The Graph's inspector keeps two presentations of where a value came from (A and B, behind its Debug menu); one is deleted when Yona picks | `2026-10-28-graph-is-the-project-canvas` | The fixture and shader space theory session, or Yona picks |
+| The Nodes view's Outputs panel and the node-card patch bay draw patching from older derivations, not from the patcher as rows of spans | `2026-10-28-graph-is-the-project-canvas` | Next work on the Outputs panel or the patch bay |
+| The Graph's canvas is built from `lpa-graph`'s own node graph, not from Studio's project model | `2026-10-28-graph-is-the-project-canvas` | The Graph needs a node kind or binding its own graph does not model |
 
 ## Relationship To Shared Planning
 

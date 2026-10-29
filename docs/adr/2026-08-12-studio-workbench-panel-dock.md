@@ -2,6 +2,7 @@
 
 - Status: accepted
 - Date: 2026-08-12
+- Superseded in part (2026-10-28) by `2026-10-28-graph-is-the-project-canvas.md`: the PanelDock chrome stays for Nodes · Graph; the Mapping view and its Fixtures and Props panels are deleted.
 - Plan: `2026-08-12-1112-studio-workbench-chrome`
 - Design record: `spikes/studio-chrome/index.html` (rounds 1–3, ratified
   2026-08-12); precursor: `spikes/unified-editor-shell/index.html`

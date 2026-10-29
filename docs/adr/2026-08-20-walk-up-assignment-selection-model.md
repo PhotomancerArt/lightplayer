@@ -2,6 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-08-20
+- **Superseded in part (2026-10-28) by** `2026-10-28-graph-is-the-project-canvas.md`: the arm grammar and the patch verbs are gone with the Patch tab; plain clicks still never write in the Outputs panel.
 - **Deciders:** Photomancer
 - **Plan:** lp2025/2026-08-20-1826-patching-pass2-walkup-assignment (PR #439)
 - **Supersedes:** None (extends
