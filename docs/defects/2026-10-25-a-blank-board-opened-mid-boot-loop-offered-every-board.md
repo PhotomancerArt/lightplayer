@@ -43,6 +43,12 @@ the C6's own reset keeps its USB (it does not re-enumerate; the ROM prints
 Web Serial and the WebUSB port (`usb_cdc_serial.js` implements
 `setSignals`), so the phone gets it with no WebUSB-specific code.
 
+**Superseded 2026-10-28** — the banner reset is removed. On a blank XIAO
+ESP32-C6 the reset re-enumerates USB, and identify looped on it forever
+(docs/defects/2026-10-28-a-blank-board-that-re-enumerates-on-reset-identified-forever.md).
+Since #1320 the install picker this fix served is gone: Install reads the
+chip in the bootloader session. The tests below went with it.
+
 **Regression tests** — `lpa-devices` `activity/identify.rs`:
 `a_blank_board_with_no_banner_is_reset_once_for_it`,
 `the_banner_reset_is_sent_once_and_never_waited_on`,
