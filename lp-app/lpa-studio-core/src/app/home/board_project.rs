@@ -189,21 +189,23 @@ fn meteor_export_files() -> impl Iterator<Item = (&'static str, &'static [u8])> 
         .filter(|(path, _)| path.starts_with(METEOR_EXPORT))
 }
 
-/// Root module: the four fixed nodes of a first project.
+/// Root module: the four fixed nodes of a first project, in the order the
+/// canonical writer puts them (by name), so a generated project rewrites
+/// byte-identically (`lp-cli`'s `examples_valid`).
 const ROOT_MODULE: &[u8] = br#"{
   "kind": "Module",
   "nodes": {
     "clock": {
       "ref": "./clock.json"
     },
-    "playlist": {
-      "ref": "./playlist.json"
-    },
     "fixture": {
       "ref": "./fixture.json"
     },
     "output": {
       "ref": "./output.json"
+    },
+    "playlist": {
+      "ref": "./playlist.json"
     }
   }
 }
