@@ -428,7 +428,7 @@ The canvas container (architecture §8), bottom to top:
   drawing tool out) is the mapping editor: its drawing in SVG, in its own
   units, with its lamps as dots on a canvas inside it. Any other fixture is
   Studio's live view, its lamps alone as cells of light (`lamp_cells.rs`,
-  built as `lpa-mapping-editor`'s `point_cells` builds them, worked out
+  built as Studio's `lamp_cells_geometry.rs` builds them, worked out
   once per layout and zoom). Lines in a card divide their width by the
   zoom, so they keep one width on screen. An output's rows are SVG with its pixels on a
   canvas. Lamps and pixels are rasterized in Rust and put with one

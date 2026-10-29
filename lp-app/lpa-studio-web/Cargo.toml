@@ -37,8 +37,6 @@ lpc-model = { path = "../../lp-core/lpc-model" }
 lpa-palettes = { path = "../lpa-palettes" }
 # Story fixtures build lamp layouts from the shared mapping corpus.
 lpc-mapping = { path = "../../lp-core/lpc-mapping", default-features = false }
-# Shared lamp-view geometry (universe palette, wiring arrows) + the editor.
-lpa-mapping-editor = { path = "../lpa-mapping-editor" }
 # The Graph tab: the mapping lab's canvas, panels and model, mounted as
 # they are (plan 2026-10-17-0202-mapping-lab-into-studio, D5).
 lab-layout = { path = "../../lab/mapping/layout" }

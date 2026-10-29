@@ -1,9 +1,8 @@
-//! The workbench and editor-shell stories' patch surfaces: hand-built
-//! DTOs (small-dome, peach) the stories pin their looks with — derivation
-//! is covered by unit tests and e2e. Frames are deliberately absent (cells
-//! draw their honest "no frame yet"): live pixels are the dev server's job,
-//! and a story that faked them would drift from the renderer it claims to
-//! pin.
+//! The workbench stories' patch surface: a hand-built small-dome DTO the
+//! stories pin their looks with — derivation is covered by unit tests and
+//! e2e. Frames are deliberately absent (cells draw their honest "no frame
+//! yet"): live pixels are the dev server's job, and a story that faked them
+//! would drift from the renderer it claims to pin.
 
 use lpa_studio_core::{
     NodeId, UiFixturePatch, UiPatchBay, UiPatchCell, UiPatchInstance, UiPatchPort, UiPatchSurface,
@@ -37,8 +36,8 @@ fn port(key: u32, pin: &str, start: u32, lamps: u32, cells: Vec<UiPatchCell>) ->
 }
 
 /// A surface module row — production always has at least the root (the
-/// tree root wears the module kind), and the panels render the chain as
-/// the levels above the fixtures/outputs.
+/// tree root wears the module kind), and the Outputs panel renders the
+/// modules as the levels above the outputs.
 fn module(node: u32, label: &str, depth: usize) -> UiPatchSurfaceModule {
     UiPatchSurfaceModule {
         node: NodeId::new(node),
@@ -87,16 +86,11 @@ fn finish_surface(mut surface: UiPatchSurface) -> UiPatchSurface {
 /// sharing repeated instances and doors) — deliberately kept at story
 /// scale (five 30-lamp "sectors", three 9-lamp doors, five ports), NOT
 /// the real example's 6,310 lamps: stories pin UI structure, not scale.
-pub(crate) fn small_dome_surface(contested: bool) -> UiPatchSurface {
-    let surface = build_small_dome_surface(contested);
-    finish_surface(surface)
+pub(crate) fn small_dome_surface() -> UiPatchSurface {
+    finish_surface(build_small_dome_surface())
 }
 
-fn build_small_dome_surface(contested: bool) -> UiPatchSurface {
-    let mut sector2 = cell("dome:0:60:0", "dome", 60, 30, 0);
-    sector2.contested = contested;
-    let mut door0 = cell("doors:0:0:30", "doors", 0, 9, 30);
-    door0.contested = contested;
+fn build_small_dome_surface() -> UiPatchSurface {
     UiPatchSurface {
         // The example's real tree shape: each fixture lives in its OWN
         // sub-module under the root show.
@@ -115,7 +109,16 @@ fn build_small_dome_surface(contested: bool) -> UiPatchSurface {
                 module: Some(NodeId::new(1)),
                 bay: UiPatchBay {
                     ports: vec![
-                        port(0, "IO18", 0, 39, vec![sector2, door0]),
+                        port(
+                            0,
+                            "IO18",
+                            0,
+                            39,
+                            vec![
+                                cell("dome:0:60:0", "dome", 60, 30, 0),
+                                cell("doors:0:0:30", "doors", 0, 9, 30),
+                            ],
+                        ),
                         port(
                             1,
                             "IO13",
@@ -135,7 +138,7 @@ fn build_small_dome_surface(contested: bool) -> UiPatchSurface {
                         ),
                     ],
                     frame: None,
-                    contested_lamps: if contested { 9 } else { 0 },
+                    contested_lamps: 0,
                     gap_lamps: 0,
                 },
             },
@@ -225,85 +228,6 @@ fn build_small_dome_surface(contested: bool) -> UiPatchSurface {
                 instances: (0..3)
                     .map(|k| instance(&format!("/door/{k}"), &format!("door {k}"), k * 9, 9, 3))
                     .collect(),
-                arrange: None,
-            },
-        ],
-        ..Default::default()
-    }
-}
-
-/// The peach: one output, two fixtures, NO instance grain (format-1 range
-/// entries over docs without ids) — the surface's second first-class shape.
-pub(crate) fn peach_surface() -> UiPatchSurface {
-    finish_surface(build_peach_surface())
-}
-
-fn build_peach_surface() -> UiPatchSurface {
-    UiPatchSurface {
-        modules: vec![module(1, "peach", 0)],
-        outputs: vec![UiPatchSurfaceOutput {
-            node: NodeId::new(10),
-            label: "output".to_string(),
-            name: None,
-            address: None,
-            name_assign: None,
-            module: Some(NodeId::new(1)),
-            bay: UiPatchBay {
-                ports: vec![port(
-                    0,
-                    "D10",
-                    0,
-                    56,
-                    vec![
-                        cell("body:0:0:0", "peach_body", 0, 22, 0),
-                        cell("leaf:0:0:22", "peach_leaf", 0, 12, 22),
-                        {
-                            let mut second = cell("body:0:22:34", "peach_body", 22, 22, 34);
-                            second.reversed = true;
-                            second
-                        },
-                    ],
-                )],
-                frame: None,
-                contested_lamps: 0,
-                gap_lamps: 0,
-            },
-        }],
-        fixtures: vec![
-            UiPatchSurfaceFixture {
-                node: NodeId::new(2),
-                label: "peach_body".to_string(),
-                address: None,
-                mapping_artifact: None,
-                mapping_loaded: true,
-                patch: UiFixturePatch {
-                    lamps: 44,
-                    cells: vec![cell("body:0:0:0", "peach_body", 0, 22, 0), {
-                        let mut second = cell("body:0:22:34", "peach_body", 22, 22, 34);
-                        second.reversed = true;
-                        second
-                    }],
-                    frame: None,
-                    single_output: true,
-                },
-                module: Some(NodeId::new(1)),
-                instances: Vec::new(),
-                arrange: None,
-            },
-            UiPatchSurfaceFixture {
-                node: NodeId::new(3),
-                label: "peach_leaf".to_string(),
-                address: None,
-                mapping_artifact: None,
-                mapping_loaded: true,
-                patch: UiFixturePatch {
-                    lamps: 12,
-                    cells: vec![cell("leaf:0:0:22", "peach_leaf", 0, 12, 22)],
-                    frame: None,
-                    single_output: true,
-                },
-                module: Some(NodeId::new(1)),
-                instances: Vec::new(),
                 arrange: None,
             },
         ],

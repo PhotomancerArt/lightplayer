@@ -101,7 +101,7 @@ pub fn FixtureFace(
                     // two near-empty bars stacked over the lamp field is
                     // exactly the chrome the style rules refuse.
                     ProductIdentity { product: preview.clone() }
-                    div { class: "lpme-spacer" }
+                    div { class: "tw:flex-1" }
                     if show_toggles {
                         MapViewToggles {
                             value: view(),

@@ -24,8 +24,8 @@
 //! dome is ~1500 lamps). Coincident lamps have no bisector and simply
 //! share territory.
 //!
-//! This began as the point-field mode of the mapping canvas's cell layer
-//! (`lpa-mapping-editor`); the product display is its one remaining user.
+//! This began as the point-field mode of the retired Map editor's cell
+//! layer; the product display is its one remaining user.
 //!
 //! [`LampView`]: super::lamp_view::LampView
 

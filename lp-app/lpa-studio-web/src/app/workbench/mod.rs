@@ -10,8 +10,8 @@
 //!
 //! - Panels with FIXED homes — left: Tree (one panel, one ROLE — the
 //!   view supplies the content: the project's node tree on Nodes, the
-//!   fixture tree on Mapping, D10); right: Device · Outputs · Props
-//!   (Mapping view only — the selection's properties, R4). The
+//!   Graph's tree on Graph, D10); right: Device · Outputs (Nodes) and
+//!   Props · Device (Graph — Props is the Graph's inspector). The
 //!   assignment lives in [`PanelId::side`] and [`roster`], data tables
 //!   by design, so experiments are a constant edit — but there is
 //!   deliberately no user arrangement in v1 ("things have one home",
@@ -25,17 +25,16 @@
 //!   rail never shares a column).
 //! - Panel visibility is remembered **per view** ([`PanelMemory`]),
 //!   seeded by each view's defaults — the Nodes view opens the Tree +
-//!   Device, the Mapping view opens the Tree + Props — so switching
+//!   Device, the Graph opens the Tree + Props — so switching
 //!   views feels like the view helping, never like the room rearranging.
 //!   The memory is ephemeral by design (spike A2): losing it on reload
 //!   costs one click.
 //!
 //! Design record: `spikes/studio-chrome/index.html` (rounds 1–3 ratified
 //! 2026-08-12; rounds 4–6 — the band, the attached tabs, the Tree merge
-//! — ratified 2026-08-14). The Mapping view's center mounts the unified
-//! editor's coordinator
-//! ([`crate::app::editor_shell::EditorShellCenter`]); the Tree's Mapping
-//! body and the Outputs panel are that editor's rails, grown in place.
+//! — ratified 2026-08-14). The Nodes center is the node workspace; the
+//! Graph's center, Tree and Props are the mapping lab's canvas, tree and
+//! inspector (`graph_view.rs`).
 
 pub(crate) mod free_port_runs;
 #[cfg(feature = "stories")]
@@ -48,16 +47,14 @@ pub(crate) mod workbench_stories;
 pub(crate) mod workbench_story_surfaces;
 
 use dioxus::prelude::*;
-use lpa_mapping_editor::MapEditorSession;
 use lpa_studio_core::{
-    NodeId, ProjectEditorView, UiAction, UiLensCard, UiPaneView, UiPatchSurface, UiSelection,
-    UiViewContent,
+    ProjectEditorView, UiAction, UiLensCard, UiPaneView, UiPatchSurface, UiSelection, UiViewContent,
 };
 
 use crate::app::{ProjectNodeWorkspace, ProjectPane};
 use crate::core::PaneView;
 use graph_view::{GraphCenter, GraphPage, GraphPropsPanel, GraphTreePanel, use_graph_page};
-use panels::{FixturesPanel, OutputsPanel};
+use panels::OutputsPanel;
 
 /// Which center the workbench renders — the route's view suffix
 /// ([`crate::router::ProjectView`]), narrowed to the views the workbench
@@ -66,10 +63,6 @@ use panels::{FixturesPanel, OutputsPanel};
 pub enum WorkbenchView {
     #[default]
     Nodes,
-    /// The Map view: hidden (no [`VIEWS`] row) until M4's Graph replaces
-    /// it — project format 12 moved every fixture's mapping to map2d format
-    /// 6, which its editor does not read. Its code stays until then.
-    Mapping,
     /// The mapping lab's canvas on the project (`graph_view.rs`): every
     /// node a card, fixtures drawn in place, coloured by the board.
     Graph,
@@ -95,9 +88,6 @@ pub const VIEWS: &[ViewSpec] = &[
         label: "Nodes",
         route_view: crate::router::ProjectView::Workspace,
     },
-    // No "Map" row: the Map view is hidden until M4's Graph replaces it
-    // (its code stays), so no tab shows it and `/mapping` lands on the
-    // default view.
     ViewSpec {
         view: WorkbenchView::Graph,
         // A working name (plan D4), revisited when it is the only view.
@@ -179,19 +169,18 @@ impl WorkbenchHrefs {
 /// The dockable panels. `side` is the fixed-home table (ratified:
 /// content/structure left, hardware right). A panel is a ROLE, not a
 /// content mount: the VIEW supplies the [`PanelBody`] content (D10 —
-/// the Tree shows the assembly on Nodes, the fixture tree on Mapping).
+/// the Tree shows the assembly on Nodes, the Graph's tree on Graph).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PanelId {
     /// The structure tree (D10): the project's node tree on the Nodes
-    /// view, the fixture → object → instance tree on the Mapping view.
+    /// view, the Graph's tree on the Graph.
     Tree,
     /// The lens session's device card (D43), docked.
     Device,
     /// box → port → wire-window cells (P2).
     Outputs,
-    /// The selection's properties (R4, Figma prior art): the dived
-    /// object's fields, or the selected fixture's placement facts.
-    /// Mapping view only.
+    /// The selection's properties (R4, Figma prior art): the Graph's
+    /// inspector. Graph view only.
     Props,
 }
 
@@ -234,14 +223,11 @@ impl PanelId {
 
 /// Panel order per (view, side), top to bottom — the strip and tab-row
 /// orders both read this one table. Total over [`VIEWS`]: Props exists
-/// only where a canvas selection exists to describe (the Mapping view).
+/// only where a canvas selection exists to describe (the Graph).
 pub fn roster(view: WorkbenchView, side: DockSide) -> &'static [PanelId] {
     match (side, view) {
         (DockSide::Left, _) => &[PanelId::Tree],
         (DockSide::Right, WorkbenchView::Nodes) => &[PanelId::Device, PanelId::Outputs],
-        (DockSide::Right, WorkbenchView::Mapping) => {
-            &[PanelId::Props, PanelId::Outputs, PanelId::Device]
-        }
         // The Graph's outputs are cards on its canvas: Props (the lab's
         // inspector) and the board.
         (DockSide::Right, WorkbenchView::Graph) => &[PanelId::Props, PanelId::Device],
@@ -249,18 +235,13 @@ pub fn roster(view: WorkbenchView, side: DockSide) -> &'static [PanelId] {
 }
 
 /// Each view's ratified dock defaults — what [`PanelMemory`] seeds a
-/// view with on first visit. Nodes opens the Tree + Device; the Mapping
-/// view opens the Tree + Props (the fixture tree and the object
-/// properties: what actual mapping wants, R4 ruling).
+/// view with on first visit. Nodes opens the Tree + Device; the Graph
+/// opens the Tree + Props.
 pub fn defaults(view: WorkbenchView) -> DockState {
     match view {
         WorkbenchView::Nodes => DockState {
             left: Some(PanelId::Tree),
             right: Some(PanelId::Device),
-        },
-        WorkbenchView::Mapping => DockState {
-            left: Some(PanelId::Tree),
-            right: Some(PanelId::Props),
         },
         // The Graph opens as the lab does: the tree, the canvas, the
         // inspector.
@@ -329,7 +310,7 @@ impl PanelMemory {
 
 /// The workbench frame: strips, docks, view tabs, center. Mounted by the
 /// studio shell whenever a project editor renders in a workbench view;
-/// staying ONE component across Nodes↔Mapping keeps [`PanelMemory`]
+/// staying ONE component across Nodes↔Graph keeps [`PanelMemory`]
 /// alive through view switches.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
@@ -364,29 +345,8 @@ pub fn WorkbenchFrame(
     let graph_state = graph_view.as_ref().map(|g| g.state.clone());
     let graph = use_graph_page(graph_view);
     let docks = memory.read().view(view);
-    // The Nodes view's route — threaded to the Props stack's
-    // context-strip link (and any panel that addresses the workspace).
-    let workspace_href = hrefs
-        .href(WorkbenchView::default())
-        .unwrap_or_else(|| "#".to_string());
-    // The DIVE's shared state (R4): the focused fixture, its mapping
-    // session (one selection/document for the canvas, the Fixtures tree,
-    // and the Props pane), and the Props pane's commit bump (plain data
-    // across the dock boundary; the session host applies on change).
-    // The DERIVED dive (unified-selection P4): the entered fixture IS the
-    // selection's scope — no independent dive state to drift. Rendering
-    // the scope as a dive is MAPPING's activity (grain follows activity).
-    let dive_focused = matches!(view, WorkbenchView::Mapping)
-        .then(|| project_editor.patch_selection.entered())
-        .flatten();
-    let dive_session = use_signal(|| MapEditorSession::new(lpc_mapping::Map2dDoc::new()));
-    let dive_commits = use_signal(|| 0u64);
-    // The Map canvas's auto-pack slots, frame-owned so they outlive a
-    // center remount (G1 round 1: slots computed at different mount times
-    // diverged).
-    let pack_slots = use_signal(crate::app::editor_shell::arrange::PackSlots::new);
-    // The Fixtures/Outputs panels' slice of the editor view (#409 DTOs)
-    // and the surface's one shared selection.
+    // The Outputs panel's slice of the editor view (#409 DTOs) and the
+    // surface's one shared selection.
     let surface = project_editor.patch_surface.clone();
     let patch_selection = project_editor.patch_selection.clone();
     // The mobile fold's summoned panel: below the fold breakpoint the
@@ -467,10 +427,6 @@ pub fn WorkbenchFrame(
                             lens_card: lens_card.clone(),
                             surface: surface.clone(),
                             patch_selection: patch_selection.clone(),
-                            dive_focused,
-                            dive_session,
-                            dive_commits,
-                            workspace_href: workspace_href.clone(),
                             running,
                             now_secs,
                             graph: graph.clone(),
@@ -483,21 +439,6 @@ pub fn WorkbenchFrame(
                         WorkbenchView::Nodes => rsx! {
                             div { class: "tw:min-h-0 tw:flex-1 tw:overflow-y-auto tw:p-3.5 tw:max-[820px]:p-2",
                                 ProjectNodeWorkspace { view: project_editor, on_action }
-                            }
-                        },
-                        WorkbenchView::Mapping => rsx! {
-                            // The unified editor's coordinator: toolbar +
-                            // arrange canvas + the editor.json prefetch
-                            // (unified-editor P3/P4).
-                            crate::app::editor_shell::EditorShellCenter {
-                                surface: surface.clone(),
-                                selection: patch_selection.clone(),
-                                pack_slots,
-                                project_editor,
-                                dive_focused,
-                                dive_session,
-                                dive_commits,
-                                on_action,
                             }
                         },
                         WorkbenchView::Graph => rsx! {
@@ -537,18 +478,11 @@ pub fn WorkbenchFrame(
                                     lens_card: lens_card.clone(),
                                     surface: surface.clone(),
                                     patch_selection: patch_selection.clone(),
-                                    dive_focused,
-                                    dive_session,
-                                    dive_commits,
-                                    workspace_href: workspace_href.clone(),
                                     running,
                                     now_secs,
                                     graph: graph.clone(),
                                     on_action,
                                 }
-                            }
-                            if let Some(summary) = panel_footer(panel, view, surface.as_ref()) {
-                                PanelFooter { summary }
                             }
                         }
                     }
@@ -562,10 +496,6 @@ pub fn WorkbenchFrame(
                             lens_card: lens_card.clone(),
                             surface: surface.clone(),
                             patch_selection: patch_selection.clone(),
-                            dive_focused,
-                            dive_session,
-                            dive_commits,
-                            workspace_href: workspace_href.clone(),
                             running,
                             now_secs,
                             graph: graph.clone(),
@@ -797,11 +727,6 @@ fn PanelDock(
     lens_card: Option<UiLensCard>,
     surface: Option<UiPatchSurface>,
     patch_selection: UiSelection,
-    dive_focused: Option<NodeId>,
-    dive_session: Signal<MapEditorSession>,
-    dive_commits: Signal<u64>,
-    /// The Nodes view's route — the Props stack's context-strip link.
-    workspace_href: String,
     running: bool,
     now_secs: Option<f64>,
     graph: GraphPage,
@@ -819,64 +744,14 @@ fn PanelDock(
                     view,
                     panes,
                     lens_card,
-                    surface: surface.clone(),
+                    surface,
                     patch_selection,
-                    dive_focused,
-                    dive_session,
-                    dive_commits,
-                    workspace_href,
                     running,
                     now_secs,
                     graph: graph.clone(),
                     on_action,
                 }
             }
-            if let Some(summary) = panel_footer(panel, view, surface.as_ref()) {
-                PanelFooter { summary }
-            }
-        }
-    }
-}
-
-/// A panel's Finder-style summary footer (D12), pinned at the dock
-/// bottom under the scrolling body. Declared per (panel, view) so any
-/// panel can grow one; today only the Mapping view's Tree carries its
-/// fixture totals (the line that used to sit atop the Fixtures panel).
-fn panel_footer(
-    panel: PanelId,
-    view: WorkbenchView,
-    surface: Option<&UiPatchSurface>,
-) -> Option<String> {
-    match (panel, view) {
-        (PanelId::Tree, WorkbenchView::Mapping) => {
-            let surface = surface?;
-            let lamps: u32 = surface
-                .fixtures
-                .iter()
-                .map(|fixture| fixture.patch.lamps)
-                .sum();
-            let instances: usize = surface
-                .fixtures
-                .iter()
-                .map(|fixture| fixture.instances.len())
-                .sum();
-            Some(format!(
-                "{} fixtures · {lamps} lamps · {instances} instances",
-                surface.fixtures.len()
-            ))
-        }
-        _ => None,
-    }
-}
-
-/// The footer row itself: muted, mono, non-scrolling — the dock
-/// composition owns it, panels only declare the line.
-#[component]
-#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn PanelFooter(summary: String) -> Element {
-    rsx! {
-        div { class: "tw:flex-none tw:border-t tw:border-border-subtle tw:bg-card-muted tw:px-2.5 tw:py-1 tw:font-mono tw:text-[10px] tw:text-dim-foreground",
-            "{summary}"
         }
     }
 }
@@ -885,7 +760,7 @@ fn PanelFooter(summary: String) -> Element {
 /// summon overlay render the same content through this one component.
 /// Dispatch is `(view, panel)` — a panel is a role, and the VIEW picks
 /// what fills it (D10): the Tree shows the project's node tree on Nodes
-/// and the fixture tree on Mapping.
+/// and the Graph's tree on Graph.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn PanelBody(
@@ -895,11 +770,6 @@ fn PanelBody(
     lens_card: Option<UiLensCard>,
     surface: Option<UiPatchSurface>,
     patch_selection: UiSelection,
-    dive_focused: Option<NodeId>,
-    dive_session: Signal<MapEditorSession>,
-    dive_commits: Signal<u64>,
-    /// The Nodes view's route — the Props stack's context-strip link.
-    workspace_href: String,
     running: bool,
     now_secs: Option<f64>,
     graph: GraphPage,
@@ -935,31 +805,6 @@ fn PanelBody(
                 }
             }
         },
-        (PanelId::Tree, WorkbenchView::Mapping) => rsx! {
-            div { class: "tw:grid tw:content-start tw:gap-2.5",
-                TreePanelActions { panes: panes.clone(), on_action }
-                // The AUTHORED tree: objects and repeat interiors for
-                // every fixture — the dived one through the live session,
-                // the rest from their loaded bodies.
-                FixturesPanel {
-                    surface,
-                    selection: patch_selection,
-                    bodies: std::rc::Rc::new(
-                        panes
-                            .iter()
-                            .find_map(|pane| match &pane.body {
-                                UiViewContent::ProjectEditor(editor) => {
-                                    Some(crate::app::editor_shell::mapping_assets(editor).0)
-                                }
-                                _ => None,
-                            })
-                            .unwrap_or_default(),
-                    ),
-                    dive: dive_focused.map(|node| (node, dive_session)),
-                    on_action,
-                }
-            }
-        },
         (PanelId::Tree, WorkbenchView::Graph) => rsx! {
             GraphTreePanel { page: graph }
         },
@@ -971,17 +816,8 @@ fn PanelBody(
                 crate::app::layout::studio_shell::LensCardPane { card, on_action }
             }
         },
-        (PanelId::Props, _) => rsx! {
-            panels::PropsPanel {
-                surface,
-                selection: patch_selection,
-                dive_focused,
-                dive_session,
-                dive_commits,
-                workspace_href,
-                on_action,
-            }
-        },
+        // Never rostered on Nodes: Props is the Graph's inspector.
+        (PanelId::Props, WorkbenchView::Nodes) => rsx! {},
         (PanelId::Outputs, _) => rsx! {
             OutputsPanel {
                 surface,
@@ -1039,7 +875,7 @@ mod tests {
             &[PanelId::Tree]
         );
         assert_eq!(
-            roster(WorkbenchView::Mapping, DockSide::Left),
+            roster(WorkbenchView::Graph, DockSide::Left),
             &[PanelId::Tree]
         );
         assert_eq!(
@@ -1047,8 +883,8 @@ mod tests {
             &[PanelId::Device, PanelId::Outputs]
         );
         assert_eq!(
-            roster(WorkbenchView::Mapping, DockSide::Right),
-            &[PanelId::Props, PanelId::Outputs, PanelId::Device]
+            roster(WorkbenchView::Graph, DockSide::Right),
+            &[PanelId::Props, PanelId::Device]
         );
     }
 
@@ -1074,7 +910,7 @@ mod tests {
             }
         );
         assert_eq!(
-            defaults(WorkbenchView::Mapping),
+            defaults(WorkbenchView::Graph),
             DockState {
                 left: Some(PanelId::Tree),
                 right: Some(PanelId::Props),
@@ -1095,8 +931,8 @@ mod tests {
         memory.view_mut(WorkbenchView::Nodes).toggle(PanelId::Tree);
         assert_eq!(memory.view(WorkbenchView::Nodes).left, None);
         assert_eq!(
-            memory.view(WorkbenchView::Mapping),
-            defaults(WorkbenchView::Mapping)
+            memory.view(WorkbenchView::Graph),
+            defaults(WorkbenchView::Graph)
         );
 
         // Pressing a collapsed side's panel reopens it; pressing another
@@ -1129,15 +965,14 @@ mod tests {
         );
     }
 
-    /// The Map view is hidden until M4's Graph replaces it: no tab names
-    /// it, and its route lands on the default view.
+    /// The views are Nodes and Graph; the old Map view's route lands on
+    /// the default view.
     #[test]
-    fn the_map_view_is_hidden() {
+    fn the_views_are_nodes_and_graph() {
         assert_eq!(
             VIEWS.iter().map(|spec| spec.label).collect::<Vec<_>>(),
             ["Nodes", "Graph"]
         );
-        assert!(VIEWS.iter().all(|spec| spec.view != WorkbenchView::Mapping));
         assert_eq!(
             view_for_route(crate::router::ProjectView::Mapping),
             WorkbenchView::default()

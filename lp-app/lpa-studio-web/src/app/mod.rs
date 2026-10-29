@@ -19,11 +19,8 @@ pub mod command_palette;
 #[cfg(feature = "stories")]
 pub(crate) mod design_language_stories;
 pub mod docs;
-pub mod editor_shell;
 pub mod home;
 pub mod layout;
-#[cfg(feature = "stories")]
-pub(crate) mod mapping_editor_stories;
 /// The module face, panel, and play-mode surfaces.
 pub mod module;
 pub mod node;

@@ -3,10 +3,6 @@
 # docs/adr/2026-10-01-agentic-control-offers-in-core.md.
 1 lp-app/lpa-studio-web/src/app/docs/embeds/open_in_studio.rs
 1 lp-app/lpa-studio-web/src/app/docs/embeds/panel_embed.rs
-2 lp-app/lpa-studio-web/src/app/editor_shell/arrange.rs
-1 lp-app/lpa-studio-web/src/app/editor_shell/mapping_session.rs
-5 lp-app/lpa-studio-web/src/app/editor_shell/mod.rs
-1 lp-app/lpa-studio-web/src/app/editor_shell/selection.rs
 2 lp-app/lpa-studio-web/src/app/home/gallery_paste.rs
 1 lp-app/lpa-studio-web/src/app/home/package_card.rs
 1 lp-app/lpa-studio-web/src/app/home/project_opening_frame.rs

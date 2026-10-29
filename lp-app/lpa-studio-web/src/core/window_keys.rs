@@ -1,6 +1,5 @@
 //! Window-level keydown plumbing: the app-wide shortcut listener (the
-//! command palette's ⌘K) and the editable-target guard that ordinary key
-//! grammars use to stay out of text fields.
+//! command palette's ⌘K).
 //!
 //! Mechanics: a listener installs once per mount ([`use_hook`]) and is
 //! removed on unmount (Drop — the popover auto-update idiom). The raw JS
@@ -24,27 +23,6 @@ pub(crate) fn use_window_shortcut(handler: impl FnMut(web_sys::KeyboardEvent) + 
     use_hook(move || std::rc::Rc::new(WindowShortcut::install(callback)));
     #[cfg(not(target_arch = "wasm32"))]
     let _ = callback;
-}
-
-/// True when the event's target is an editable control — `input`,
-/// `textarea`, `select`, or a `contenteditable` region. Window-level key
-/// grammars must ignore those: typing in a field is never a verb.
-#[cfg(target_arch = "wasm32")]
-#[must_use]
-pub(crate) fn event_targets_editable(event: &web_sys::Event) -> bool {
-    use wasm_bindgen::JsCast as _;
-    let Some(target) = event.target() else {
-        return false;
-    };
-    let Some(element) = target.dyn_ref::<web_sys::Element>() else {
-        return false;
-    };
-    if matches!(element.tag_name().as_str(), "INPUT" | "TEXTAREA" | "SELECT") {
-        return true;
-    }
-    element
-        .dyn_ref::<web_sys::HtmlElement>()
-        .is_some_and(web_sys::HtmlElement::is_content_editable)
 }
 
 /// The capture-phase keydown listener behind [`use_window_shortcut`],

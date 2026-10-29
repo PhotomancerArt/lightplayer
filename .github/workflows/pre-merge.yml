@@ -364,7 +364,6 @@ jobs:
               - 'lp-app/lpa-board-editor/**'
               - 'lp-app/lpa-boards/**'
               - 'lp-app/lpa-palettes/**'
-              - 'lp-app/lpa-mapping-editor/**'
               - 'lp-core/lpc-mapping/**'
               # The mapping lab's crates: Studio's Graph mounts them, and
               # test-studio-host runs their statements (nothing else does).

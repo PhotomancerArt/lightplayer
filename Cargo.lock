@@ -6668,21 +6668,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "lpa-mapping-editor"
-version = "40.0.0"
-dependencies = [
- "base64 0.22.1",
- "dioxus",
- "dioxus-icons",
- "gloo-timers",
- "lpc-mapping",
- "serde_json",
- "wasm-bindgen",
- "wasm-bindgen-futures",
- "web-sys",
-]
-
-[[package]]
 name = "lpa-palettes"
 version = "40.0.0"
 dependencies = [
@@ -6802,7 +6787,6 @@ dependencies = [
  "lpa-firmware-store",
  "lpa-fs-opfs",
  "lpa-link",
- "lpa-mapping-editor",
  "lpa-palettes",
  "lpa-studio-core",
  "lpa-studio-web-story-macros",
