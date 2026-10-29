@@ -116,7 +116,6 @@ fn project_view(view: ProjectView) -> UiProjectView {
     match view {
         ProjectView::Workspace => UiProjectView::Nodes,
         ProjectView::Play => UiProjectView::Play,
-        ProjectView::Mapping => UiProjectView::Mapping,
         ProjectView::Graph => UiProjectView::Graph,
     }
 }

@@ -35,8 +35,8 @@ pub enum UiPage {
     Stories,
 }
 
-/// Which surface of the project editor the page shows: the `/play`,
-/// `/patch`, `/mapping` and `/graph` suffixes, or none.
+/// Which surface of the project editor the page shows: the `/play` and
+/// `/graph` suffixes, or none.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum UiProjectView {
     /// The node workspace (no suffix).
@@ -44,8 +44,6 @@ pub enum UiProjectView {
     Nodes,
     /// Play mode: the root module's panel, nothing else.
     Play,
-    /// The mapping view.
-    Mapping,
     /// The Graph: the mapping lab's canvas (`app/graph`).
     Graph,
 }
@@ -75,7 +73,7 @@ impl UiPage {
     }
 
     /// The page in a few plain words, for the agent's readout:
-    /// `project editor, patch view`, `home`, `docs: wiring`.
+    /// `project editor, graph view`, `home`, `docs: wiring`.
     pub fn describe(&self) -> String {
         match self {
             Self::Home => "home".to_string(),
@@ -105,12 +103,11 @@ impl UiPage {
 }
 
 impl UiProjectView {
-    /// `nodes view`, `play mode`, `mapping view`, `graph view`.
+    /// `nodes view`, `play mode`, `graph view`.
     pub fn describe(self) -> &'static str {
         match self {
             Self::Nodes => "nodes view",
             Self::Play => "play mode",
-            Self::Mapping => "mapping view",
             Self::Graph => "graph view",
         }
     }

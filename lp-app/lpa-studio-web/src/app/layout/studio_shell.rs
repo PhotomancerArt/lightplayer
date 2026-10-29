@@ -34,8 +34,8 @@ pub fn StudioShell(
     /// surface.
     #[props(default = false)]
     play: bool,
-    /// Which project view the route addresses (the `/mapping` and
-    /// `/graph` suffixes; `Workspace` is the suffix-less Nodes view).
+    /// Which project view the route addresses (the `/graph` suffix;
+    /// `Workspace` is the suffix-less Nodes view).
     /// Play arrives through the separate `play` flag because a DEVICE
     /// lens has a play zoom too but no project-view suffixes.
     #[props(default)]

@@ -41,6 +41,7 @@ pub(crate) mod free_port_runs;
 pub(crate) mod graph_stories;
 pub mod graph_view;
 pub mod panels;
+pub mod view_links;
 #[cfg(feature = "stories")]
 pub(crate) mod workbench_stories;
 #[cfg(feature = "stories")]
@@ -342,6 +343,9 @@ pub fn WorkbenchFrame(
     on_action: EventHandler<UiAction>,
 ) -> Element {
     let mut memory = use_signal(move || initial_memory.clone().unwrap_or_default());
+    // The views' addresses, for the links inside them (the fixture face's
+    // "Edit mapping" opens the Graph).
+    view_links::use_provide_view_links(&hrefs);
     let graph_state = graph_view.as_ref().map(|g| g.state.clone());
     let graph = use_graph_page(graph_view);
     let docks = memory.read().view(view);
@@ -965,18 +969,16 @@ mod tests {
         );
     }
 
-    /// The views are Nodes and Graph; the old Map view's route lands on
-    /// the default view.
+    /// The views are Nodes and Graph; the old Map view's `/mapping`
+    /// address lands on the Graph.
     #[test]
     fn the_views_are_nodes_and_graph() {
         assert_eq!(
             VIEWS.iter().map(|spec| spec.label).collect::<Vec<_>>(),
             ["Nodes", "Graph"]
         );
-        assert_eq!(
-            view_for_route(crate::router::ProjectView::Mapping),
-            WorkbenchView::default()
-        );
+        let old_map = crate::router::StudioRoute::parse("/device/devx/mapping");
+        assert_eq!(view_for_route(old_map.project_view()), WorkbenchView::Graph);
     }
 
     /// The device lens addresses every view: tabs were hidden there by a

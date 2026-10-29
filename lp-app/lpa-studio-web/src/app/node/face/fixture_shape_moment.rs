@@ -27,12 +27,12 @@
 //!   wire`).
 //! - **Matrix** — no map, a square render area, strip order NOT
 //!   meaningful: `{2D}` from authored intent, wire order is plumbing.
-//! - **Mapped shape** — the map is the shape: the tile keeps it and
-//!   resolves the moment. It opens no editor: the face offers no mapping
-//!   edit (project format 12's map2d format 6 has its editor in M4). The D3
-//!   strip-order follow-up question is NOT asked here (dropped at the
-//!   strip-order unification: the bit is the dimensionality dropdown's
-//!   first choice, one drawer below).
+//! - **Mapped shape** — the map is the shape: the tile keeps it, resolves
+//!   the moment, and is a plain link to the Graph, where the mapping is
+//!   edited ("Edit mapping"). Without an address (stories) it only keeps
+//!   the map. The D3 strip-order follow-up question is NOT asked here
+//!   (dropped at the strip-order unification: the bit is the
+//!   dimensionality dropdown's first choice, one drawer below).
 //! - **3D (soon)** — disabled; honesty about the roadmap.
 
 use dioxus::prelude::*;
@@ -48,9 +48,12 @@ const SHAPE_PROMPT: &str = "What shape is this fixture?";
 const SHAPE_PROMPT_SUB: &str = "Effects are matched to the fixture's shape.";
 /// The dismiss affordance: the moment is an offer, never a gate.
 const SHAPE_SKIP: &str = "Skip and keep it as it is";
-/// The Mapped-shape tile's title when the fixture has a map: the map is
-/// kept as the shape, and nothing opens.
+/// The Mapped-shape tile's title when the fixture has a map but the card
+/// has no Graph to link to (stories): the map is kept as the shape.
 const MAPPED_SHAPE_KEEP_TITLE: &str = "Keep the mapping as the shape";
+/// The label of every link from the fixture's card to the Graph, where
+/// its mapping is edited: the face's pencil and the Mapped-shape tile.
+pub(crate) const EDIT_MAPPING: &str = "Edit mapping";
 
 /// One preset tile of the Shape moment (Q7's proposed set).
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -170,10 +173,15 @@ pub fn FixtureShapeMoment(
     /// Absent (stories) renders the tiles inert.
     #[props(default = None)]
     node: Option<String>,
+    /// The current lens's Graph address, where the mapping is edited —
+    /// the Mapped-shape tile's link. Absent (stories, no lens) the tile
+    /// only keeps the map.
+    #[props(default = None)]
+    mapping_href: Option<String>,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
-    // The Mapped-shape tile keeps a map the fixture already has; it opens
-    // no editor (the face offers no mapping edit).
+    // The Mapped-shape tile keeps a map the fixture already has and, with
+    // an address, links to the Graph to edit it.
     let mappable = presets.has_map2d;
     let dispatch_preset = {
         let presets = presets.clone();
@@ -218,30 +226,39 @@ pub fn FixtureShapeMoment(
                         }
                     }
                 }
-                button {
-                    key: "mapped",
-                    class: shape_tile_class(mappable),
-                    r#type: "button",
-                    disabled: !mappable,
-                    title: if mappable { MAPPED_SHAPE_KEEP_TITLE } else { "Needs a 2D mapping first. Add one in the advanced drawer." },
-                    onclick: {
-                        let dispatch_preset = dispatch_preset.clone();
-                        move |event: MouseEvent| {
-                            event.stop_propagation();
-                            if !mappable {
-                                return;
+                if let Some(href) = mapping_href.filter(|_| mappable) {
+                    a {
+                        class: "{shape_tile_class(true)} tw:no-underline",
+                        href: "{href}",
+                        title: EDIT_MAPPING,
+                        // Keep the map as the shape on the way to the
+                        // Graph; the link itself does the navigating.
+                        onclick: {
+                            let dispatch_preset = dispatch_preset.clone();
+                            move |event: MouseEvent| {
+                                event.stop_propagation();
+                                dispatch_preset(ShapePreset::MappedShape);
                             }
-                            dispatch_preset(ShapePreset::MappedShape);
-                        }
-                    },
-                    span { class: "tw:block tw:h-10 tw:w-full tw:overflow-hidden tw:rounded-xs tw:bg-page",
-                        ShapeGlyph { preset: ShapePreset::MappedShape }
+                        },
+                        MappedShapeTileBody {}
                     }
-                    span { class: "tw:min-w-0 tw:truncate tw:text-[11px] tw:font-bold",
-                        "{ShapePreset::MappedShape.label()}"
-                    }
-                    span { class: "tw:min-w-0 tw:truncate tw:text-[10px] tw:leading-tight tw:text-dim-foreground",
-                        "{ShapePreset::MappedShape.hint()}"
+                } else {
+                    button {
+                        class: shape_tile_class(mappable),
+                        r#type: "button",
+                        disabled: !mappable,
+                        title: if mappable { MAPPED_SHAPE_KEEP_TITLE } else { "Needs a 2D mapping first. Add one in the advanced drawer." },
+                        onclick: {
+                            let dispatch_preset = dispatch_preset.clone();
+                            move |event: MouseEvent| {
+                                event.stop_propagation();
+                                if !mappable {
+                                    return;
+                                }
+                                dispatch_preset(ShapePreset::MappedShape);
+                            }
+                        },
+                        MappedShapeTileBody {}
                     }
                 }
                 button {
@@ -279,6 +296,24 @@ pub fn FixtureShapeMoment(
                 },
                 "{SHAPE_SKIP}"
             }
+        }
+    }
+}
+
+/// The Mapped-shape tile's drawing, label and hint — the same whether the
+/// tile is a link to the Graph or only keeps the map.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn MappedShapeTileBody() -> Element {
+    rsx! {
+        span { class: "tw:block tw:h-10 tw:w-full tw:overflow-hidden tw:rounded-xs tw:bg-page",
+            ShapeGlyph { preset: ShapePreset::MappedShape }
+        }
+        span { class: "tw:min-w-0 tw:truncate tw:text-[11px] tw:font-bold",
+            "{ShapePreset::MappedShape.label()}"
+        }
+        span { class: "tw:min-w-0 tw:truncate tw:text-[10px] tw:leading-tight tw:text-dim-foreground",
+            "{ShapePreset::MappedShape.hint()}"
         }
     }
 }
@@ -422,28 +457,42 @@ mod tests {
         assert_eq!(actions.len(), 1, "only the guided-bit clear remains");
     }
 
-    /// The face offers no mapping edit (project format 12: map2d format
-    /// 6's editor is M4's): with a map in hand, the Mapped-shape tile keeps
-    /// it and resolves the moment, and nothing on the moment opens or
-    /// names a mapping editor.
+    /// The mapping is edited on the Graph: with a map in hand and the
+    /// lens's Graph address, the Mapped-shape tile is a plain link there,
+    /// labelled "Edit mapping". Without an address (stories) it only keeps
+    /// the map and links nowhere.
     #[test]
-    fn the_shape_moment_offers_no_mapping_edit() {
-        let html = crate::app::board_card::card_test_fixtures::render(
-            FixtureShapeMoment,
-            FixtureShapeMomentProps {
-                presets: presets(),
-                node: Some("/demo.module/halo.fixture".to_string()),
-                on_action: None,
-            },
+    fn the_shape_moment_links_the_mapping_to_the_graph() {
+        let render = |mapping_href: Option<String>| {
+            crate::app::board_card::card_test_fixtures::render(
+                FixtureShapeMoment,
+                FixtureShapeMomentProps {
+                    presets: presets(),
+                    node: Some("/demo.module/halo.fixture".to_string()),
+                    mapping_href,
+                    on_action: None,
+                },
+            )
+        };
+        let html = render(Some("/device/devx/graph".to_string()));
+        assert!(
+            html.contains(r#"href="/device/devx/graph""#),
+            "the Mapped-shape tile links to the Graph: {html}"
         );
         assert!(
-            html.contains(MAPPED_SHAPE_KEEP_TITLE),
-            "the Mapped-shape tile keeps the map: {html}"
+            html.contains(&format!(r#"title="{EDIT_MAPPING}""#)),
+            "the link says what it does: {html}"
         );
-        let lower = html.to_lowercase();
-        for word in ["mapping editor", "edit the mapping", "edit mapping"] {
-            assert!(!lower.contains(word), "the moment names `{word}`: {html}");
-        }
+
+        let route_less = render(None);
+        assert!(
+            route_less.contains(MAPPED_SHAPE_KEEP_TITLE),
+            "with no address the tile keeps the map: {route_less}"
+        );
+        assert!(
+            !route_less.contains("href="),
+            "with no address nothing links: {route_less}"
+        );
     }
 
     /// The declared areas: a strip is ONE row (the engine's

@@ -3,9 +3,11 @@
 //!
 //! The `output` section is the fixture's "one home" (2D mapping plan D9):
 //! the control product's LED sample points rendered full-bleed on the lamp
-//! canvas, in its mapped shape. The face offers no mapping edit: project
-//! format 12 moved every mapping to map2d format 6, whose editor is M4's
-//! (the Graph), and the Map view the old pencil opened is hidden.
+//! canvas, in its mapped shape. The mapping is edited on the Graph, the
+//! project's one canvas: when the fixture has a map, the bar carries a
+//! pencil that is a plain link to the current lens's Graph ("Edit
+//! mapping"). It selects nothing by address; outside a workbench frame
+//! (stories) there is no address and no pencil.
 //!
 //! The bar above that hero carries the product's own chrome at its head —
 //! name, the publish chip when the control output is wired to a bus
@@ -42,15 +44,19 @@
 //! `FixtureDef.brightness.some`.
 
 use dioxus::prelude::*;
+use dioxus_icons::lucide::Pencil;
 use lpa_studio_core::{
     NodeCardDrawer, NodeUiOp, UiAction, UiFixtureFace as UiFixtureFaceData, UiProductKind,
 };
 
+use crate::app::node::face::fixture_shape_moment::EDIT_MAPPING;
 use crate::app::node::face::{FixturePatchRow, FixtureShapeMoment, node_ui_action};
 use crate::app::node::map_view::{MapViewOptions, MapViewToggles};
 use crate::app::node::{
     NodeCardSection, PanelControl, ProductIdentity, ProductPreview, SlotDetailButton,
 };
+use crate::app::workbench::WorkbenchView;
+use crate::app::workbench::view_links::use_view_href;
 
 use super::space_section::{SPACE_SECTION_LABEL, SpaceSection, space_section_summary};
 
@@ -90,6 +96,10 @@ pub fn FixtureFace(
     // The toggle bar's state, view-local (see module doc).
     let mut view = use_signal(move || initial_map_view.unwrap_or_default());
     let show_toggles = preview.kind == UiProductKind::Control;
+    // The mapping is edited on the Graph: a fixture with a map links there
+    // (a link, not an action — it navigates and changes nothing).
+    let graph_href = use_view_href(WorkbenchView::Graph);
+    let mapping_href = graph_href.filter(|_| face.mapping_editor.is_some());
 
     rsx! {
         NodeCardSection { label: "output", first: true,
@@ -102,6 +112,18 @@ pub fn FixtureFace(
                     // exactly the chrome the style rules refuse.
                     ProductIdentity { product: preview.clone() }
                     div { class: "tw:flex-1" }
+                    if let Some(href) = mapping_href.clone() {
+                        a {
+                            class: "ux-map-toggle",
+                            href: "{href}",
+                            title: EDIT_MAPPING,
+                            aria_label: EDIT_MAPPING,
+                            // The bar sits in the card; opening the Graph
+                            // must never double as the card's own click.
+                            onclick: move |event: MouseEvent| event.stop_propagation(),
+                            Pencil { size: 13 }
+                        }
+                    }
                     if show_toggles {
                         MapViewToggles {
                             value: view(),
@@ -167,6 +189,7 @@ pub fn FixtureFace(
                 FixtureShapeMoment {
                     presets: face.shape_presets.clone().expect("checked above"),
                     node: node.clone(),
+                    mapping_href: mapping_href.clone(),
                     on_action,
                 }
             }

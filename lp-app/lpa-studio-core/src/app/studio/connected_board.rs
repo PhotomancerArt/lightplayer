@@ -145,7 +145,7 @@ mod tests {
         for view in [
             UiProjectView::Nodes,
             UiProjectView::Play,
-            UiProjectView::Mapping,
+            UiProjectView::Graph,
         ] {
             let project = place(UiPage::Project {
                 uid: PROJECT.to_string(),

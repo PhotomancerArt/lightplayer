@@ -301,7 +301,7 @@ fn ChromeOverflowMenu(
                 span { class: GROUP_HEADER_CLASS, "Tools" }
                 // (The standalone mapping-editor card is gone: bare
                 // `/mapping` died with the standalone page — mapping
-                // lives in the project workbench's view tabs now.)
+                // lives on the project workbench's Graph now.)
                 ToolCard {
                     icon: StudioIconName::NodeKind(crate::base::NodeKindIcon::Compute),
                     title: "Board editor",

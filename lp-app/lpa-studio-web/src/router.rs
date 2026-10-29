@@ -71,7 +71,6 @@
 //! /device/<uid>/play    likewise, and the heal keeps the view:
 //!                       `/p/<slug>-prj…/play?on=mac:…`.
 //! /stories[/<story-id>] the story book (dev)
-//! /mapping              the standalone 2D mapping editor
 //! /boards[/<vendor>/<product>], /boards/edit
 //! /docs[/<article-slug>]
 //! ```
@@ -239,8 +238,8 @@ pub(crate) enum StudioRoute {
         /// into the address bar by `web_app.rs` (D10). `None` for a bare
         /// `/p/prj…`.
         slug: Option<String>,
-        /// Which surface the route renders — the `/play`, `/mapping` and
-        /// `/graph` suffixes. Same-session zooms/views, never a
+        /// Which surface the route renders — the `/play` and `/graph`
+        /// suffixes. Same-session zooms/views, never a
         /// different document (`same_session` ignores it).
         view: ProjectView,
         /// The `?on=` device hint (D35/D43): which device this project
@@ -303,18 +302,17 @@ pub(crate) enum StudioRoute {
 /// project address — mutually exclusive, and never a session boundary.
 ///
 /// `Workspace` is the suffix-less default: the Nodes view (today's node
-/// workspace). `Mapping` and `Graph` are workbench views (`/mapping`,
-/// `/graph`; `/map` parses as an alias) — the Map view's tab is hidden
-/// until M4, so the workbench shows the default view at `/mapping`. The
-/// Patch tab went with project format 12, and the Graph is where patching
-/// lives now, so its `/patch` and `/patching` suffixes parse as aliases of
-/// `/graph` (Q88). `Play` is the full-page zoom.
+/// workspace). `Graph` is the workbench's one project canvas (`/graph`).
+/// The Patch tab went with project format 12 and the Map tab with the
+/// mapping rebuild; the Graph is where patching and mapping live now, so
+/// their old suffixes (`/patch`, `/patching`, `/mapping`, `/map`) parse as
+/// aliases of `/graph` (Q88) and the address heals to `/graph`. `Play` is
+/// the full-page zoom.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ProjectView {
     #[default]
     Workspace,
     Play,
-    Mapping,
     /// The mapping lab's canvas on the project (`app/workbench/graph_view.rs`).
     Graph,
 }
@@ -360,10 +358,7 @@ impl StudioRoute {
             Some("device") => match (segments.next(), segments.next(), segments.next()) {
                 (Some(uid), None, _) => device_route(uid, ProjectView::Workspace),
                 (Some(uid), Some("play"), None) => device_route(uid, ProjectView::Play),
-                (Some(uid), Some("mapping" | "map"), None) => {
-                    device_route(uid, ProjectView::Mapping)
-                }
-                (Some(uid), Some("graph" | "patch" | "patching"), None) => {
+                (Some(uid), Some(view), None) if GRAPH_SUFFIXES.contains(&view) => {
                     device_route(uid, ProjectView::Graph)
                 }
                 _ => StudioRoute::Home,
@@ -378,14 +373,10 @@ impl StudioRoute {
             Some("p") => match (segments.next(), segments.next(), segments.next()) {
                 (Some(link), None, _) => project_route(link, ProjectView::Workspace, on),
                 (Some(link), Some("play"), None) => project_route(link, ProjectView::Play, on),
-                // Both spellings parse; `path()` emits the canonical one
-                // (`mapping`) and navigation heals an aliased address.
-                (Some(link), Some("mapping" | "map"), None) => {
-                    project_route(link, ProjectView::Mapping, on)
-                }
-                // The Patch tab's old suffixes land on the Graph, where
-                // patching lives now (Q88); `path()` emits `graph`.
-                (Some(link), Some("graph" | "patch" | "patching"), None) => {
+                // The Patch and Map tabs' old suffixes land on the Graph,
+                // where patching and mapping live now (Q88); `path()` emits
+                // `graph`.
+                (Some(link), Some(view), None) if GRAPH_SUFFIXES.contains(&view) => {
                     project_route(link, ProjectView::Graph, on)
                 }
                 _ => StudioRoute::Home,
@@ -653,7 +644,6 @@ fn with_view_suffix(path: &str, view: ProjectView) -> String {
     match view {
         ProjectView::Workspace => path.to_string(),
         ProjectView::Play => format!("{path}/play"),
-        ProjectView::Mapping => format!("{path}/mapping"),
         ProjectView::Graph => format!("{path}/graph"),
     }
 }
@@ -684,6 +674,12 @@ fn query_param<'a>(query: &'a str, key: &str) -> Option<&'a str> {
 /// spelling of the root, and the Devices and Projects pages the home page
 /// replaced. Parsed, never emitted.
 const HOME_ALIASES: [&str; 3] = ["home", "devices", "projects"];
+
+/// The view suffixes that open the Graph: its own `graph`, and the deleted
+/// Patch (`patch`, `patching`) and Map (`mapping`, `map`) tabs' suffixes,
+/// whose work lives on the Graph now (Q88). Parsed; `path()` only ever
+/// emits `graph`.
+const GRAPH_SUFFIXES: [&str; 5] = ["graph", "patch", "patching", "mapping", "map"];
 
 /// Where an alias of Home heals to, or `None` when `path_and_query` is not
 /// one (`/` itself, a lens route, any other section, and an unknown path
@@ -1807,11 +1803,12 @@ mod tests {
             StudioRoute::parse("/device/devx/play"),
             device(ProjectView::Play)
         );
+        // The Map and Patch tabs are gone: `/mapping` and `/patch` land on
+        // the Graph (Q88).
         assert_eq!(
             StudioRoute::parse("/device/devx/mapping"),
-            device(ProjectView::Mapping)
+            device(ProjectView::Graph)
         );
-        // The Patch tab is gone: `/patch` lands on the Graph (Q88).
         assert_eq!(
             StudioRoute::parse("/device/devx/patch"),
             device(ProjectView::Graph)
@@ -1977,21 +1974,26 @@ mod tests {
         assert_eq!(StudioRoute::parse("/p/play"), StudioRoute::Home);
     }
 
-    /// The workbench's Mapping view is a route suffix like play: it
-    /// parses, re-emits, and never reads as a different session.
+    /// The Map tab is deleted and mapping lives on the Graph: an old
+    /// `/mapping` link parses as the Graph view of the same project, heals
+    /// to `/graph`, and never reads as a different session.
     #[test]
-    fn the_mapping_segment_parses_and_round_trips() {
+    fn the_mapping_segment_lands_on_the_graph() {
         let route = StudioRoute::parse(&format!("/p/zook-dome-{SHARE_UID}/mapping"));
         assert_eq!(
             route,
             StudioRoute::Project {
                 uid: share_uid(),
                 slug: Some("zook-dome".to_string()),
-                view: ProjectView::Mapping,
+                view: ProjectView::Graph,
                 on: None,
             }
         );
-        assert_eq!(route.path(), format!("/p/zook-dome-{SHARE_UID}/mapping"));
+        assert_eq!(
+            route.path(),
+            format!("/p/zook-dome-{SHARE_UID}/graph"),
+            "/p/…/mapping heals to the Graph's own address"
+        );
         // a same-session view, exactly like the play zoom
         assert!(route.same_session(&route.with_view(ProjectView::Workspace)));
         assert!(!route.is_play());
@@ -1999,7 +2001,7 @@ mod tests {
         assert_eq!(
             route.with_play(true).project_view(),
             ProjectView::Play,
-            "entering play leaves the mapping view"
+            "entering play leaves the Graph"
         );
         // the standalone editor is deleted (R1): a bare `/mapping` (no
         // project segment) is user input like any unknown path — Home,
@@ -2007,16 +2009,20 @@ mod tests {
         assert_eq!(StudioRoute::parse("/mapping"), StudioRoute::Home);
     }
 
-    /// Both view-suffix spellings parse — `/map` for `/mapping` — and heal
-    /// to the canonical emission on the next `path()`.
+    /// The Map tab's short spelling `/map` parses as the Graph too, and
+    /// heals to the canonical emission on the next `path()`.
     #[test]
     fn view_suffix_aliases_parse_and_heal_to_canonical() {
         let map_alias = StudioRoute::parse(&format!("/p/zook-dome-{SHARE_UID}/map"));
-        assert_eq!(map_alias.project_view(), ProjectView::Mapping);
+        assert_eq!(map_alias.project_view(), ProjectView::Graph);
         assert_eq!(
             map_alias.path(),
-            format!("/p/zook-dome-{SHARE_UID}/mapping"),
+            format!("/p/zook-dome-{SHARE_UID}/graph"),
             "aliased address heals to the canonical spelling"
+        );
+        assert_eq!(
+            StudioRoute::parse("/device/devx/map").path(),
+            "/device/devx/graph"
         );
 
         // Aliases are view suffixes only — never standalone routes.
@@ -2081,7 +2087,7 @@ mod tests {
         );
         assert_eq!(
             StudioRoute::parse("/p/fyeah-sign/mapping").project_view(),
-            ProjectView::Mapping
+            ProjectView::Graph
         );
         // unknown bare slug → the landing, exactly as before this grammar
         assert_eq!(StudioRoute::parse("/p/no-such-example"), StudioRoute::Home);
@@ -2753,7 +2759,7 @@ mod tests {
         for (path, healed) in [
             ("/device/dev000000daqf6dvvqz", ""),
             ("/device/dev000000daqf6dvvqz/play", "/play"),
-            ("/device/dev000000daqf6dvvqz/mapping", "/mapping"),
+            ("/device/dev000000daqf6dvvqz/mapping", "/graph"),
             ("/device/dev000000daqf6dvvqz/graph", "/graph"),
         ] {
             let lens_move = lens_sync_target(
