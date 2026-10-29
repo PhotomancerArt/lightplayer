@@ -372,11 +372,9 @@ impl Editor {
         let options = [PatchOption::AsDrawn, PatchOption::Reversed];
         let direction = self.shared_walked(&walked, |w| Some(direction_option(w.direction)));
         let ring_note = match walked.as_slice() {
-            [(_, o, _)] if p.ring_of(o).is_some() => Some(
-                "this ring only, on the line: its lamps stay where they are (the circle's \
-                 Counter-clockwise turns every ring)"
-                    .to_string(),
-            ),
+            [(_, o, _)] if p.ring_of(o).is_some() => {
+                Some("this ring's wiring only: its lamps stay put".to_string())
+            }
             _ => None,
         };
         fields.push(UiField {

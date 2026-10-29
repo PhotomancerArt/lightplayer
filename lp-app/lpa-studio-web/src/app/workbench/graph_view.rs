@@ -198,13 +198,17 @@ fn GraphCanvas(page: GraphPage, live: bool, on_action: EventHandler<UiAction>) -
                         }
                     }
                 }
-                span { class: "tw:ml-auto tw:text-xs tw:text-subtle-foreground",
-                    if live { "Colours from the board" } else { "Waiting for the board's first frame" }
-                }
-                GraphDebug {
-                    ed: ed.clone(),
-                    presentation: toolbar.presentation,
-                    cursor_ops: toolbar.cursor_ops,
+                // The board's word and Debug stay together at the bar's
+                // end, on one line, however the tools wrap.
+                div { class: "tw:ml-auto tw:flex tw:flex-none tw:items-center tw:gap-3 tw:whitespace-nowrap",
+                    span { class: "tw:text-xs tw:text-subtle-foreground",
+                        if live { "Colours from the board" } else { "Waiting for the board's first frame" }
+                    }
+                    GraphDebug {
+                        ed: ed.clone(),
+                        presentation: toolbar.presentation,
+                        cursor_ops: toolbar.cursor_ops,
+                    }
                 }
             }
             div { class: "canvas-wrap tw:relative tw:min-h-0 tw:flex-1",
