@@ -488,12 +488,6 @@ pub struct ServerHello {
     /// hello, and `ClientRequest::Hello` answers re-read it, so a
     /// post-stamp request reports the new uid. `None` means unstamped.
     pub device_uid: Option<String>,
-    /// The board's own name, if a person gave it one: `/.lp/device.json`'s
-    /// `name`, set by [`crate::ClientRequest::SetDeviceName`]. The name
-    /// Studio shows, the board's Bluetooth name (`LP-<name>`) and its name
-    /// on the cloud relay. `None`: never named (Studio shows its own).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub device_name: Option<String>,
     /// The JSON Pack format this build packs in
     /// ([`lp_json_pack::PACK_FORMAT_VERSION`]), or 0 when this embedder does
     /// not pack at all (hosts, the browser, `fw-emu`, an ESP image without
@@ -517,6 +511,16 @@ pub struct ServerHello {
     /// `Q` there (DM9).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub firmware: Option<lpc_update::BoardManifest>,
+    /// The board's own name, if a person gave it one: `/.lp/device.json`'s
+    /// `name`, set by [`crate::ClientRequest::SetDeviceName`]. The name
+    /// Studio shows, the board's Bluetooth name (`LP-<name>`) and its name
+    /// on the cloud relay. `None`: never named (Studio shows its own).
+    ///
+    /// Last, beside `firmware`: an optional field the packed writer skips
+    /// sits at the struct's end (a skipped field mid-struct broke the
+    /// packed hello's decode on the S3 emulator).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device_name: Option<String>,
 }
 
 /// Build facts of the firmware/server binary answering the hello: its

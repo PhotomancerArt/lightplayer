@@ -170,6 +170,43 @@ mod tests {
         );
     }
 
+    /// The hello as the board packs it (typed, through `ser_learned_to`),
+    /// named and unnamed, decodes back to its JSON on the host — twice on
+    /// one table, as a link's boot hello and a requested one do (wire 46).
+    #[cfg(feature = "std")]
+    #[test]
+    fn a_typed_hello_packs_and_decodes_named_or_not() {
+        use crate::{BuildFacts, HardwareFacts, HelloAuth, ServerHello, WIRE_PROTO_VERSION};
+        for name in [None, Some("Flower-Viatrix".to_string())] {
+            let hello = ServerHello {
+                proto: WIRE_PROTO_VERSION,
+                build: BuildFacts {
+                    features: vec![lpc_model::LpFeature::NodeShader],
+                    package: "fw-esp32s3".to_string(),
+                    version: "2026.10.03-1".into(),
+                    commit: "abc123456789".to_string(),
+                    dirty: false,
+                    profile: "release-esp32".to_string(),
+                },
+                hardware: HardwareFacts::default(),
+                device_uid: None,
+                pack_format: lp_json_pack::PACK_FORMAT_VERSION,
+                auth: HelloAuth::TRUSTED,
+                firmware: None,
+                device_name: name,
+            };
+            let msg = WireServerMessage::new(100, crate::server::ServerMsgBody::Hello(hello));
+            let json = crate::json::to_string(&msg).unwrap();
+            let mut buf = vec![0u8; 1 << 14];
+            let mut board = LearnedTable::NEW;
+            let mut host = LearnedTable::NEW;
+            for _ in 0..2 {
+                let n = ser_learned_to(&mut buf, &mut board, &msg).unwrap();
+                assert_eq!(decode(&mut host, &buf[..n]), json);
+            }
+        }
+    }
+
     /// Serialized through the lexer instead (the JSON text of each line), a
     /// frame packs to the same bytes as the token path — with blobs declined,
     /// since the lexer cannot know a string is base64.
