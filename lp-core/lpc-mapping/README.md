@@ -163,7 +163,8 @@ cargo test -p lpc-mapping --features edit
 fixture-space point, which coordinate does the source see, or is the lamp
 dark?** The fixture's box is its `view_box` (`ViewBox`, y down). A source
 has a box of its own (`ProductBox`): a view for a shader (`unit`: −1…1, y
-up; `shadertoy`: 0…N pixels, y up) or an extent for something bounded (a
+up; `shadertoy`: pixels, y up, the fixture box's shape with N = 64 on its
+short side, N × N with no fixture) or an extent for something bounded (a
 fluid's grid). The fixture's `Fit` (contain, cover or fill; nine
 alignments; scale; rotation, clockwise as drawn) gives one affine T per
 source (`SpaceTransform`). The y flip is inside T. A lamp outside the box

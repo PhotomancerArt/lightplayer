@@ -189,7 +189,9 @@ impl Column {
             (Self::A, true) => return "(a) the lean: the lamps' bounds + cover",
             (Self::B, true) => return "(b) old canvas + cover",
             (Self::C, true) => return "(c): same as (a) for a unit shader",
-            (Self::Hybrid, true) => return "Hybrid: same as (a) for a unit shader",
+            (Self::Hybrid, true) => {
+                return "Hybrid, the upgrade rule: same as (a) for a unit shader";
+            }
             _ => {}
         }
         match self {
@@ -197,7 +199,9 @@ impl Column {
             Self::A => "(a) the lean: old canvas + fill",
             Self::B => "(b) old canvas everywhere",
             Self::C => "(c) render footprint + fill",
-            Self::Hybrid => "Hybrid: (c), squeezed strips un-squeezed",
+            Self::Hybrid => {
+                "Hybrid, the upgrade rule: (c), squeezed strips on their lamps' bounds, shadertoy the box's shape"
+            }
             Self::SquareView => "shadertoy 64 × 64 square",
             Self::BoxShapedView => "shadertoy the box's shape, 64 on the short side",
         }
@@ -292,8 +296,18 @@ impl Setup {
             Column::Today => return None,
             Column::A | Column::B => (canvas, fill(), square),
             Column::C | Column::SquareView => (footprint, fill(), square),
-            Column::Hybrid if self.squeezed => (canvas, fill(), square),
-            Column::Hybrid => (footprint, fill(), square),
+            // The upgrade rule (G1): a squeezed strip's box is its lamps'
+            // bounds, any other pixel fixture's the render's footprint, and
+            // `shadertoy` takes the box's shape, 64 on the short side.
+            Column::Hybrid => {
+                let box_ = if self.squeezed { lean } else { footprint };
+                let view = ViewBox::from_array(box_).unwrap();
+                (
+                    box_,
+                    fill(),
+                    ProductBox::shadertoy_for(Some(&view), N as u32).unwrap(),
+                )
+            }
             Column::BoxShapedView => {
                 let [_, _, w, h] = canvas;
                 let (pw, ph) = if w >= h {

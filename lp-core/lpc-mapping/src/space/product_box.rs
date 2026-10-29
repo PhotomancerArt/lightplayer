@@ -2,6 +2,12 @@
 //! fixture's box.
 
 use crate::space::space_error::SpaceError;
+use crate::space::view_box::ViewBox;
+
+/// N, the default view's resolution: `shadertoy`'s pixels on the short side
+/// of its view, and the size of a render with no fixture behind it (a
+/// preview, a probe, the bus). One constant (open question O3, answered).
+pub const DEFAULT_VIEW_N: u32 = 64;
 
 /// Whether anything exists outside a product's box (theory D6, D18).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -41,10 +47,31 @@ impl ProductBox {
         }
     }
 
-    /// `shadertoy`'s default view: `fragCoord` in pixels of an `n` × `n`
-    /// view, 0…n on both axes, origin bottom-left, y up (theory D19).
+    /// `shadertoy`'s view with no fixture behind it: `fragCoord` in pixels
+    /// of an `n` × `n` view, 0…n on both axes, origin bottom-left, y up
+    /// (theory D19).
     pub fn shadertoy_2d(n: u32) -> Result<Self, SpaceError> {
         Self::new(ProductBoxKind::View, 0.0, 0.0, n as f32, n as f32, true)
+    }
+
+    /// `shadertoy`'s view for the fixture that samples it: the fixture
+    /// box's shape, `n` pixels on its short side, so `iResolution` (and
+    /// `outputSize`) is `(n · w/h, n)` for a wide box and `(n, n · h/w)` for
+    /// a tall one. With no fixture (`None`) it is `n` × `n`. A shader keeps
+    /// the proportions it was written for: dividing `pos` by `outputSize.y`
+    /// reads the box's own aspect.
+    pub fn shadertoy_for(view_box: Option<&ViewBox>, n: u32) -> Result<Self, SpaceError> {
+        let Some(view_box) = view_box else {
+            return Self::shadertoy_2d(n);
+        };
+        let (w, h) = (f64::from(view_box.width()), f64::from(view_box.height()));
+        let short = f64::from(n);
+        let (pw, ph) = if w >= h {
+            (short * w / h, short)
+        } else {
+            (short, short * h / w)
+        };
+        Self::new(ProductBoxKind::View, 0.0, 0.0, pw as f32, ph as f32, true)
     }
 
     /// A bounded grid `width` × `height`, 0…width × 0…height, y down (a

@@ -7,8 +7,8 @@
 //! ```
 
 use lpc_mapping::space::{
-    AddressMode, AlignAxis, Fit, FitAlign, FitMode, OutsideRule, ProductBox, Q16_ONE, REL_ONE,
-    Sample, SpaceError, SpaceTransform, UnitScope, ViewBox, order_position_q16,
+    AddressMode, AlignAxis, DEFAULT_VIEW_N, Fit, FitAlign, FitMode, OutsideRule, ProductBox,
+    Q16_ONE, REL_ONE, Sample, SpaceError, SpaceTransform, UnitScope, ViewBox, order_position_q16,
 };
 
 /// Cover of the unit view on a 3:1 box gives a `unit` extent of (1, 1/3).
@@ -401,6 +401,54 @@ fn a_view_box_of_no_width_or_height_is_refused() {
         ProductBox::unit_2d(),
     );
     assert_eq!(bad_scale, Err(SpaceError::BadScale));
+}
+
+/// `shadertoy`'s view for a 3:1 box is 192 × 64: the box's shape, 64 on
+/// the short side.
+#[test]
+fn shadertoys_view_for_a_three_to_one_box_is_192_by_64() {
+    let view = ProductBox::shadertoy_for(Some(&view_box(0.0, 0.0, 300.0, 100.0)), DEFAULT_VIEW_N);
+    assert_eq!(view.map(|v| (v.width(), v.height())), Ok((192.0, 64.0)));
+}
+
+/// `shadertoy`'s view for a 1:3 box is 64 × 192.
+#[test]
+fn shadertoys_view_for_a_one_to_three_box_is_64_by_192() {
+    let view = ProductBox::shadertoy_for(Some(&view_box(5.0, 5.0, 10.0, 30.0)), DEFAULT_VIEW_N);
+    assert_eq!(view.map(|v| (v.width(), v.height())), Ok((64.0, 192.0)));
+}
+
+/// `shadertoy`'s view for a square box is 64 × 64.
+#[test]
+fn shadertoys_view_for_a_square_box_is_64_by_64() {
+    let view = ProductBox::shadertoy_for(Some(&view_box(0.0, 0.0, 500.0, 500.0)), DEFAULT_VIEW_N);
+    assert_eq!(view.map(|v| (v.width(), v.height())), Ok((64.0, 64.0)));
+}
+
+/// With no fixture behind the render, `shadertoy`'s view is 64 × 64.
+#[test]
+fn shadertoys_view_with_no_fixture_is_64_by_64() {
+    let view = ProductBox::shadertoy_for(None, DEFAULT_VIEW_N);
+    assert_eq!(view.map(|v| (v.width(), v.height())), Ok((64.0, 64.0)));
+}
+
+/// Under fill, a box-shaped `shadertoy` view maps the box's corners to its
+/// own: `pos / outputSize` is the lamp's place in the box.
+#[test]
+fn a_box_shaped_shadertoy_view_under_fill_maps_corner_to_corner() {
+    let box_ = view_box(0.0, 0.0, 300.0, 100.0);
+    let view = ProductBox::shadertoy_for(Some(&box_), DEFAULT_VIEW_N).unwrap();
+    let t = SpaceTransform::new(box_, Fit::new(FitMode::Fill, FitAlign::CENTRE), view).unwrap();
+    assert_eq!(
+        at(&t, [300.0, 0.0]),
+        q16s(192.0, 64.0),
+        "top-right is (192, 64)"
+    );
+    assert_eq!(
+        at(&t, [0.0, 100.0]),
+        q16s(0.0, 0.0),
+        "bottom-left is the origin"
+    );
 }
 
 // ---- helpers ------------------------------------------------------------------

@@ -9,7 +9,9 @@
 //! - A source's box is a [`ProductBox`]: a **view** (unbounded, a shader;
 //!   the box is a suggestion) or an **extent** (bounded: nothing outside).
 //!   The interfaces' views are [`ProductBox::unit_2d`] (−1…1, y up) and
-//!   [`ProductBox::shadertoy_2d`] (`fragCoord`, 0…N, y up).
+//!   [`ProductBox::shadertoy_for`] (`fragCoord` in pixels, y up: the
+//!   fixture box's shape with [`DEFAULT_VIEW_N`] on its short side, or
+//!   N × N with no fixture).
 //! - The fixture authors a [`Fit`] (contain, cover, fill; nine alignments;
 //!   scale and rotation about the fitted product's centre, D16). From the
 //!   fit, the fixture's box and the source's box comes **one affine T**
@@ -51,7 +53,7 @@ pub use fit_mode::FitMode;
 pub use landing_1d::{DEFAULT_LANDING_1D, Landing1d, LandingFlip, LandingMirror, LandingShape};
 pub use order_position::order_position_q16;
 pub use outside_rule::{DEFAULT_OUTSIDE_RULE, OutsideRule};
-pub use product_box::{ProductBox, ProductBoxKind};
+pub use product_box::{DEFAULT_VIEW_N, ProductBox, ProductBoxKind};
 pub use sample::Sample;
 pub use space_error::SpaceError;
 pub use space_transform::{Q16_ONE, REL_ONE, SpaceTransform};

@@ -58,7 +58,18 @@ pub fn bounds(points: &[[f32; 2]]) -> [f32; 4] {
         x1 = x1.max(p[0]);
         y1 = y1.max(p[1]);
     }
-    [x0, y0, x1 - x0, y1 - y0]
+    [x0, y0, reaching(x0, x1), reaching(y0, y1)]
+}
+
+/// `max − min` in `f32`, rounded up where rounding to nearest would leave
+/// the far edge `min + size` short of `max`: a box written from these
+/// numbers must hold its own last lamp, or that lamp is dark.
+fn reaching(min: f32, max: f32) -> f32 {
+    let mut size = max - min;
+    while size > 0.0 && f64::from(min) + f64::from(size) < f64::from(max) {
+        size = f32::from_bits(size.to_bits() + 1);
+    }
+    size
 }
 
 /// The lamp pitch in the drawing's units: the mean distance between

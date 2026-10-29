@@ -32,10 +32,12 @@ use sampling_support::space_options::{self, bounds, doc_pitch, fill, footprint, 
 /// `shadertoy`'s default view, N × N (G1's O3 lean).
 const SHADERTOY_N: u32 = 64;
 
-/// Under the lean (a), every lamp a `unit` source feeds moves by less than
-/// a hundredth of a lamp pitch; the report says how much, exactly.
+/// Under the upgrade rule Yona chose (the hybrid), no lamp goes dark, every
+/// `unit` lamp moves at most 2/65536, and every pixel lamp of a fixture that
+/// is not squeezed today moves less than a hundredth of a pitch; under the
+/// lean (a), no `unit` lamp moves a hundredth of a pitch.
 #[test]
-fn under_the_lean_no_unit_lamp_moves_a_hundredth_of_a_pitch() {
+fn under_the_hybrid_no_lamp_goes_dark_and_no_unsqueezed_shader_moves() {
     let report = build_report();
     assert!(
         report.fixtures.len() > 120,
@@ -60,6 +62,35 @@ fn under_the_lean_no_unit_lamp_moves_a_hundredth_of_a_pitch() {
                     fixture.file,
                     source.shader,
                     a.pitches
+                );
+            }
+        }
+    }
+    for fixture in &report.fixtures {
+        for source in &fixture.sources {
+            let hybrid = &source.moves[HYBRID];
+            let name = format!("{} {} × {}", fixture.project, fixture.file, source.shader);
+            assert_eq!(hybrid.dark, 0, "{name}: a lamp goes dark under the hybrid");
+            assert!(
+                hybrid.refused.is_none(),
+                "{name}: the hybrid refuses its box"
+            );
+            if source.coords == V12Coords::Pattern {
+                assert!(
+                    hybrid.q16_steps <= 2,
+                    "{name}: a unit lamp moves {} Q16.16 steps under the hybrid",
+                    hybrid.q16_steps
+                );
+            } else if !squeezed_today(fixture) {
+                // Today truncates each lamp to 1/65536 of its render; the
+                // hybrid lands within two of those steps. On a dense
+                // fixture (the small dome, a lamp every quarter render pixel)
+                // that is just over a hundredth of a pitch.
+                assert!(
+                    hybrid.q16_steps <= 2 && hybrid.pitches < 0.02,
+                    "{name}: a pixel lamp moves {} steps ({} pitches) under the hybrid",
+                    hybrid.q16_steps,
+                    hybrid.pitches
                 );
             }
         }
@@ -106,8 +137,8 @@ struct SourceRow {
     glsl: String,
     coords: V12Coords,
     two_d: bool,
-    /// [lean (a), old canvas (b), the render's footprint (c)].
-    moves: [Move; 3],
+    /// [lean (a), old canvas (b), the render's footprint (c), the hybrid].
+    moves: [Move; 4],
 }
 
 #[derive(Default, Clone)]
@@ -295,7 +326,13 @@ fn fixture_row(tree: &ProjectTree, fixture: &FixtureNode, shaders: &[&ShaderNode
             };
             row.today_span = Some([axis(0, w), axis(1, h)]);
         }
-        let moves = [Answer::Lean, Answer::OldCanvas, Answer::Footprint].map(|answer| {
+        let moves = [
+            Answer::Lean,
+            Answer::OldCanvas,
+            Answer::Footprint,
+            Answer::Hybrid,
+        ]
+        .map(|answer| {
             measure(
                 &row,
                 &lamps.positions,
@@ -327,6 +364,26 @@ enum Answer {
     /// today's render covers (the old canvas grown to `render_size`'s
     /// aspect, centred), fill.
     Footprint,
+    /// The upgrade rule (Yona, G1): `unit`-fed → the lamps' bounds, cover;
+    /// pixel-only → the render's footprint, fill; pixel-only and squeezed
+    /// today → the lamps' bounds, fill. Pixel sources see a `shadertoy` view
+    /// of the box's shape, 64 on its short side.
+    Hybrid,
+}
+
+/// The hybrid's index in `SourceRow::moves`.
+const HYBRID: usize = 3;
+
+/// Today's lamps sit in a sliver of a long, thin render: they span less
+/// than a quarter of it on both axes, and the old canvas is not the render's
+/// shape (the 27 the report lists).
+fn squeezed_today(row: &FixtureRow) -> bool {
+    row.today_span.is_some_and(|[x, y]| x.max(y) < 0.25) && {
+        let [_, _, w, h] = old_canvas(row);
+        let box_aspect = f64::from(w) / f64::from(h);
+        let render_aspect = f64::from(row.render_size[0]) / f64::from(row.render_size[1]);
+        (box_aspect - render_aspect).abs() > 1e-6 * render_aspect
+    }
 }
 
 /// How far one source's coordinates move under one option.
@@ -349,6 +406,9 @@ fn measure(
         (Answer::Footprint, false) => {
             (Some(footprint(old_canvas, row.render_size)), fill(), "fill")
         }
+        (Answer::Hybrid, true) => (row.lean_box, Fit::DEFAULT, "cover"),
+        (Answer::Hybrid, false) if squeezed_today(row) => (row.lean_box, fill(), "fill"),
+        (Answer::Hybrid, false) => (Some(footprint(old_canvas, row.render_size)), fill(), "fill"),
     };
     let mut out = Move {
         fit: fit_name,
@@ -411,12 +471,19 @@ fn measure(
             }
         }
         V12Coords::Pixels => {
-            // `shadertoy`: fragCoord in N × N, y up; the step's GLSL flip
+            // `shadertoy`: fragCoord in pixels, y up (N × N for (a)–(c),
+            // as measured before G1; the box's shape with N on the short
+            // side for the hybrid, G1 question 3). The step's GLSL flip
             // (`pos.y = outputSize.y - pos.y`) turns it back down, so the
-            // shader's `pos / outputSize` is (qx / N, 1 − qy / N).
-            let n = SHADERTOY_N;
-            let t =
-                SpaceTransform::new(view_box, fit, ProductBox::shadertoy_2d(n).unwrap()).unwrap();
+            // shader's `pos / outputSize` is (qx / W, 1 − qy / H).
+            let product = if option == Answer::Hybrid {
+                ProductBox::shadertoy_for(Some(&view_box), SHADERTOY_N)
+            } else {
+                ProductBox::shadertoy_2d(SHADERTOY_N)
+            }
+            .unwrap();
+            let (pw, ph) = (f64::from(product.width()), f64::from(product.height()));
+            let t = SpaceTransform::new(view_box, fit, product).unwrap();
             let [w, h] = [today.uniforms.output_size[0], today.uniforms.output_size[1]];
             let pitch_px = today_pitch_px(today, positions, fixture);
             for (k, lamp) in positions.iter().enumerate() {
@@ -425,8 +492,8 @@ fn measure(
                     continue;
                 };
                 let uv_new = [
-                    f64::from(q[0]) / 65536.0 / f64::from(n),
-                    1.0 - f64::from(q[1]) / 65536.0 / f64::from(n),
+                    f64::from(q[0]) / 65536.0 / pw,
+                    1.0 - f64::from(q[1]) / 65536.0 / ph,
                 ];
                 let uv_was = [
                     f64::from(today.words[2 * k]) / 65536.0 / f64::from(w),
@@ -436,6 +503,11 @@ fn measure(
                 let dy = (uv_new[1] - uv_was[1]) * f64::from(h);
                 let d = (dx * dx + dy * dy).sqrt();
                 out.units = out.units.max(d);
+                // In steps of today's own grid: a lamp's place is truncated
+                // to 1/65536 of the render on each axis.
+                let steps =
+                    ((uv_new[0] - uv_was[0]).abs()).max((uv_new[1] - uv_was[1]).abs()) * 65536.0;
+                out.q16_steps = out.q16_steps.max(steps.ceil() as i64);
                 if pitch_px > 0.0 {
                     out.pitches = out.pitches.max(d / pitch_px);
                 }
@@ -621,14 +693,34 @@ fn render(report: &Report) -> String {
         measured.len()
     );
     let _ = writeln!(s, "| fixtures that move under (c) | {} |", moves(2));
-    for (option, label) in [(0usize, "(a)"), (1, "(b)"), (2, "(c)")] {
+    for (option, label) in [(0usize, "(a)"), (1, "(b)"), (2, "(c)"), (3, "the hybrid")] {
         let seen = measured.iter().filter(|f| f.worst(option) >= 0.01).count();
         let _ = writeln!(
             s,
             "| fixtures whose lamps move a hundredth of a pitch or more under {label} | {seen} |"
         );
     }
-    for (option, label) in [(0usize, "(a)"), (1, "(b)"), (2, "(c)")] {
+    let _ = writeln!(
+        s,
+        "| **unchanged, bit for bit, under the hybrid** | **{}** of {} |",
+        unchanged(HYBRID),
+        measured.len()
+    );
+    let _ = writeln!(
+        s,
+        "| fixtures that move under the hybrid | {} |",
+        moves(HYBRID)
+    );
+    let _ = writeln!(
+        s,
+        "| lamps dark under the hybrid | {} |",
+        measured
+            .iter()
+            .flat_map(|f| f.sources.iter())
+            .map(|src| src.moves[HYBRID].dark)
+            .sum::<usize>()
+    );
+    for (option, label) in [(0usize, "(a)"), (1, "(b)"), (2, "(c)"), (3, "the hybrid")] {
         if let Some(worst) = measured
             .iter()
             .max_by(|x, y| x.worst(option).total_cmp(&y.worst(option)))
@@ -664,6 +756,36 @@ fn render(report: &Report) -> String {
     let _ = writeln!(s);
 
     let _ = writeln!(s, "## What stands out\n");
+    let pixel_unsqueezed_worst = measured
+        .iter()
+        .filter(|f| !f.unit_fed() && !squeezed_today(f))
+        .map(|f| f.worst(HYBRID))
+        .fold(0.0, f64::max);
+    let unit_worst_steps = measured
+        .iter()
+        .flat_map(|f| f.sources.iter())
+        .filter(|src| src.coords == V12Coords::Pattern)
+        .map(|src| src.moves[HYBRID].q16_steps)
+        .max()
+        .unwrap_or(0);
+    let _ = writeln!(
+        s,
+        "- **The hybrid is the upgrade rule** (Yona, 2026-10-29: there are no field users, \
+         only Sean's testing and Yona's, so the bar is that the shaders still look OK). \
+         Under it no lamp goes dark ({} dark). Every `unit` lamp moves at most {} Q16.16 \
+         step(s). Every pixel fixture that is not squeezed today moves at most {} pitches. The \
+         {} squeezed fixtures are un-squeezed on purpose; their moves are in the hybrid's \
+         table. Pixel sources see a `shadertoy` view of the box's shape, so `outputSize` keeps \
+         today's aspect wherever the box is the render's footprint.",
+        measured
+            .iter()
+            .flat_map(|f| f.sources.iter())
+            .map(|src| src.moves[HYBRID].dark)
+            .sum::<usize>(),
+        unit_worst_steps,
+        fmt_pitches(pixel_unsqueezed_worst),
+        measured.iter().filter(|f| squeezed_today(f)).count()
+    );
     let squeezed: Vec<&&FixtureRow> = measured
         .iter()
         .filter(|f| {
@@ -752,9 +874,12 @@ fn render(report: &Report) -> String {
         s,
         "- **{} pixel shaders use `outputSize` as more than `pos / outputSize`** (listed under \
          Flags). The PLAYFUL choker's own shader is one: `pos / outputSize.y` scales both axes \
-         by the height. Under `shadertoy` that is 64 instead of 28, and its x range goes from \
-         0…3.7 to 0…1, whatever the box and fit. No answer to O1 keeps those shaders' look \
-         unless the step also rewrites those lines.",
+         by the height. With a square 64 × 64 view its x range would go from 0…3.7 to 0…1. \
+         Under the hybrid the view takes the box's shape, and a pixel fixture's box is its old \
+         render's footprint, so `outputSize.x / outputSize.y` and `pos / outputSize.y` read as \
+         today with no GLSL rewritten. What still scales is a length in absolute pixels \
+         (`outputSize * 0.5` as a centre stays the centre; a radius in pixels grows by 64 over \
+         the old render's short side).",
         report.output_size_uses.len()
     );
     let one_d: Vec<String> = measured
@@ -810,6 +935,10 @@ fn render(report: &Report) -> String {
             2,
             "## Option (c): as (a), but pixels only → the render's footprint, fill",
         ),
+        (
+            HYBRID,
+            "## The hybrid, the upgrade rule (`unit` → the lamps' bounds, cover; pixels → the render's footprint, fill; squeezed pixels → the lamps' bounds, fill; `shadertoy` the box's shape)",
+        ),
     ] {
         let _ = writeln!(s, "{title}\n");
         let _ = writeln!(
@@ -837,8 +966,11 @@ fn render(report: &Report) -> String {
                 },
             );
             let box_ = match (option, f.unit_fed()) {
-                (0 | 2, true) => f.lean_box.map_or("refused".to_string(), fmt_box),
-                (2, false) => fmt_box(footprint(old_canvas(f), f.render_size)),
+                (0 | 2 | 3, true) => f.lean_box.map_or("refused".to_string(), fmt_box),
+                (3, false) if squeezed_today(f) => {
+                    f.lean_box.map_or("refused".to_string(), fmt_box)
+                }
+                (2 | 3, false) => fmt_box(footprint(old_canvas(f), f.render_size)),
                 _ => fmt_box(old_canvas(f)),
             };
             let unit = if f.unit_fed() { "unit" } else { "px" };
