@@ -11,12 +11,15 @@
 //! vec order is the wiring order) stays for its resolver: [`resolve`] and
 //! [`resolve_into`] are the new model's geometry (each shape's lamps), and
 //! [`fit_points`] maps doc-space positions into a fixture render target
-//! without stretching. Studio's hidden Map tab still reads the document
-//! until it is deleted.
+//! without stretching. Its reader and writer stay for what still builds
+//! geometry as shapes before writing format 6 (the logo sign and small-dome
+//! generators, Studio's fixture-face stories through [`corpus`]) and for the
+//! format-12 upgrade's own statements, which read the old documents.
 //!
 //! A second document is project-level: the editor's `editor.json`
-//! ([`EditorMetaDoc`]) — per-node Arrange-canvas placement, for human eyes
-//! only. The engine and the device never read it, and it is never a
+//! ([`EditorMetaDoc`]) — per-node surfaces for the editor (the Graph's
+//! pinned canvas positions; an older build's Arrange placements are kept
+//! unread), for human eyes only. The engine and the device never read it, and it is never a
 //! sampling input (see the module doc in `editor_meta`).
 //!
 //! Boundary: schema + pure geometry only. No filesystem access, no engine

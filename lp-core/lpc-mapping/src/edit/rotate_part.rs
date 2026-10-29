@@ -2,8 +2,8 @@
 //! to each copy, so a copy that becomes a real part keeps its lamps where
 //! the repeat put them.
 //!
-//! Every shape that can carry the turn in its own numbers does (today's
-//! editor's rule, `expand_repeat` in the Map tab): a path's, a polygon's and
+//! Every shape that can carry the turn in its own numbers does (the old
+//! Map tab's rule, its `expand_repeat`): a path's, a polygon's and
 //! points' positions turn; a circle's centre turns and its start angle moves
 //! by the turn; a repeat inside turns its centre and its part (a turn
 //! conjugated by another is the same turn about the moved centre). A grid

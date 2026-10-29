@@ -743,7 +743,7 @@ fn point_bounds(points: &[[f32; 2]]) -> [f32; 4] {
 ///
 /// The bridge between an object path like "/sector/2" and "lamps 60..90"
 /// (what the patch documents of formats 1 to 5 lowered their rows through;
-/// Studio's Map tab draws instances with it). Strand order matches
+/// the format-12 upgrade cuts segments with it). Strand order matches
 /// [`ResolvedMap2d::spans`] exactly.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ObjectInstanceSpan {
