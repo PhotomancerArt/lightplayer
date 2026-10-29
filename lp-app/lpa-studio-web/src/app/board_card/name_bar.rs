@@ -15,6 +15,14 @@
 //! A blank or unchanged name presses nothing. No Save button: the field is
 //! the page's edit state, and the press is core's.
 //!
+//! A pressed name is shown at once, never the old one: until the card's
+//! title is the new name it stays as the page's pending name ([`PendingName`]),
+//! dimmed, with the bar's small spinner where the pencil was. The title
+//! arriving, or changing to anything else (another rename won), ends it.
+//! A name that has not arrived after [`RENAME_PENDING_MS`] is dropped, the
+//! board's own name comes back, and a warn toast says the rename did not
+//! take.
+//!
 //! The name keeps about twelve characters: on a card too narrow for that
 //! beside the whole primary, the primary drops to its verb alone ("Update"
 //! for "Update firmware"; core's [`UiCardAction::verb_alone`]), since the
@@ -35,8 +43,9 @@ use super::card_action::{CardAction, CardActionLook, narrow_tail};
 use crate::app::agent::AgentMark;
 use crate::app::home::device_access_panel::select_focused_input;
 use crate::app::home::device_rename_section::rename_press;
-use crate::base::{StudioIcon, StudioIconName, conic_spinner_class};
+use crate::base::{StudioIcon, StudioIconName, Toasts, conic_spinner_class};
 use crate::core::use_offer_at;
+use gloo_timers::future::TimeoutFuture;
 
 /// The name bar. See the module doc.
 #[component]
@@ -83,11 +92,26 @@ pub fn NameBar(bar: UiNameBar, on_action: EventHandler<UiAction>) -> Element {
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn RenamableName(title: String, rename: OfferPath, on_action: EventHandler<UiAction>) -> Element {
     let offer = use_offer_at(rename.clone())();
-    let renaming = super::card_action::use_card_scope().previews.renaming;
-    let mut editing = use_signal(|| renaming);
+    let previews = super::card_action::use_card_scope().previews;
+    let mut editing = use_signal(|| previews.renaming);
     let mut value = use_signal(|| title.clone());
     // Esc puts the name back; the blur that follows must not press.
     let mut cancelled = use_signal(|| false);
+    let mut pending = use_signal(|| {
+        previews.rename_pending.map(|name| PendingName {
+            name,
+            was: title.clone(),
+            seq: 0,
+        })
+    });
+    let toasts = try_consume_context::<Toasts>();
+    // The title moved: the pending name arrived, or another rename won.
+    // Either way the board's own name is shown from here.
+    use_effect(use_reactive!(|title| {
+        if pending.peek().as_ref().is_some_and(|p| !p.waits_on(&title)) {
+            pending.set(None);
+        }
+    }));
     let Some(offer) = offer else {
         return rsx! {
             h3 { class: TITLE_CLASS, title: "{title}", "{title}" }
@@ -103,9 +127,32 @@ fn RenamableName(title: String, rename: OfferPath, on_action: EventHandler<UiAct
         if let Some(name) = renamed(end, &value.read(), &was)
             && let Some(action) = rename_press(&offer, &name)
         {
+            let seq = pending.peek().as_ref().map_or(0, |p| p.seq) + 1;
+            pending.set(Some(PendingName {
+                name: name.clone(),
+                was: was.clone(),
+                seq,
+            }));
             on_action.call(action);
+            let mut toasts = toasts;
+            spawn(async move {
+                TimeoutFuture::new(RENAME_PENDING_MS).await;
+                if pending.peek().as_ref().is_some_and(|p| p.seq == seq) {
+                    pending.set(None);
+                    if let Some(toasts) = toasts.as_mut() {
+                        toasts.warn(format!("The board wasn't renamed to “{name}”."));
+                    }
+                }
+            });
         }
     };
+    // What the name reads: the pressed name while it is on its way.
+    let saving = pending
+        .read()
+        .as_ref()
+        .filter(|p| p.waits_on(&title))
+        .map(|p| p.name.clone());
+    let shown = saving.clone().unwrap_or_else(|| title.clone());
     if editing() {
         let reset = title.clone();
         let mut enter = commit.clone();
@@ -144,28 +191,67 @@ fn RenamableName(title: String, rename: OfferPath, on_action: EventHandler<UiAct
             }
         };
     }
-    let start = title.clone();
+    let start = shown.clone();
+    let hint = match &saving {
+        Some(name) => format!("Saving the name {name}"),
+        None => format!("Rename {title}"),
+    };
     rsx! {
         AgentMark { path: rename,
             button {
                 class: NAME_BUTTON_CLASS,
                 r#type: "button",
-                title: "Rename {title}",
-                aria_label: "Rename {title}",
+                title: "{hint}",
+                aria_label: "{hint}",
+                aria_busy: saving.is_some(),
                 "data-rename": "true",
+                "data-rename-pending": saving.is_some(),
                 onclick: move |_| {
                     value.set(start.clone());
                     cancelled.set(false);
                     editing.set(true);
                 },
-                span { class: "{TITLE_CLASS} ux-board-name-text", "{title}" }
-                span { class: PENCIL_CLASS, aria_hidden: "true",
-                    StudioIcon { name: StudioIconName::Edited, size: 12 }
+                if saving.is_some() {
+                    span { class: "{TITLE_CLASS} {PENDING_NAME_CLASS} ux-board-name-text", "{shown}" }
+                    span { class: PENCIL_CLASS, aria_hidden: "true",
+                        span { class: "{conic_spinner_class()} ux-board-spinner" }
+                    }
+                } else {
+                    span { class: "{TITLE_CLASS} ux-board-name-text", "{shown}" }
+                    span { class: PENCIL_CLASS, aria_hidden: "true",
+                        StudioIcon { name: StudioIconName::Edited, size: 12 }
+                    }
                 }
             }
         }
     }
 }
+
+/// A name pressed and not yet the board's: shown in its place until the
+/// card's title catches up.
+#[derive(Clone, Debug, PartialEq)]
+struct PendingName {
+    /// What was pressed.
+    name: String,
+    /// The title when it was pressed.
+    was: String,
+    /// Which press this is, so an older press's timeout leaves a newer one be.
+    seq: u32,
+}
+
+impl PendingName {
+    /// Whether the name is still on its way while the card's title is
+    /// `title`: it is until the title is the new name, and a title that is
+    /// neither the old name nor the new one is another rename, which wins.
+    fn waits_on(&self, title: &str) -> bool {
+        title == self.was && title != self.name
+    }
+}
+
+/// How long a pressed name waits for the title before it is dropped. Core
+/// applies a rename at once and publishes it after the batch's actions, so
+/// this only runs out when the rename did not take.
+const RENAME_PENDING_MS: u32 = 10_000;
 
 /// How a rename ends.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -271,6 +357,9 @@ const TITLE_CLASS: &str = "tw:m-0 tw:min-w-0 tw:truncate tw:text-[13.5px] tw:fon
 /// (style.css `.ux-board-name`).
 const NAME_BUTTON_CLASS: &str = "ux-board-name tw:flex tw:min-w-0 tw:max-w-full tw:cursor-text tw:appearance-none tw:items-center tw:gap-1.5 tw:border-0 tw:bg-transparent tw:p-0 tw:text-left tw:text-inherit ux-focus-ring tw:rounded-sm";
 
+/// The name while it is being saved: dimmed.
+const PENDING_NAME_CLASS: &str = "tw:opacity-60";
+
 /// The pencil after the name: faint, always shown.
 const PENCIL_CLASS: &str = "ux-board-name-pencil tw:inline-flex tw:flex-none tw:text-[color:var(--studio-color-text-faint)]";
 
@@ -344,6 +433,51 @@ mod tests {
         plain.name_bar.rename = None;
         let html = super::super::card_test_fixtures::render_card(plain, tree, None);
         assert!(!html.contains("data-rename"), "{html}");
+    }
+
+    /// A pressed name is still on its way while the title is the old name;
+    /// the title becoming the new name, or any other, ends it.
+    #[test]
+    fn a_pressed_name_waits_until_the_title_moves() {
+        let pending = PendingName {
+            name: "Flower-Viatrix".to_string(),
+            was: "Porch".to_string(),
+            seq: 1,
+        };
+        assert!(pending.waits_on("Porch"), "the old name: still saving");
+        assert!(!pending.waits_on("Flower-Viatrix"), "arrived");
+        assert!(!pending.waits_on("Eaves"), "another rename won");
+    }
+
+    /// While the pressed name is saving the card reads it, never the old
+    /// name: dimmed, the bar's spinner where the pencil was, and busy.
+    #[test]
+    fn a_pressed_name_shows_at_once_with_the_spinner_in_the_pencils_place() {
+        use super::super::card_action::CardPreviews;
+        use super::super::card_test_fixtures::{card_and_tree, porch_view, render_card_with};
+        let (card, tree) = card_and_tree(&porch_view());
+        let saving = CardPreviews {
+            rename_pending: Some("Flower-Viatrix".to_string()),
+            ..CardPreviews::default()
+        };
+        let html = render_card_with(card.clone(), tree.clone(), None, saving);
+        assert!(html.contains("data-rename-pending=true"), "{html}");
+        assert!(html.contains("aria-busy=true"), "{html}");
+        assert!(
+            html.contains("aria-label=\"Saving the name Flower-Viatrix\""),
+            "{html}"
+        );
+        assert!(html.contains(PENDING_NAME_CLASS), "{html}");
+        assert!(html.contains(">Flower-Viatrix</span>"), "{html}");
+        assert!(
+            !html.contains(">Porch</span>"),
+            "never the old name: {html}"
+        );
+        assert!(html.contains("ux-board-spinner"), "{html}");
+
+        let html = render_card_with(card, tree, None, CardPreviews::default());
+        assert!(html.contains("data-rename-pending=false"), "{html}");
+        assert!(!html.contains(PENDING_NAME_CLASS), "{html}");
     }
 
     /// Connecting or identifying: the spinner alone, named for a screen

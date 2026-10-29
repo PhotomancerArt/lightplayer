@@ -20,7 +20,7 @@ use crate::activity::{ActivityCell, ActivityKind, ActivityOutcome, CancelPhase};
 use crate::degraded::{Degraded, DegradedCause};
 use crate::device::{Device, DeviceStatus};
 use crate::evidence::{
-    Classification, Evidence, IncompatibleReason, Liveness, TerminalLine, WireVersion,
+    Classification, Evidence, IncompatibleReason, Liveness, Presence, TerminalLine, WireVersion,
 };
 use crate::firmware_age::FirmwareAge;
 use crate::identity::DeviceId;
@@ -56,6 +56,14 @@ pub struct DeviceView {
     /// `None` until the board has been heard.
     #[serde(default)]
     pub heard_age_ms: Option<u64>,
+    /// How long ago this session saw the board's link go, in milliseconds:
+    /// `Some` only while it is gone, only once this session held one (a
+    /// board rehydrated cold from its record has `None`), and never after
+    /// the user's own Disconnect. What lets a
+    /// surface show a board that is rebooting as reconnecting in place
+    /// rather than offline (Studio's `reconnect_grace`).
+    #[serde(default)]
+    pub detached_age_ms: Option<u64>,
     /// Strongest identity binding, for disambiguating two similar boards.
     pub identity_label: Option<String>,
     /// Chip read off the boot banner, normalized ("esp32c6"). What the
@@ -282,11 +290,21 @@ pub struct PendingLinkView {
 }
 
 /// Project the whole roster.
+///
+/// **Devices come first added first** ([`Device::added_at`]), whatever the
+/// roster's own order: a board keeps its place while it is flashed, sent a
+/// project, renamed or rebooted, and a board that turns out to be one
+/// already listed takes that one's place. Not by name, which a rename moves,
+/// and not by last seen, which every reboot moves. The sort is stable, so
+/// boards added at the same instant (every record saved before the time was
+/// kept) keep the order the store lists them in; a device with no time yet
+/// sorts last, where a new board lands.
 pub fn roster_view(roster: &Roster, now: Millis) -> RosterView {
+    let mut devices: Vec<&Device> = roster.devices().iter().collect();
+    devices.sort_by_key(|device| device.added_at.unwrap_or(Millis(u64::MAX)));
     RosterView {
-        devices: roster
-            .devices()
-            .iter()
+        devices: devices
+            .into_iter()
             .map(|device| device_view(device, now))
             .collect(),
         pending: roster
@@ -356,6 +374,17 @@ pub fn device_view(device: &Device, now: Millis) -> DeviceView {
         detail: detail(device),
         freshness_label: freshness_label(device, now),
         heard_age_ms: device.evidence.freshness.age_ms(now),
+        detached_age_ms: match device.evidence.presence {
+            // A link the user let go (Disconnect) is not coming back by
+            // itself: no age, so nothing reads it as a reboot.
+            Presence::Detached { .. }
+                if device.intent.connection == crate::intent::ConnectionIntent::Disconnected =>
+            {
+                None
+            }
+            Presence::Detached { since } => Some(now.since(since)),
+            Presence::Unknown | Presence::Present { .. } | Presence::Open { .. } => None,
+        },
         identity_label: device.identity.strongest_label(),
         // A boot banner names the chip for a board seen booting; a board
         // that was already running when the tab attached never shows one,

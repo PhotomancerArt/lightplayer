@@ -2000,6 +2000,79 @@ fn a_re_enumeration_under_the_lens_never_takes_the_board_offline() {
     assert_ne!(lens_link(&bench), old_link, "on the new link");
 }
 
+/// Stable board order: a board that restarts (a Reset, turning Bluetooth
+/// on, a flash's own reboot) loses its USB port for a moment. Its card
+/// stays in Online boards, in its place, Reconnecting, and is the same card
+/// when the board comes back. A board that stays away is Offline once the
+/// grace ends.
+#[test]
+fn a_board_that_loses_its_port_reconnects_in_place_then_goes_offline() {
+    let device = empty_light_player("dev000000daqf6dvvrb");
+    let (mut bench, tasks) = identified(&device, "usb-grace-1");
+    let board = bench.view().devices[0].id;
+    let reconnecting = |bench: &DeviceBench| {
+        let roster = bench.controller.device_roster_view();
+        let split = crate::split_roster(&roster);
+        (
+            roster.connections.get(&board).cloned(),
+            split
+                .connected
+                .iter()
+                .map(|card| card.id)
+                .collect::<Vec<_>>(),
+            split
+                .remembered
+                .iter()
+                .map(|tile| tile.id)
+                .collect::<Vec<_>>(),
+        )
+    };
+
+    device.set_failure_plan(
+        lpa_link::providers::fake_device::FakeFailurePlan::none()
+            .with_disconnect_after_bytes(device.served_bytes()),
+    );
+    bench.lose_port();
+    bench.run_until(&tasks, "the board's link to go", |bench| {
+        bench.view().devices[0].status == lpa_devices::device::DeviceStatus::Offline
+    });
+    assert_eq!(
+        reconnecting(&bench),
+        (
+            Some(crate::BoardConnection::Reconnecting),
+            vec![board],
+            Vec::new()
+        ),
+        "a board gone a moment is reconnecting, in Online boards"
+    );
+    let home = crate::build_home_sections(&[], &bench.controller.device_roster_view());
+    assert_eq!(home.online[0].id, board);
+    assert_eq!(home.online[0].status, "Reconnecting\u{2026}");
+
+    // It stays away: past the grace it is Offline.
+    bench
+        .clock
+        .set(bench.clock.get() + crate::RECONNECT_GRACE_MS as f64 / 1_000.0 + 1.0);
+    assert_eq!(
+        reconnecting(&bench),
+        (None, Vec::new(), vec![board]),
+        "past the grace a board that has not come back is offline"
+    );
+
+    // Back, on a new port: the same card, online again.
+    device.set_failure_plan(lpa_link::providers::fake_device::FakeFailurePlan::none());
+    bench.port_back();
+    bench.run_until(&tasks, "the board to be Ready on the new link", |bench| {
+        bench
+            .view()
+            .devices
+            .first()
+            .is_some_and(|card| card.activity.is_none() && card.state_label == "Ready")
+    });
+    assert_eq!(bench.view().devices.len(), 1, "one board, one card");
+    assert_eq!(reconnecting(&bench), (None, vec![board], Vec::new()));
+}
+
 /// The replug-under-the-lens flake, made deterministic: a link whose
 /// arrival has landed but whose own `LinkAttached` is still queued behind
 /// another input (here a stale timer fire) must survive that input's fold.
@@ -4053,6 +4126,16 @@ fn bundled_example() -> crate::PushSource {
 }
 
 /// Drive a board to its settled card.
+/// Let a board whose link just went stay away past the reconnect grace,
+/// so it reads Offline rather than Reconnecting (`reconnect_grace`): what
+/// an unplugged board is, once nobody plugs it back in.
+fn past_the_reconnect_grace(bench: &mut DeviceBench, tasks: &TaskPool) {
+    bench
+        .clock
+        .set(bench.clock.get() + crate::RECONNECT_GRACE_MS as f64 / 1_000.0 + 1.0);
+    bench.step(tasks);
+}
+
 fn identified(device: &FakeEsp32Device, endpoint: &str) -> (DeviceBench, TaskPool) {
     let (mut bench, tasks) = DeviceBench::granted(device, endpoint);
     bench.run_until(&tasks, "the board to identify", |bench| {

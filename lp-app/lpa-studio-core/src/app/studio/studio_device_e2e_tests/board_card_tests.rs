@@ -215,6 +215,7 @@ fn an_offline_boards_card_reconnects_wifi_first() {
             .iter()
             .any(|card| card.id == id && card.status == crate::DeviceStatus::Offline)
     });
+    super::past_the_reconnect_grace(&mut bench, &tasks);
     let card = card_of(&bench, id);
     assert_eq!(card.presence, crate::UiBoardPresence::Offline);
     assert_eq!(card.status.mark, crate::CornerMark::Quiet);
@@ -245,6 +246,7 @@ fn an_offline_boards_card_reconnects_wifi_first() {
             .iter()
             .any(|card| card.id == id && card.status == crate::DeviceStatus::Offline)
     });
+    super::past_the_reconnect_grace(&mut bench, &tasks);
     let wifi = primary_offer(&card_of(&bench, id));
     assert_eq!(wifi.offer, bench.device_verb(id, "connect"));
     assert_eq!(wifi.word, "Connect");

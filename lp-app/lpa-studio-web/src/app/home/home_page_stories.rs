@@ -346,6 +346,7 @@ fn roster(boards: &[Board]) -> DeviceRosterView {
                     title: "Truck".to_string(),
                     freshness_label: Some("last heard 1 day ago".to_string()),
                     heard_age_ms: Some(86400000),
+                    detached_age_ms: None,
                     identity_label: Some("dev000000000truck01".to_string()),
                     ..base.roster.devices[4].clone()
                 };
@@ -555,11 +556,11 @@ mod tests {
                 .map(|board| board.kind)
                 .collect::<Vec<_>>(),
             [
-                UiHomeBoardKind::Pending,
                 UiHomeBoardKind::Connected,
-                UiHomeBoardKind::Connected
+                UiHomeBoardKind::Connected,
+                UiHomeBoardKind::Pending
             ],
-            "a link being identified, a board and a sim"
+            "a board, a sim, then a link being identified (last, where it lands)"
         );
         assert_eq!(sections.offline.len(), 2);
         assert_eq!(sections.other_projects.len(), 3);

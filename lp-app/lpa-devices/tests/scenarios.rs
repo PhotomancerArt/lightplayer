@@ -2555,3 +2555,51 @@ fn reset_over_usb_still_pulses_the_lines() {
         "{commands:?}"
     );
 }
+
+/// A blank XIAO ESP32-C6 on a Mac, 2026-10-28: Studio sat on "Identifying"
+/// for as long as it stayed plugged in. The card's Reset pulse (and the
+/// board's own boot-loop watchdog) re-enumerates this board's USB, so every
+/// reset identify sent "for the ROM banner" took the port away, the link
+/// came back as a new pending device with no memory of it, and its first
+/// `invalid header` line sent the reset again
+/// (docs/defects/2026-10-28-a-blank-board-that-re-enumerates-on-reset-identified-forever.md).
+///
+/// Replayed as the board did it: each cycle the port opens mid boot loop,
+/// hears the flood and no banner, and drops off USB a moment later. Every
+/// cycle must settle on the blank verdict at its first line, and nothing
+/// may reset the board.
+#[test]
+fn a_blank_board_that_drops_off_usb_settles_blank_every_time_and_is_never_reset() {
+    let config = RosterConfig::default();
+    let mut replay = Replay::new(config);
+    let mut at = 0;
+    for cycle in 0..6 {
+        let link = cycle + 1;
+        replay.step(Millis(at), Step::attach(link, "usb-1"));
+        replay.step(Millis(at + 20), Step::opened(link));
+        let commands = replay.step(
+            Millis(at + 50),
+            Step::line(link, "invalid header: 0xffffffff"),
+        );
+        assert!(
+            !commands.iter().any(|command| matches!(
+                command,
+                Command::Link {
+                    command: LinkCommand::RunReset(_),
+                    ..
+                }
+            )),
+            "cycle {cycle}: a blank board is never reset by identify: {commands:?}"
+        );
+        let pending = &replay.view().pending[0];
+        assert!(
+            pending.needs_firmware(),
+            "cycle {cycle}: the first blank line is the verdict: {pending:?}"
+        );
+        assert_eq!(pending.detected_chip, None, "the premise: no banner heard");
+        // Its watchdog (or anything else) resets it: USB goes away.
+        replay.step(Millis(at + 100), Step::closed(link));
+        replay.step(Millis(at + 100), Step::detach(link));
+        at += 700;
+    }
+}

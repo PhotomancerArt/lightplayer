@@ -1316,6 +1316,7 @@ fn unplug(bench: &mut DeviceBench, tasks: &TaskPool, id: crate::DeviceId) {
             .iter()
             .any(|card| card.id == id && card.status == crate::DeviceStatus::Offline)
     });
+    super::past_the_reconnect_grace(bench, tasks);
 }
 
 /// A board reached over Bluetooth only, identified and registered, then

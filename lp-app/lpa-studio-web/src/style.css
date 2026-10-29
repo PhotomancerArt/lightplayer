@@ -990,6 +990,13 @@ label:has(> input:not(:disabled)) {
     color: var(--studio-color-text-muted);
 }
 
+/* While a new name is saving, the bar's small spinner stands where the
+   pencil was, at the pencil's size. */
+.ux-board-name-pencil .ux-board-spinner {
+    width: 12px;
+    height: 12px;
+}
+
 .ux-board-name:hover .ux-board-name-text {
     text-decoration: underline;
     text-decoration-color: var(--studio-color-text-faint);

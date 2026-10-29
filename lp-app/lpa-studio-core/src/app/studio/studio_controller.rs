@@ -2632,6 +2632,9 @@ impl StudioController {
         // joins in: a record seen more recently stands over it.
         view.last_seen = self.registry_last_seen(&view);
         self.join_account_boards(&mut view);
+        // A board restarting under setup holds its place, reconnecting.
+        // Last: it reads what every other join said about the board.
+        crate::join_reconnect_grace(&mut view);
         view.board_projects = self.board_projects(&view);
         view
     }
@@ -4252,11 +4255,26 @@ impl StudioController {
     /// Should two entries answer to one MAC (a pending link whose
     /// preflight read the MAC of a board the roster already remembers),
     /// the second is offered as a `new-<n>` instead, so no path is
-    /// published twice.
+    /// published twice. "Second" is in the roster's own order (devices,
+    /// then pending links), never the page's: the page lists boards first
+    /// added first, and that order must not move a board's path.
     fn device_offer_prefixes(
         &self,
         entries: &[crate::DeviceId],
     ) -> std::collections::BTreeMap<crate::DeviceId, crate::OfferPath> {
+        let roster = self.devices.roster();
+        let held: Vec<crate::DeviceId> = roster
+            .devices()
+            .iter()
+            .map(|device| device.id)
+            .chain(roster.pending().iter().map(|pending| pending.device_id()))
+            .collect();
+        let mut entries = entries.to_vec();
+        entries.sort_by_key(|device| {
+            held.iter()
+                .position(|id| id == device)
+                .unwrap_or(usize::MAX)
+        });
         let mut taken = std::collections::BTreeSet::new();
         let known: Vec<(crate::DeviceId, Option<crate::BoardRef>)> = entries
             .iter()

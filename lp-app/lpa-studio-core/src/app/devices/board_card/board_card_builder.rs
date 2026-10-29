@@ -15,6 +15,7 @@ use lpa_devices::view::PendingLinkView;
 use super::access_bar::{access_bar, pending_access_bar};
 use super::bluetooth_bar::bluetooth_bar;
 use super::board_card_input::BoardCardInput;
+use super::board_connection::BoardConnection;
 use super::board_picture::board_picture;
 use super::board_surface::{
     board_surface, carried_layer, carries_work, pending_surface, surface_state,
@@ -78,10 +79,12 @@ pub fn board_card(input: &BoardCardInput<'_>) -> UiBoardCard {
     let card = UiBoardCard {
         board: input.board.clone(),
         device: input.view.id,
-        // A board another tab holds is plugged in and running: Online,
-        // whatever it is here (`split_roster` says the same).
+        // A board another tab holds is plugged in and running, and one
+        // reconnecting is rebooting: Online, whatever it is here
+        // (`split_roster` says the same).
         presence: match input.offline()
             && input.view.held_elsewhere.is_none()
+            && *input.connection != BoardConnection::Reconnecting
             && !input.online_at_cloud()
         {
             true => UiBoardPresence::Offline,
@@ -287,13 +290,28 @@ mod tests {
     use lpa_devices::view::OutcomeView;
     use lpa_devices::{ActivityKind, HoldLevel};
 
-    use super::super::board_connection::BoardConnection;
     use super::super::card_fixtures::{CardFixture, activity, board, feed};
     use super::super::primary_action::tests::pending_view;
     use super::super::ui_stack_bar::BarLayer;
     use super::*;
     use crate::app::devices::activity_ends::ActivityEnd;
     use crate::app::devices::device_card_feed_view::FeedLiveness;
+
+    /// A board rebooting under setup is reconnecting, not offline: its
+    /// card stays Online, in its place, and says so (stable board order).
+    #[test]
+    fn a_reconnecting_board_is_online_and_says_so() {
+        let mut fixture = CardFixture::offline();
+        assert_eq!(
+            board_card(&fixture.input()).presence,
+            UiBoardPresence::Offline
+        );
+
+        fixture.connection = BoardConnection::Reconnecting;
+        let card = board_card(&fixture.input());
+        assert_eq!(card.presence, UiBoardPresence::Online);
+        assert_eq!(card.surface.state, SurfaceState::Reconnecting);
+    }
 
     #[test]
     fn a_card_has_its_eight_rows_in_order() {

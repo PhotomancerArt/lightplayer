@@ -99,6 +99,8 @@ pub struct CardPreviews {
     pub sweep_parked_at: Option<i16>,
     /// The name bar's rename field, open (a capture cannot press the name).
     pub renaming: bool,
+    /// The name bar showing this name as pressed and not yet the board's.
+    pub rename_pending: Option<String>,
 }
 
 /// Provide `scope` to every action below the caller; readers re-render

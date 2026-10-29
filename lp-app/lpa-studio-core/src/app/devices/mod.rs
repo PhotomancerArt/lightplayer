@@ -138,6 +138,7 @@ pub mod project_stage_controller;
 pub mod project_stage_status;
 pub mod provisional_board_numbers;
 pub mod push_format_gate;
+pub mod reconnect_grace;
 pub mod relay_connect_failure;
 pub mod relay_connect_offer;
 pub mod relay_connect_op;
@@ -327,6 +328,7 @@ pub use project_stage_command::ProjectStageCommand;
 pub use project_stage_controller::ProjectStageController;
 pub use project_stage_status::{ProjectStageStatus, ProjectsHeldBack};
 pub use provisional_board_numbers::ProvisionalBoardNumbers;
+pub use reconnect_grace::{RECONNECT_GRACE_MS, in_reconnect_grace, join_reconnect_grace};
 pub use relay_connect_failure::{
     RELAY_NO_HELD_KEY_WORDS, RELAY_OFFLINE_WORDS, RELAY_UNREACHABLE_WORDS, RelayConnectFailure,
 };
