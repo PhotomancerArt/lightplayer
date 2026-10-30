@@ -2909,7 +2909,8 @@ jobs:
   # test passed: wifi 3.4 min and relay 8.4 min on the runner
   # (docs/debt/emulator-ci-jobs-outgrow-their-time-budgets.md: split, don't
   # bump). One Xtensa firmware build (the `wifi` image, merged) shared by
-  # both. Path-gated as the seams job.
+  # both. Path-gated as the seams job. First green run: 15 min 15 s (run
+  # 40982870684); the seams job beside it 17 min 10 s.
   emu-esp32s3-radio:
     name: Emulator ESP32-S3 Wi-Fi and relay (x64)
     runs-on: ubuntu-24.04
