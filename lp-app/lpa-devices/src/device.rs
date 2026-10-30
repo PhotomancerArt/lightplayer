@@ -55,6 +55,11 @@ use crate::wire::ClientFrame;
 const CLEAR_FAULTS_REQUEST_ID: u32 = 1;
 const CLEAR_FAULTS_REREAD_REQUEST_ID: u32 = 2;
 
+/// Correlation id for the board-name write ([`Action::NameBoard`]). A
+/// constant like the two above: the answer is recognised by its body
+/// ([`crate::wire::ServerFrameBody::Named`]), never by its id.
+const SET_DEVICE_NAME_REQUEST_ID: u32 = 3;
+
 /// Correlation id for the restart request [`Action::ResetBoard`] sends over
 /// a network link. A constant for the same reason: nothing waits on its
 /// answer (see [`Device::resets_by_request`]).
@@ -142,6 +147,7 @@ impl Device {
     pub fn from_record(record: DeviceRecord) -> Self {
         let mut device = Self::new(record.device, record.identity.clone());
         device.intent.name = record.name.clone();
+        device.intent.name_unsent = record.name_unsent && record.name.is_some();
         device.intent.autoconnect = record.autoconnect;
         device.added_at = record.added_at;
         device.record = Some(record);
@@ -306,6 +312,7 @@ impl Device {
             .unwrap_or_else(|| DeviceRecord::new(self.id, self.identity.clone()));
         record.identity = self.identity.clone();
         record.name = self.intent.name.clone();
+        record.name_unsent = self.intent.name_unsent;
         record.autoconnect = self.intent.autoconnect;
         record.last_seen = self.evidence.freshness.last_heard.or(record.last_seen);
         // Learned, never cleared: a window reset (reopen, reboot) drops the
@@ -746,10 +753,12 @@ impl Device {
                 // Flashing implies wanting the board connected afterwards.
                 self.intent.connection = ConnectionIntent::Connected;
                 // A name typed into the setup gesture is the user's, exactly
-                // as a `SetName` would record it; `None` changes nothing (the
-                // app derives one when the board has none).
-                if let Some(name) = name {
-                    self.intent.name = Some(name.clone());
+                // as a `NameBoard` would record it (the board is told at its
+                // first hello); `None` changes nothing (the app derives one
+                // when the board has none, and that one stays Studio's).
+                if let Some(name) = name.as_deref().map(str::trim).filter(|n| !n.is_empty()) {
+                    self.intent.name = Some(name.to_string());
+                    self.intent.name_unsent = true;
                 }
                 self.spawn_flash(
                     now,
@@ -835,6 +844,21 @@ impl Device {
                 self.intent.name = Some(name.clone());
                 vec![Command::PersistRecord(self.record_snapshot())]
             }
+            Action::NameBoard { name, .. } => {
+                // A person's name: the board keeps it too. Written now when
+                // the board can take it, else at its next hello.
+                // The app cleans it first (`lpc_wire::clean_device_name`,
+                // the rule the board applies); a blank one names nothing.
+                let name = name.trim();
+                if name.is_empty() {
+                    return Vec::new();
+                }
+                self.intent.name = Some(name.to_string());
+                self.intent.name_unsent = true;
+                let mut commands = self.send_name_to_board(ctx);
+                commands.push(Command::PersistRecord(self.record_snapshot()));
+                commands
+            }
             Action::SetAutoconnect { enabled, .. } => {
                 self.intent.autoconnect = *enabled;
                 vec![Command::PersistRecord(self.record_snapshot())]
@@ -847,6 +871,85 @@ impl Device {
             | Action::Reconnect { .. }
             | Action::AdoptLink { .. }
             | Action::DismissLink { .. } => Vec::new(),
+        }
+    }
+
+    /// Write a person's name to the board, when the board can take it: a
+    /// link, no activity holding it (I5), and a hello at this Studio's wire
+    /// (an older board does not know the request; it is written once the
+    /// board is updated). Nothing to send, or not now → no command; the name
+    /// stays unsent and the next hello tries again.
+    fn send_name_to_board(&self, ctx: &ModelCtx<'_>) -> Vec<Command> {
+        if !self.intent.name_unsent || self.activity.is_some() {
+            return Vec::new();
+        }
+        let (Some(name), Some(link)) = (self.intent.name.as_ref(), self.link()) else {
+            return Vec::new();
+        };
+        let current_wire = self
+            .evidence
+            .classification
+            .hello()
+            .is_some_and(|hello| hello.proto == ctx.config.expected_proto);
+        if !current_wire {
+            return Vec::new();
+        }
+        vec![Command::Link {
+            link,
+            command: LinkCommand::SendFrame(ClientFrame::set_device_name(
+                SET_DEVICE_NAME_REQUEST_ID,
+                name.clone(),
+            )),
+        }]
+    }
+
+    /// The board's own name after `event` (step 4c of the event path).
+    ///
+    /// - The board answered a rename: the name it keeps is the name, and
+    ///   nothing is left to send.
+    /// - A fresh hello, or an activity that just let go of the link: an
+    ///   unsent rename is written now. With none, a hello that names the
+    ///   board otherwise (it was renamed in another browser, or by `lp-cli`)
+    ///   is adopted as the title.
+    fn follow_board_name(
+        &mut self,
+        event: &Event,
+        hello_before: bool,
+        busy_before: bool,
+        ctx: &ModelCtx<'_>,
+    ) -> Vec<Command> {
+        if let Event::Link {
+            event: crate::link::LinkEvent::Frame(frame),
+            ..
+        } = event
+            && let crate::wire::ServerFrameBody::Named { name } = &frame.body
+        {
+            self.intent.name_unsent = false;
+            if let Some(name) = name {
+                self.identity.name = Some(name.clone());
+                self.intent.name = Some(name.clone());
+            }
+            return vec![Command::PersistRecord(self.record_snapshot())];
+        }
+        let fresh_hello = !hello_before && self.evidence.has_hello();
+        let released = busy_before && self.activity.is_none();
+        if !fresh_hello && !released {
+            return Vec::new();
+        }
+        if self.intent.name_unsent {
+            return self.send_name_to_board(ctx);
+        }
+        let reported = self
+            .evidence
+            .classification
+            .hello()
+            .and_then(|hello| hello.identity.name.clone());
+        match reported {
+            Some(name) if self.intent.name.as_ref() != Some(&name) => {
+                self.intent.name = Some(name);
+                vec![Command::PersistRecord(self.record_snapshot())]
+            }
+            _ => Vec::new(),
         }
     }
 
@@ -906,6 +1009,7 @@ impl Device {
         }
         let mut commands = Vec::new();
         let hello_before = self.evidence.has_hello();
+        let busy_before = self.activity.is_some();
 
         // 1. Fold first, so the activity always reads fresh evidence.
         let notes = self
@@ -990,6 +1094,11 @@ impl Device {
             self.late_hello_reidentifies = false;
             commands.extend(self.spawn_identify_on_hello_in_hand(now, ctx));
         }
+
+        // 4c. The board's own name: a person's rename it has not taken yet
+        // is written when it can be; its answer, or a hello naming the board
+        // otherwise (renamed elsewhere), is the name from then on.
+        commands.extend(self.follow_board_name(event, hello_before, busy_before, ctx));
 
         // 5. Supervision looks at the clock last.
         commands.extend(self.supervise(now, ctx));

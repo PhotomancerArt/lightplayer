@@ -400,6 +400,7 @@ mod tests {
             },
             hardware: HardwareFacts::default(),
             device_uid: None,
+            device_name: None,
             pack_format,
             auth: crate::HelloAuth::TRUSTED,
             startup_refused: None,

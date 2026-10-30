@@ -7,8 +7,9 @@
 //! primary"). The card's surface says why, and says the button aloud.
 //!
 //! The name is renamed where it is: pressed, a field takes its place
-//! ([`UiNameBar::rename`], the board's `rename` offer — Studio's own name
-//! for it, never written to the board).
+//! ([`UiNameBar::rename`], the board's `rename` offer — the board's own
+//! name, written to it, and its only project's;
+//! `docs/adr/2026-10-28-one-board-name.md`).
 
 use super::ui_card_action::UiCardAction;
 use crate::OfferPath;

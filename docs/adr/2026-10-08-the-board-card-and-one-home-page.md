@@ -719,7 +719,9 @@ changes §2's "stack of bars" and §3's bar model:
 - **The board is renamed where its name is:** the name bar's name, with a
   faint pencil always shown; pressing it puts a field in its place, Enter
   or clicking away keeps it, Esc doesn't (`UiNameBar::rename`). Hardware's
-  details no longer hold a name field.
+  details no longer hold a name field. Since 2026-10-28 the rename is the
+  board's own name too, written to it, and its only project's
+  ([2026-10-28-one-board-name](2026-10-28-one-board-name.md)).
 - **The struck cloud mark is gone;** lightplayer.app's row says it.
 
 Out of this amendment, in the secrets-vault plan: where Studio keeps

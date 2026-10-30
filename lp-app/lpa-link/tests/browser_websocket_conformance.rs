@@ -1258,6 +1258,7 @@ fn hello(granted: Option<Tier>) -> lpc_wire::WireServerMessage {
             },
             hardware: HardwareFacts::default(),
             device_uid: None,
+            device_name: None,
             // No pack format: the page's link stays JSON.
             pack_format: 0,
             auth: lpc_wire::HelloAuth {

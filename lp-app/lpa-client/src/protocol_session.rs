@@ -438,6 +438,7 @@ mod tests {
                 },
                 hardware: Default::default(),
                 device_uid: Some("dev000000daqf6dvvt2".to_string()),
+                device_name: None,
                 pack_format: lpc_wire::PACK_FORMAT_VERSION,
                 auth: lpc_wire::HelloAuth::TRUSTED,
                 startup_refused: None,

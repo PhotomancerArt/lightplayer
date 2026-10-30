@@ -143,6 +143,7 @@ pub fn server_message_detail(msg: &lpc_wire::WireServerMessage) -> String {
         // (and keeps the C6 under M5's size line).
         lpc_wire::server::ServerMsgBody::NetworkStatus(_) => String::from("NetworkStatus"),
         lpc_wire::server::ServerMsgBody::NetworkScan(_) => String::from("NetworkScan"),
+        lpc_wire::server::ServerMsgBody::SetDeviceName { .. } => String::from("SetDeviceName"),
     }
 }
 

@@ -10,9 +10,9 @@
 mod ble_controller_config;
 
 use fw_esp32_common::radio_link::RadioLinkPort;
-pub use fw_esp32_radio::ble::refresh_advertised_name;
 #[cfg(feature = "desk_ble_params")]
 pub use fw_esp32_radio::ble::{configure_desk_params, desk_params_path};
+pub use fw_esp32_radio::ble::{name_at_boot, refresh_advertised_name};
 
 use crate::board::esp32c6::board_quirks::BoardQuirksApplied;
 

@@ -245,6 +245,8 @@ grants that entry's tier; `LoginAnswer` is refused there. See
   engine. When it lands it is classified `Play`, like the panel. Until then
   a wrong-device connect is caught by the advertised name
   (`LP-<project name>`, or the last four MAC hex digits), not by a blink.
+  Since 2026-10-28 the board's own name comes first (`LP-<board name>`,
+  [2026-10-28-one-board-name](2026-10-28-one-board-name.md)).
 - **Enabling BLE takes a reboot** (plan DD23). The firmware reads
   `bleEnabled` from the device store once, at boot
   (`docs/adr/2026-09-24-ble-transport.md`, decision 4), so the edit-tier write

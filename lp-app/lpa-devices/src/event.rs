@@ -234,7 +234,16 @@ pub enum Action {
         device: DeviceId,
         intent: UpdateIntentFacts,
     },
+    /// Studio's own name for a board (one it minted: `"<board> · <Mon D>"`).
+    /// Kept in this browser only; the board is never told.
     SetName {
+        device: DeviceId,
+        name: String,
+    },
+    /// A person named the board: Studio's name AND the board's own, written
+    /// to the board (`ClientRequest::SetDeviceName`) when it can take it —
+    /// now, or at its next hello on this Studio's wire.
+    NameBoard {
         device: DeviceId,
         name: String,
     },
@@ -264,6 +273,7 @@ impl Action {
             | Self::ResetBoard { device }
             | Self::ClearFaults { device }
             | Self::SetName { device, .. }
+            | Self::NameBoard { device, .. }
             | Self::SetAutoconnect { device, .. } => Some(*device),
             Self::AddFromUsb
             | Self::AddFromBle
@@ -618,6 +628,10 @@ mod tests {
                 intent: UpdateIntentFacts::Auto,
             },
             Action::SetName {
+                device,
+                name: "n".to_string(),
+            },
+            Action::NameBoard {
                 device,
                 name: "n".to_string(),
             },

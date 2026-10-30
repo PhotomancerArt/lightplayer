@@ -1153,6 +1153,7 @@ fn hello() -> lpc_wire::WireServerMessage {
             },
             hardware: HardwareFacts::default(),
             device_uid: None,
+            device_name: None,
             // No pack format: the page's link stays JSON, so every read here
             // is the board's plain JSON.
             pack_format: 0,

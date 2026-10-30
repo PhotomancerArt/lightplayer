@@ -5355,38 +5355,8 @@ impl StudioController {
                     .await;
             }
             HomeOp::RenamePackage { uid, name } => {
-                let name = name.trim();
-                if name.is_empty() {
-                    return Err(UiError::UnsupportedAction(
-                        "a project name cannot be empty".to_string(),
-                    ));
-                }
-                // The project OPEN in this tab — the one whose settings row
-                // or gallery card was just edited while it runs — cannot go
-                // through the catalog: the host refuses structural ops on
-                // it (`OpenInThisTab`, the project-before-catalog rule).
-                // Its name is patched through its own handle instead, and
-                // the library directory follows when the project closes
-                // (`run_pending_reslug`).
-                if self.project.active_library_uid().as_deref() == Some(uid.as_str()) {
-                    let renamed = {
-                        let server = self.pool.lens_session_mut()?.client_mut()?;
-                        self.project.rename_active_project(server, name).await?
-                    };
-                    self.pending_reslug = Some((uid, renamed.clone()));
-                    return Ok(UiNotices::new()
-                        .with_notice(UiNotice::info(format!("Renamed to {renamed}"))));
-                }
-                let outcome = self
-                    .run_catalog_op(CatalogOp::Rename {
-                        uid,
-                        new_slug: name.to_string(),
-                    })
-                    .await?;
-                let renamed = outcome
-                    .summary
-                    .map(|summary| summary.slug)
-                    .unwrap_or_else(|| name.to_string());
+                let renamed = self.rename_package(uid.clone(), &name).await?;
+                self.board_follows_project_rename(&uid, &name).await;
                 Ok(UiNotices::new().with_notice(UiNotice::info(format!("Renamed to {renamed}"))))
             }
             HomeOp::SetPackageTarget { uid, target } => {
@@ -6964,7 +6934,16 @@ impl StudioController {
             _ => None,
         };
         let chooser_before = self.devices.effects().last_grant_request();
+        let renamed_project = match op.action() {
+            crate::DeviceAction::NameBoard { device, name } => {
+                Some((self.sole_board_project(*device), name.clone()))
+            }
+            _ => None,
+        };
         self.fold_device_input(crate::DeviceInput::Action(op.action.clone()));
+        if let Some((project, name)) = renamed_project {
+            self.rename_board_project(project, &name).await;
+        }
         self.note_section_chooser(op.action(), chooser_before);
         if let Some(key) = forgotten_board {
             self.wifi_connects.forget_board(key);
@@ -7074,6 +7053,7 @@ impl StudioController {
         let touches_wire = !matches!(
             action,
             crate::DeviceAction::SetName { .. }
+                | crate::DeviceAction::NameBoard { .. }
                 | crate::DeviceAction::SetAutoconnect { .. }
                 | crate::DeviceAction::ResetBoard { .. }
         );
@@ -7092,6 +7072,99 @@ impl StudioController {
             ));
             self.close_device_lens();
         }
+    }
+
+    /// Rename a library project, returning the name it now goes by.
+    ///
+    /// The project OPEN in this tab — the one whose settings row or gallery
+    /// card was just edited while it runs — cannot go through the catalog:
+    /// the host refuses structural ops on it (`OpenInThisTab`, the
+    /// project-before-catalog rule). Its name is patched through its own
+    /// handle instead, and the library directory follows when the project
+    /// closes (`run_pending_reslug`).
+    async fn rename_package(&mut self, uid: String, name: &str) -> Result<String, UiError> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err(UiError::UnsupportedAction(
+                "a project name cannot be empty".to_string(),
+            ));
+        }
+        if self.project.active_library_uid().as_deref() == Some(uid.as_str()) {
+            let renamed = {
+                let server = self.pool.lens_session_mut()?.client_mut()?;
+                self.project.rename_active_project(server, name).await?
+            };
+            self.pending_reslug = Some((uid, renamed.clone()));
+            return Ok(renamed);
+        }
+        let outcome = self
+            .run_catalog_op(CatalogOp::Rename {
+                uid,
+                new_slug: name.to_string(),
+            })
+            .await?;
+        Ok(outcome
+            .summary
+            .map(|summary| summary.slug)
+            .unwrap_or_else(|| name.to_string()))
+    }
+
+    /// One name (2026-10-28, Q3): a project exactly one board plays names
+    /// that board too, on the board as well. Called after a project rename.
+    pub(crate) async fn board_follows_project_rename(&mut self, uid: &str, name: &str) {
+        let view = self.device_roster_view();
+        if let [board] = self.board_projects(&view).boards_playing(uid)[..]
+            && let Some(name) = lpc_wire::clean_device_name(name)
+            && self
+                .devices
+                .roster()
+                .device(board)
+                .map(|device| device.title())
+                != Some(name.clone())
+        {
+            self.fold_device_input(crate::DeviceInput::Action(crate::DeviceAction::NameBoard {
+                device: board,
+                name,
+            }));
+            self.settle_device_records().await;
+        }
+    }
+
+    /// A board's rename follows onto the project it plays, when it is the
+    /// only board playing it (2026-10-28, Q2/Q3). A project several boards
+    /// share keeps its name, and nothing says so. `project` is the board's
+    /// project before the rename folded; a failed rename is a log line, not
+    /// a refused board rename.
+    async fn rename_board_project(&mut self, project: Option<(String, String)>, name: &str) {
+        let Some((uid, current)) = project else {
+            return;
+        };
+        use crate::app::library::package_slug::{slugify, strip_date_prefix};
+        if strip_date_prefix(&current) == slugify(name) {
+            return;
+        }
+        if let Err(error) = self.rename_package(uid, name).await {
+            log::warn!("the board's project kept its name: {error}");
+        }
+    }
+
+    /// The project `board` alone plays, with its current name: `None` when
+    /// it plays none, or one other boards play too.
+    fn sole_board_project(&self, board: crate::DeviceId) -> Option<(String, String)> {
+        let view = self.device_roster_view();
+        let projects = self.board_projects(&view);
+        let uid = projects.plays(board).project_uid()?.to_string();
+        if projects.boards_playing(&uid).len() != 1 {
+            return None;
+        }
+        let name = self
+            .home_inputs
+            .as_ref()?
+            .projects
+            .iter()
+            .find(|project| project.uid == uid)
+            .map(|project| project.slug.clone())?;
+        Some((uid, name))
     }
 
     /// The empty face's gesture: prepare a project, then push it.
@@ -7114,12 +7187,27 @@ impl StudioController {
         // rename, folded before the push exactly as the card's own Rename
         // would be.
         if let Some(name) = op.device_name.clone() {
-            self.fold_device_input(crate::DeviceInput::Action(crate::DeviceAction::SetName {
+            self.fold_device_input(crate::DeviceInput::Action(crate::DeviceAction::NameBoard {
                 device: op.device,
                 name,
             }));
         }
-        let (staged, migration_notice) = self.prepare_push(&op.source).await;
+        // One name: what lands on a board is a copy named after the board
+        // (Yona, 2026-10-28) — unless it is the board's own project going
+        // back to it.
+        let board_name = self
+            .devices
+            .roster()
+            .device(op.device)
+            .map(|device| device.title());
+        let plays = self
+            .board_projects(&self.device_roster_view())
+            .plays(op.device)
+            .project_uid()
+            .map(str::to_string);
+        let (staged, migration_notice) = self
+            .prepare_push(&op.source, board_name.as_deref(), plays.as_deref())
+            .await;
         // A board whose engine reads an older project format would refuse
         // the project only after the push stopped and cleared it: refused
         // here, before the board is touched (Q111). The card's Update offer
@@ -7171,8 +7259,13 @@ impl StudioController {
     async fn prepare_push(
         &mut self,
         source: &crate::PushSource,
+        board_name: Option<&str>,
+        board_plays: Option<&str>,
     ) -> (crate::StagedPush, Option<UiNotice>) {
-        match self.prepare_push_inner(source).await {
+        match self
+            .prepare_push_inner(source, board_name, board_plays)
+            .await
+        {
             Ok((payload, notice)) => (Ok(payload), notice),
             Err(error) => (Err(error), None),
         }
@@ -7180,19 +7273,60 @@ impl StudioController {
 
     /// [`Self::prepare_push`]'s body, kept `Result`-shaped so the three
     /// sources can still converge through `?`.
+    ///
+    /// `board_name` is the board's title: an example or a library project
+    /// lands as a copy carrying it, so the board and what it plays have one
+    /// name. `board_plays` is the project the board plays now; pushing that
+    /// one back is an update, not a copy.
     async fn prepare_push_inner(
         &mut self,
         source: &crate::PushSource,
+        board_name: Option<&str>,
+        board_plays: Option<&str>,
     ) -> Result<(crate::PushPayload, Option<UiNotice>), String> {
+        // A library copy reads (and so migrates) its source first; that
+        // read's notice is the one the push says.
+        let mut source_notice = None;
         let uid = match source {
-            crate::PushSource::Library { project_uid } => project_uid.clone(),
+            crate::PushSource::Library { project_uid }
+                if board_plays == Some(project_uid.as_str()) || board_name.is_none() =>
+            {
+                project_uid.clone()
+            }
+            crate::PushSource::Library { project_uid } => {
+                // A copy for this board (Q1): the library project stays as
+                // it is, and the board gets its own, named after it.
+                let (files, _, _, notice) = self.read_push_payload(project_uid).await?;
+                source_notice = notice;
+                let files = files
+                    .into_iter()
+                    .filter(|(path, _)| path != ".lp/meta.json")
+                    .collect();
+                let provenance = match self
+                    .home_inputs
+                    .as_ref()
+                    .and_then(|inputs| inputs.project_heads.get(project_uid))
+                {
+                    Some(head) => crate::app::library::PackageProvenance::ForkedFrom {
+                        parent_project: project_uid.clone(),
+                        parent_version: head.to_string(),
+                    },
+                    None => crate::app::library::PackageProvenance::Created,
+                };
+                self.install_for_push(CatalogOp::ForkTransientCopy {
+                    name: board_name.unwrap_or_default().to_string(),
+                    files,
+                    provenance,
+                })
+                .await?
+            }
             crate::PushSource::Example { example_id } => {
                 let example = crate::app::home::embedded_example::embedded_example(example_id)
                     .ok_or_else(|| format!("this build has no example called {example_id}"))?;
-                // No naming step (ruled): the library's dated-slug
-                // convention names it from the example's own label.
+                // Named after the board it lands on (one name, 2026-10-28),
+                // else the example's own label.
                 self.install_for_push(CatalogOp::ForkTransientCopy {
-                    name: example.name.to_string(),
+                    name: board_name.unwrap_or(example.name).to_string(),
                     files: example.files(),
                     provenance: crate::app::library::PackageProvenance::SeededFrom {
                         source: example.id.to_string(),
@@ -7209,6 +7343,7 @@ impl StudioController {
             }
         };
         let (files, content_hash, label, notice) = self.read_push_payload(&uid).await?;
+        let notice = source_notice.or(notice);
         Ok((
             crate::PushPayload {
                 project_uid: uid,
@@ -10982,9 +11117,9 @@ fn board_on_tree_store(evidence: &lpa_devices::Evidence) -> Option<bool> {
 fn pressed_device(action: &UiAction) -> Option<crate::DeviceId> {
     if let Some(op) = action.op_as::<crate::DevicesOp>() {
         return match op.action() {
-            crate::DeviceAction::SetName { .. } | crate::DeviceAction::SetAutoconnect { .. } => {
-                None
-            }
+            crate::DeviceAction::SetName { .. }
+            | crate::DeviceAction::NameBoard { .. }
+            | crate::DeviceAction::SetAutoconnect { .. } => None,
             action => action.device(),
         };
     }

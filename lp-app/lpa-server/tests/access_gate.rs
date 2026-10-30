@@ -123,6 +123,32 @@ fn every_request_against_every_link_state() {
     }
 }
 
+/// A rename over a trusted link is written to the identity file and the
+/// next hello says it (one board name, wire 47).
+#[test]
+fn naming_the_board_writes_its_identity_file_and_the_hello_says_it() {
+    let mut rig = Rig::for_state(LinkState::Trusted);
+    let link = LinkState::Trusted.link();
+    let reply = rig.request(
+        link,
+        ClientRequest::SetDeviceName {
+            name: String::from("  Flower-Viatrix "),
+        },
+    );
+    match reply {
+        WireServerMsgBody::SetDeviceName { name } => {
+            assert_eq!(name.as_deref(), Some("Flower-Viatrix"));
+        }
+        other => panic!("expected the name's answer, got {}", body_name(&other)),
+    }
+    match rig.request(link, ClientRequest::Hello) {
+        WireServerMsgBody::Hello(hello) => {
+            assert_eq!(hello.device_name.as_deref(), Some("Flower-Viatrix"));
+        }
+        other => panic!("expected a hello, got {}", body_name(&other)),
+    }
+}
+
 /// The same gate holds the network file (the Wi-Fi password): the trusted
 /// link reads none of its spellings either, and a refused read carries no
 /// byte of it.
@@ -979,6 +1005,13 @@ fn table_rows() -> Vec<Row> {
             },
             Required::Edit,
         ),
+        row(
+            "setDeviceName",
+            ClientRequest::SetDeviceName {
+                name: String::from("Porch"),
+            },
+            Required::Edit,
+        ),
     ];
 
     for (command, needs) in project_commands() {
@@ -1668,6 +1701,7 @@ fn body_name(body: &WireServerMsgBody) -> &'static str {
         WireServerMsgBody::AccessList { .. } => "AccessList",
         WireServerMsgBody::NetworkStatus(_) => "NetworkStatus",
         WireServerMsgBody::NetworkScan(_) => "NetworkScan",
+        WireServerMsgBody::SetDeviceName { .. } => "SetDeviceName",
         _ => "Other",
     }
 }
