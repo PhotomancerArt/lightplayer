@@ -1,5 +1,5 @@
 ---
-status: open
+status: fixed
 found: 2026-10-22      # how: emulator walk (`just walk-wifi-emu lan --s3`, S3 radio M5's second half, PR #1273)
 area: lp-fw/fw-esp32s3 `wifi` image's heap (lp-fw/fw-esp32s3/src/c_heap.rs, dram2_heap.rs) × a loaded project × the LAN link
 class: untested-path   # the S3's wifi image had never held a project and a LAN link at once: on silicon it does not join yet (2026-10-22-the-s3-wifi-image-never-authenticates.md), and the emulator could not run its station until #1273
@@ -103,3 +103,23 @@ stops there the same way (`memory allocation of 240 bytes failed` in
 **Repro** — `just test-emu-esp32s3-wifi` (builds and merges the image), then
 `just walk-wifi-emu lan --s3` (needs `just studio-web-story-build`, `cargo
 build -p lp-cli`). W3's board console is `target/walk-wifi-emu/lan-s3/console/s3-a.link.log`.
+
+**2026-10-29, fixed by PSRAM (S3 radio M10, on by default since
+2026-10-23).** The project's heap is in PSRAM now, so the internal arena no
+longer carries it. Checked, with `wifi` on by default (#1333):
+
+- **Emulated, this entry's W3 and W10:** one S3 (`lp-emu:esp32s3:t1+net=lan`,
+  main `3dc8a3527` + #1333) joined the fixture's `home`, then
+  `lp-cli upload catalog/projects/peach-1d lan:…` over its LAN forward: Peach
+  (1D) loaded and compiled with **122,660 B free** after the load (43,532 B and
+  a panic before). `lp-cli link rtt lan:…` then ran to the end (p50 30 ms);
+  the heartbeat's free figure never fell below 113,020 B. No panic, no
+  "board memory busy".
+- **Emulated, the relay arm:** `just test-emu-esp32s3-relay` with the arm's
+  exception removed (`BoardImage::runs_basic` is gone): `projects/test/basic`
+  uploaded through the relay and rendered, every step passed (424 s).
+- **Silicon, FS3 (XIAO ESP32-S3 Plus):** Wi‑Fi, Bluetooth, ESP-NOW and PSRAM
+  on, joined, relay registered, a LAN link busy: Skirt 620 five's internal
+  free never below 99,932 B; the 2,048-LED `Core1 8x256` at 122,700 B
+  (docs/reports/2026-10-29-s3-wifi-on-by-default.md).
+
