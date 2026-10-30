@@ -114,7 +114,7 @@ fw_closure_esp32v3:
   - 'third_party/ser-write-json/**'
   - 'tools/lp-app-version/**'
 
-# fw-esp32s3 on xtensa-esp32s3-none-elf: 51 directories.
+# fw-esp32s3 on xtensa-esp32s3-none-elf: 52 directories.
 fw_closure_esp32s3:
   - 'lp-app/lpa-server/**'
   - 'lp-base/lp-bootctl/**'
@@ -135,6 +135,7 @@ fw_closure_esp32s3:
   - 'lp-core/lpc-mapping/**'
   - 'lp-core/lpc-model/**'
   - 'lp-core/lpc-registry/**'
+  - 'lp-core/lpc-relay/**'
   - 'lp-core/lpc-shared/**'
   - 'lp-core/lpc-slot-codegen/**'
   - 'lp-core/lpc-slot-macros/**'
