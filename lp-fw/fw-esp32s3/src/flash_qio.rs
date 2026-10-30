@@ -30,9 +30,10 @@
 //! 2. **QIO** on the parts `fw_esp32_common::flash_qio::ESP32S3_QIO_PARTS`
 //!    names, with QE already set, through the ROM's `SPIMasterReadModeCnfig`
 //!    — the C6's switch, the same checks (`fw_esp32_common::flash_read_mode`).
-//!    The list is empty today: FS3's part has not had its id read on
-//!    silicon, and a C6's evidence is not evidence for this controller. So
-//!    every S3 reads in DIO, and the boot line says why. **No status
+//!    The list holds the parts read and soaked on an S3 (the plain XIAO
+//!    S3's GigaDevice and the XIAO S3 Plus's Puya, 2026-10-29); a C6's
+//!    evidence is not evidence for this controller. Any other part reads in
+//!    DIO, and the boot line says why. **No status
 //!    register is ever written** (the C6 ADR's reason: `config_readmode`'s
 //!    `Enable_QMode` writes it when it reads QE clear, and a status write is
 //!    a non-volatile write).
