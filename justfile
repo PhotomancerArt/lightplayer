@@ -4567,7 +4567,7 @@ test-emu-esp32s3-lcd:
     cargo test -p lp-emu-esp32s3 --test lcd_cam_lanes --test lcd_backend_lanes -- --include-ignored --nocapture
 
 # Emulated Wi‑Fi on the S3 (S3 radio M5, the second half): `fw-esp32s3
-# --features wifi` (off by default) built, copied out of the shared target
+# --features wifi` (on by default since 2026-10-29) built, copied out of the shared target
 # path and merged, then `lp-cli/tests/emu_s3_lan_pair.rs`: two boards, each
 # joined alone over its USB link, then both on one runner-driven LAN — two
 # leases, each board's `lp-xxxx.local` answered on the segment, the same
