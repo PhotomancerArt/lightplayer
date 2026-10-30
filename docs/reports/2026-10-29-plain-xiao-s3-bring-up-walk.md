@@ -92,6 +92,15 @@ Soak: 20 reboots, each `[flash] 80 MHz, set before the core QIO (jedec
 `core.bin`. A project upload (tree-store writes under QIO), then a reboot:
 the project loaded and rendered at 66.6 fps. No status register was
 written. FS3's Puya part stays off the list until a sitting with FS3 soaks it.
+
+**FS3's Puya part, the same day.** FS3 (XIAO ESP32-S3 Plus, 16 MB, `85 20 18`,
+SR2 `0x02`, QE set at the factory) on the shipped image from main
+`3dc8a3527`, with its part added to the list: `[flash] 80 MHz, set before the
+core QIO (jedec 182085, sr2 02)` on 20 of 20 reboots, each hello's core
+SHA-256 equal to the built `core.bin`, the startup project loaded every time.
+A project upload written under QIO (the 2,048-LED `Core1 8x256`), then a
+reboot: it loaded and rendered. Skirt 620 five 55.6 → **65.8 fps**; core hash
+at boot 160 → 116 ms. No status register was written.
 Not run: an over-the-air update written by a QIO core.
 
 ## Wi‑Fi
