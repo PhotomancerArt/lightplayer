@@ -812,3 +812,13 @@ hours), and neither is an exit path on its own.
   180000 ms — killed.` ("a pipeline failure, not story drift"). The previous
   head of the same PR passed the job. Re-ran the failed job. Three hits since
   2026-10-23 makes the 180 s bound for a full capture the paydown to do.
+- 2026-10-31 — **two stories moved on a PR that cannot reach them.** #1334
+  (the card's Pattern instrument verbs: `StudioController::view` and
+  `connect_flow.rs` only, no web or fixture change) got a sticky comment
+  reporting 2 changed stories against its own base `da1b5c5b67`:
+  `board-card-offline-on-your-account` (the "met here · unplugged" card
+  captured without its "This board isn't plugged in." notice over the
+  picture) and `design-language__page`. Neither story builds a
+  `StudioController`; the stories use fixed fixtures (`STORY_BOARD_NOW`).
+  Read as capture nondeterminism, and merged as is. If the unplugged notice
+  goes missing again, look for a timing dependence in the card's cover.
