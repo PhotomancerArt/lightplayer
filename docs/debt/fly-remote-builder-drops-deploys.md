@@ -40,6 +40,10 @@ this entry.
   build; the re-run deployed.
 - 2026-10-29 11:09 UTC — #1329's merge (`f7c5cd770`): the same EOF at 98 s;
   re-run.
+- 2026-10-31 08:38 UTC — #1334's merge (`88ccd87ff`): the same EOF about
+  120 s into the build, while compiling `lp-cloud-server`; re-run with
+  `gh run rerun --failed`. The third hit in three days. Release firmware was
+  green, so only the Studio bundle waited.
 
 **Exit criteria** — a dropped builder stream no longer fails a deploy without
 a person: the deploy step retries the remote build once (or falls back to a
