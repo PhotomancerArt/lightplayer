@@ -125,3 +125,28 @@ texel centres map to ±1, and the pitch is one texel.
   would be a second `ScopeGeometry` source, and nothing here prevents it.
 - Deriving `render_size` from pitch was deferred by DD3.
 - Sample geometry (per-letter, along-stroke, wire-order patterns).
+
+## Amendment, 2026-10-29: the frame is the fixture's box
+
+Fixture and shader space (`2026-10-29-fixture-and-shader-space.md`) replaces this frame. What stays and what
+goes:
+
+- **The frame.** A shader no longer frames the lamps' bounds. It frames the
+  fixture's box (its map2d `view_box`) through the fixture's fit, whose
+  default is cover. Cover of a 1:1 view on a box is this decision's rule:
+  the long side runs −1…1, centred, y up. Long side versus short side is a
+  fit (cover versus contain), not a different interface.
+- **The name.** `"coords": "pattern"` becomes `"coords": "unit"`, and an
+  absent `coords` means `unit`. Pixel shaders become `shadertoy`.
+- **"Why lamp bounds and not the canvas"** is answered by how projects are
+  upgraded. A fixture fed by `unit` shaders gets the lamps' bounds as its
+  box, with cover. Its lamps sample what they did here, to within 2/65536.
+  The box is now visible and authored, not hidden.
+- **The uniforms.** `patternExtent`, `patternPitch` and `lampCount` keep
+  their names and are defined through the fixture's transform: the box as
+  the shader sees it, and the lamp pitch scaled by it.
+- **A request with no lamps.** Previews, probes and the bus render the
+  shader's default view (−1…1). The rule "every texel centre is a lamp" is
+  gone.
+- **The precision argument stands.** The transform is still an exact
+  integer affine on the host. It is now a 2×2 matrix, for rotation.

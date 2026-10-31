@@ -36,6 +36,19 @@ lpfs = { path = "../../lp-base/lpfs" }
 # (lpc-mapping, a dependency above, also checks the v11→v12 step's output
 # with the real reader, renderer and patcher rather than the step's own
 # arithmetic: lean Q6.)
+# The frozen format-12 sampling copy (`src/v12/`) is proved against the live
+# engine it was frozen from (`tests/v12_sampling_live.rs`), and the look
+# report (`tests/look_report.rs`) reads the same recorded frames: the engine,
+# the real CPU graphics tier behind a recorder, and the host's virtual
+# buttons and radio. Tests only — the library never reads the live engine.
+lpc-engine = { path = "../../lp-core/lpc-engine" }
+lp-gfx = { path = "../../lp-gfx/lp-gfx", default-features = false }
+lp-gfx-lpvm = { path = "../../lp-gfx/lp-gfx-lpvm", default-features = false }
+lp-shader = { path = "../../lp-shader/lp-shader", default-features = false }
+lps-shared = { path = "../../lp-shader/lps-shared", default-features = false }
+lpc-hardware = { path = "../../lp-core/lpc-hardware", default-features = false, features = ["std"] }
+# Per-thread ambient revision, as the engine's own tests take it.
+lpc-model = { path = "../../lp-core/lpc-model", features = ["test-support"] }
 
 [lints]
 workspace = true
