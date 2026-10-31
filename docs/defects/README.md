@@ -140,6 +140,10 @@ genuinely fits none of these, and define it here in one line.
   a member that tool actually does assign — so the gap survives
   exactly as long as nothing exercises that one member. Real toolchain
   output (a sequence transcription, not memory) is the only falsifier.
+- **`uptime-dependent-size`** — a payload's encoding grows with how long
+  the system has run (revision stamps, counters, uptimes written as
+  text), so every test taken at boot fits a hard limit the field crosses
+  hours later. Presents as "a reset fixes it".
 - **`retired-surface-still-reachable`** — a surface believed replaced is
   still rendered, because its replacement can be absent and the old
   surface is the fallback branch.
