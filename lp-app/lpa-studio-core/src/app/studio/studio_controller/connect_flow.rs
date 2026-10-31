@@ -133,10 +133,19 @@ impl StudioController {
     /// The connected board's panel at card size, while its session shows
     /// on its card and its project is ready: the project's root panel
     /// ([`crate::ProjectEditorView::root_module_face`]) picked by
-    /// [`crate::board_panel_picks`]. The editor's view is built into a
-    /// scratch offer tree, so none of the editor's node verbs are published
-    /// on the home page; the editor's own view is untouched.
-    pub(super) fn connected_board_panel(&self) -> Option<(DeviceId, crate::UiBoardPanel)> {
+    /// [`crate::board_panel_picks`], with the verbs its Pattern instruments
+    /// press.
+    ///
+    /// The editor's view is built into a scratch offer tree, so the
+    /// editor's node verbs stay off the home page; the editor's own view is
+    /// untouched. The one exception is what the card itself draws: each
+    /// Pattern instrument on the panel presses its playlist's live verbs
+    /// (`project/<playlist>/play`, `next`, `cycle`, …), so those come back
+    /// out of the scratch tree for the home page to publish. Without them
+    /// the instrument drew on the card with every button inert.
+    pub(super) fn connected_board_panel(
+        &self,
+    ) -> Option<(DeviceId, crate::UiBoardPanel, Vec<UiOffer>)> {
         let connected = self.connected()?;
         if connected.phase != ConnectPhase::Open || !self.connected_shows_on_its_card() {
             return None;
@@ -149,10 +158,9 @@ impl StudioController {
             return None;
         };
         let face = editor.root_module_face()?;
-        Some((
-            connected.device,
-            crate::board_panel_picks(&face.panel, face.auto_save),
-        ))
+        let panel = crate::board_panel_picks(&face.panel, face.auto_save);
+        let verbs = panel_pattern_verbs(&panel, &scratch);
+        Some((connected.device, panel, verbs))
     }
 
     /// The lens on session `id` attached: a connect's open is over.
@@ -850,4 +858,23 @@ impl StudioController {
             crate::app::open_progress::note_open_settled();
         }
     }
+}
+
+/// The playlist verbs every Pattern instrument on `panel` presses, taken
+/// from `scratch` (the editor view's offer tree): only those, so the card
+/// can play, step and hold its patterns while the rest of the editor's
+/// verbs stay off the home page.
+fn panel_pattern_verbs(panel: &crate::UiBoardPanel, scratch: &crate::UiOfferTree) -> Vec<UiOffer> {
+    panel
+        .controls()
+        .filter_map(|control| match &control.view.control.widget {
+            crate::UiPanelWidget::PatternPicker { picker } => Some(&picker.verbs),
+            _ => None,
+        })
+        .flat_map(|verbs| {
+            crate::app::project::node::playlist_offers::PLAYLIST_VERBS
+                .iter()
+                .filter_map(|verb| scratch.get(&verbs.clone().child(*verb)).cloned())
+        })
+        .collect()
 }
