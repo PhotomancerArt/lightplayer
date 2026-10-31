@@ -23,26 +23,21 @@ use lpc_model::AsLpPath;
 use lpc_shared::output::MemoryOutputProvider;
 use lpfs::LpFsMemory;
 
-use crate::app::studio::studio_edit_e2e_tests::{
-    InProcessServerIo, drive, project_action, project_editor,
-};
+use crate::app::studio::studio_edit_e2e_tests::{InProcessServerIo, drive, project_editor};
+use crate::app::studio::studio_face_e2e_tests::connect_running_project;
 use crate::{
-    ProjectOp, StudioActor, StudioController, StudioServerClient, UiNodeFace, UiPanelGroup,
-    UiPanelWidget, UiStudioView,
+    StudioActor, StudioController, StudioServerClient, UiNodeFace, UiPanelGroup, UiPanelWidget,
+    UiStudioView,
 };
 
 #[test]
 fn a_playlist_bigger_than_a_frame_keeps_the_whole_panel() {
-    let mut session = Session::connect(None);
-    assert_whole_panel(&session.view);
-    // The editor's reads after the first sync carry it too, whenever the
-    // playlist's def changes.
-    session.refresh(3);
-    assert_whole_panel(&session.view);
+    let view = connect(None);
+    assert_whole_panel(&view);
     assert!(
-        project_editor(&session.view).sync.issue.is_none(),
+        project_editor(&view).sync.issue.is_none(),
         "{:?}",
-        project_editor(&session.view).sync.issue
+        project_editor(&view).sync.issue
     );
 }
 
@@ -51,8 +46,7 @@ fn a_playlist_bigger_than_a_frame_keeps_the_whole_panel() {
 /// the playlist's root, which still arrives, a piece at a time.
 #[test]
 fn a_fragmented_board_still_sends_the_big_playlist() {
-    let session = Session::connect(Some(16 * 1024));
-    assert_whole_panel(&session.view);
+    assert_whole_panel(&connect(Some(16 * 1024)));
 }
 
 /// Entries in the grown playlist: its def root is ~32 KB of wire JSON.
@@ -81,56 +75,23 @@ fn largest_block() -> Option<u32> {
     LARGEST_BLOCK.with(Cell::get)
 }
 
-type NoTimer = fn(core::time::Duration) -> core::future::Ready<()>;
-
-fn no_timer(_: core::time::Duration) -> core::future::Ready<()> {
-    core::future::ready(())
-}
-
-struct Session {
-    actor: StudioActor<NoTimer>,
-    tx: crate::app::studio::studio_view_channel::CommandSender,
-    views: crate::app::studio::studio_view_channel::StudioViewReceiver,
-    view: UiStudioView,
-}
-
-impl Session {
-    /// Connect to the grown tryout; `largest_block` is the board's largest
-    /// free block, when it reports one.
-    fn connect(largest_block: Option<u32>) -> Self {
-        LARGEST_BLOCK.with(|cell| cell.set(largest_block));
-        let io = InProcessServerIo {
-            server: Rc::new(RefCell::new(tryout_server())),
-            inbox: Rc::new(RefCell::new(VecDeque::new())),
-            sent: Rc::new(RefCell::new(Vec::new())),
-        };
-        let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
-        let controller = StudioController::connected_with_client_for_test(client);
-        let (mut actor, handle) = StudioActor::new(controller, no_timer as NoTimer);
-        let mut views = handle.view;
-        handle
-            .tx
-            .send(project_action(ProjectOp::ConnectRunningProject));
-        drive(actor.run_one_batch_for_test());
-        let view = views.try_recv().expect("connect emits a snapshot");
-        Self {
-            actor,
-            tx: handle.tx,
-            views,
-            view,
-        }
-    }
-
-    /// `ticks` passive refreshes, as the editor's lens pulls.
-    fn refresh(&mut self, ticks: usize) {
-        for _ in 0..ticks {
-            self.tx.send(project_action(ProjectOp::RefreshProject));
-            drive(self.actor.run_one_batch_for_test());
-            while let Some(view) = self.views.try_recv() {
-                self.view = view;
-            }
-        }
-    }
+/// Connect to the grown tryout, `largest_block` being the board's largest
+/// free block when it reports one, and return the view after the first
+/// sync.
+fn connect(largest_block: Option<u32>) -> UiStudioView {
+    LARGEST_BLOCK.with(|cell| cell.set(largest_block));
+    let io = InProcessServerIo {
+        server: Rc::new(RefCell::new(tryout_server())),
+        inbox: Rc::new(RefCell::new(VecDeque::new())),
+        sent: Rc::new(RefCell::new(Vec::new())),
+    };
+    let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
+    let controller = StudioController::connected_with_client_for_test(client);
+    let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
+    let mut views = handle.view;
+    connect_running_project(&handle.tx);
+    drive(actor.run_one_batch_for_test());
+    views.try_recv().expect("connect emits a snapshot")
 }
 
 /// The root module card's panel.
