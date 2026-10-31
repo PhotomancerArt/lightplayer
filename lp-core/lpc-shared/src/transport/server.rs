@@ -33,6 +33,14 @@ pub trait ProjectReadEventSink {
 
     async fn send_project_read_event(&mut self, event: ProjectReadEvent)
     -> Result<(), Self::Error>;
+
+    /// The most encoded bytes one frame of this sink carries, when it cuts
+    /// the stream into frames; `None` when one event may be any size. An
+    /// event bigger than a frame fails the read, so the engine cuts what can
+    /// be cut (a big slot root) to fit.
+    fn frame_budget(&self) -> Option<usize> {
+        None
+    }
 }
 
 /// Trait for server-side transport implementations
@@ -378,6 +386,10 @@ where
         event: ProjectReadEvent,
     ) -> Result<(), Self::Error> {
         self.push_event(event).await
+    }
+
+    fn frame_budget(&self) -> Option<usize> {
+        Some(self.max_bytes)
     }
 }
 

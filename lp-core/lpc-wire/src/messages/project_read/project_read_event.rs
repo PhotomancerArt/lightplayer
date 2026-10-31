@@ -102,13 +102,43 @@ pub enum ProjectReadShapeEvent {
 /// Tree deltas and slot-root snapshots can be emitted as they are produced by
 /// the project mirror. Clients collect them into one node read result when they
 /// need the compatibility aggregate.
+///
+/// A slot root whose event would not fit the read's frame (see
+/// [`PROJECT_READ_SLOT_ROOT_FRAME_RESERVE_BYTES`](crate::PROJECT_READ_SLOT_ROOT_FRAME_RESERVE_BYTES))
+/// travels in pieces instead: [`SlotRootBegin`](Self::SlotRootBegin) (its name
+/// and shape), N × [`SlotRootBytes`](Self::SlotRootBytes) (consecutive pieces of
+/// the wire JSON of its `data`), then [`SlotRootEnd`](Self::SlotRootEnd). The
+/// client joins the pieces and decodes them into the same
+/// [`WireSlotRootSnapshot`] a whole `SlotRoot` carries. Nothing else may come
+/// between a `SlotRootBegin` and its `SlotRootEnd`.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum ProjectReadNodeEvent {
-    Begin { level: ReadLevel },
-    TreeDeltas { deltas: Vec<WireTreeDelta> },
+    Begin {
+        level: ReadLevel,
+    },
+    TreeDeltas {
+        deltas: Vec<WireTreeDelta>,
+    },
     SlotRoot(WireSlotRootSnapshot),
+    /// Opens a slot root sent in pieces: `byte_length` bytes of its `data`'s
+    /// wire JSON follow as [`SlotRootBytes`](Self::SlotRootBytes).
+    SlotRootBegin {
+        name: String,
+        shape: SlotShapeId,
+        byte_length: u32,
+    },
+    /// One consecutive piece of the open slot root's `data` JSON. `offset` is
+    /// the running byte position (a gap is a protocol error).
+    SlotRootBytes {
+        offset: u32,
+        #[cfg_attr(feature = "schema-gen", schemars(with = "String"))]
+        #[serde(with = "crate::serde_base64")]
+        bytes: Vec<u8>,
+    },
+    /// Closes the open slot root; its pieces now decode to its data.
+    SlotRootEnd,
     End,
 }
 
