@@ -143,6 +143,11 @@ impl QueryInternTable {
         self.keys.get(id.index())
     }
 
+    /// Every interned key, indexed by [`QueryId::index`].
+    pub fn keys_by_index(&self) -> &[Rc<QueryKey>] {
+        &self.keys
+    }
+
     pub fn len(&self) -> usize {
         self.keys.len()
     }

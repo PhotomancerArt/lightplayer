@@ -9,6 +9,7 @@
 //! remain available through convenience helpers, but the resolver can also
 //! carry maps, records, options, and receiver-owned merge results.
 
+pub mod payload_bytes;
 pub mod production;
 pub mod query_intern;
 pub mod query_key;
@@ -31,6 +32,6 @@ pub use resolve_trace::{
     ResolveLogLevel, ResolveTrace, ResolveTraceError, ResolveTraceEvent, TraceGuard,
 };
 pub use resolver::{ResolveFrameCounters, Resolver};
-pub use resolver_cache::ResolverCache;
+pub use resolver_cache::{RESOLVER_PAYLOAD_CAP_BYTES, ResolverCache};
 pub use route::ResolvedRoute;
 pub use tick_resolver::{SessionHostResolver, TickResolver};
