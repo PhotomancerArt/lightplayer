@@ -69,3 +69,11 @@ bound=violet convention); marching-squares outlines; convex hulls
 - Deferred: authored/custom outlines (the channel-letter full face),
   fusing strand-runs whose gap is below a threshold (dome cluster
   cohesion), preview-painter cells.
+
+## Amendment, 2026-10-29: no `sample_diameter` floor
+
+Fixture and shader space (`2026-10-29-fixture-and-shader-space.md`) removes the lamp size. Map2d format 6
+writes no `sample_diameter`, and fixtures point-sample. Decision 4's floors
+by `sample_diameter` therefore go: cell radius and outline reach come from
+the strand's pitch alone. A physical lamp size comes back only when a
+feature needs it.

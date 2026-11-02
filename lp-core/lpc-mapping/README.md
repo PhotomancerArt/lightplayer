@@ -157,10 +157,42 @@ compiles it. Its statements are `tests/edit.rs`:
 cargo test -p lpc-mapping --features edit
 ```
 
+## Space
+
+`space/` answers, for one fixture and one source: **given a lamp at a
+fixture-space point, which coordinate does the source see, or is the lamp
+dark?** The fixture's box is its `view_box` (`ViewBox`, y down). A source
+has a box of its own (`ProductBox`): a view for a shader (`unit`: −1…1, y
+up; `shadertoy`: pixels, y up, the fixture box's shape with N = 64 on its
+short side, N × N with no fixture) or an extent for something bounded (a
+fluid's grid). The fixture's `Fit` (contain, cover or fill; nine
+alignments; scale; rotation, clockwise as drawn) gives one affine T per
+source (`SpaceTransform`). The y flip is inside T. A lamp outside the box
+is `Dark`. A sample past a bounded extent is `Outside` until the fixture's
+`OutsideRule` (solid, clamp, wrap, mirror, per axis) resolves it. `unit`'s
+uniforms come through T (`UnitScope`), a 1D source lands as the fixture
+says (`Landing1d`), and along the order lamp `k` of `N` sits at `k/(N−1)`
+(`order_position_q16`).
+
+T is exact fixed point: built in `f64`, applied in integers to box-relative
+Q2.30 coordinates, with Q16.16 out, rounded to nearest. A 30,000-lamp strip's
+last lamp lands on exactly 1.0, and a 40 m box in millimetres does not
+overflow. Cover of the unit view on the lamps' own bounds gives today's
+pattern frame bit for bit. The statements are in `tests/space_statements.rs`:
+
+```sh
+cargo test -p lpc-mapping --test space_statements
+```
+
+Nothing in the engine calls it yet. The theory is planning
+`lp2025/2026-10-28-0935-fixture-space-theory` (`theory.md`), and the ADR
+"Fixture and shader space" will record it.
+
 ## Modules
 
 | Module | What |
 |---|---|
+| `space/` | Fixture and shader space: the box, the fit, T, the outside rule, the 1D landing, `unit`'s scope (above) |
 | `part/` | The parts, the rendered tree, ids, segments, `render`, `render_layout` (the same tree with no lamp placed: what a patch walks), `Tree::take_positions` (the engine's carrier takes the positions), `Mapping::same_layout` (a patching-only edit renders nothing) |
 | `patching/` | Starts, flows, overrides, the cursor, `patch_mapping`, `patch_mapping_placed` (no walk record: the engine's), spans, problems |
 | `map2d6/` | Format 6: its document structs, a small JSON reader (`json_text`, no serde on the read path), path data, `read`, `write`, `DEVICE_REFUSAL` |
