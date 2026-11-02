@@ -233,6 +233,56 @@ pub fn ser_write_json_len<T: Serialize>(value: &T) -> usize {
     }
 }
 
+/// Append bytes `offset .. offset + max` of `value`'s wire encoding to `out`
+/// (fewer at its end).
+///
+/// The value is serialized whole on every call and only the window is kept,
+/// so cutting a big value into pieces never needs one allocation of its
+/// whole encoding (a contiguous block a fragmented device heap may not
+/// have). Each piece costs one serialization pass. Goes through the same
+/// erased serializer instantiation as the real write (see
+/// [`ser_write_json_to`]).
+pub fn ser_write_json_slice<T: Serialize + ?Sized>(
+    value: &T,
+    offset: usize,
+    max: usize,
+    out: &mut alloc::vec::Vec<u8>,
+) -> Result<(), ErasedWriteError> {
+    let mut window = WindowSerWrite {
+        at: 0,
+        start: offset,
+        end: offset.saturating_add(max),
+        out,
+    };
+    ser_write_json_to(&mut window, value)
+}
+
+/// A [`SerWrite`] sink that keeps only the bytes in `start..end` of what is
+/// written to it.
+struct WindowSerWrite<'a> {
+    at: usize,
+    start: usize,
+    end: usize,
+    out: &'a mut alloc::vec::Vec<u8>,
+}
+
+impl SerWrite for WindowSerWrite<'_> {
+    type Error = core::convert::Infallible;
+
+    fn write(&mut self, buf: &[u8]) -> Result<(), Self::Error> {
+        let from = self.at;
+        let to = from.saturating_add(buf.len());
+        self.at = to;
+        let keep_from = from.max(self.start);
+        let keep_to = to.min(self.end);
+        if keep_from < keep_to {
+            self.out
+                .extend_from_slice(&buf[keep_from - from..keep_to - from]);
+        }
+        Ok(())
+    }
+}
+
 /// A 64-bit FNV-1a hash of `value`'s wire encoding, without allocating it.
 ///
 /// For content comparison of wire payloads the engine answers repeatedly —
@@ -292,6 +342,25 @@ mod tests {
     use alloc::vec;
     use lpc_model::Revision;
     use ser_write_json::ser::to_writer;
+
+    #[test]
+    fn slices_join_to_the_whole_encoding() {
+        let value = vec!["alpha".to_string(), "beta".to_string(), "gamma".to_string()];
+        let mut whole = alloc::vec::Vec::new();
+        ser_write_json_slice(&value, 0, usize::MAX, &mut whole).unwrap();
+        assert_eq!(whole.len(), ser_write_json_len(&value));
+        for piece in [1, 3, 7, whole.len()] {
+            let mut joined = alloc::vec::Vec::new();
+            let mut offset = 0;
+            while offset < whole.len() {
+                let before = joined.len();
+                ser_write_json_slice(&value, offset, piece, &mut joined).unwrap();
+                assert!(joined.len() - before <= piece);
+                offset += piece;
+            }
+            assert_eq!(joined, whole, "pieces of {piece}");
+        }
+    }
 
     #[test]
     fn counts_bytes_without_emitting() {

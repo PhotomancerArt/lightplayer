@@ -19,6 +19,10 @@ pub mod studio_actor;
 /// iterate → overlay-edit path (host-only, like the edit e2e tests).
 #[cfg(test)]
 mod studio_agent_e2e_tests;
+/// End-to-end: a slot root bigger than one read frame (the choker tryout's
+/// grown playlist) still reaches the card's panel.
+#[cfg(test)]
+mod studio_big_slot_root_e2e_tests;
 pub mod studio_command;
 pub mod studio_command_summary;
 pub mod studio_controller;
