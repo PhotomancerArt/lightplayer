@@ -830,3 +830,7 @@ hours), and neither is an exit path on its own.
   `StudioController`; the stories use fixed fixtures (`STORY_BOARD_NOW`).
   Read as capture nondeterminism, and merged as is. If the unplugged notice
   goes missing again, look for a timing dependence in the card's cover.
+- 2026-11-05 — **`oxipng` hit its 180 s bound a fourth time.** #1326's
+  `Validate story baselines` at `650fcbb5d` (a figures-only commit on top of
+  a head whose capture had passed) died on `oxipng did not exit within
+  180000 ms — killed.` Re-ran the failed job. Four hits since 2026-10-23.
