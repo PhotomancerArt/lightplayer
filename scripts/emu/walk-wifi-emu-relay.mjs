@@ -70,10 +70,8 @@
 // `lp-emu:esp32s3:t1+net=lan@<commit>`. Output in
 // `target/walk-wifi-emu/relay-s3/`.
 //
-// On the S3 the cell uploads no project: the `wifi` image's 136 KB arena runs
-// out compiling `projects/test/basic`'s shader with a relay session open
-// (docs/defects/2026-10-22-the-s3-wifi-image-runs-out-of-heap-with-a-project-loaded.md),
-// so P2 is the members-only half and P3/P4 watch a board with no lamps.
+// The S3 runs every step the C6 does, `projects/test/basic` included, since
+// PSRAM holds its heap (the S3 arm uploaded no project before that).
 //
 // NOT CI (the cell is). Needs the rv32 target and a firmware build
 // (`LP_EMU_BUILD_FW=1` builds it; `LP_CI_IMAGES` takes CI's). One
@@ -109,11 +107,9 @@ const STEPS = [
   ["R2", "registered by itself", [/\[relay\] leg open to lightplayer\.app/, ANSWERS("relay connected after boot", "connected")]],
   ["P1", "a picture right after registering", [/\[relay\] state=connected .*pictures [1-9]\d* idle/, SAYS("listed at relayProto 2, firmware "), SAYS("the hub holds the board's picture")]],
   ["R3", "a session through the relay", [/\[relay\] route \d+: link \S+, secure session opening/]],
-  S3
-    ? ["P2", "members only (no project: the S3 Wi‑Fi image's heap defect)", [SAYS("no upload over relay:"), SAYS("Bob and a guest read no picture \\(no project on this board\\)")]]
-    : ["P2", "the project's name and colours, members only", [SAYS('the hub lists the project "Basic"; Bob and a guest read no picture'), SAYS("the picture carries the project's colours")]],
+  ["P2", "the project's name and colours, members only", [SAYS('the hub lists the project "Basic"; Bob and a guest read no picture'), SAYS("the picture carries the project's colours")]],
   ["P3", "watched, then idle by itself", [{ first: /pictures \d+ watched/, then: /pictures \d+ idle/ }, SAYS("watched: seq "), SAYS("idle again by itself")]],
-  ["P4", "the heap while watched, a relay session open", [SAYS(`heap — ${S3 ? "no project" : "projects/test/basic loaded"}, relay registered, pictures watched, a relay session open \\(read through it\\): free`)]],
+  ["P4", "the heap while watched, a relay session open", [SAYS(`heap — projects/test/basic loaded, relay registered, pictures watched, a relay session open \\(read through it\\): free`)]],
   ["R4", "the same key takes the session on the LAN", [/closed \(taken over by the same key\)/]],
   ["R5", "another key is told busy", [/the network link is in use — busy/]],
   ["P5", "kept across a deploy, back with the board", [SAYS("(right after the deploy the new hub answers the stored picture, offline|the board was back before the new hub could be asked)"), SAYS("a picture is back with the board after the deploy")]],

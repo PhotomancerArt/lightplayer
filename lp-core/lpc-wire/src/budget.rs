@@ -95,6 +95,27 @@ const PROJECT_READ_RUNTIME_CHUNK_ASSERT: () = assert!(
     "runtime-buffer chunk (base64 + envelope reserve) must fit one project-read frame"
 );
 
+/// Room a slot root's event leaves in its frame for the envelope around it.
+///
+/// A slot root goes whole as one `SlotRoot` event when that event plus this
+/// reserve fits the read's frame (`ProjectReadEventSink::frame_budget`);
+/// otherwise it goes as `SlotRootBegin` → N × `SlotRootBytes` → `SlotRootEnd`
+/// (`ProjectReadNodeEvent`), each piece sized so its base64 plus this
+/// reserve fits the frame. The frame envelope (id, `seq`, `fin`, the
+/// `projectRead` wrapper) is under 100 B and a piece's own scaffolding
+/// (query index, offset) under 100 more.
+///
+/// Before pieces, a root bigger than its frame ended the read: the choker
+/// tryout's 25-entry playlist is a ~16 KB root whose every revision stamp
+/// grows a digit as the board's revision does, so on a board that had run
+/// a while every read that carried it failed
+/// (`docs/defects/2026-10-31-a-big-playlist-loses-the-panel-after-its-first-step.md`).
+pub const PROJECT_READ_SLOT_ROOT_FRAME_RESERVE_BYTES: usize = 256;
+
+/// The smallest piece a slot root is cut into, whatever the frame: below
+/// it the reserve is most of every event.
+pub const PROJECT_READ_SLOT_ROOT_MIN_PIECE_BYTES: usize = 256;
+
 /// Reserve for the per-entry `FileChunk` + envelope JSON around one file-sync
 /// chunk (path, kind, offsets, `FsResponse::Changes` + envelope scaffolding).
 const FILE_SYNC_CHUNK_ENVELOPE_RESERVE_BYTES: usize = 1024;

@@ -592,7 +592,18 @@ struct NodeState {
     level: Option<ReadLevel>,
     deltas: Vec<WireTreeDelta>,
     roots: Vec<WireSlotRootSnapshot>,
+    /// A slot root arriving in pieces (`SlotRootBegin` .. `SlotRootEnd`).
+    pending_root: Option<PendingSlotRoot>,
     ended: bool,
+}
+
+/// A slot root sent in pieces, being joined.
+#[derive(Debug)]
+struct PendingSlotRoot {
+    name: String,
+    shape: lpc_model::SlotShapeId,
+    byte_length: u32,
+    bytes: Vec<u8>,
 }
 
 impl NodeState {
@@ -609,15 +620,86 @@ impl NodeState {
             }
             ProjectReadNodeEvent::SlotRoot(root) => {
                 self.ensure_open("slot root")?;
+                self.ensure_no_pending_root("slot root")?;
                 self.roots.push(root);
+            }
+            ProjectReadNodeEvent::SlotRootBegin {
+                name,
+                shape,
+                byte_length,
+            } => {
+                self.ensure_open("slot root begin")?;
+                self.ensure_no_pending_root("slot root begin")?;
+                self.pending_root = Some(PendingSlotRoot {
+                    name,
+                    shape,
+                    byte_length,
+                    bytes: Vec::new(),
+                });
+            }
+            ProjectReadNodeEvent::SlotRootBytes { offset, bytes } => {
+                let pending = self
+                    .pending_root
+                    .as_mut()
+                    .ok_or_else(|| protocol("slot root bytes arrived before slot root begin"))?;
+                if offset as usize != pending.bytes.len() {
+                    return Err(protocol(format!(
+                        "slot root {} bytes at offset {offset}, expected {}",
+                        pending.name,
+                        pending.bytes.len()
+                    )));
+                }
+                if pending.bytes.len() + bytes.len() > pending.byte_length as usize {
+                    return Err(protocol(format!(
+                        "slot root {} overran its {} bytes",
+                        pending.name, pending.byte_length
+                    )));
+                }
+                pending.bytes.extend_from_slice(&bytes);
+            }
+            ProjectReadNodeEvent::SlotRootEnd => {
+                let pending = self
+                    .pending_root
+                    .take()
+                    .ok_or_else(|| protocol("slot root end arrived before slot root begin"))?;
+                if pending.bytes.len() != pending.byte_length as usize {
+                    return Err(protocol(format!(
+                        "slot root {} ended at {} of {} bytes",
+                        pending.name,
+                        pending.bytes.len(),
+                        pending.byte_length
+                    )));
+                }
+                let data = lpc_wire::json::from_slice(&pending.bytes).map_err(|error| {
+                    protocol(format!(
+                        "slot root {} did not decode: {error}",
+                        pending.name
+                    ))
+                })?;
+                self.roots.push(WireSlotRootSnapshot {
+                    name: pending.name,
+                    shape: pending.shape,
+                    data,
+                });
             }
             ProjectReadNodeEvent::End => {
                 self.ensure_open("node end")?;
+                self.ensure_no_pending_root("node end")?;
                 self.ended = true;
                 return Ok(true);
             }
         }
         Ok(false)
+    }
+
+    fn ensure_no_pending_root(&self, label: &str) -> Result<(), ProjectReadApplyStreamError> {
+        match &self.pending_root {
+            Some(pending) => Err(protocol(format!(
+                "{label} arrived inside slot root {}",
+                pending.name
+            ))),
+            None => Ok(()),
+        }
     }
 
     fn apply_to(
@@ -1108,6 +1190,86 @@ mod tests {
                 .registry
                 .entry(&value_shape_id("shape.b"))
                 .is_some()
+        );
+    }
+
+    // ---- A slot root sent in pieces ----
+
+    /// `root` as `SlotRootBegin`, its data JSON in pieces of `piece` bytes,
+    /// and `SlotRootEnd`, all under node query 0.
+    fn root_in_pieces(root: &WireSlotRootSnapshot, piece: usize) -> Vec<ProjectReadEvent> {
+        let json = lpc_wire::json::to_string(&root.data).unwrap().into_bytes();
+        let mut events = vec![q(
+            0,
+            nodes(ProjectReadNodeEvent::SlotRootBegin {
+                name: root.name.clone(),
+                shape: root.shape,
+                byte_length: json.len() as u32,
+            }),
+        )];
+        for (index, bytes) in json.chunks(piece).enumerate() {
+            events.push(q(
+                0,
+                nodes(ProjectReadNodeEvent::SlotRootBytes {
+                    offset: (index * piece) as u32,
+                    bytes: bytes.to_vec(),
+                }),
+            ));
+        }
+        events.push(q(0, nodes(ProjectReadNodeEvent::SlotRootEnd)));
+        events
+    }
+
+    fn nodes_stream(rev: i64, body: Vec<ProjectReadEvent>) -> Vec<ProjectReadEvent> {
+        let mut events = vec![
+            begin(rev),
+            q(
+                0,
+                nodes(ProjectReadNodeEvent::Begin {
+                    level: ReadLevel::Detail,
+                }),
+            ),
+        ];
+        events.extend(body);
+        events.push(q(0, nodes(ProjectReadNodeEvent::End)));
+        events.push(end(rev));
+        events
+    }
+
+    #[test]
+    fn a_slot_root_in_pieces_applies_like_a_whole_one() {
+        let registry = value_registry(&["shape.a"], 1);
+        let root = value_root(&registry, "node.1.state", value_shape_id("shape.a"), 42.0);
+        let mut view = populated_view();
+        apply_stream(&mut view, nodes_stream(7, root_in_pieces(&root, 5))).unwrap();
+        assert_eq!(f32_root_value(&view, "node.1.state"), 42.0);
+    }
+
+    #[test]
+    fn a_gap_in_a_slot_roots_pieces_is_a_protocol_error() {
+        let registry = value_registry(&["shape.a"], 1);
+        let root = value_root(&registry, "node.1.state", value_shape_id("shape.a"), 42.0);
+        let mut pieces = root_in_pieces(&root, 5);
+        pieces.remove(2);
+        let mut view = populated_view();
+        let error = apply_stream(&mut view, nodes_stream(7, pieces)).unwrap_err();
+        assert!(
+            matches!(&error, ProjectReadApplyStreamError::Protocol(message) if message.contains("offset")),
+            "{error:?}"
+        );
+    }
+
+    #[test]
+    fn nothing_comes_between_a_slot_roots_pieces() {
+        let registry = value_registry(&["shape.a"], 1);
+        let root = value_root(&registry, "node.1.state", value_shape_id("shape.a"), 42.0);
+        let mut pieces = root_in_pieces(&root, 5);
+        pieces.insert(2, q(0, nodes(ProjectReadNodeEvent::SlotRoot(root.clone()))));
+        let mut view = populated_view();
+        let error = apply_stream(&mut view, nodes_stream(7, pieces)).unwrap_err();
+        assert!(
+            matches!(&error, ProjectReadApplyStreamError::Protocol(message) if message.contains("inside slot root")),
+            "{error:?}"
         );
     }
 

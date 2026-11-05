@@ -226,7 +226,7 @@ pub fn lcd_lanes_image() -> Result<PathBuf, String> {
 }
 
 /// The environment variable naming the **Wi‑Fi** ELF — `fw-esp32s3` built
-/// with `wifi` (S3 radio M4; off by default): the shipped app with the
+/// with `wifi` (S3 radio M4; on by default since 2026-10-29): the shipped app with the
 /// station, the LAN link and the relay, whose network seam an emulator
 /// answers with a virtual LAN (`net=lan`, M5). On its own variable for the
 /// one-path trap's reason.

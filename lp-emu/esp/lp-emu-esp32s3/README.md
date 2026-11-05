@@ -1028,9 +1028,9 @@ seams and heap (x64)`, a job of its own, which also runs the S3's heap
 ratchet).
 
 **The `wifi` image declares the network seam** (S3 radio M5's second half;
-`fw-esp32s3 --features wifi`, off by default): a default run engages
+`fw-esp32s3 --features wifi`, on by default since 2026-10-29): a default run engages
 `net=lan`, the firmware says `[wifi] network: the emulator's network seam`,
-and the label is `lp-emu:esp32s3:t1+net=lan`. An image without `wifi` has no
+and the label is `lp-emu:esp32s3:t1+net=lan`. An image built without `wifi` has no
 network stack and declares no seam, so every default run on it says `SEAM none
 engaged: no seam table` and its label stays `lp-emu:esp32s3:t1`.
 `just test-emu-esp32s3-wifi` builds and merges the `wifi` image and runs
@@ -1039,10 +1039,10 @@ link, then both on one runner-driven LAN (two leases, each board's
 `lp-xxxx.local` answered, the same frame log twice). `emu serve --chip
 esp32s3` holds S3 boards on a served LAN (`lan=<name>`, a forward each), and
 `just walk-wifi-emu lan --s3` walks Studio over `?lan=` against two of them
-(docs/reports/2026-10-22-s3-wifi-emulator-walk.md). With Peach (1D) loaded,
-the image's heap runs short and the board resets
-(docs/defects/2026-10-22-the-s3-wifi-image-runs-out-of-heap-with-a-project-loaded.md);
-`WALK_PROJECT="Fiber Headband"` fits.
+(docs/reports/2026-10-22-s3-wifi-emulator-walk.md). Before PSRAM held the
+heap, a project the size of Peach (1D) ran it short
+(docs/defects/2026-10-22-the-s3-wifi-image-runs-out-of-heap-with-a-project-loaded.md,
+fixed); the relay cell's S3 arm now loads `projects/test/basic` like the C6's.
 
 ⚠️ **A harness that takes an interrupt must arm `CPENABLE` first.** esp-hal's
 interrupt entry saves the FP registers, and this machine's `CPENABLE` resets

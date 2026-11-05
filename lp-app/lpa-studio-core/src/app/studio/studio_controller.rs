@@ -3611,8 +3611,14 @@ impl StudioController {
             }
             self.publish_device_offers(&mut offers);
             // Each board's card points at the verbs just published; the
-            // connected board's carries its panel.
-            let panel = self.connected_board_panel();
+            // connected board's carries its panel, and the playlist verbs
+            // its Pattern instrument presses are published with it.
+            let panel = self.connected_board_panel().map(|(device, panel, verbs)| {
+                for verb in verbs {
+                    offers.publish(verb);
+                }
+                (device, panel)
+            });
             home.devices.cards = crate::roster_board_cards(&self.roster_cards_input(
                 &home.devices,
                 &offers,

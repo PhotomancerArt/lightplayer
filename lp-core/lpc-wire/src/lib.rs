@@ -17,6 +17,9 @@ extern crate alloc;
 extern crate std;
 
 pub mod budget;
+pub use budget::{
+    PROJECT_READ_SLOT_ROOT_FRAME_RESERVE_BYTES, PROJECT_READ_SLOT_ROOT_MIN_PIECE_BYTES,
+};
 pub mod console_line;
 pub mod device_name;
 pub mod json;
@@ -115,7 +118,7 @@ pub use project_overlay::{
 #[cfg(feature = "ser-write-json")]
 pub use ser_write::{
     CountingSerWrite, ErasedWriteError, WireWriteError, ser_learned_to, ser_write_json_fnv64,
-    ser_write_json_len, ser_write_json_to,
+    ser_write_json_len, ser_write_json_slice, ser_write_json_to,
 };
 pub use server::{
     AccessEntryInfo, AvailableProject, BatchOp, BuildFacts, ConnectStep, FAULT_MESSAGE_CAP_BYTES,

@@ -348,9 +348,9 @@ the app through the same view model and presses the same actions. See
   is a relay client **in the core** (`fw-esp32-radio/src/net/relay_task.rs` on
   `lp-net`, the loop in `fw-esp32-common/src/net/relay/`): it dials only when
   joined, Cloud relay is on and it holds an account key, and
-  `NetworkStatus.relay` says how far it got. The S3's `wifi` image (off by
-  default) runs the same client (S3 radio M6; walked emulated, silicon
-  owed). The product image always dials
+  `NetworkStatus.relay` says how far it got. The S3 runs the same client
+  (`wifi`, on by default since 2026-10-29; S3 radio M6): walked emulated,
+  and on FS3 it registered with lightplayer.app by itself. The product image always dials
   `lightplayer.app:80`; `LP_RELAY_HOST=<host>[:port]` at build time makes a
   desk image that dials another host and says so at boot — never a release
   build. Relay links are `LinkTrust::Relayed`: the board's "Anyone" setting
@@ -666,7 +666,7 @@ runtime.
 | `lpc-update`     | OTA update protocol v1 (channel 3): codec, board manifest, progress record, and the board's sans-IO update session | yes |
 | `lpa-update`     | OTA host side: serving, backup, login client, decision, update driver; feature `pack` = the one packer of encoding 1 | no (host + wasm) |
 | `fw-esp32c6`       | ESP32 firmware                         | yes (bare metal) |
-| `fw-esp32-radio`   | The radio glue the chip crates share (`lp-fw/`): the ESP-NOW driver and the radio's one bring-up, the BLE link, the network on `lp-net` (station, IP stack, LAN endpoint, mDNS, relay). Depends on esp-hal/esp-radio, which `fw-esp32-common` may not; chip facts (BLE controller config, board quirks, thread sizes, hooks) come in from the chip crate. Consumers: `fw-esp32c6`, `fw-esp32s3` (`radio`/`ble`/`wifi`, off by default until walked) | yes (bare metal) |
+| `fw-esp32-radio`   | The radio glue the chip crates share (`lp-fw/`): the ESP-NOW driver and the radio's one bring-up, the BLE link, the network on `lp-net` (station, IP stack, LAN endpoint, mDNS, relay). Depends on esp-hal/esp-radio, which `fw-esp32-common` may not; chip facts (BLE controller config, board quirks, thread sizes, hooks) come in from the chip crate. Consumers: `fw-esp32c6`, `fw-esp32s3` (`ble`, `espnow` and `wifi` on by default) | yes (bare metal) |
 | `fw-esp32c6-loader` | The C6 split image's RAM-only loader: boots the core a boot record names (standalone crate, own workspace). Two flavours: the factory loader the IDF bootloader starts, and (`--features bootloader`) LightPlayer's own second stage at flash `0x0`, the C6's boot path since 2026-10-17 — every split image must boot through **both** (`lp-emu-esp32c6/tests/split_boot.rs`, `second_stage.rs`; `docs/adr/2026-10-17-the-c6-boots-through-our-own-bootloader.md`) | yes (bare metal) |
 | `lp-fw-split`    | Host tool: the two-pass split link, its verifier and layout, for the C6 and (a chip profile, GNU ld's Xtensa output) the S3 (`tools/`; `docs/adr/2026-10-04-c6-split-link-firmware-loader-and-boot-records.md`, `2026-10-23-the-s3-ships-a-split-image.md`) | no (host) |
 | `fw-esp32s3-loader` | The S3 split image's RAM-only loader, the C6 loader's job on the S3's machine: layout 2, the S3's MMU, the reset table `ResetKind::from_s3_reason`. Started by the ESP-IDF bootloader only (our own S3 second stage is future work). Its MMU and RAM claims bind every S3 core (`docs/adr/2026-10-23-the-s3-ships-a-split-image.md` §3) | yes (bare metal) |
@@ -1707,9 +1707,9 @@ their own rules: `docs/adr/2026-10-05-emulator-seams.md`.
 The C6 and, since S3 radio M5, the **S3** answer seams (Xtensa: a `movi`
 hint, a windowed call through a volatile pointer, answered at a `break` over
 the `entry` before the window rotates — the ADR's §13; the wake is
-`SYSTEM.cpu_intr_from_cpu_3`). On the S3 the `wifi` image (off by default)
-declares the network seam, so it runs `net=lan` like the C6; an S3 image
-without `wifi` declares none. `just test-emu-esp32s3-wifi` is two S3s on one
+`SYSTEM.cpu_intr_from_cpu_3`). On the S3 the `wifi` image (on by default since
+2026-10-29) declares the network seam, so it runs `net=lan` like the C6; an
+S3 image built without `wifi` declares none. `just test-emu-esp32s3-wifi` is two S3s on one
 LAN (CI), `just walk-wifi-emu lan --s3` the walk.
 
 - **Two kinds.** A *capability* seam stands in for hardware the emulator

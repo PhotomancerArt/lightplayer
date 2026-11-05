@@ -820,3 +820,13 @@ hours), and neither is an exit path on its own.
   make. Likely cause: the field is focused on mount and commits on blur, so a
   capture that moves focus closes it. The paydown is a preview that does not
   close on blur.
+- 2026-10-31 — **two stories moved on a PR that cannot reach them.** #1334
+  (the card's Pattern instrument verbs: `StudioController::view` and
+  `connect_flow.rs` only, no web or fixture change) got a sticky comment
+  reporting 2 changed stories against its own base `da1b5c5b67`:
+  `board-card-offline-on-your-account` (the "met here · unplugged" card
+  captured without its "This board isn't plugged in." notice over the
+  picture) and `design-language__page`. Neither story builds a
+  `StudioController`; the stories use fixed fixtures (`STORY_BOARD_NOW`).
+  Read as capture nondeterminism, and merged as is. If the unplugged notice
+  goes missing again, look for a timing dependence in the card's cover.

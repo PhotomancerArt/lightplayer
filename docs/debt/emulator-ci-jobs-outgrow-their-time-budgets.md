@@ -99,6 +99,14 @@ Stacked PRs feel it first, because they carry several features' tests at once.
   (largestFreeBlock 73,744; stackHighWater 12,208 B in its band). The job
   wants the split this entry prescribes (the ratchet into its own job, or
   PSRAM's 10 minutes out); not done here.
+- 2026-10-29 — PR #1333 (the S3's `wifi` on by default), run 40977967976:
+  `Emulator ESP32-S3 seams and heap (x64)` cancelled at its 30-minute budget
+  in the heap-ratchet step, five minutes in, every earlier step passed.
+  The PR's own cause: the relay cell's S3 arm loads `projects/test/basic`
+  again (8.4 min on the runner, from 3.3), beside seams 1.5, LCD 0.5, PSRAM 10
+  and Wi‑Fi 3.4. Split, not bumped: the Wi‑Fi and relay cells are
+  `Emulator ESP32-S3 Wi-Fi and relay (x64)`, their own job, which also pays
+  down 2026-10-28's note above (the ratchet had never completed there).
 
 **Exit criteria** — each emulator job's budget sits at 2–3× its measured max
 with room to spare, and adding a device test names the job it lands in and that

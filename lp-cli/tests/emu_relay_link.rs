@@ -324,39 +324,27 @@ fn relay_walk(image: &BoardImage) {
     // environment while it runs.
     unsafe { std::env::set_var("LP_CLOUD_SESSION", &alice.session) };
     let relay_spec = format!("relay:{board_id}@{}", cloud.origin());
-    let runs_basic = image.runs_basic();
-    if runs_basic {
-        if let Err(error) = handle_upload(UploadArgs {
-            dir: workspace_dir().join("projects/test/basic"),
-            host: relay_spec.clone(),
-            password: Default::default(),
-            no_wait: false,
-            wait_timeout_secs: 300,
-        }) {
-            panic!(
-                "`lp-cli upload projects/test/basic {relay_spec}` failed: {error:#}\n`emu run` \
-                 said:\n{}",
-                board.output()
-            );
-        }
-        eprintln!("emu_relay_link: an upload over {relay_spec}");
-    } else {
-        eprintln!(
-            "emu_relay_link: no upload over {relay_spec}: this image cannot compile the \
-             project's shader with a relay session open ({S3_BASIC_DEFECT})"
+    if let Err(error) = handle_upload(UploadArgs {
+        dir: workspace_dir().join("projects/test/basic"),
+        host: relay_spec.clone(),
+        password: Default::default(),
+        no_wait: false,
+        wait_timeout_secs: 300,
+    }) {
+        panic!(
+            "`lp-cli upload projects/test/basic {relay_spec}` failed: {error:#}\n`emu run` \
+             said:\n{}",
+            board.output()
         );
     }
-    let loaded = if runs_basic {
-        "projects/test/basic loaded"
-    } else {
-        "no project"
-    };
+    eprintln!("emu_relay_link: an upload over {relay_spec}");
+    let loaded = "projects/test/basic loaded";
 
     // P2. The board reports the project it now runs (its name in the clear;
     // its uid only as a keyed tag, never shown here); the hub lists it. Only
     // the accounts the board proved read its picture.
     let named = Instant::now();
-    while runs_basic {
+    loop {
         let list = cloud.online_boards(&alice.session);
         let project = list.first().and_then(|b| b.project.clone());
         if project.as_deref() == Some(BASIC_NAME) {
@@ -381,14 +369,9 @@ fn relay_walk(image: &BoardImage) {
         guest_reads.pictures.is_empty(),
         "a guest reads {guest_reads:?}"
     );
-    if runs_basic {
-        eprintln!(
-            "emu_relay_link: the hub lists the project {BASIC_NAME:?}; Bob and a guest read no \
-             picture"
-        );
-    } else {
-        eprintln!("emu_relay_link: Bob and a guest read no picture (no project on this board)");
-    }
+    eprintln!(
+        "emu_relay_link: the hub lists the project {BASIC_NAME:?}; Bob and a guest read no picture"
+    );
 
     // The gate case (plan A3): projects/test/basic loaded, the relay
     // registered and a session open through it. The heap is read through
@@ -422,34 +405,32 @@ fn relay_walk(image: &BoardImage) {
         wait_heartbeat(&board, mark, RELAY_NET, "watched", |beat| {
             beat.state == "connected" && beat.mode == "watched"
         });
-        if runs_basic {
-            let lit = watcher.wait(&board, "a picture of the project's lamps", |p| lamps(p) > 0);
-            let samples = colours(&lit).len() / 3;
-            assert_eq!(
-                colours(&lit).len(),
-                3 * samples,
-                "three bytes a sample: {lit:?}"
-            );
-            assert!(
-                (1..=256).contains(&samples) && samples as u64 <= lamps(&lit),
-                "1 ≤ count ≤ min(256, lamps): {samples} samples of {} lamps",
-                lamps(&lit)
-            );
-            assert!(
-                colours(&lit).iter().any(|&b| b != 0),
-                "the project renders: its picture is not all dark: {lit:?}"
-            );
-            eprintln!(
-                "emu_relay_link: the picture carries the project's colours (seq {}, outputs {:?}, \
-             {samples} samples, {} lit)",
-                lit.seq,
-                lit.outputs,
-                colours(&lit)
-                    .chunks(3)
-                    .filter(|rgb| rgb.iter().any(|&b| b != 0))
-                    .count()
-            );
-        }
+        let lit = watcher.wait(&board, "a picture of the project's lamps", |p| lamps(p) > 0);
+        let samples = colours(&lit).len() / 3;
+        assert_eq!(
+            colours(&lit).len(),
+            3 * samples,
+            "three bytes a sample: {lit:?}"
+        );
+        assert!(
+            (1..=256).contains(&samples) && samples as u64 <= lamps(&lit),
+            "1 ≤ count ≤ min(256, lamps): {samples} samples of {} lamps",
+            lamps(&lit)
+        );
+        assert!(
+            colours(&lit).iter().any(|&b| b != 0),
+            "the project renders: its picture is not all dark: {lit:?}"
+        );
+        eprintln!(
+            "emu_relay_link: the picture carries the project's colours (seq {}, outputs {:?}, \
+         {samples} samples, {} lit)",
+            lit.seq,
+            lit.outputs,
+            colours(&lit)
+                .chunks(3)
+                .filter(|rgb| rgb.iter().any(|&b| b != 0))
+                .count()
+        );
         let first_seq = watcher.first_seq();
         let moved = watcher.wait(&board, "three more pictures while watched", |p| {
             p.seq >= first_seq + 3
@@ -1397,19 +1378,7 @@ enum BoardImage {
     S3(PathBuf),
 }
 
-/// Why the S3 arm runs no project (see [`BoardImage::runs_basic`]).
-const S3_BASIC_DEFECT: &str =
-    "docs/defects/2026-10-22-the-s3-wifi-image-runs-out-of-heap-with-a-project-loaded.md";
-
 impl BoardImage {
-    /// Whether the walk uploads `projects/test/basic` and checks what it
-    /// renders. Not on the S3's Wi‑Fi image yet: its 136 KB arena runs out
-    /// compiling the shader with a relay session open ([`S3_BASIC_DEFECT`],
-    /// the heap is the plan's M10). Every relay step still runs there.
-    fn runs_basic(&self) -> bool {
-        matches!(self, Self::C6(_))
-    }
-
     /// The configuration its figures are quoted on.
     fn configuration(&self) -> &'static str {
         match self {

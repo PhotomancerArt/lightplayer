@@ -18,6 +18,7 @@ default = [
     "heap-dram2",
     "ble",
     "espnow",
+    "wifi",
     "psram",
     "lcd-ws281x",
     "two-core",
@@ -169,7 +170,10 @@ espnow = ["radio"]
 # at `ws://<board>/link` and `lp-xxxx.local`, and dials lightplayer.app's
 # relay when Cloud relay is on and it holds an account key. The thread, the
 # station, the LAN endpoint, mDNS and the relay are `fw_esp32_radio::net`;
-# this chip's facts are `src/net/`.
+# this chip's facts are `src/net/`. On by default since 2026-10-29: FS3 (the
+# XIAO S3 Plus) and XS1 (the plain XIAO S3) each joined 10 of 10 at the
+# 15 dBm cap, inside the radio frame-rate budget. A board with no saved
+# network never scans.
 wifi = [
     "ble",
     "espnow",

@@ -733,7 +733,8 @@ fn the_opening_frames_connect_keeps_the_editor_open() {
 /// group under its name — the root panel's own controls, every one. Done is the primary, and the ⋯
 /// holds the panel's reset and, on USB (the edit tier), auto-save. The
 /// editor's view is built to draw them, and none of its verbs are published
-/// on the home page.
+/// on the home page but the ones the card's Pattern instrument presses
+/// (`the_cards_pattern_instrument_steps_and_holds`).
 #[test]
 fn the_connected_card_carries_the_panel() {
     let (mut bench, _tasks, _device, id, _uid) =
@@ -808,6 +809,105 @@ fn the_connected_card_carries_the_panel() {
     assert_eq!(panel.sections, picks.sections);
     assert_eq!(panel.target, picks.target);
     assert_eq!(panel.auto_save, picks.auto_save);
+}
+
+/// The card's Pattern instrument plays: its playlist's verbs are published
+/// on the home page (only those: the editor's other verbs stay off it), so
+/// the card can step to the next pattern and turn the cycle off to stay on
+/// it, pressed by path, and the board takes both. Before, the instrument
+/// drew on the card with every button inert, and a festival phone could
+/// not stop the cycle from the card.
+#[test]
+fn the_cards_pattern_instrument_steps_and_holds() {
+    let (mut bench, tasks, _device, id, _uid) =
+        running_library_board("dev000000cnct000020", "usb-conn-20");
+    bench.press_device(id, "connect", OfferArgs::new());
+
+    let picker = card_picker(&bench, id);
+    let authored_cycling = picker.cycling();
+    let verbs = picker.verbs.clone();
+    for verb in [
+        crate::PLAYLIST_NEXT_VERB,
+        crate::PLAYLIST_PREV_VERB,
+        crate::PLAYLIST_PLAY_VERB,
+        crate::PLAYLIST_CYCLE_VERB,
+    ] {
+        bench.offered(verbs.clone().child(verb));
+    }
+    bench.not_offered("project/add-node");
+
+    // The cycle on, from the card.
+    bench
+        .press(
+            verbs.clone().child(crate::PLAYLIST_CYCLE_VERB),
+            OfferArgs::new().with(crate::PLAYLIST_CYCLING_PARAM, "true"),
+        )
+        .expect("the board takes the cycle");
+    bench.run_until(&tasks, "the card to say it cycles", |bench| {
+        card_picker(bench, id).cycling()
+    });
+
+    // Next: a pick of the neighbouring pattern, which the board's panel
+    // reads back as held. (This fake's playlist does not report the switch
+    // itself; the Pattern instrument's own e2e tests and the emulated walk
+    // prove the board plays it.)
+    assert!(
+        !card_picker(&bench, id)
+            .entry_target
+            .is_some_and(|target| target.engaged),
+        "nothing picked yet"
+    );
+    let notices = bench
+        .press(
+            verbs.clone().child(crate::PLAYLIST_NEXT_VERB),
+            OfferArgs::new(),
+        )
+        .expect("the board takes the pick");
+    assert!(notices.notices.is_empty(), "accepted: {notices:?}");
+    bench.run_until(&tasks, "the board to hold the pick", |bench| {
+        card_picker(bench, id)
+            .entry_target
+            .is_some_and(|target| target.engaged)
+    });
+
+    // Cycle off: stay on the pattern playing.
+    let notices = bench
+        .press(
+            verbs.clone().child(crate::PLAYLIST_CYCLE_VERB),
+            OfferArgs::new().with(crate::PLAYLIST_CYCLING_PARAM, "false"),
+        )
+        .expect("the board takes the hold");
+    assert!(notices.notices.is_empty(), "accepted: {notices:?}");
+    bench.run_until(&tasks, "the card to say it holds", |bench| {
+        !card_picker(bench, id).cycling()
+    });
+    // …and Reset gives the playlist back to what was authored.
+    bench
+        .press(
+            verbs.clone().child(crate::PLAYLIST_RESET_VERB),
+            OfferArgs::new(),
+        )
+        .expect("reset lets the hold go");
+    bench.run_until(&tasks, "the authored cycle to come back", |bench| {
+        let picker = card_picker(bench, id);
+        picker.cycling() == authored_cycling
+            && !picker.cycle_target.as_ref().is_some_and(|t| t.engaged)
+    });
+    assert_card_offers(&bench, id);
+}
+
+/// The Pattern instrument on `device`'s connected card.
+#[track_caller]
+fn card_picker(bench: &DeviceBench, device: crate::DeviceId) -> crate::UiPatternPicker {
+    the_card(bench, device)
+        .panel
+        .expect("the panel")
+        .controls()
+        .find_map(|control| match &control.view.control.widget {
+            crate::UiPanelWidget::PatternPicker { picker } => Some(picker.clone()),
+            _ => None,
+        })
+        .expect("the Pattern instrument on the card")
 }
 
 /// CD8 (#571's test, redone on Connect): while the session holds the wire

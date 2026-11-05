@@ -1,6 +1,7 @@
 //! Streaming project-read response/event writer for [`Engine`].
 
 use alloc::string::String;
+use alloc::vec::Vec;
 use lpc_registry::ProjectRegistry;
 use lpc_shared::transport::ProjectReadEventSink;
 use lpc_wire::{
@@ -205,12 +206,7 @@ impl<'a> EngineProjectReadSource<'a> {
                         self.engine
                             .iter_node_slot_roots(self.registry, since_rev, &selection)
                     {
-                        send_query_event(
-                            sink,
-                            index,
-                            ProjectReadQueryEvent::Nodes(ProjectReadNodeEvent::SlotRoot(root)),
-                        )
-                        .await?;
+                        stream_slot_root(index, root, sink).await?;
                     }
                 }
                 send_query_event(
@@ -317,6 +313,92 @@ impl<'a> EngineProjectReadSource<'a> {
         };
         stream_probe_result(index, result, sink).await
     }
+}
+
+/// Emit one slot root under the node query `index`: whole as `SlotRoot` when
+/// its event fits the sink's frame
+/// ([`ProjectReadEventSink::frame_budget`], less
+/// [`lpc_wire::PROJECT_READ_SLOT_ROOT_FRAME_RESERVE_BYTES`]), else as
+/// `SlotRootBegin` → N × `SlotRootBytes` → `SlotRootEnd`, the pieces being
+/// consecutive slices of its data's wire JSON sized to the frame.
+///
+/// The root is already built; each piece serializes it again and keeps one
+/// window ([`lpc_wire::ser_write_json_slice`]), so no allocation the size of
+/// the whole encoding is ever made. A root that fits is sent exactly as
+/// before.
+async fn stream_slot_root<S>(
+    index: u32,
+    root: lpc_wire::WireSlotRootSnapshot,
+    sink: &mut S,
+) -> Result<(), ProjectReadEventStreamError<S::Error>>
+where
+    S: ProjectReadEventSink,
+{
+    const RESERVE: usize = lpc_wire::PROJECT_READ_SLOT_ROOT_FRAME_RESERVE_BYTES;
+
+    let event = ProjectReadEvent::Query {
+        index,
+        event: ProjectReadQueryEvent::Nodes(ProjectReadNodeEvent::SlotRoot(root)),
+    };
+    let Some(budget) = sink.frame_budget() else {
+        return send_project_read_event(sink, event).await;
+    };
+    if lpc_wire::ser_write_json_len(&event).saturating_add(RESERVE) <= budget {
+        return send_project_read_event(sink, event).await;
+    }
+    let ProjectReadEvent::Query {
+        event: ProjectReadQueryEvent::Nodes(ProjectReadNodeEvent::SlotRoot(root)),
+        ..
+    } = event
+    else {
+        unreachable!("built just above");
+    };
+    // A piece travels as base64: 4 bytes for every 3.
+    let piece = (budget.saturating_sub(RESERVE) / 4 * 3)
+        .max(lpc_wire::PROJECT_READ_SLOT_ROOT_MIN_PIECE_BYTES);
+    let data_len = lpc_wire::ser_write_json_len(&root.data);
+    let byte_length = u32::try_from(data_len)
+        .map_err(|_| ProjectReadEventStreamError::Protocol("slot root is too large".into()))?;
+    send_query_event(
+        sink,
+        index,
+        ProjectReadQueryEvent::Nodes(ProjectReadNodeEvent::SlotRootBegin {
+            name: root.name.clone(),
+            shape: root.shape,
+            byte_length,
+        }),
+    )
+    .await?;
+    let mut offset = 0usize;
+    while offset < data_len {
+        let mut bytes = Vec::with_capacity(piece.min(data_len - offset));
+        lpc_wire::ser_write_json_slice(&root.data, offset, piece, &mut bytes).map_err(|_| {
+            ProjectReadEventStreamError::Protocol("slot root failed to serialize".into())
+        })?;
+        if bytes.is_empty() {
+            return Err(ProjectReadEventStreamError::Protocol(
+                "slot root encoding ended early".into(),
+            ));
+        }
+        let piece_len = bytes.len();
+        send_query_event(
+            sink,
+            index,
+            ProjectReadQueryEvent::Nodes(ProjectReadNodeEvent::SlotRootBytes {
+                // `offset < data_len`, which fit a `u32` above.
+                offset: offset as u32,
+                bytes,
+            }),
+        )
+        .await?;
+        offset += piece_len;
+    }
+    send_query_event(
+        sink,
+        index,
+        ProjectReadQueryEvent::Nodes(ProjectReadNodeEvent::SlotRootEnd),
+    )
+    .await
 }
 
 /// Emit one probe result under the enclosing probe `index`, chunking its bulk

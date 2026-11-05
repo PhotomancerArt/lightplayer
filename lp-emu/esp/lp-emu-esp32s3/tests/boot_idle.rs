@@ -180,12 +180,14 @@ fn assert_the_hello_is_delivered_whole(machine: &mut Machine, _delivered: &[u8])
 /// Since the S3 reads the plain XIAO's flash in QIO (2026-10-29) the QIO
 /// switch, a RAM function, is reachable: `.rwtext` grows and both start 0x190
 /// higher.
+/// Since `wifi` joined the defaults (2026-10-29) the station and the IP
+/// stack's statics are in: both start 0x100 higher.
 const HELLO: &str = "\
 [INIT] fw-esp32s3 boot
 [INIT] chip=esp32s3 arch=xtensa heap=83968+73744=157712 (dram_seg arena + dram2_seg)
-[INIT] heap region: 0x3fcadef8+83968 (dram_seg arena, Internal)
+[INIT] heap region: 0x3fcadff8+83968 (dram_seg arena, Internal)
 [INIT] heap region: 0x3fcdb700+73744 (dram2_seg, untagged)
-[INIT] heap region: 0x3fca1ee0+49152 (radio)
+[INIT] heap region: 0x3fca1fe0+49152 (radio)
 [INIT] psram: on, 8388608 bytes at 0x3c800000 (MMU entries 0x80..0x100), self-test passed
 [INIT] heap region: 0x3c800000+8388608 (PSRAM, External; Rust's allocations go here first)
 [RECOVERY] boot: cause=power-on level=green safe_mode=false prior_boot_complete=true
@@ -197,7 +199,7 @@ const HELLO: &str = "\
 /// [`HELLO`]'s length and sha256, so a change to any byte of it is a failure
 /// that names the diff rather than a diff a reader has to spot.
 const HELLO_BYTES: usize = 670;
-const HELLO_SHA: &str = "ffd2983b0ab5ed4e261966f15185c45b85e0c6d303a510fb07f1fb6160d2eef9";
+const HELLO_SHA: &str = "0b984c08295c526adfff86cc6da12d3154ee47701b97f3790af068275296225d";
 
 fn sha(bytes: &[u8]) -> String {
     let mut h = Sha256::new();

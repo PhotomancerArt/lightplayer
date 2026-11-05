@@ -1,5 +1,5 @@
 ---
-status: fixed
+status: open
 found: 2026-10-23      # how: CI red on main (Validate x64, job 120275282279, at bd0ff431c)
 fixed: 2026-10-23      # lpa-devices: the late-hello re-identify settles on the hello in hand
 area: lp-app/lpa-devices identify (the late-hello re-identify) × lpa-studio-core's once-per-connection effects (LoginWindow)
@@ -58,3 +58,13 @@ only, the 5 s verdict, then the board's hello 180 s later. It now asserts:
 
 The account test no longer depends on when the bench's fake board answers:
 whichever path identify takes, one connection has one `hello_at`.
+
+**Seen again (2026-10-29)** — `Validate (x64)` on PR #1333 (run
+40982870684, job 123826947600, head `6dce21c5e`, main `3359cf9d2` merged),
+a PR that touches no Studio or device-model code:
+`a_usb_connect_that_finds_the_accounts_key_reports_the_board_once` saw two
+`Report(AccountBoardReport { id: "a0f26287b49a", … seen_on: Usb })` where it
+expects one. The same job passed on the PR's previous head, and the test
+passes locally. So the 2026-10-23 fix closed one path to the second report,
+not every one; reopened.
+

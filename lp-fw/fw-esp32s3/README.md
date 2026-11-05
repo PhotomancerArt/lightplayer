@@ -616,11 +616,11 @@ The C6's radio, on this chip (S3 radio plan, M3 and M4,
   Emulated, `just test-emu-esp32s3-relay` (`lp-cli/tests/emu_relay_link.rs`'s
   S3 arm) and `just walk-wifi-emu relay --s3` walk it: registered, edited as
   `relay:<mac>@<origin>`, taken over on the LAN, busy, a deploy, Cloud relay
-  off and on, a reset key refused. It uploads no project there: before PSRAM
-  (M10) the image cannot compile `projects/test/basic` with a relay session
-  open (docs/defects/2026-10-22-the-s3-wifi-image-runs-out-of-heap-with-a-project-loaded.md).
-  On silicon it is owed until the join defect is fixed
-  (docs/defects/2026-10-22-the-s3-wifi-image-never-authenticates.md).
+  off and on, a reset key refused. On silicon the station caps its transmit
+  power at 15 dBm (`MAX_TX_POWER_QDBM`): at 20 dBm FS3 never authenticated
+  (docs/defects/2026-10-22-the-s3-wifi-image-never-authenticates.md). With
+  the cap, FS3 and XS1 each joined 10 of 10 on the first attempt, and FS3
+  registered with lightplayer.app's relay by itself.
 
 All of it comes up in `core_boot`, after the filesystem, in the C6's order
 (the radio, then BLE, then `lp-net`), so a core-only board keeps its radio.
@@ -636,10 +636,12 @@ BTDM controller unless the device store turns Bluetooth off, emulated ones
 included (they advertise to nobody, as an emulated C6 does). **`espnow` is on
 by default** since PSRAM is (2026-10-23, Yona's ruling): the Wi-Fi blob up
 costs about 37 KB of internal heap, which PSRAM's heap gives back (the radio
-memory ADR's 2026-10-23 amendment). **`wifi` is off by default**
-until its desk walk passes:
-build it with `just build-fw-esp32s3 wifi` or `just fw-esp32s3-split
-esp32s3,server,float-f32,wifi`. A radio-free image is `--no-default-features
+memory ADR's 2026-10-23 amendment). **`wifi` is on by default** since
+2026-10-29, when FS3 (the XIAO S3 Plus, at its usual metre from the desk's
+access point) and XS1 (the plain XIAO S3) each joined 10 of 10 and stayed
+inside the radio frame-rate budget
+(docs/reports/2026-10-29-s3-wifi-on-by-default.md). A board with no saved
+network never scans. A radio-free image is `--no-default-features
 --features esp32s3,server,float-f32,…`; a `radio_boot_probe` image runs the
 probe's radio in place of the product's (`build.rs`: `s3_radio`, `s3_ble`,
 `s3_espnow`, `s3_wifi` are the features minus the probe, and the source gates
