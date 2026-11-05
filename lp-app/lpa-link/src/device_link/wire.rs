@@ -127,6 +127,8 @@ pub fn server_frame(message: &WireServerMessage) -> ServerFrame {
             request_id,
             projects.iter().map(loaded_project_facts).collect(),
         ),
+        // A rename's answer: how the model knows the name reached the board.
+        ServerMsgBody::SetDeviceName { name } => ServerFrame::named(request_id, name.clone()),
         other => ServerFrame::other(request_id, body_label(other)),
     }
 }
@@ -214,10 +216,8 @@ fn recovery_facts(recovery: &lpc_wire::server::RecoveryStatus) -> RecoveryFacts 
 
 /// The hello facts the fold reads, from the full wire hello.
 ///
-/// `identity.name` stays `None` deliberately: the wire hello carries only
-/// `device_uid`. The provisioned name lives in the device's own
-/// `/.lp/device.json` and reaches the app through a filesystem read, not
-/// through this frame.
+/// `identity.name` is the board's own name (`device_name`, wire 47): the
+/// name a person gave it, kept in its `/.lp/device.json`.
 pub fn hello_facts(hello: &ServerHello) -> HelloFacts {
     HelloFacts {
         proto: hello.proto,
@@ -232,7 +232,10 @@ pub fn hello_facts(hello: &ServerHello) -> HelloFacts {
                 .as_deref()
                 .and_then(normalize_base_mac)
                 .map(MacAddress),
-            name: None,
+            name: hello
+                .device_name
+                .as_deref()
+                .and_then(lpc_wire::clean_device_name),
         },
         firmware: Some(firmware_label(hello)),
         version: Some(hello.build.version.to_string()),
@@ -275,8 +278,7 @@ pub fn hello_facts(hello: &ServerHello) -> HelloFacts {
 /// Same normalization as [`hello_facts`], and for the same reason: a MAC
 /// crossing an untyped boundary that is not normalized here would mint a
 /// SECOND identity for a board the hello already bound. `name` stays `None`
-/// — the provisioned name lives in the device's `/.lp/device.json` and
-/// reaches the app through a filesystem read, never through a frame.
+/// — a heartbeat does not carry the board's name; its hello does.
 fn heartbeat_identity(identity: &lpc_wire::server::HeartbeatIdentity) -> PeerIdentity {
     PeerIdentity {
         uid: identity
@@ -346,6 +348,7 @@ fn body_label(body: &ServerMsgBody) -> &'static str {
         ServerMsgBody::AccessList { .. } => "AccessList",
         ServerMsgBody::NetworkStatus(_) => "NetworkStatus",
         ServerMsgBody::NetworkScan(_) => "NetworkScan",
+        ServerMsgBody::SetDeviceName { .. } => "SetDeviceName",
     }
 }
 
@@ -369,6 +372,9 @@ pub fn client_message(frame: &ClientFrame) -> Result<ClientMessage, String> {
         // diagnostic, and the card re-derives from the loaded report that
         // follows this frame.
         ClientFrameBody::ClearFaults => ClientRequest::ClearFaults,
+        ClientFrameBody::SetDeviceName { name } => {
+            ClientRequest::SetDeviceName { name: name.clone() }
+        }
         ClientFrameBody::Opaque { label } => {
             return Err(format!(
                 "lpa-link cannot forward an opaque request ({label}): coarse effects go \
@@ -792,6 +798,7 @@ mod tests {
             },
             hardware: lpc_wire::HardwareFacts::default(),
             device_uid: None,
+            device_name: None,
             pack_format: lpc_wire::PACK_FORMAT_VERSION,
             auth: lpc_wire::HelloAuth::TRUSTED,
             startup_refused: None,
@@ -817,6 +824,7 @@ mod tests {
                 ..Default::default()
             },
             device_uid: Some(uid.to_string()),
+            device_name: None,
             pack_format: lpc_wire::PACK_FORMAT_VERSION,
             auth: lpc_wire::HelloAuth::TRUSTED,
             startup_refused: None,

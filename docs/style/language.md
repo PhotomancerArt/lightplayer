@@ -279,8 +279,11 @@ hold Restore from a backup file… and Download backup.
 
 A new board is named after its model ("XIAO ESP32-C6"), with no date; a
 second of the same model gets a number ("XIAO ESP32-C6 2"). It is renamed
-where its name is, in the name bar (press it, type, Enter); the name is
-Studio's own, never written to the board.
+where its name is, in the name bar (press it, type, Enter). That name is
+the board's own: it is written to the board, which advertises it over
+Bluetooth (`LP-<name>`), and the project only that board plays takes it
+too (`docs/adr/2026-10-28-one-board-name.md`). The model name Studio gives
+a new board stays Studio's.
 
 **Cloud connected** names a board that talks to lightplayer.app through
 the relay; it's a property of the board, not of the link in use. A board

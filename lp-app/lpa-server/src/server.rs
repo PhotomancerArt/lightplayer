@@ -389,6 +389,9 @@ impl LpServer {
             fs: lpc_wire::FsBootState::Memory,
         };
         let features = server_features(&hardware, graphics.backend_name());
+        // The board's own name is a file on its filesystem, read once here;
+        // `SetDeviceName` keeps the held hello in step after that.
+        let device_name = crate::device_identity::read_device_name(&*base_fs);
         Self {
             output_provider,
             project_manager,
@@ -428,6 +431,7 @@ impl LpServer {
                 },
                 hardware,
                 device_uid: None,
+                device_name,
                 // No packing until the embedder says its transport can
                 // (`set_packed_encoding_supported`).
                 pack_format: 0,
@@ -554,6 +558,14 @@ impl LpServer {
                 .position(|candidate| candidate == feature)
                 .unwrap_or(usize::MAX)
         });
+    }
+
+    /// The board's own name, as the held hello reports it (see
+    /// [`lpc_wire::ServerHello::device_name`]): read from the filesystem at
+    /// construction and kept in step by `SetDeviceName`. Cheap — no
+    /// filesystem read — so a radio's upkeep may ask it every few seconds.
+    pub fn device_name(&self) -> Option<&str> {
+        self.hello.device_name.as_deref()
     }
 
     /// The hello payload as a TRUSTED link reads it. What a particular link
@@ -1091,6 +1103,30 @@ impl LpServer {
                     {
                         notice(&access_store::read_device_store(fs));
                     }
+                    send_reply(
+                        transport,
+                        link.id,
+                        WireServerMessage::new(msg_id, body),
+                        &mut connection_lost,
+                    )
+                    .await;
+                    response_count += 1;
+                }
+                // The board's name: edit tier (the gate above has already
+                // refused anything less), written through the BASE fs into
+                // the root identity file, and the held hello follows so the
+                // next hello and the Bluetooth name say it.
+                ClientRequest::SetDeviceName { name } => {
+                    let body = match crate::device_identity::write_device_name(
+                        &*self.base_fs,
+                        Some(name.as_str()),
+                    ) {
+                        Ok(stored) => {
+                            self.hello.device_name = stored.clone();
+                            lpc_wire::server::ServerMsgBody::SetDeviceName { name: stored }
+                        }
+                        Err(error) => lpc_wire::server::ServerMsgBody::Error { error },
+                    };
                     send_reply(
                         transport,
                         link.id,

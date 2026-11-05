@@ -98,7 +98,7 @@ pub fn start(
         peripheral, runner, ..
     } = stack.build();
 
-    let gap_name: &'static str = Box::leak(Box::new(advertising::mac_name())).as_str();
+    let gap_name: &'static str = Box::leak(Box::new(advertising::gap_name())).as_str();
     let server: &'static NusServer<'static> =
         match NusServer::new_with_config(GapConfig::Peripheral(PeripheralConfig {
             name: gap_name,

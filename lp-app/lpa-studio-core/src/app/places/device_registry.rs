@@ -82,6 +82,11 @@ pub struct RegisteredDevice {
     /// it appears (the model's `Intent::autoconnect`).
     #[serde(default, skip_serializing_if = "core::ops::Not::not")]
     pub autoconnect: bool,
+    /// A person renamed the board and the board has not said it keeps the
+    /// name yet (`Intent::name_unsent`): Studio writes it at the board's next
+    /// hello on this Studio's wire. Additive: absent reads as `false`.
+    #[serde(default, skip_serializing_if = "core::ops::Not::not")]
+    pub name_unsent: bool,
     /// When this browser first met the board, f64 epoch seconds
     /// (`DeviceRecord.added_at`): the home page lists boards first added
     /// first, so a card keeps its place while the board is set up. Kept as
@@ -177,6 +182,7 @@ impl DeviceRegistry {
             existing.firmware = device.firmware;
         }
         existing.autoconnect = device.autoconnect;
+        existing.name_unsent = device.name_unsent;
         existing.added_at = earliest_added(existing.added_at, device.added_at);
         self.save(&file)
     }
@@ -341,6 +347,7 @@ fn merge_registered_devices(
             .clone()
             .or_else(|| other.device_name.clone()),
         autoconnect: old_row.autoconnect || new_row.autoconnect,
+        name_unsent: recent.name_unsent,
         added_at: earliest_added(old_row.added_at, new_row.added_at),
     }
 }

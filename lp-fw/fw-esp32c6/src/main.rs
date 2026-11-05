@@ -911,6 +911,10 @@ fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
         match (store.ble_enabled, board::esp32c6::init::take_bt()) {
             (true, Some(bt)) => {
                 log::info!("[ble] enabled (device store, or none: on by default) — starting");
+                // The GAP name is built at start: the board's own name now.
+                ble::name_at_boot(
+                    lpa_server::device_identity::read_device_name(base_fs.as_ref()).as_deref(),
+                );
                 ble::start(spawner, bt, radio_port, quirks_applied);
                 true
             }

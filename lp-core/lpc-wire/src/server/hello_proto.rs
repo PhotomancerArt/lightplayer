@@ -246,7 +246,7 @@ mod tests {
     #[test]
     fn a_wire_32_hello_does_not_decode_at_this_wire_version_but_names_its_proto() {
         assert_eq!(
-            WIRE_PROTO_VERSION, 46,
+            WIRE_PROTO_VERSION, 47,
             "re-read this test when the version moves"
         );
         assert!(
@@ -279,14 +279,14 @@ mod tests {
     /// which wire 46 requires (36 and 37 left the hello as it was, 38 only
     /// added the optional `firmware`, 39 and 40 changed only network shapes,
     /// 41 only edit bodies, 42 only fs verbs, 43 only added the `fs` value
-    /// `refused`, 44 only file bodies, and 45 only removed the node-command
-    /// channel): such a hello does not decode, and names its proto and
+    /// `refused`, 44 only file bodies, 45 only removed the node-command
+    /// channel, and 47 only added the optional `deviceName`): such a hello does not decode, and names its proto and
     /// board all the same. The same hello with a version and a project
     /// format decodes — the two fields are the whole difference.
     #[test]
     fn a_wire_34_hello_lacks_only_the_version_and_the_project_format() {
         assert_eq!(
-            WIRE_PROTO_VERSION, 46,
+            WIRE_PROTO_VERSION, 47,
             "re-read this test when the version moves"
         );
         let wire_34 = HELLO_PROTO_32

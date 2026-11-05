@@ -373,6 +373,11 @@ impl ControllerOp for DevicesOp {
                 "Change what Studio calls this device.",
                 ActionPriority::Secondary,
             ),
+            Action::NameBoard { .. } => ActionMeta::new(
+                "Rename",
+                "Change this board's name, on the board too.",
+                ActionPriority::Secondary,
+            ),
             Action::SetAutoconnect { .. } => ActionMeta::new(
                 "Connect automatically",
                 "Open this device's port whenever it appears.",
@@ -437,6 +442,10 @@ mod tests {
                 restore_backup: false,
             },
             Action::SetName {
+                device,
+                name: "Kitchen".to_string(),
+            },
+            Action::NameBoard {
                 device,
                 name: "Kitchen".to_string(),
             },

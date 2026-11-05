@@ -178,6 +178,15 @@ pub enum ClientRequest {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         cloud_relay: Option<bool>,
     },
+    /// Name the board: the name a person gave it, which it keeps in its root
+    /// identity file (`/.lp/device.json`'s `name`), reports in every hello
+    /// ([`crate::ServerHello::device_name`]) and advertises over Bluetooth
+    /// (`LP-<name>`). A blank name clears it. Answered with
+    /// [`crate::server::ServerMsgBody::SetDeviceName`], naming the board's
+    /// name as it now stands. Edit tier.
+    SetDeviceName {
+        name: String,
+    },
 }
 
 #[cfg(test)]

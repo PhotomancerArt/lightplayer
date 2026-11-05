@@ -164,3 +164,12 @@ row.
   construction; syncing the rows themselves is its own feature.
 - Removing the hello's `device_uid` field and the `/.lp/device.json`
   read entirely, once no fielded board still needs migrating.
+
+## Amendment 2026-10-28: the name is written to the board again
+
+The decision's "Name ... registry-only data ... `/.lp/device.json` is no
+longer written for ESP-class devices" is superseded for the **name** by
+[2026-10-28-one-board-name](2026-10-28-one-board-name.md): a person's name
+for a board is written to the board's `/.lp/device.json` `name`
+(`ClientRequest::SetDeviceName`, wire 47) and read back as truth from its
+hello. Identity is unchanged: still the efuse MAC, and no uid is stamped.

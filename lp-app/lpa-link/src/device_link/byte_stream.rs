@@ -1095,6 +1095,7 @@ mod tests {
                 },
                 hardware: Default::default(),
                 device_uid: None,
+                device_name: None,
                 pack_format: 0,
                 auth: lpc_wire::HelloAuth::TRUSTED,
                 startup_refused: None,

@@ -199,6 +199,12 @@ pub enum ServerMsgBody {
     /// station). The answer to [`crate::ClientRequest::NetworkScan`]. Edit
     /// tier only.
     NetworkScan(crate::server::NetworkScan),
+    /// Answer to [`crate::ClientRequest::SetDeviceName`]: the board's name
+    /// as it now stands (`None` once cleared), already written to its root
+    /// identity file.
+    SetDeviceName {
+        name: Option<String>,
+    },
 }
 
 /// Log severity carried by [`ServerMsgBody::Log`] frames and

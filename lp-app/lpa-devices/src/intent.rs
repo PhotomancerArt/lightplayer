@@ -18,6 +18,11 @@ pub struct Intent {
     /// [`IdentityChain`](crate::IdentityChain) — a user rename must not
     /// masquerade as evidence.
     pub name: Option<String>,
+    /// A person gave the board [`Self::name`] and the board has not said it
+    /// keeps it yet: the next time it can (a hello at this Studio's wire),
+    /// Studio writes it to the board. A name Studio minted itself never sets
+    /// this — it stays Studio's.
+    pub name_unsent: bool,
     pub autoconnect: bool,
     /// The user asked to set this device up (round 2 turns this into a Setup
     /// activity; M1 records the wish and renders it).
