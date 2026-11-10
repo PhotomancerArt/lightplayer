@@ -38,6 +38,13 @@ use crate::server::startup_refusal::StartupRefusal;
 ///
 /// # History
 ///
+/// - 47: the board keeps its own name (plan
+///   `lp2025/2026-10-28-2051-one-board-name`) — `ClientRequest::SetDeviceName
+///   { name }` (edit tier) and its answer `ServerMsgBody::SetDeviceName
+///   { name }`, and the hello's `deviceName`: the name a person gave the
+///   board, kept in `/.lp/device.json`'s `name`. An older board would not
+///   decode the request, so Studio sends it only at this version.
+///   `PACK_FORMAT_VERSION` is unchanged.
 /// - 46: the hello says which project format the engine reads — `BuildFacts`
 ///   gains the required `projectFormat` (`lpc_model::PROJECT_FORMAT_VERSION`,
 ///   filled by the server, 12 at this bump). A host reads it to upgrade a
@@ -478,7 +485,7 @@ use crate::server::startup_refusal::StartupRefusal;
 /// as `None` on new Studio and a new firmware's extra fields are ignored
 /// by old Studio. Bumping for those would mark every board running
 /// current firmware Incompatible in exchange for nothing.
-pub const WIRE_PROTO_VERSION: u32 = 46;
+pub const WIRE_PROTO_VERSION: u32 = 47;
 
 /// Unsolicited/boot-time server identity, version, and capability report.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -528,6 +535,16 @@ pub struct ServerHello {
     /// purpose. Set and cleared by the server, never by an embedder.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub startup_refused: Option<StartupRefusal>,
+    /// The board's own name, if a person gave it one: `/.lp/device.json`'s
+    /// `name`, set by [`crate::ClientRequest::SetDeviceName`]. The name
+    /// Studio shows, the board's Bluetooth name (`LP-<name>`) and its name
+    /// on the cloud relay. `None`: never named (Studio shows its own).
+    ///
+    /// Last, beside `firmware`: an optional field the packed writer skips
+    /// sits at the struct's end (a skipped field mid-struct broke the
+    /// packed hello's decode on the S3 emulator).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device_name: Option<String>,
 }
 
 /// Build facts of the firmware/server binary answering the hello: its
@@ -758,6 +775,7 @@ mod tests {
                 ..Default::default()
             },
             device_uid: Some("dev0000000000000001".to_string()),
+            device_name: None,
             pack_format: lp_json_pack::PACK_FORMAT_VERSION,
             auth: HelloAuth::TRUSTED,
             startup_refused: None,
@@ -813,6 +831,7 @@ mod tests {
             },
             hardware: HardwareFacts::default(),
             device_uid: None,
+            device_name: None,
             pack_format: 0,
             auth: HelloAuth::TRUSTED,
             startup_refused: None,
@@ -864,6 +883,7 @@ mod tests {
                 project: "/projects/eaves".to_string(),
                 found: Some(11),
             }),
+            device_name: None,
         };
         let json = crate::json::to_string(&hello).unwrap();
         assert!(
@@ -906,6 +926,7 @@ mod tests {
                 ..Default::default()
             },
             device_uid: None,
+            device_name: None,
             pack_format: lp_json_pack::PACK_FORMAT_VERSION,
             auth: HelloAuth {
                 required: true,
@@ -942,6 +963,7 @@ mod tests {
                 ..Default::default()
             },
             device_uid: None,
+            device_name: None,
             pack_format: lp_json_pack::PACK_FORMAT_VERSION,
             auth: HelloAuth {
                 required: true,
@@ -977,7 +999,7 @@ mod tests {
     #[test]
     fn the_proto_version_is_pinned_to_its_history() {
         assert_eq!(
-            WIRE_PROTO_VERSION, 46,
+            WIRE_PROTO_VERSION, 47,
             "if you meant to bump, add the History entry in this file's \
              doc comment and update this pin"
         );

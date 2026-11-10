@@ -112,6 +112,7 @@ pub fn handle_client_message(
             // runtime), so answer requests with a fresh read.
             let mut hello = hello.clone();
             hello.device_uid = crate::device_identity::read_device_uid(&*base_fs);
+            hello.device_name = crate::device_identity::read_device_name(&*base_fs);
             ServerMessagePayload::Hello(hello)
         }
         lpc_wire::ClientRequest::Filesystem(fs_request) => {
@@ -167,9 +168,11 @@ pub fn handle_client_message(
         | lpc_wire::ClientRequest::NetworkScan
         | lpc_wire::ClientRequest::NetworkAdd { .. }
         | lpc_wire::ClientRequest::NetworkForget { .. }
-        | lpc_wire::ClientRequest::NetworkSet { .. } => {
+        | lpc_wire::ClientRequest::NetworkSet { .. }
+        | lpc_wire::ClientRequest::SetDeviceName { .. } => {
             return Err(ServerError::Core(
-                "network requests are answered beside the access gate, not a handler".into(),
+                "network and naming requests are answered beside the access gate, not a handler"
+                    .into(),
             ));
         }
         lpc_wire::ClientRequest::ProjectCommand { handle, command } => {

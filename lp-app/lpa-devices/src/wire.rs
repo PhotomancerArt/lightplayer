@@ -174,6 +174,15 @@ impl ServerFrame {
         self
     }
 
+    /// The board's answer to a [`ClientFrameBody::SetDeviceName`]: its name
+    /// as it now stands, already written to its identity file.
+    pub fn named(request_id: u32, name: Option<String>) -> Self {
+        Self {
+            request_id,
+            body: ServerFrameBody::Named { name },
+        }
+    }
+
     pub fn other(request_id: u32, label: impl Into<String>) -> Self {
         Self {
             request_id,
@@ -189,7 +198,9 @@ impl ServerFrame {
             ServerFrameBody::Hello(hello) => Some(&hello.identity),
             ServerFrameBody::Heartbeat { identity, .. }
             | ServerFrameBody::HelloOnOtherWire { identity, .. } => identity.as_ref(),
-            ServerFrameBody::Loaded { .. } | ServerFrameBody::Other { .. } => None,
+            ServerFrameBody::Loaded { .. }
+            | ServerFrameBody::Named { .. }
+            | ServerFrameBody::Other { .. } => None,
         }
     }
 
@@ -199,6 +210,7 @@ impl ServerFrame {
             ServerFrameBody::Heartbeat { loaded, .. } => loaded.as_deref(),
             ServerFrameBody::Loaded { loaded } => Some(loaded),
             ServerFrameBody::Hello(_)
+            | ServerFrameBody::Named { .. }
             | ServerFrameBody::Other { .. }
             | ServerFrameBody::HelloOnOtherWire { .. } => None,
         }
@@ -294,6 +306,13 @@ pub enum ServerFrameBody {
     /// is made of it.
     Loaded {
         loaded: Vec<LoadedProjectFacts>,
+    },
+    /// A `SetDeviceName` answer: the board's own name as it now stands
+    /// (`None` once cleared). Decoded rather than labelled, because it is
+    /// how a rename knows it reached the board.
+    Named {
+        #[serde(default)]
+        name: Option<String>,
     },
     Other {
         label: String,
@@ -553,6 +572,13 @@ impl ClientFrame {
         }
     }
 
+    pub fn set_device_name(request_id: u32, name: impl Into<String>) -> Self {
+        Self {
+            request_id,
+            body: ClientFrameBody::SetDeviceName { name: name.into() },
+        }
+    }
+
     pub fn reboot(request_id: u32) -> Self {
         Self {
             request_id,
@@ -587,6 +613,10 @@ pub enum ClientFrameBody {
     /// that faulted. Nothing resets, so there is no boot to wait for: the
     /// card re-derives from what the board reports next.
     ClearFaults,
+    /// `ClientRequest::SetDeviceName` — "this is your name now": the name a
+    /// person gave the board, which it keeps and advertises. Answered with
+    /// [`ServerFrameBody::Named`].
+    SetDeviceName { name: String },
     /// An opaque request forwarded on behalf of a coarse effect; the label
     /// exists so journals read honestly.
     Opaque { label: String },

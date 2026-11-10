@@ -1207,7 +1207,7 @@ impl Observations {
                 self.frames_seen += 1;
                 self.loaded = Some(loaded.clone());
             }
-            ServerFrameBody::Other { .. } => {
+            ServerFrameBody::Named { .. } | ServerFrameBody::Other { .. } => {
                 self.frames_seen += 1;
             }
             // A hello all the same, on a wire this build cannot read: kept
@@ -1452,6 +1452,10 @@ fn wire_summary(body: &ServerFrameBody) -> String {
             loaded, recovery, ..
         } => heartbeat_summary(loaded, recovery),
         ServerFrameBody::Loaded { loaded } => loaded_summary(loaded),
+        ServerFrameBody::Named { name } => match name {
+            Some(name) => format!("named · {name}"),
+            None => "named · (none)".to_string(),
+        },
         ServerFrameBody::Other { label } => label.clone(),
         ServerFrameBody::HelloOnOtherWire {
             proto,

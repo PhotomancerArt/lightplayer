@@ -230,6 +230,7 @@ pub fn request_kind(request: &ClientRequest) -> &'static str {
         ClientRequest::NetworkAdd { .. } => "wifi.add",
         ClientRequest::NetworkForget { .. } => "wifi.forget",
         ClientRequest::NetworkSet { .. } => "wifi.set",
+        ClientRequest::SetDeviceName { .. } => "device.set-name",
     }
 }
 

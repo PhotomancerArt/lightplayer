@@ -2754,7 +2754,7 @@ fn device_pick_popover_new_tab() -> Element {
 }
 
 #[story(
-    description = "Rename, on the board card: the hardware bar's details, open, hold the one verb that acts on the ENTRY rather than the board — Rename, as an inline form prefilled with the card's current title (here the derived \"<board> · <Mon D>\" a flash minted). Submitting dispatches the model's own SetName; the name is Studio's (persisted to the registry) and is never written to the board. Beside it are the board's model, chip and id, Reset, and Forget apart in the danger zone. A new board's card has no Rename — a link that has not identified itself has no entry to name, and names itself through the board pick's name field instead."
+    description = "Rename, on the board card: the hardware bar's details, open, hold the one verb that acts on the ENTRY rather than the board — Rename, as an inline form prefilled with the card's current title (here the derived \"<board> · <Mon D>\" a flash minted). Submitting dispatches the model's own NameBoard; the name is persisted to the registry and written to the board (one board name, 2026-10-28). Beside it are the board's model, chip and id, Reset, and Forget apart in the danger zone. A new board's card has no Rename — a link that has not identified itself has no entry to name, and names itself through the board pick's name field instead."
 )]
 fn devices_card_menu_open() -> Element {
     let card = roster_fixture().roster.devices.remove(0);

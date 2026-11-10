@@ -181,6 +181,7 @@ pub fn hello(pack_format: u8) -> WireServerMessage {
             },
             hardware: Default::default(),
             device_uid: None,
+            device_name: None,
             pack_format,
             auth: lpc_wire::HelloAuth::TRUSTED,
             startup_refused: None,

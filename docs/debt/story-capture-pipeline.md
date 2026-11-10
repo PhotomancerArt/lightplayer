@@ -812,6 +812,14 @@ hours), and neither is an exit path on its own.
   180000 ms — killed.` ("a pipeline failure, not story drift"). The previous
   head of the same PR passed the job. Re-ran the failed job. Three hits since
   2026-10-23 makes the 180 s bound for a full capture the paydown to do.
+- 2026-10-29 — **`board-card-rename-in-place` flips between captures with
+  no source change.** Its "renaming" cell (`CardPreviews { renaming: true }`)
+  sometimes captures the open field and sometimes the closed name with its
+  pencil: main's own snapshots `sha-85f1f7a66` and `sha-3ce005d41` differ on
+  exactly that cell (sm and lg), so #1326 reported it as a change it did not
+  make. Likely cause: the field is focused on mount and commits on blur, so a
+  capture that moves focus closes it. The paydown is a preview that does not
+  close on blur.
 - 2026-10-31 — **two stories moved on a PR that cannot reach them.** #1334
   (the card's Pattern instrument verbs: `StudioController::view` and
   `connect_flow.rs` only, no web or fixture change) got a sticky comment
@@ -822,3 +830,7 @@ hours), and neither is an exit path on its own.
   `StudioController`; the stories use fixed fixtures (`STORY_BOARD_NOW`).
   Read as capture nondeterminism, and merged as is. If the unplugged notice
   goes missing again, look for a timing dependence in the card's cover.
+- 2026-11-05 — **`oxipng` hit its 180 s bound a fourth time.** #1326's
+  `Validate story baselines` at `650fcbb5d` (a figures-only commit on top of
+  a head whose capture had passed) died on `oxipng did not exit within
+  180000 ms — killed.` Re-ran the failed job. Four hits since 2026-10-23.

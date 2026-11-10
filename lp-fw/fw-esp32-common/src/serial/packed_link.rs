@@ -288,6 +288,7 @@ mod tests {
             },
             hardware: lpc_wire::HardwareFacts::default(),
             device_uid: None,
+            device_name: None,
             pack_format: lpc_wire::PACK_FORMAT_VERSION,
             auth: lpc_wire::HelloAuth::TRUSTED,
             startup_refused: None,

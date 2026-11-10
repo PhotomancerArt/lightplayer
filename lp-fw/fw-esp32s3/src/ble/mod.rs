@@ -12,7 +12,7 @@
 mod ble_controller_config;
 
 use fw_esp32_common::radio_link::RadioLinkPort;
-pub use fw_esp32_radio::ble::refresh_advertised_name;
+pub use fw_esp32_radio::ble::{name_at_boot, refresh_advertised_name};
 
 /// Bring BLE up and start serving it on `port`, with this chip's controller
 /// configuration. `false` (and logged) when the peripheral is gone.

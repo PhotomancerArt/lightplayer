@@ -21,6 +21,7 @@ pub use budget::{
     PROJECT_READ_SLOT_ROOT_FRAME_RESERVE_BYTES, PROJECT_READ_SLOT_ROOT_MIN_PIECE_BYTES,
 };
 pub mod console_line;
+pub mod device_name;
 pub mod json;
 pub mod link_counter_tally;
 pub mod link_payload;
@@ -49,6 +50,7 @@ pub mod wire_link_port;
 pub mod wire_link_sniffer;
 pub mod wire_stream;
 
+pub use device_name::{DEVICE_NAME_MAX_CHARS, clean_device_name};
 pub use link_counter_tally::LinkCounterTally;
 #[cfg(feature = "ser-write-json")]
 pub use link_payload::{EncodedPayload, encode_server_payload, encode_server_payload_into};

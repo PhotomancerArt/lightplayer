@@ -4,10 +4,15 @@
 //! - **Address:** a random *static* address derived from the base MAC, as in
 //!   the spike, so the same board is the same device to a phone across boots
 //!   (Bluefy's `getDevices()` finds it again with no chooser).
-//! - **Name:** `LP-<short>`. `<short>` is the loaded project's name truncated
-//!   to fit the advertising packet, or else the last four hex digits of the
-//!   MAC. It follows the loaded project: the server loop's upkeep calls
-//!   [`refresh_advertised_name`], and a change restarts advertising.
+//! - **Name:** `LP-<short>`. `<short>` is the board's own name (the one a
+//!   person gave it, `LpServer::device_name`), else the loaded project's
+//!   folder, else the last four hex digits of the MAC, cut on a character
+//!   to fit the advertising packet. It follows a rename and the loaded
+//!   project with no reboot: the server loop's upkeep calls
+//!   [`refresh_advertised_name`], and a change restarts advertising. The
+//!   GAP device name (what a connected central reads) is fixed when the
+//!   GATT server is built, so it is the board's name at boot
+//!   ([`name_at_boot`]) and follows a rename at the next one.
 //! - **Payload:** flags + complete local name in the advertisement; the NUS
 //!   service UUID in the scan response (a 128-bit UUID does not fit beside a
 //!   name in 31 bytes), which is what Studio's chooser filters on.
@@ -65,11 +70,38 @@ pub fn mac_name() -> AdvName {
     name
 }
 
-/// `LP-` + `project`, cut on a character boundary to fit.
+/// Seed the advertised name with the board's own name (the identity file's,
+/// read by the chip at boot), before [`super::start`]: the GAP device name
+/// is built from it, and the first advertisement says it before the server
+/// loop's first upkeep. `None` (never named) leaves the MAC name.
+pub fn name_at_boot(name: Option<&str>) {
+    let Some(name) = name else {
+        return;
+    };
+    let name = project_name(name);
+    critical_section::with(|cs| *NAME.borrow_ref_mut(cs) = name);
+}
+
+/// The name the GATT server is built with: the board's name at boot when it
+/// has one ([`name_at_boot`]), else the MAC name.
+pub(super) fn gap_name() -> AdvName {
+    critical_section::with(|cs| {
+        let name = NAME.borrow_ref(cs);
+        if name.is_empty() {
+            mac_name()
+        } else {
+            name.clone()
+        }
+    })
+}
+
+/// `LP-` + `project` (a project folder or the board's name), cut on a
+/// character boundary to fit. Control characters are dropped: the board's
+/// name is cleaned when stored, and a folder name never has any.
 pub fn project_name(project: &str) -> AdvName {
     let mut name = AdvName::new();
     let _ = name.push_str(PREFIX);
-    for c in project.chars() {
+    for c in project.chars().filter(|c| !c.is_control()) {
         if name.push(c).is_err() {
             break;
         }
@@ -78,7 +110,8 @@ pub fn project_name(project: &str) -> AdvName {
 }
 
 /// Server-loop upkeep hook: every few seconds, make the advertised name
-/// follow the first loaded project (or the MAC when none is loaded).
+/// follow the board's own name, else the first loaded project, else the
+/// MAC.
 pub fn refresh_advertised_name(server: &lpa_server::LpServer, now_ms: u64) {
     let due = critical_section::with(|cs| {
         let mut last = LAST_REFRESH_MS.borrow_ref_mut(cs);
@@ -91,18 +124,23 @@ pub fn refresh_advertised_name(server: &lpa_server::LpServer, now_ms: u64) {
     if !due {
         return;
     }
-    // The project's name is its folder's: the last component of its path.
-    let wanted = server
-        .project_manager()
-        .list_loaded_projects()
-        .first()
-        .and_then(|loaded| {
-            loaded
-                .path
-                .as_str()
-                .rsplit('/')
-                .find(|part| !part.is_empty())
-                .map(project_name)
+    // The board's name first (held by the server: no flash read here); a
+    // project's name is its folder's, the last component of its path.
+    let named = server.device_name().map(project_name);
+    let wanted = named
+        .or_else(|| {
+            server
+                .project_manager()
+                .list_loaded_projects()
+                .first()
+                .and_then(|loaded| {
+                    loaded
+                        .path
+                        .as_str()
+                        .rsplit('/')
+                        .find(|part| !part.is_empty())
+                        .map(project_name)
+                })
         })
         .unwrap_or_else(mac_name);
     let changed = critical_section::with(|cs| {
@@ -130,14 +168,7 @@ pub async fn advertise(
     peripheral: &mut Peripheral<'static, BleController, DefaultPacketPool>,
     server: &'static NusServer<'static>,
 ) -> Result<GattConnection<'static, 'static, DefaultPacketPool>, BleStackError> {
-    let name = critical_section::with(|cs| {
-        let name = NAME.borrow_ref(cs);
-        if name.is_empty() {
-            mac_name()
-        } else {
-            name.clone()
-        }
-    });
+    let name = gap_name();
     let mut adv = [0u8; 31];
     let adv_len = AdStructure::encode_slice(
         &[

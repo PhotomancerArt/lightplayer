@@ -16,6 +16,7 @@
 //! | `identity.name` (provisioned) | `device_name` (additive) |
 //! | `name` (the user's) | `name` — the registry's user-facing truth |
 //! | `autoconnect` | `autoconnect` (additive) |
+//! | `name_unsent` (the user's name, not yet on the board) | `name_unsent` (additive) |
 //! | `last_seen` (millis) | `last_seen_at` (epoch seconds) |
 //! | `board_id` (learned, never cleared) | `board_id` (additive — the SAME field a provisioning-flow board pick also writes) |
 //! | `chip` (learned, never cleared) | `chip` (additive) |
@@ -131,6 +132,7 @@ pub fn registry_row_from_record(record: &DeviceRecord) -> Option<RegisteredDevic
         device_id: Some(record.device.0),
         device_name: record.identity.name.clone(),
         autoconnect: record.autoconnect,
+        name_unsent: record.name_unsent,
         added_at: record.added_at.map(|added| added.0 as f64 / 1_000.0),
     })
 }
@@ -204,6 +206,7 @@ pub fn record_from_registry_row(row: &RegisteredDevice, fallback_device_id: u64)
             name: row.device_name.clone(),
         },
         name: (!row.name.is_empty()).then(|| row.name.clone()),
+        name_unsent: row.name_unsent && !row.name.is_empty(),
         autoconnect: row.autoconnect,
         last_seen: (row.last_seen_at > 0.0)
             .then(|| Millis((row.last_seen_at * 1_000.0).round().max(0.0) as u64)),
@@ -240,6 +243,7 @@ mod tests {
                 name: Some("Bench board".to_string()),
             },
             name: Some("Kitchen".to_string()),
+            name_unsent: true,
             autoconnect: true,
             last_seen: Some(Millis(1_500)),
             board_id: Some("seeed/xiao-esp32-c6".to_string()),

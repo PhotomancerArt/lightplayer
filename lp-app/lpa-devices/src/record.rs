@@ -26,6 +26,12 @@ pub struct DeviceRecord {
     /// The user's chosen name, if they set one. Distinct from
     /// [`IdentityChain::name`], which is what the device calls itself.
     pub name: Option<String>,
+    /// The user's name has not reached the board yet
+    /// ([`crate::Intent::name_unsent`]): kept so a rename made while the
+    /// board was away is written when it is next reached, after a reload
+    /// too. `#[serde(default)]`: older records load as "nothing to send".
+    #[serde(default)]
+    pub name_unsent: bool,
     pub autoconnect: bool,
     pub last_seen: Option<Millis>,
     /// The board this firmware said it was built for, from a hello's
@@ -81,6 +87,7 @@ impl DeviceRecord {
             device,
             identity,
             name: None,
+            name_unsent: false,
             autoconnect: false,
             last_seen: None,
             board_id: None,

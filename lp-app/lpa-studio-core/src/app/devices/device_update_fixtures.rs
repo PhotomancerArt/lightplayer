@@ -508,6 +508,12 @@ pub fn with_update_intent(
     view
 }
 
+/// The wire language the older sample releases speak: older than this
+/// Studio's, and from before the hello said its engine's project format, so
+/// such a release reads at most format 11 (`engine_project_format`).
+const OLDER_WIRE: u32 =
+    crate::app::devices::engine_project_format::FIRST_WIRE_SAYING_PROJECT_FORMAT - 1;
+
 /// The store's release index for the sample target: fourteen releases,
 /// newest first, from `2026.10.07-4` (the newer board's) down to
 /// `2026.10.02-1`, X and Y among them. The five oldest speak the wire
@@ -538,7 +544,7 @@ pub fn release_index() -> ReleaseIndex {
             commit: format!("{}{}", commit_for(version), "0".repeat(28)),
             wire_proto: match at {
                 0..9 => lpc_wire::WIRE_PROTO_VERSION,
-                _ => lpc_wire::WIRE_PROTO_VERSION - 1,
+                _ => OLDER_WIRE,
             },
             project_format: None,
             requires: Requires {
@@ -559,7 +565,7 @@ pub fn looked_up_release(version: &str) -> StoreLookup {
     StoreLookup::Found(ReleaseIndexEntry {
         version: version.to_string(),
         commit: format!("{}{}", commit_for(version), "0".repeat(28)),
-        wire_proto: lpc_wire::WIRE_PROTO_VERSION - 1,
+        wire_proto: OLDER_WIRE,
         project_format: None,
         requires: Requires {
             fs_tree: false,

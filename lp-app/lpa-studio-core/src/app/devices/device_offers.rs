@@ -264,12 +264,16 @@ pub fn escape_verb(escape: Escape) -> &'static str {
     }
 }
 
-/// `rename`: what Studio calls the device, as one required Text param
-/// whose placeholder is what it is called now. The name is Studio's, never
-/// written to the board.
+/// `rename`: the board's name, as one required Text param whose placeholder
+/// is what it is called now. One name everywhere: Studio's title, the
+/// board's own (written to it, and what it advertises over Bluetooth) and,
+/// when only this board plays it, its project's.
 fn rename_offer(view: &DeviceView, path: OfferPath) -> UiOffer {
     let device = view.id;
-    let set_name = move |name: String| DevicesOp::action_for(Action::SetName { device, name });
+    let set_name = move |name: String| {
+        let name = lpc_wire::clean_device_name(&name).unwrap_or_default();
+        DevicesOp::action_for(Action::NameBoard { device, name })
+    };
     UiOffer::with_params(
         path,
         "edit",
@@ -552,7 +556,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             bound.op_as::<DevicesOp>().unwrap().action(),
-            &Action::SetName {
+            &Action::NameBoard {
                 device: DeviceId(7),
                 name: "Kitchen".to_string()
             }
