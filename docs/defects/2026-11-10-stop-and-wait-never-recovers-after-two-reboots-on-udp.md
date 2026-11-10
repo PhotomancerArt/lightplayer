@@ -40,7 +40,7 @@ sc.board_reboots = vec![430683, 421441];
 assert!(run::<StopAndWait>(&sc).violations.is_empty()); // fails
 ```
 
-Two reboots about 9 ms apart, given out of order, with duplicates, dropped
+Two board reboots about 9 ms apart, with duplicates, dropped
 tails and long delay spikes on the board→host leg.
 
 **Impact** — none on a product link: every product link runs
