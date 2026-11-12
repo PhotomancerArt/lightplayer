@@ -16,6 +16,7 @@ mod array_size;
 mod builtin;
 mod builtin_out;
 mod coerce;
+mod const_expr;
 mod const_fold;
 mod function;
 mod place;
@@ -1037,6 +1038,7 @@ fn build_global_consts<'src>(
             types,
         );
         let expr = ctx.type_expr(&parsed)?;
+        const_expr::check_constant_expr(ctx.arena.view(), expr)?;
         let expr = ctx.coerce_expr(expr, &ty)?;
         globals.insert(
             konst.name.clone(),

@@ -53,6 +53,8 @@ pub(super) struct TypeCtx<'a> {
     imports: &'a mut ImportRegistry,
     texture_specs: &'a VecMap<String, TextureBindingSpec>,
     pub(super) locals: Vec<HirLocal>,
+    /// Indices into `locals` declared `const`: a write to one is an error.
+    const_locals: Vec<usize>,
     pub(super) arena: TypedArena<'a>,
     scopes: Vec<VecMap<String, usize>>,
     loop_depth: usize,
@@ -82,6 +84,7 @@ impl<'a> TypeCtx<'a> {
             imports,
             texture_specs,
             locals: Vec::new(),
+            const_locals: Vec::new(),
             arena: TypedArena::new(types),
             scopes: alloc::vec![VecMap::new()],
             loop_depth: 0,
@@ -110,6 +113,7 @@ impl<'a> TypeCtx<'a> {
             imports,
             texture_specs,
             locals: Vec::new(),
+            const_locals: Vec::new(),
             arena: TypedArena::new(types),
             scopes: alloc::vec![VecMap::new()],
             loop_depth: 0,
@@ -148,11 +152,11 @@ impl<'a> TypeCtx<'a> {
     ) -> Result<Vec<HirStmt>, Diagnostic> {
         match stmt {
             ParsedStmt::Let {
+                is_const,
                 ty,
                 name,
                 init,
                 span,
-                ..
             } => {
                 let init = if let Some(init) = init {
                     self.type_decl_init(ty, *span, init)?
@@ -166,13 +170,20 @@ impl<'a> TypeCtx<'a> {
                     name: String::from(*name),
                     ty,
                 });
+                if *is_const {
+                    self.const_locals.push(local);
+                }
                 self.scopes
                     .last_mut()
                     .expect("type scope")
                     .insert(String::from(*name), local);
                 Ok(alloc::vec![HirStmt::Let { local, init }])
             }
-            ParsedStmt::LetGroup { declarations, .. } => {
+            ParsedStmt::LetGroup {
+                is_const,
+                declarations,
+                ..
+            } => {
                 let mut statements = Vec::new();
                 for declaration in declarations {
                     let init = if let Some(init) = &declaration.init {
@@ -187,6 +198,9 @@ impl<'a> TypeCtx<'a> {
                         name: String::from(declaration.name),
                         ty,
                     });
+                    if *is_const {
+                        self.const_locals.push(local);
+                    }
                     self.scopes
                         .last_mut()
                         .expect("type scope")
@@ -1275,6 +1289,14 @@ impl<'a> TypeCtx<'a> {
                     return Err(Diagnostic::error(
                         expr.span,
                         "cannot write to uniform variable",
+                    ));
+                }
+                if mode != AccessMode::Read
+                    && matches!(place.root, PlaceRoot::Local { local } if self.const_locals.contains(&local))
+                {
+                    return Err(Diagnostic::error(
+                        expr.span,
+                        format!("cannot assign to const variable `{name}`"),
                     ));
                 }
                 Ok(place)
