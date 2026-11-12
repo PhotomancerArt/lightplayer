@@ -350,6 +350,9 @@ pub struct OutputNode {
     /// microformat is parsed once per change, not once per frame.
     highlight_text: Option<String>,
     highlight: Highlight,
+    /// How far the last frame's buffer was grown past the fixtures' extent
+    /// for a chase ([`Self::chase_reach`]), in samples; 0 when it wasn't.
+    chase_reach: usize,
     /// The per-frame reads, each planned to its interned query id.
     reads: OutputReads,
 }
@@ -388,6 +391,7 @@ impl OutputNode {
             name: None,
             highlight_text: None,
             highlight: Highlight::default(),
+            chase_reach: 0,
             reads: OutputReads::default(),
         }
     }
@@ -523,9 +527,11 @@ impl OutputNode {
     ///
     /// Both modes are overlays, not bypasses, and both dim the rest of the
     /// wire first. Chase falls back to the breath when the output's sample
-    /// layout cannot say which channel is which (A2) — a mis-decoded chase
-    /// would name the wrong end of the strand, which is worse than the
-    /// direction-free language.
+    /// layout cannot say which channel is which (A2: a lamp inside a `Raw`
+    /// run) — a mis-decoded chase would name the wrong end of the strand,
+    /// which is worse than the direction-free language. A lamp no run
+    /// covers (a draft being drawn on lamps nothing is mapped to yet) takes
+    /// the nearest run's order: the same strand, most likely the same chip.
     fn paint_highlight(&self, samples: &mut [u16], highlight: &Highlight, time_seconds: f32) {
         match highlight {
             Highlight::Breath(spans) => Self::paint_breath(samples, spans, time_seconds),
@@ -590,6 +596,13 @@ impl OutputNode {
             .and_then(|()| self.render_planned(ctx, &products, samples));
         self.products_scratch = products;
         result?;
+        // A chase may name lamps past what the fixtures render (a draft
+        // being drawn on lamps nothing is mapped to yet): the wire reaches
+        // them, dark but for the chase.
+        let reach = self.chase_reach(samples.len());
+        if reach > samples.len() {
+            samples.resize(reach, 0);
+        }
         // The highlight overlay repaints AFTER the real render, so the frame
         // underneath stays the graph's and un-highlighted lamps are untouched.
         // With no highlight this is a no-op — the byte-identical path every
@@ -598,6 +611,32 @@ impl OutputNode {
             self.paint_highlight(samples, &self.highlight, ctx.time_seconds());
         }
         Ok(())
+    }
+
+    /// The buffer length this frame needs for its chase, in samples: as far
+    /// as the chase's furthest lamp when that is past the `rendered`
+    /// extent (at most [`CHASE_REACH_MAX_LAMPS`] past it), else nothing.
+    /// When the chase stops reaching as far, the frame after still reaches
+    /// to where it did, dark, so the LEDs it lit there go out before the
+    /// wire shrinks back (a WS281x LED keeps the last colour it was sent).
+    fn chase_reach(&mut self, rendered: usize) -> usize {
+        let want = match &self.highlight {
+            Highlight::Chase(spans) if chase_lamp_count(spans) > 0 => {
+                let end = spans
+                    .iter()
+                    .map(|span| span.start.saturating_add(span.count))
+                    .max()
+                    .unwrap_or(0);
+                let end = lamps_to_samples(end) as usize;
+                let most =
+                    rendered.saturating_add(lamps_to_samples(CHASE_REACH_MAX_LAMPS) as usize);
+                if end > rendered { end.min(most) } else { 0 }
+            }
+            _ => 0,
+        };
+        let reach = want.max(self.chase_reach);
+        self.chase_reach = want;
+        reach
     }
 
     /// Render `products` through this output's frame plan, building it when
@@ -721,7 +760,7 @@ impl OutputNode {
             if first.saturating_add(SAMPLES_PER_LAMP as usize) > established {
                 continue;
             }
-            if lookup.order_at(first as u32).is_none() {
+            if lookup.order_for(first as u32).is_none() {
                 return false;
             }
         }
@@ -738,7 +777,7 @@ impl OutputNode {
                 continue;
             }
             let rgb = chase::lamp_rgb_16(ordinal as u32, total, phase);
-            let Some(order) = lookup.order_at(first as u32) else {
+            let Some(order) = lookup.order_for(first as u32) else {
                 continue;
             };
             let ordered = ordered_rgb_16(order, rgb);
@@ -1155,6 +1194,11 @@ struct ChaseSpan {
     reversed: bool,
 }
 
+/// Most lamps a chase may reach past the extent the output's fixtures
+/// render ([`OutputNode::chase_reach`]). Studio names only lamps its ports
+/// have; this bounds a hand-typed range, at 6 KiB of samples.
+const CHASE_REACH_MAX_LAMPS: u32 = 1024;
+
 /// Most lamps a single chase will walk before it is treated as garbage.
 ///
 /// The chase costs work per lamp (the breath is slice math), so a fat-fingered
@@ -1321,6 +1365,38 @@ impl<'a> ChannelOrders<'a> {
             }
         }
         None
+    }
+
+    /// The channel order a chase paints `sample` in: its RGB run's; for a
+    /// lamp no run covers (a gap, or past the extent — a draft on lamps
+    /// nothing is mapped to yet), the nearest run's before it, else the
+    /// first's, else RGB, as the fault pattern guesses. `None` only inside
+    /// a `Raw` run, which has no colour to speak (A2).
+    fn order_for(&mut self, sample: u32) -> Option<ColorOrder> {
+        if let Some(order) = self.order_at(sample) {
+            return Some(order);
+        }
+        let covered = |span: &ControlSpan| {
+            sample >= span.start && sample < span.start.saturating_add(span.len)
+        };
+        if self.spans.iter().any(covered) {
+            return None;
+        }
+        let rgb = |span: &ControlSpan| match &span.encoding {
+            ControlHint::RgbPixels { color_order, .. } => Some(*color_order),
+            ControlHint::Raw => None,
+        };
+        let before = self
+            .spans
+            .iter()
+            .filter(|span| span.start <= sample)
+            .max_by_key(|span| span.start)
+            .and_then(rgb);
+        Some(
+            before
+                .or_else(|| self.spans.iter().find_map(rgb))
+                .unwrap_or(ColorOrder::Rgb),
+        )
     }
 }
 
@@ -3108,6 +3184,66 @@ mod tests {
             vec![0, 0, 65535, 0, 65535, 0],
             "on a GRB run the red tail is the MIDDLE channel — a chase that \
              ignored the layout would light the wrong end green",
+        );
+    }
+
+    /// A chase naming lamps past what the fixtures render (a draft drawn on
+    /// lamps nothing is mapped to yet) reaches them: the buffer grows to its
+    /// last lamp, dark but for the chase, painted in the nearest run's
+    /// channel order. The frame after it stops still reaches there, dark, so
+    /// the LEDs it lit go out before the wire shrinks back.
+    #[test]
+    fn a_chase_past_the_rendered_extent_reaches_its_lamps_then_goes_dark() {
+        let mut node = output_node();
+        let mut resolver = FakeResolver::new();
+        resolver.graph_extent = TWO_LAMPS;
+        resolver.sample_color_order = Some(ColorOrder::Grb);
+        resolver.highlight = String::from("chase:2-5");
+
+        consume_at_time(&mut node, &mut resolver, Revision::new(1), 0.0).expect("graph frame");
+        let floor = chase::BODY_FLOOR_16;
+        assert_eq!(
+            resolver.published_samples(),
+            vec![
+                // the rendered lamps, dimmed
+                250, 500, 750, 250, 500, 750, // the draft's head, blue in GRB
+                0, 0, 65535, //
+                floor, floor, floor, floor, floor, floor,
+                // its tail, red in GRB: the middle channel
+                0, 65535, 0,
+            ],
+        );
+
+        resolver.highlight = String::new();
+        consume_at_time(&mut node, &mut resolver, Revision::new(2), 0.0).expect("cleared");
+        assert_eq!(
+            resolver.published_samples(),
+            vec![
+                1000, 2000, 3000, 1000, 2000, 3000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+            ],
+            "the lamps the chase lit go dark before the wire shrinks back",
+        );
+        consume_at_time(&mut node, &mut resolver, Revision::new(3), 0.0).expect("after");
+        assert_eq!(
+            resolver.published_samples(),
+            vec![1000, 2000, 3000, 1000, 2000, 3000],
+        );
+    }
+
+    /// A hand-typed chase far past the extent reaches at most
+    /// [`CHASE_REACH_MAX_LAMPS`] past it.
+    #[test]
+    fn a_chase_reaches_at_most_its_bound_past_the_extent() {
+        let mut node = output_node();
+        let mut resolver = FakeResolver::new();
+        resolver.graph_extent = TWO_LAMPS;
+        resolver.sample_color_order = Some(ColorOrder::Rgb);
+        resolver.highlight = String::from("chase:60000");
+
+        consume_at_time(&mut node, &mut resolver, Revision::new(1), 0.0).expect("graph frame");
+        assert_eq!(
+            resolver.published_samples().len(),
+            lamps_to_samples(2 + CHASE_REACH_MAX_LAMPS) as usize,
         );
     }
 
