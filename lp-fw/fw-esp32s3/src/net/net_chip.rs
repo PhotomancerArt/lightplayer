@@ -22,7 +22,7 @@ pub const CORE: u32 = 0;
 /// FS3 (a XIAO ESP32-S3 Plus) never authenticated, 0 of 26 attempts, while
 /// it heard the access point at −15…−44 dBm; capped at 15 dBm it joined 10
 /// of 10 on the first attempt
-/// (docs/defects/2026-10-22-the-s3-wifi-image-never-authenticates.md).
+/// (docs/defects/2026-10-22-the-s3-wifi-image-never-authenticates.ai.md).
 pub const MAX_TX_POWER_QDBM: i8 = 60;
 
 /// What `net_thread::start` is given on this chip.

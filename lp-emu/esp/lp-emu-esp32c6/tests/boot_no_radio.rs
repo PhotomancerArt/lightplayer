@@ -246,7 +246,7 @@ fn the_no_radio_image_runs_three_seconds_strict_to_the_idle_loop() {
     // threshold raised, never restored. Which firmware build lands a tick
     // in that last window is an accident of code layout, so a check that
     // counts raw entries against raw restores flips between unrelated
-    // commits (docs/defects/2026-09-24-boot-no-radio-asserted-the-window-edge.md).
+    // commits (docs/defects/2026-09-24-boot-no-radio-asserted-the-window-edge.ai.md).
     // So pair them: walk the trace in order, and require every entry to be
     // followed by its raise (2) and its restore (1) before the next entry.
     // Only the LAST entry may be unfinished, and only because the window

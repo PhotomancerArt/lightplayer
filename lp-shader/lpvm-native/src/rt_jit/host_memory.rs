@@ -65,7 +65,7 @@ impl LpvmMemory for NativeHostMemory {
             // memory lives as long as the engine (every project on the
             // device), and its table grows while a project runs — above the
             // project's memory — so a kept table splits the heap the project
-            // frees (docs/defects/2026-09-24-ble-enabled-c6-refuses-a-project-switch-after-the-heap-cut.md).
+            // frees (docs/defects/2026-09-24-ble-enabled-c6-refuses-a-project-switch-after-the-heap-cut.ai.md).
             if live.is_empty() {
                 *live = VecMap::new();
             }

@@ -4,7 +4,7 @@
 // builtin, matching `src/builtins/lpfn/generative/fbm/fbm2_q32.rs`:
 // octave sum of lpfn_snoise with amplitude 0.5, gain 0.5, lacunarity 2.0.
 // FBM (weighted octave sum) is a standard procedure from Perlin's 1985
-// paper (see docs/reports/2026-03-31-lpfx-license-audit.md).
+// paper (see docs/reports/2026-03-31-lpfx-license-audit.ai.md).
 //
 // Depends on: generative/snoise/snoise2.glsl (which depends on hash.glsl)
 

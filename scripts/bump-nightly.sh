@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Bump the pinned nightly toolchain, then validate. See docs/toolchain-notes.md
+# Bump the pinned nightly toolchain, then validate. See docs/toolchain-notes.ai.md
 # for why the toolchain is pinned at all.
 #
 # Usage:
@@ -16,7 +16,7 @@
 # to the nightly `core::intrinsics::catch_unwind` ABI (0.2.8 integer return,
 # 0.2.9 bool), so a toolchain bump could require advancing the crate in lockstep
 # and the script did that speculatively, with a Cargo.lock snapshot to revert.
-# `unwinding` is gone (ADR docs/adr/2026-08-02-rv32-firmwares-are-abort-tier.md),
+# `unwinding` is gone (ADR docs/adr/2026-08-02-rv32-firmwares-are-abort-tier.ai.md),
 # so nothing in the tree is coupled to a nightly's internal ABI and the bump is
 # a one-variable change. A failure now means a real regression — a new clippy
 # lint or genuine breakage — not a version-matching puzzle.

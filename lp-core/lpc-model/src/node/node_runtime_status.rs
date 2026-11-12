@@ -27,7 +27,7 @@ pub enum NodeRuntimeStatus {
     ///
     /// Outputs of a project with any node in this state paint the fault
     /// pattern (never black); [`Self::Error`] and [`Self::Warn`] do not.
-    /// See docs/adr/2026-09-02-fault-is-never-black.md (written in P4).
+    /// See docs/adr/2026-09-02-fault-is-never-black.ai.md (written in P4).
     Fault(String),
     /// The node's kind has no runtime compiled into this build; a
     /// placeholder is attached in its place. The message names the kind.

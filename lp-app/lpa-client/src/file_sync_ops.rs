@@ -299,7 +299,7 @@ mod tests {
     }
 
     /// The board refuses a package hash it cannot hold in memory (the Edit
-    /// press's library bind, `docs/defects/2026-10-10-the-edit-press-package-hash-reads-files-whole-ungated.md`)
+    /// press's library bind, `docs/defects/2026-10-10-the-edit-press-package-hash-reads-files-whole-ungated.ai.md`)
     /// with `error` set and no hash. That must reach the caller as an error
     /// carrying the refusal's words, never as an empty hash that parses as
     /// something: the bind logs it and opens the editor unnamed.

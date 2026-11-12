@@ -36,7 +36,7 @@ pub async fn usb_link_task(
         // esp-println shares the IN endpoint and esp-hal's writer neither
         // checks it is free nor clears a stale `serial_in_empty`; the gate
         // does both before every packet (PR #805,
-        // docs/defects/2026-09-24-the-real-c6-link-loses-bytes-inside-a-packed-frame.md).
+        // docs/defects/2026-09-24-the-real-c6-link-loses-bytes-inside-a-packed-frame.ai.md).
         #[cfg(not(feature = "fixture-no-in-endpoint-gate"))]
         let tx = InEndpoint::<_, UsbSerialJtagInEndpoint>::new(tx);
         (rx, tx)

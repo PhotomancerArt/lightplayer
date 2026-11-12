@@ -148,7 +148,7 @@ pub async fn run_server_loop<T: ServerTransport + LinkUpkeep>(
 ) -> ! {
     // Wire hello: the first id-0 frame this loop ever sends, so clients can
     // check the protocol version before anything else arrives (see
-    // docs/adr/2026-07-14-wire-hello-versioning.md). Sent at the top of the
+    // docs/adr/2026-07-14-wire-hello-versioning.ai.md). Sent at the top of the
     // first pass the chip's hello gate is open ([`set_hello_gate`]), to the
     // links open now; no heartbeat goes before it.
     let mut hello_owed = true;
@@ -536,7 +536,7 @@ pub async fn run_server_loop_bounded<T: ServerTransport + LinkUpkeep>(
 ) -> LpServer {
     // Wire hello: the first id-0 frame this loop ever sends, so clients can
     // check the protocol version before anything else arrives (see
-    // docs/adr/2026-07-14-wire-hello-versioning.md). Sent at the top of the
+    // docs/adr/2026-07-14-wire-hello-versioning.ai.md). Sent at the top of the
     // first pass the chip's hello gate is open ([`set_hello_gate`]), to the
     // links open now; no heartbeat goes before it.
     let mut hello_owed = true;

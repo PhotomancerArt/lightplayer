@@ -165,7 +165,7 @@ pub fn from_display_srgb(space: Colorspace, srgb: [f32; 3]) -> [f32; 3] {
     }
 }
 
-/// Oklch (L, C, hue °) → Oklab — hue is DEGREES (`color.md` §4).
+/// Oklch (L, C, hue °) → Oklab — hue is DEGREES (`color.ai.md` §4).
 fn oklch_to_oklab(c: [f32; 3]) -> [f32; 3] {
     let radians = wrap_degrees(c[2]).to_radians();
     [c[0], c[1] * radians.cos(), c[1] * radians.sin()]

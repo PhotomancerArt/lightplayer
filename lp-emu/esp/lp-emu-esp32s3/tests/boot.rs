@@ -607,7 +607,7 @@ fn the_shipped_image_gets_past_esp_hal_init_and_crosses_the_console() {
     // first framed write, the hello, lost one 64-byte packet here: esp-hal's
     // write future woke on the stale `serial_in_empty` esp-println's drain
     // left, and the next chunk went into a buffer the block would not take
-    // (`docs/defects/2026-09-13-the-s3-link-drops-the-io-tasks-next-chunk-on-a-stale-serial-in-empty.md`).
+    // (`docs/defects/2026-09-13-the-s3-link-drops-the-io-tasks-next-chunk-on-a-stale-serial-in-empty.ai.md`).
     // The io_task's `serial::in_endpoint` gate now waits for a free buffer
     // and clears that bit before every write; `tests/boot_idle.rs` pins the
     // same on every host path.

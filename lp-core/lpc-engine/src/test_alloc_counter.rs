@@ -1,7 +1,7 @@
 //! Test-only global allocator that counts requests per thread.
 //!
 //! "How many allocations does a steady frame make?" is a question the
-//! emulator's heap-budget gate answers in CI (`docs/heap-budget-gate.md`),
+//! emulator's heap-budget gate answers in CI (`docs/heap-budget-gate.ai.md`),
 //! but an emulator run is minutes; this makes it a unit test. The crate's
 //! test binary installs [`CountingAlloc`] as its `#[global_allocator]` (see
 //! `lib.rs`), and [`measure`] brackets a closure with a snapshot.

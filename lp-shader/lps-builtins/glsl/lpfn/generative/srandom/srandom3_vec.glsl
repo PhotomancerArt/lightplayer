@@ -6,7 +6,7 @@
 // Three independent sin-hash channels with the classic gradient-noise dot
 // constants (127.1/311.7/74.7 family). The constants and sin-hash pattern
 // are the widely used public one-liner (David Hoskins lineage, MIT; see
-// docs/reports/2026-03-31-lpfx-license-audit.md).
+// docs/reports/2026-03-31-lpfx-license-audit.ai.md).
 //
 // NOTE: the seed parameter is accepted but unused, matching the Rust
 // implementation (`_seed`); seeding this variant is future work tracked with

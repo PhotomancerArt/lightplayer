@@ -5,7 +5,7 @@
 //! - the Web Serial **chooser filter**
 //!   (`browser_esp32_device_controller.js`, `ESP32_USB_VENDOR_IDS` — keep
 //!   the JS copy in sync by hand; JS is untestable from here, see
-//!   `docs/debt/web-serial-js-untestable.md`), and
+//!   `docs/debt/web-serial-js-untestable.ai.md`), and
 //! - the **granted-ports sweep** (`sweep_granted_ports` →
 //!   `discover_granted`), which under Brave's `SerialAllowAllPortsForUrls`
 //!   policy also surfaces Bluetooth serial nodes. Those carry no USB ids at

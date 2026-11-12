@@ -102,7 +102,7 @@ only `usr` uids, session tokens, and account device keys (`GetAccountAccess`),
 all from `IdMint` bytes.
 
 **The account's board list grants nothing**
-(`docs/adr/2026-10-20-the-account-board-list.md`). `ReportBoard` adds or
+(`docs/adr/2026-10-20-the-account-board-list.ai.md`). `ReportBoard` adds or
 freshens a board on the caller's own list (signed in, not a guest; a board
 new to a full list, 64, is `BoardListFull`); `ForgetBoard` removes the
 caller's own record (and acknowledges one that was not there);

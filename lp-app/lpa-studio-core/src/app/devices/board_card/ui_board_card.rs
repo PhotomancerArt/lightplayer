@@ -5,7 +5,7 @@
 //! core ([`super::board_card`], [`super::pending_board_card`]) from the
 //! roster's facts and the board's own offers, so the web decides how a bar
 //! looks and never what it says or which offer it carries
-//! (`docs/adr/2026-10-08-the-board-card-and-one-home-page.md`).
+//! (`docs/adr/2026-10-08-the-board-card-and-one-home-page.ai.md`).
 
 use lpa_devices::DeviceId;
 

@@ -43,7 +43,7 @@ pub struct ServerTickOutcome {
 /// Every embedder loop calls this once, as the first frame it sends when it
 /// starts serving (before/with the first heartbeat). The payload is the
 /// embedder-injected [`LpServer::hello`]; see
-/// `docs/adr/2026-07-14-wire-hello-versioning.md` for the contract.
+/// `docs/adr/2026-07-14-wire-hello-versioning.ai.md` for the contract.
 pub async fn send_unsolicited_hello<T: ServerTransport>(
     server: &LpServer,
     transport: &mut T,

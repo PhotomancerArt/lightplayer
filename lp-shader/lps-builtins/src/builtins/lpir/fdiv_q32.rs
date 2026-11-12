@@ -2,7 +2,7 @@
 //!
 //! Reference saturating implementation (one i64 div). **The shipped Q32
 //! lowering does not call this**: `lpvm-native` and `lpvm-wasm` lower
-//! `LpirOp::Fdiv` to [`super::fdiv_recip_q32`] (`docs/design/q32.md`). It
+//! `LpirOp::Fdiv` to [`super::fdiv_recip_q32`] (`docs/design/q32.ai.md`). It
 //! survives as `lpvm-cranelift`'s Q32 `Fdiv` target and as the divide used
 //! inside the Q32 transcendental builtins (`exp`, `log`, `tan`, …).
 
@@ -14,7 +14,7 @@ const MIN_FIXED: i32 = i32::MIN; // Minimum representable fixed-point value
 /// Uses native Rust division. Handles division by zero by saturating to max/min fixed-point values.
 #[unsafe(no_mangle)]
 pub extern "C" fn __lp_lpir_fdiv_q32(dividend: i32, divisor: i32) -> i32 {
-    // Division by zero: 0/0 → 0; nonzero/0 → saturate by sign (see docs/design/q32.md)
+    // Division by zero: 0/0 → 0; nonzero/0 → saturate by sign (see docs/design/q32.ai.md)
     if divisor == 0 {
         if dividend == 0 {
             return 0;

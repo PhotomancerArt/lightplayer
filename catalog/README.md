@@ -6,7 +6,7 @@ is **Explore**; the word here is *catalog* because "library" is taken —
 Studio's *library* is the user's own store of projects, and this tree is
 the built-in stock it remixes from. The public library is a later step.
 
-Design record: `docs/adr/2026-09-06-catalog-content-tree.md`.
+Design record: `docs/adr/2026-09-06-catalog-content-tree.ai.md`.
 
 ## Layout: buckets mirror `kind`, the manifest is the truth
 
@@ -30,7 +30,7 @@ Engine and bench test rigs are **not** content: they live under
 [`../projects/test/`](../projects/test/) and are never embedded.
 
 Every entry is one project in the two-file layout
-(`docs/design/modules.md` §6): a `project.json` container manifest beside
+(`docs/design/modules.ai.md` §6): a `project.json` container manifest beside
 a `module.json` root module; every other file is a node artifact or an
 asset the module references. A pattern additionally keeps its effect
 inside `effect/` — its own `module.json`, the shader def and source —
@@ -54,7 +54,7 @@ copy it made (delete the gallery package to re-seed).
 | `description` | `project.json` | Optional, one sentence, ≤160 characters. Project data (the card face does not show it today). |
 | `kind`, `exports` | `project.json` | Patterns: `"kind": "pattern"`, `"exports": ["effect"]`. Projects: absent. |
 | `provenance` | `effect/module.json` for a pattern; the root `module.json` for a project | `author`, `version`, `license`, `created`. CC0-1.0 unless stated; a pattern's export must state a license or the export lint warns. |
-| `inputs` | `effect/module.json` | The channels the pattern shares with the piece it is placed in: `["palette", "detail"]` when the pattern's palette and its detail mean the same thing in every pattern (Detail's "1× is my chosen size"). Each lists as one control at the playlist's level; a pattern that does not declare one keeps it to itself. Names only: label and range come from the shader's own binding. See `docs/adr/2026-10-20-patterns-declare-their-inputs.md`. |
+| `inputs` | `effect/module.json` | The channels the pattern shares with the piece it is placed in: `["palette", "detail"]` when the pattern's palette and its detail mean the same thing in every pattern (Detail's "1× is my chosen size"). Each lists as one control at the playlist's level; a pattern that does not declare one keeps it to itself. Names only: label and range come from the shader's own binding. See `docs/adr/2026-10-20-patterns-declare-their-inputs.ai.md`. |
 
 Sample content in this repository is CC0 unless a module's provenance
 says otherwise; anything that is not CC0 has a row in
@@ -74,7 +74,7 @@ says otherwise; anything that is not CC0 has a row in
    tag, author, source URL, upstream file/function.
 4. Run the gates (below). A pattern must also open onto a populated
    root panel: at least one control bound to a bus channel (`speed` is
-   the usual one), per `docs/adr/2026-08-03-panel-visibility-is-derived.md`.
+   the usual one), per `docs/adr/2026-08-03-panel-visibility-is-derived.ai.md`.
 5. Optional: a per-entry `README.md` — source commit for ports, what
    changed, what it stresses, and a bench-test line (board, date, who
    walked it). It ships with the entry and travels with a remix.
@@ -109,7 +109,7 @@ whose drift test fails if the committed mapping falls behind),
 and the desktop-class stress fixture; regenerate with `cargo run -p
 lpt-geodome`), `peach-1d` / `peach-2d` (the mapping-and-patching pair:
 byte-identical patch files, opposite declarations — see
-[the peach](../docs/user-guide/the-peach.md)), `fiber-headband` (a real,
+[the peach](../docs/user-guide/the-peach.ai.md)), `fiber-headband` (a real,
 battery-powered wearable), `rocaille` (a real 2D piece on a
 hand-authored mapping), `playful-choker` (a real PCB wearable) and
 `playful-choker-tryout` (the choker's rig with the first pattern set as
@@ -134,7 +134,7 @@ piece).
 Not here on purpose: `projects/test/fault-demo`, the shader that faults
 every frame to demonstrate "a fault is never black". Its loop never ends
 and only the LPVM's fuel meter traps it; a GPU tier used to hang on it
-(`docs/defects/2026-09-06-gpu-tier-executes-unbounded-shaders.md`, fixed
+(`docs/defects/2026-09-06-gpu-tier-executes-unbounded-shaders.ai.md`, fixed
 by the loop-bounds pass, which now refuses it at GPU compile time), so a
 gallery card would show a placeholder instead of the pattern. It stays a
 rig for `lp-cli dev` and the engine/server tests.
@@ -149,7 +149,7 @@ provenance header naming the upstream repo, file, function and SHA,
 [`COPYING.md`](COPYING.md) carries their rows, and WLED's license text
 is vendored at [`licenses/WLED-MIT.txt`](../licenses/WLED-MIT.txt) — the
 per-file discipline
-`docs/adr/2026-07-29-license-provenance-discipline.md` (and its
+`docs/adr/2026-07-29-license-provenance-discipline.ai.md` (and its
 2026-08-01 addendum, which established that pre-relicense WLED is MIT)
 requires of any permissively-licensed upstream.
 

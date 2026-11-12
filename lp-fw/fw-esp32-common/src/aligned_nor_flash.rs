@@ -66,7 +66,7 @@ impl<N: NorFlash> AlignedNorFlash<N> {
         }
     }
 
-    /// Check records with `crc32` (the chip's own engine for FORMAT.md's
+    /// Check records with `crc32` (the chip's own engine for FORMAT.ai.md's
     /// CRC-32: given the finished CRC so far, 0 to start, and more bytes, the
     /// finished CRC of all of them) instead of `lp-crc32`'s.
     pub fn with_crc32(mut self, crc32: fn(u32, &[u8]) -> u32) -> Self {

@@ -298,7 +298,7 @@ impl ProjectManager {
             self.end_pending_commit();
         }
 
-        // The clean-shutdown flush (panel.md P11): an orderly unload is
+        // The clean-shutdown flush (panel.ai.md P11): an orderly unload is
         // the one moment we can beat the ~10 s throttle, so the last few
         // seconds of a gesture are not lost.
         project.flush_panel_state();
@@ -363,7 +363,7 @@ impl ProjectManager {
     /// so a kept table (3.7 KB for `projects`: a `Project` is stored inline)
     /// sits in the middle of the space the project frees and splits it; a
     /// device then refused the next project on contiguity with 200 KB free
-    /// (docs/defects/2026-09-24-ble-enabled-c6-refuses-a-project-switch-after-the-heap-cut.md).
+    /// (docs/defects/2026-09-24-ble-enabled-c6-refuses-a-project-switch-after-the-heap-cut.ai.md).
     fn release_tables_if_empty(&mut self) {
         if self.projects.is_empty() {
             self.projects = HashMap::new();

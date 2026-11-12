@@ -435,7 +435,7 @@ fn a_littlefs_with_a_store_sector_in_a_used_block_is_not_trusted() {
     ));
 }
 
-/// FORMAT.md "Growing the partition" (OW-P6): the store records no
+/// FORMAT.ai.md "Growing the partition" (OW-P6): the store records no
 /// identity, so a trusted sector of ANOTHER store left in the new region —
 /// an earlier attempt, a dev build's store — whose roots out-sequence the
 /// new store's would be adopted by the first mount. Here a foreign store

@@ -64,7 +64,7 @@ pub struct CompilePxDesc<'a> {
     /// [`crate::LpsEngine`] passes it to the backend through
     /// [`lpvm::LpvmCompileParams`]; an engine that cannot honour it says so
     /// via [`lpvm::LpvmEngine::supports_float_mode`] and the caller errors.
-    /// See `docs/adr/2026-08-01-float-mode-as-a-compiler-parameter.md`.
+    /// See `docs/adr/2026-08-01-float-mode-as-a-compiler-parameter.ai.md`.
     pub float_mode: FloatMode,
     /// Space this shader declares it renders in, which *is* the entry
     /// contract: `TwoD` requires `vec4 render_2d(vec2 pos)`, `OneD`

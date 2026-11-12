@@ -89,7 +89,7 @@ impl SplitChip for C6Split {
     /// radio quiet first like every other reset the firmware makes
     /// (`restart`): an update over Bluetooth, the LAN or the relay ends with
     /// the radio busy, and the loader then runs in RAM the app's heap held
-    /// (docs/defects/2026-10-17-radio-heap-overflow-reached-the-split-loaders-ram.md).
+    /// (docs/defects/2026-10-17-radio-heap-overflow-reached-the-split-loaders-ram.ai.md).
     fn reset_now() -> ! {
         crate::board::esp32c6::restart::restart()
     }

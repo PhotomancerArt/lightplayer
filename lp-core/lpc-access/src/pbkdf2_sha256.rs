@@ -12,7 +12,7 @@
 //! iteration count) and verifies `HMAC(K, challenge)`; spending the KDF's
 //! deliberate cost on an ESP32-C6 would buy nothing, because `K` is what a
 //! login proves possession of either way. See
-//! `docs/adr/2026-09-23-ble-access-model.md`.
+//! `docs/adr/2026-09-23-ble-access-model.ai.md`.
 //!
 //! RustCrypto's `pbkdf2` crate is a dev-dependency oracle for the tests
 //! below and is never linked into the product.

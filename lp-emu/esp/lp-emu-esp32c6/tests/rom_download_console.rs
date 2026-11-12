@@ -17,7 +17,7 @@
 //! **not** `#[ignore]`d — they run under a bare `cargo test` and in every
 //! CI job that builds this crate.
 //!
-//! # What the trace settled (docs/reports/2026-09-08-esp32c6-rom-console-trace.md)
+//! # What the trace settled (docs/reports/2026-09-08-esp32c6-rom-console-trace.ai.md)
 //!
 //! Nothing in the register model was wrong. The ROM's detector alternates
 //! between UART0 (`uart_baudrate_detect`) and the USB console

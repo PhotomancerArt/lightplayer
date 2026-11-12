@@ -17,7 +17,7 @@ so the main stack is the RESIDUAL of RWDATA — eight new bytes of statics move
 it by eight. Every `stack_probe.rs` reports `_stack_start - _stack_end` as the
 `of <total> B` on its `[stack] heartbeat:` line. `heap-budget-check.sh` grades
 that reported figure against this derived one instead of against a number
-frozen in the record (docs/adr/2026-09-23-heap-budget-record-split-and-derived-stack.md):
+frozen in the record (docs/adr/2026-09-23-heap-budget-record-split-and-derived-stack.ai.md):
 
 - `stackTotal` here must EQUAL the heartbeat's — the probe reports the layout;
 - `stackTop` must equal the record's — it is `ORIGIN + LENGTH` of RWDATA, a

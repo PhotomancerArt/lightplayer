@@ -5,7 +5,7 @@
 //
 // HSV→RGB conversion is standard mathematical procedure (Foley & van Dam);
 // the LightPlayer port was originally written with reference to LYGIA's
-// hsv2rgb.glsl (see docs/reports/2026-03-31-lpfx-license-audit.md).
+// hsv2rgb.glsl (see docs/reports/2026-03-31-lpfx-license-audit.ai.md).
 //
 // Depends on: color/space/hue2rgb.glsl (which depends on math/saturate.glsl)
 

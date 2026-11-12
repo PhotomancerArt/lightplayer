@@ -6,7 +6,7 @@
 //! *acts* on it lives here, driven by [`Esp32OutputProvider`] and by a
 //! chip-side [`PowerGatePin`].
 //!
-//! See `docs/adr/2026-08-08-switched-power-rail-mechanism.md`.
+//! See `docs/adr/2026-08-08-switched-power-rail-mechanism.ai.md`.
 //!
 //! [`Esp32OutputProvider`]: super::provider::Esp32OutputProvider
 
@@ -34,7 +34,7 @@ pub trait PowerGatePin {
 
 /// Monotonic microseconds. Injected as a closure rather than read from a HAL:
 /// fw-esp32-common builds under three chip toolchains and none of its time may
-/// be ambient (`docs/adr/2026-07-06-sans-io-core.md`), and the settle window
+/// be ambient (`docs/adr/2026-07-06-sans-io-core.ai.md`), and the settle window
 /// below is only testable if the clock can be advanced by hand.
 pub type NowMicros = Box<dyn Fn() -> u64>;
 

@@ -449,7 +449,7 @@ fn rom_up_and_direct_load_agree_on_what_the_app_sees() {
     //    long as `I2C_ANA_MST` was an accept block with a single shared
     //    `data` byte, because the ROM's own `regi2c` traffic had left
     //    something else in it
-    //    (`docs/defects/2026-09-08-regi2c-is-one-data-register-not-a-register-file.md`).
+    //    (`docs/defects/2026-09-08-regi2c-is-one-data-register-not-a-register-file.ai.md`).
     //
     //    The assertion is the whole console rather than a grep for that one
     //    string: a model that answers `regi2c` reads differently changes what

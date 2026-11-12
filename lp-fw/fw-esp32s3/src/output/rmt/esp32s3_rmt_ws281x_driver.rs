@@ -316,7 +316,7 @@ impl Esp32S3RmtWs281xDriver {
         // error was ever raised, and the strip held its last frame until a
         // reboot. A different GPIO is the case `with_pin` handles correctly:
         // connect the new pad, release the old one.
-        // (docs/defects/2026-09-02-same-gpio-rebind-disconnects-the-pad.md)
+        // (docs/defects/2026-09-02-same-gpio-rebind-disconnects-the-pad.ai.md)
         if slot.bound_gpio == Some(gpio) {
             slot.tx = Some(tx);
         } else {

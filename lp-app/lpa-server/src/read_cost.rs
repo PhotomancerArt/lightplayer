@@ -6,7 +6,7 @@
 //! read's working set (the first sync's skeleton, 25 KB) plus room for the
 //! link and radio tasks — so the device card's read, whose working set is
 //! 4–9 KB at the choker's 73 lamps, is refused for the editor's sake
-//! (`docs/defects/2026-10-09-a-phones-bluetooth-link-leaves-the-choker-under-the-read-gate.md`).
+//! (`docs/defects/2026-10-09-a-phones-bluetooth-link-leaves-the-choker-under-the-read-gate.ai.md`).
 //! And the same floor is too SMALL at the design target: at 512 lamps the
 //! card's read peaks at ~39 KB and the editor's control focus at ~50 KB, so
 //! a 512-lamp board just over the floor passes the gate and resets.

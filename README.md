@@ -1,3 +1,6 @@
+> [!NOTE]
+> An AI agent wrote this README. A person will rewrite it.
+
 <!-- README images track the newest captured main snapshot via the stories
      repo's GC-exempt `latest` ref. A renamed hero story 404s here until this
      README is updated; GitHub's camo cache can lag a refresh by a while. -->
@@ -122,7 +125,7 @@ For an empty flash and firmware only (no project push), use `just demo-esp32c6-s
    - `just fci-app` - Fix, check, build, and test the application.
    - `just fci-glsl` - Fix, check, build, and test the GLSL compiler.
 
-See `just --list` for all available commands, and [`docs/development.md`](docs/development.md) for
+See `just --list` for all available commands, and [`docs/development.ai.md`](docs/development.ai.md) for
 deeper workflows: board manifests, schema generation, GPIO calibration, and on-hardware
 firmware tests.
 
@@ -213,4 +216,4 @@ Derived third-party sources and their vendored license texts (`licenses/`):
   itself after Jos Stam, "Real-Time Fluid Dynamics for Games" (GDC 2003).
 - **Catalog patterns ported from WLED**: see [`catalog/COPYING.md`](catalog/COPYING.md).
 
-Contributions are accepted under the terms in [CONTRIBUTING.md](CONTRIBUTING.md).
+Contributions are accepted under the terms in [CONTRIBUTING.ai.md](CONTRIBUTING.ai.md).

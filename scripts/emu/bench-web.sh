@@ -47,7 +47,7 @@
 # imports a directory some OTHER checkout's own `--no-serve` produced — that
 # is how a head older than the flag gets into the store.
 #
-# Emulated microseconds never gate anything (AGENTS.md "The ESP32-C6
+# Emulated microseconds never gate anything (AGENTS.ai.md "The ESP32-C6
 # emulator"): transcripts decide, probes report.
 set -euo pipefail
 

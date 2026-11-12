@@ -14,7 +14,7 @@ export function isSupported() {
 //
 // Chrome on Android has a `navigator.serial` that lists Bluetooth RFCOMM
 // ports only, never a wired board, so there the port is spoken over
-// `navigator.usb` instead (`docs/adr/2026-10-18-android-usb-over-webusb.md`).
+// `navigator.usb` instead (`docs/adr/2026-10-18-android-usb-over-webusb.ai.md`).
 // A polyfill installed on the page (an own property of `navigator`) always
 // wins: it is the board the page was asked to talk to.
 export function serialBackendKind(nav = globalThis.navigator) {

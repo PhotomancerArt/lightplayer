@@ -1,6 +1,6 @@
 //! One control on a **panel**, plus the panel state behind it.
 //!
-//! `docs/design/panel.md` is the normative treatment. A control is
+//! `docs/design/panel.ai.md` is the normative treatment. A control is
 //! identified by `(scope, channel)` (P1); the scope is the owning
 //! [`crate::UiPanelGroup`], the channel is [`UiPanelControlView::channel`].
 //! The widget payload is the existing [`UiPanelControl`] verbatim — the
@@ -14,7 +14,7 @@
 use crate::{UiPanelControl, UiSlotAffordance, UiSlotAspect, UiSlotAspectKind, UiSlotAspectRow};
 
 /// The three visibly distinct states a panel control can be in
-/// (`docs/design/panel.md` P2; the three-state requirement is P-Q2).
+/// (`docs/design/panel.ai.md` P2; the three-state requirement is P-Q2).
 ///
 /// These are *not* a severity ladder and must not reuse the bound-violet
 /// family: "bound" means wired, "engaged" means captured (P6).
@@ -22,14 +22,14 @@ use crate::{UiPanelControl, UiSlotAffordance, UiSlotAspect, UiSlotAspectKind, Ui
 pub enum UiPanelControlState {
     /// **Read, at default.** No writer anywhere in the scope chain, so the
     /// consuming slot falls back to its own authored default
-    /// (`modules.md` R6). The channel still lists — an unfilled public
+    /// (`modules.ai.md` R6). The channel still lists — an unfilled public
     /// input is an invitation, not an error.
     #[default]
     ReadDefault,
     /// **Read, following automation.** Some writer that is *not* this
     /// control's drives the channel: an authored node in this scope (an
     /// LFO, a clock) or an inherited writer from an enclosing scope
-    /// (`modules.md` R5). The control displays the live value and can be
+    /// (`modules.ai.md` R5). The control displays the live value and can be
     /// grabbed (P5 jump takeover).
     ReadFollowing,
     /// **Engaged (Latch).** This control's panel writer exists and holds,

@@ -8,7 +8,7 @@ and the emulator reads, and the generators that keep a seam alive through a
 release build. `no_std`, no dependencies, **MIT**.
 
 Why seams exist and what they may claim is the ADR
-[`docs/adr/2026-10-05-emulator-seams.md`](../../docs/adr/2026-10-05-emulator-seams.md).
+[`docs/adr/2026-10-05-emulator-seams.ai.md`](../../docs/adr/2026-10-05-emulator-seams.ai.md).
 
 ## Kinds and shapes
 
@@ -179,7 +179,7 @@ Ethernet II frame with a 1500 B payload and no FCS), `MAX_SSID_LEN` (32),
 `MAX_PASSWORD_LEN` (64), the `EVENT_*` codes and `scan_record_len`. What this
 hands over (everything at and below the frame device) and what stays real
 above it (`embassy-net`, the link, the server) is
-`docs/adr/2026-10-05-emulator-seams.md` §11.
+`docs/adr/2026-10-05-emulator-seams.ai.md` §11.
 
 ## Licence and the fence
 

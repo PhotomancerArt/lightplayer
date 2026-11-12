@@ -50,5 +50,5 @@ cargo test -p fw-core
 ```
 
 When changing code that affects firmware behavior, also run the relevant target
-checks from the root `AGENTS.md`, especially `fw-esp32c6` and `fw-emu` target
+checks from the root `AGENTS.ai.md`, especially `fw-esp32c6` and `fw-emu` target
 checks.

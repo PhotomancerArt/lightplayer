@@ -5,7 +5,7 @@
 //! through `StdMathHandler`, so the builtin and the oracle agree by
 //! construction rather than by tuning.
 //!
-//! **Tolerance (`docs/design/float.md` §6):** `1e-6` relative with a `1e-6`
+//! **Tolerance (`docs/design/float.ai.md` §6):** `1e-6` relative with a `1e-6`
 //! absolute floor, against the f64 reference. That is f32 round-off, not a
 //! quality allowance — the canonical GLSL definition *is* the IEEE function
 //! here, so there is no algorithmic error to budget for.
@@ -16,7 +16,7 @@
 //! `inversesqrt` is the real case — it is spelled out in that file with its own
 //! band. Speed-over-ulp (roadmap D6) is a licence, not an obligation.
 //!
-//! **Domain:** Defined for `x > 0`. `log(0)` is `-inf` and `log(x < 0)` is NaN; GLSL leaves both undefined (float.md §5).
+//! **Domain:** Defined for `x > 0`. `log(0)` is `-inf` and `log(x < 0)` is NaN; GLSL leaves both undefined (float.ai.md §5).
 
 /// GLSL `log(x)`.
 #[unsafe(no_mangle)]
@@ -58,7 +58,7 @@ mod tests {
             let got = __lps_log_f32(x);
             let want = (x as f64).ln() as f32;
             if !want.is_finite() {
-                // float.md §5: out-of-domain results are Unspecified — never asserted.
+                // float.ai.md §5: out-of-domain results are Unspecified — never asserted.
                 continue;
             }
             assert_f32_close(got, want, 1e-6, 1e-6, format_args!("log({x})"));

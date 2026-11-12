@@ -212,7 +212,7 @@ pub fn FixtureFace(
 /// limiting indicator second.
 ///
 /// One quiet line under the fader — no panel, no border, no badge. Two numbers
-/// do not earn chrome (`docs/style/ui.md`). Only the limiting state takes
+/// do not earn chrome (`docs/style/ui.ai.md`). Only the limiting state takes
 /// colour, and it takes `attention` rather than `warning`: shedding current to
 /// stay inside a declared budget is the feature working, not a fault.
 ///

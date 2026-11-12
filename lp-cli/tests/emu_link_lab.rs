@@ -117,7 +117,7 @@ fn run(elf: &std::path::Path, faults: LinkFaults, stall_ms: u32) -> LabOutcome {
 
 /// No USB write waited out its timeout with a host draining and the send
 /// buffer already free: the esp-hal interrupt handler's lost TX wake
-/// (docs/defects/2026-09-26-esp-hals-usb-isr-clears-a-tx-edge-it-did-not-handle.md),
+/// (docs/defects/2026-09-26-esp-hals-usb-isr-clears-a-tx-edge-it-did-not-handle.ai.md),
 /// fixed by the upstream back-port in `third_party/esp-hal`. Stock esp-hal
 /// 1.1.1 lost about five a minute here.
 fn assert_no_lost_wakes(name: &str, o: &LabOutcome) {

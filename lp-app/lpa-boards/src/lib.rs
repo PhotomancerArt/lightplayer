@@ -9,14 +9,14 @@
 //!
 //! The runtime board manifest (`boards/<vendor>/<product>.json`) is compiled
 //! into firmware and stays flash-lean; everything presentation-only lives
-//! here, app-side. See `docs/adr/2026-07-31-board-display-metadata-split.md`.
+//! here, app-side. See `docs/adr/2026-07-31-board-display-metadata-split.ai.md`.
 //!
 //! This crate also owns the **computed board↔firmware join**
 //! ([`compatible_builds`]): which checked-in firmware build a board can run,
 //! derived from chip identity and flash size — never hand-listed. Consumers
 //! are the boards catalog and (when it lands) the provisioning picker. See
 //! `firmware_join.rs` and
-//! `docs/adr/2026-08-01-firmware-manifest-architecture.md`.
+//! `docs/adr/2026-08-01-firmware-manifest-architecture.ai.md`.
 
 mod board_fingerprint;
 mod callout;

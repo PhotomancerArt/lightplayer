@@ -3,7 +3,7 @@
 //! they do not fit, the line on a board whose files are waiting, and the
 //! verbs that resolve each. Core decides; the card only lays these out.
 //!
-//! The verbs are offers (docs/adr/2026-10-01-agentic-control-offers-in-core.md):
+//! The verbs are offers (docs/adr/2026-10-01-agentic-control-offers-in-core.ai.md):
 //! published into the view's offer tree under `devices/<board>/…`, so the
 //! app agent reads and presses the same ones the card draws. The view types
 //! below carry only words and the offers' paths.
@@ -335,7 +335,7 @@ pub fn device_layout_view(
     //   pending for it, or `evidence.remembered`). Every fresh install's
     //   first boot formats too, and a board that never held anything has
     //   lost nothing: it gets the ordinary card (the connected feel gate's
-    //   finding 1, `docs/defects/2026-10-14-a-freshly-installed-board-is-told-its-files-need-restoring.md`);
+    //   finding 1, `docs/defects/2026-10-14-a-freshly-installed-board-is-told-its-files-need-restoring.ai.md`);
     // - a backup still PENDING for this board in this browser (the resume
     //   rule, Q14: an unfinished migration's backup), on a board that names
     //   no identity — any later boot of the formatted filesystem mounts

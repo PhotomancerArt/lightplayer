@@ -31,7 +31,7 @@ Chosen to sit inside `lp-xt-emu`'s modeled SRAM1 (see its `memory.rs`):
 
 Fixtures must be integer-only, by convention rather than by emulator
 limitation. `lp-xt-emu` gained FPU executors in M6 (see its README's
-"Floating point" section and `docs/adr/2026-07-31-xtensa-fp-behavior-contract.md`)
+"Floating point" section and `docs/adr/2026-07-31-xtensa-fp-behavior-contract.ai.md`)
 and `lp-xt-inst` decodes the FP subset, so the old enforcement mechanism —
 an unsupported FPU op trapping as illegal — no longer applies to `add.s` and
 friends. This corpus predates that work and there is no host-side f32 oracle

@@ -31,7 +31,7 @@
 //! The classic mirrors SRAM1 into the instruction bus at
 //! `0x400A_0000..0x400C_0000` (word-swapped), and this machine **deliberately
 //! does not map it**. M0's inventory
-//! (`docs/reports/2026-09-10-xtensa-firmware-isa-inventory.md` §5) measured
+//! (`docs/reports/2026-09-10-xtensa-firmware-isa-inventory.ai.md` §5) measured
 //! **zero** in-symbol-bounds references to that window in the shipped
 //! `fw-esp32v3` image and in the classic mask ROM. Mapping a window nothing
 //! reaches would only let a runaway pointer read plausible bytes.

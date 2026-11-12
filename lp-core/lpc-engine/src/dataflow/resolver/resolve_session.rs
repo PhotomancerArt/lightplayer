@@ -476,7 +476,7 @@ impl<'a> EngineSession<'a> {
             } => {
                 self.trace.record_select_binding(query, *binding_ref);
                 match self.resolve_route_target(host, *binding_ref, target) {
-                    // R6 (modules.md): a DEFAULT-bound consumed slot whose
+                    // R6 (modules.ai.md): a DEFAULT-bound consumed slot whose
                     // channel no enclosing scope writes falls back to its own
                     // authored default — an unfilled public input is an
                     // invitation, not an error (the fixture's brightness with

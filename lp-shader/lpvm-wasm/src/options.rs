@@ -28,7 +28,7 @@ pub struct WasmOptions {
 
     /// When true (default), insert fuel checks: check-then-decrement at every
     /// loop back-edge and check-only at every function entry (mirrors the rv32
-    /// design in `docs/adr/2026-07-20-lpvm-native-fuel.md`). Always on for the
+    /// design in `docs/adr/2026-07-20-lpvm-native-fuel.ai.md`). Always on for the
     /// wasm hosts; `false` exists for tests and perf comparison only.
     pub fuel: bool,
 }

@@ -15,7 +15,7 @@
 //!   loose nodes. Meteor is a compute/render *pair* wired to each other
 //!   (`node:../sim#meteors`); keeping them inside one module folder keeps
 //!   that wiring untouched and makes the entry playlist-playable through
-//!   the module mirror (modules.md R7: "every module node produces an
+//!   the module mirror (modules.ai.md R7: "every module node produces an
 //!   `output` slot mirroring its own scope's `visual.out` … this is what
 //!   makes any module playlist-playable with zero playlist changes"). Its
 //!   `bus:time` read resolves outward to the root clock by R5.
@@ -159,7 +159,7 @@ pub fn generate_board_project(
     // The effect rides verbatim from the catalog's meteor: its exported
     // `effect/` folder — module, node artifacts, shaders, provenance — is
     // vendored whole, so the gallery's meteor and the generated one are
-    // the same bytes by construction (modules.md §6 copy-to-own).
+    // the same bytes by construction (modules.ai.md §6 copy-to-own).
     for (path, bytes) in meteor_export_files() {
         files.push((path.to_string(), bytes.to_vec()));
     }
@@ -417,7 +417,7 @@ mod tests {
             "meteor exports a module plus its sim/render pair"
         );
         // The vendored module carries the pattern's own provenance — the
-        // export lint's warning-free shape (modules.md R14).
+        // export lint's warning-free shape (modules.ai.md R14).
         let module = file_text(&project, "effect/module.json");
         assert!(module.contains("\"provenance\""), "{module}");
         assert!(module.contains("\"license\""), "{module}");

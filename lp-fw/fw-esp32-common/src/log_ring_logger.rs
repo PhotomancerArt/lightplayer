@@ -93,7 +93,7 @@ pub fn has_records() -> bool {
 /// refused lost it with no notice a host could see — only the board's
 /// `datagramsDropped` counted it — and that is how a `[OUT] dump` lost its
 /// parts under a project load
-/// (`docs/defects/2026-09-29-the-classics-log-ring-drops-records-under-a-project-load-burst.md`).
+/// (`docs/defects/2026-09-29-the-classics-log-ring-drops-records-under-a-project-load-burst.ai.md`).
 pub fn pump<A: lp_link::Arq>(
     link: &mut lp_link::Link<A>,
     now: lp_link::Micros,

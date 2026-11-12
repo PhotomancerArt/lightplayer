@@ -5,7 +5,7 @@
 //! basebands, with their DMA — is not part of it, and on silicon the
 //! Bluetooth controller kept writing into RAM across that reset, into memory
 //! the second-stage bootloader had just loaded its code into
-//! (docs/defects/2026-10-05-a-requested-reboot-crashed-the-c6-bootloader.md).
+//! (docs/defects/2026-10-05-a-requested-reboot-crashed-the-c6-bootloader.ai.md).
 //!
 //! The fix for that crash is placement: the radio's buffers no longer live
 //! where any bootloader loads (`c_heap`, `init::HEAP_RADIO`). This is the

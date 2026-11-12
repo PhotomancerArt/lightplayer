@@ -30,7 +30,7 @@ fn log_memory(memory_stats: Option<&MemoryStatsFn>, label: &str) {
             // figure — which its advertised LED ceiling is derived from — comes
             // from differencing two such brackets. At KB granularity that
             // difference carries ±8 B/LED of rounding, enough to hide a whole
-            // optimisation. See `docs/adr/2026-08-01-esp32v3-flash-budget.md`.
+            // optimisation. See `docs/adr/2026-08-01-esp32v3-flash-budget.ai.md`.
             log::info!(
                 "[mem] {}: {} B free / {} B used ({}k / {}k)",
                 label,
@@ -95,7 +95,7 @@ pub fn handle_client_message(
         // A FIXTURE build refuses the hello outright, which is what
         // pre-hello firmware looks like from the client's side: the
         // request goes unanswered and absence IS the mismatch signal
-        // (`docs/adr/2026-07-14-wire-hello-versioning.md`). Suppressing
+        // (`docs/adr/2026-07-14-wire-hello-versioning.ai.md`). Suppressing
         // only the unsolicited hello would not do it — Studio's client
         // asks as well, and an answer would make the board compatible
         // again. Never enable this in a released image.
@@ -377,7 +377,7 @@ pub fn handle_fs_request_with_headroom(
             // Dispatch marker for the flash-write-wedge diagnosis: pairs
             // with fw-esp32v3's [FLASH] traces to split "request never
             // dispatched" from "storage op wedged" from "response lost".
-            // docs/defects/2026-08-29-flash-write-wedges-under-zook-playback.md
+            // docs/defects/2026-08-29-flash-write-wedges-under-zook-playback.ai.md
             log::debug!("fs write dispatch: {} ({} B)", path.as_str(), data.len());
             let result = fs.write_file(path.as_path(), &data);
             log::debug!("fs write handled: {} ok={}", path.as_str(), result.is_ok());

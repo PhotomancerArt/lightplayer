@@ -1,5 +1,5 @@
 //! Emulator seams: the firmware's descriptor table and the chip-neutral
-//! seams (`lp-base/lp-seam`; ADR `docs/adr/2026-10-05-emulator-seams.md`).
+//! seams (`lp-base/lp-seam`; ADR `docs/adr/2026-10-05-emulator-seams.ai.md`).
 //!
 //! A seam is a named function in the one shipped firmware where an emulator
 //! may answer. On silicon its real body runs and nothing else changes. The

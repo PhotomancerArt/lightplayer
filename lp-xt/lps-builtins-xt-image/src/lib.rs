@@ -15,7 +15,7 @@
 //!
 //! Two reasons, both deliberate:
 //!
-//! - `lp-shader/*` crates are **sans-IO** (`docs/adr/2026-07-06-sans-io-core.md`),
+//! - `lp-shader/*` crates are **sans-IO** (`docs/adr/2026-07-06-sans-io-core.ai.md`),
 //!   so the consumer cannot read the ELF from a path at runtime. Embedding at
 //!   build time is the compliant answer, mirroring how `lpvm-cranelift/build.rs`
 //!   embeds the rv32 image.

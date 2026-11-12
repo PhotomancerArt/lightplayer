@@ -1,5 +1,5 @@
 //! Live gallery thumbnails: the web-side seam between home cards and the
-//! core `PreviewHost` (`docs/adr/2026-07-16-preview-host.md`).
+//! core `PreviewHost` (`docs/adr/2026-07-16-preview-host.ai.md`).
 //!
 //! The core actor's home state stays metadata-only (`UiPackageCard` /
 //! `UiExampleCard` carry the uid / example id, which IS the preview

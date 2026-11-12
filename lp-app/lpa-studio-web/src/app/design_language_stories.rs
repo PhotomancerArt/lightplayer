@@ -1,9 +1,9 @@
 //! The design-language page — the design library's MAIN page (it is the
-//! story-book's `DEFAULT_STORY_ID`): the visual twin of `docs/style/ui.md`
+//! story-book's `DEFAULT_STORY_ID`): the visual twin of `docs/style/ui.ai.md`
 //! Color & Light. Every idiom is shown with the REAL classes and tokens,
 //! never a restatement, so this page drifts only when the language does.
 //!
-//! Ordering mirrors ui.md: the ground, frozen status meaning, kinds of
+//! Ordering mirrors ui.ai.md: the ground, frozen status meaning, kinds of
 //! light, the selection grammar (ADR 2026-08-30-studio-design-language-
 //! aurora, selection-grammar amendment), working spectrum, glass + focus.
 
@@ -71,7 +71,7 @@ fn page() -> Element {
                 p { class: "tw:m-0 tw:max-w-[70ch] tw:text-[13px] tw:leading-relaxed tw:text-soft-foreground",
                     "Aurora: violet-tinted graphite at rest — saturated color belongs to the artwork, "
                     "to status meaning, and to interaction light. There is no accent hue. The prose "
-                    "version of this page is docs/style/ui.md § Color & Light."
+                    "version of this page is docs/style/ui.ai.md § Color & Light."
                 }
             }
 

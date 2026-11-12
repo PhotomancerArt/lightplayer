@@ -309,7 +309,7 @@ impl CompiledShader {
                 Ok(Self::Emu(engine, module))
             }
             // Both native backends are the SAME engine on different ISAs — see
-            // `docs/adr/2026-07-30-isa-parameterized-host-emu-engine.md`. That is
+            // `docs/adr/2026-07-30-isa-parameterized-host-emu-engine.ai.md`. That is
             // why they share `Self::NativeFa` and why adding Xtensa needed no
             // other match arm in this file.
             Backend::Rv32fa | Backend::Xtfa => {

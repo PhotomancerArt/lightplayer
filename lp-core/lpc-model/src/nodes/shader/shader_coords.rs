@@ -15,7 +15,7 @@ use alloc::string::ToString;
 /// files round-trip byte-identically and render byte-identically.
 ///
 /// [`ShaderCoords::Pattern`] opts the shader into *pattern space* (ADR
-/// `docs/adr/2026-09-24-pattern-space.md`): the lamps' bounding box, centred
+/// `docs/adr/2026-09-24-pattern-space.ai.md`): the lamps' bounding box, centred
 /// at the origin, scaled uniformly so its long side spans −1…1, y up — and in
 /// 1D, 0 → 1 from the strand's first lamp to its last. Alongside `pos` the
 /// engine supplies three render-request intrinsics a shader may declare:

@@ -10,7 +10,7 @@
 //! lesson carried over: an accept block answers a read of *any* analog
 //! register with the last byte written to *any other*, which was a real
 //! defect with a real symptom on the C6
-//! (`docs/defects/2026-09-08-regi2c-is-one-data-register-not-a-register-file.md`),
+//! (`docs/defects/2026-09-08-regi2c-is-one-data-register-not-a-register-file.ai.md`),
 //! and on this chip esp-hal's `write_field` *does* read back — every
 //! `I2C_DIG_REG_EXT_*_DREG.write_field` in `ensure_voltage_raised` is a
 //! `rom_i2c_readReg` followed by a `rom_i2c_writeReg` (`rom_i2c_writeReg_Mask`,

@@ -123,7 +123,7 @@ impl HwRegistry {
         // project's output opens — above the project's memory — so kept
         // capacity outlived the project and split the heap it freed (a
         // device refused the next project on contiguity:
-        // docs/defects/2026-09-24-ble-enabled-c6-refuses-a-project-switch-after-the-heap-cut.md).
+        // docs/defects/2026-09-24-ble-enabled-c6-refuses-a-project-switch-after-the-heap-cut.ai.md).
         if state.active_by_address.is_empty() {
             state.active_by_address = VecMap::new();
         }

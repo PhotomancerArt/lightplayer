@@ -11,7 +11,7 @@
 //! it takes ([`super::link_session`]).
 //!
 //! The words are the row's state, in label voice, with one number when it
-//! has one (`docs/ux/anatomy/board-card.md`): "sending · 40%", "updating ·
+//! has one (`docs/ux/anatomy/board-card.ai.md`): "sending · 40%", "updating ·
 //! 42%" (one number for the whole update, never "1 of 2"), "backing up ·
 //! 12%", "installing · 30%", "identifying".
 

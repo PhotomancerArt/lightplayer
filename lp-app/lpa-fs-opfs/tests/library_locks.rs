@@ -140,7 +140,7 @@ async fn a_failed_open_leaves_the_project_reopenable() {
 /// user makes while that trip is still publishing wins — instantly, and
 /// well inside the open ladder's budget. Holding across the round trip is
 /// what turned a fresh seed's first click into "open in another tab"
-/// (`docs/defects/2026-08-14-sync-holds-the-project-lock-across-the-network.md`).
+/// (`docs/defects/2026-08-14-sync-holds-the-project-lock-across-the-network.ai.md`).
 ///
 /// The trip is played here rather than driven, because `mount_for_sync`
 /// (`lpa-studio-web/src/library_host_opfs.rs`) is not reachable from this

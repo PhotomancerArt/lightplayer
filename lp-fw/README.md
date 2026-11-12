@@ -44,7 +44,7 @@ and diffs against it (`just fw-manifest-check-esp32c6` / `-esp32s3` /
 visibly. A new embedder invokes the macro with its own facts; engine feature
 truth arrives via `lpa_server::ENGINE_FEATURE_FRAGMENT` (or
 `lpc_engine::features::` for direct dependents). See
-`docs/adr/2026-08-01-firmware-manifest-architecture.md`.
+`docs/adr/2026-08-01-firmware-manifest-architecture.ai.md`.
 
 ## Target Roles
 
@@ -172,7 +172,7 @@ README), runs the build in the crate directory, merges the image with
 embedded manifest core from what it just built.
 
 **The C6 is a split image** (`"split": true` in `esp32c6-4mb.json`;
-`docs/adr/2026-10-04-c6-split-link-firmware-loader-and-boot-records.md`):
+`docs/adr/2026-10-04-c6-split-link-firmware-loader-and-boot-records.ai.md`):
 `lp-cli firmware build|package esp32c6-4mb` build it through
 `tools/lp-fw-split` — two link passes, the verifier, the loader, the boot
 records, the core and the engine laid out inside `factory` — and package
@@ -204,4 +204,4 @@ but nothing serves it yet (roadmap M5).
 This workspace mixes host crates, browser wasm crates, and RV32 bare-metal
 firmware crates. Do not use `cargo build --workspace` or
 `cargo test --workspace` on the host target. Prefer targeted checks or the
-repo-level just recipes documented in the root `AGENTS.md`.
+repo-level just recipes documented in the root `AGENTS.ai.md`.

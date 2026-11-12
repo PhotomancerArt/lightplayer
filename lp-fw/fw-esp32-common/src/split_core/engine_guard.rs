@@ -6,7 +6,7 @@
 //! pays nothing (the split image's D20 boot-time argument holds).
 //!
 //! It is what would have caught the split image's dropped-tail defect
-//! (`docs/defects/2026-10-05-the-host-flasher-dropped-the-split-images-last-bytes.md`):
+//! (`docs/defects/2026-10-05-the-host-flasher-dropped-the-split-images-last-bytes.ai.md`):
 //! a committed header over an engine whose last bytes never reached flash.
 //! It hashes with the chip's SHA ([`SplitChip::Sha`]: the C6's accelerator).
 //!

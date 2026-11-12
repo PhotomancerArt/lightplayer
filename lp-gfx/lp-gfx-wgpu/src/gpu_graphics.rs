@@ -225,7 +225,7 @@ impl LpGraphics for GpuGraphics {
     /// Compile authored GLSL for GPU execution.
     ///
     /// Honor-or-fail semantics contract
-    /// (`docs/adr/2026-07-09-preview-fidelity-tiers.md`): this backend
+    /// (`docs/adr/2026-07-09-preview-fidelity-tiers.ai.md`): this backend
     /// implements [`ShaderSemantics::F32Gpu`] only. An explicit
     /// [`ShaderSemantics::Q32`] request is rejected with
     /// [`GfxError::Backend`] — Q32 options are never silently dropped onto
@@ -240,7 +240,7 @@ impl LpGraphics for GpuGraphics {
         if options.semantics != ShaderSemantics::F32Gpu {
             return Err(GfxError::Backend(format!(
                 "wgpu GPU backend only compiles F32Gpu semantics; explicit {:?} tier requested \
-                 (see docs/adr/2026-07-09-preview-fidelity-tiers.md)",
+                 (see docs/adr/2026-07-09-preview-fidelity-tiers.ai.md)",
                 options.semantics
             )));
         }

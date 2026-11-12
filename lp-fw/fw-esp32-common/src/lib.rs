@@ -4,7 +4,7 @@
 //! Espressif Xtensa fork: no esp-* HAL dependencies, no `unwinding`, no panic
 //! strategy. Chip facts are injected by the bin crate — a memory-stats function
 //! for the server loop, serial write channels for the transport, and a fallback
-//! manifest for the loader. See `docs/adr/2026-07-29-per-chip-fw-toolchains.md`
+//! manifest for the loader. See `docs/adr/2026-07-29-per-chip-fw-toolchains.ai.md`
 //! for the seam rules.
 
 #![no_std]

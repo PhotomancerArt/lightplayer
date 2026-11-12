@@ -11,7 +11,7 @@
 //!
 //! A route the hub opens becomes a network link trusted as
 //! [`LinkTrust::Relayed`] (so the board's "Anyone" setting never applies to
-//! it; `docs/adr/2026-10-06-cloud-relay.md` §5):
+//! it; `docs/adr/2026-10-06-cloud-relay.ai.md` §5):
 //!
 //! - **the slot is free** → the route's link opens on it at once;
 //! - **the slot is held** (a LAN session, say) → the route is a *challenge*:

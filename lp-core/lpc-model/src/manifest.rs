@@ -9,7 +9,7 @@
 //! artifact bytes for the delimiters; nothing downstream re-states what the
 //! build enabled.
 //!
-//! Design notes (ADR `docs/adr/2026-08-01-firmware-manifest-architecture.md`):
+//! Design notes (ADR `docs/adr/2026-08-01-firmware-manifest-architecture.ai.md`):
 //!
 //! - The blob sits in ordinary `.rodata` — a dedicated link section would need
 //!   per-target linker-script guarantees; a byte scan works on an ELF, an
@@ -37,7 +37,7 @@ pub const MANIFEST_BLOB_END: &str = "\u{3}LP-FW-MANIFEST-END-v1\u{4}";
 /// engine, and an over-the-air update writes and trials the core before its
 /// engine exists — so the board's update guard
 /// (`fw_esp32_common::fs_tree_core_guard`) reads this instead
-/// (docs/defects/2026-10-16-the-fs-tree-update-guard-reads-a-manifest-the-core-does-not-carry.md).
+/// (docs/defects/2026-10-16-the-fs-tree-update-guard-reads-a-manifest-the-core-does-not-carry.ai.md).
 /// Only the mark's own layout is versioned here (`v1`); which store format
 /// the core reads is the store's business (it refuses a newer one). A scanner
 /// holds it masked, so the only contiguous copy in an image is the real mark.

@@ -22,7 +22,7 @@ pub fn generate_compute_shader_header(
     // The budget valve sits here — the first place an authored `len` meets
     // code — so `len: 1000000000` is a named authoring diagnostic, never a
     // downstream allocation attempt. Fixed default for now
-    // (docs/debt/shader-budget-is-a-fixed-default.md).
+    // (docs/debt/shader-budget-is-a-fixed-default.ai.md).
     crate::validate_shader_slot_budget(
         def.consumed_slots
             .entries
@@ -59,7 +59,7 @@ pub fn generate_compute_shader_header(
             // resolvable `LpType`: `sampler2D` is not an `LpType` at all, and
             // the palette itself rides the def's `gradient` field. The engine
             // supplies the matching `TextureBindingSpec` at compile
-            // (`docs/design/lp-shader-texture-access.md`).
+            // (`docs/design/lp-shader-texture-access.ai.md`).
             ShaderSlotKind::Palette => {
                 writeln!(&mut out, "// consumed: {name}").expect("write string");
                 writeln!(

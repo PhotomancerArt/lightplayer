@@ -2,12 +2,12 @@
 //! engine cannot run the one that was asked for.
 //!
 //! `ShaderSemantics::F32Cpu` is the request an authored `float_mode = Float`
-//! shader produces (`docs/adr/2026-08-01-float-mode-as-a-compiler-parameter.md`).
+//! shader produces (`docs/adr/2026-08-01-float-mode-as-a-compiler-parameter.ai.md`).
 //! Whether it compiles depends on the engine this image linked, so these tests
 //! assert the *contract* rather than a fixed answer: the tier the backend
 //! names for Float, and that a refusal is loud, names the backend, and tells
 //! the author what to change. What it must never be is a quiet Q32 compile —
-//! `docs/adr/2026-07-09-preview-fidelity-tiers.md` §4.
+//! `docs/adr/2026-07-09-preview-fidelity-tiers.ai.md` §4.
 //!
 //! **Which arm runs here is a property of the build, not of the contract.**
 //! The host links the wasmtime engine, which since 2026-08-07 honours float
@@ -26,7 +26,7 @@ const SHADER: &str = "vec4 render_2d(vec2 pos) { return vec4(pos.x, 0.0, 0.0, 1.
 /// The tier a `float_mode = Float` shader is compiled at on a CPU backend.
 ///
 /// Not `F32Gpu`: that tier carries the GPU's documented divergence latitude,
-/// and this one is held to `docs/design/float.md` exactly.
+/// and this one is held to `docs/design/float.ai.md` exactly.
 #[test]
 fn the_cpu_backend_names_f32cpu_as_its_float_tier() {
     let graphics = TargetLpvmGraphics::new(ShaderFrontend::LpsGlsl);

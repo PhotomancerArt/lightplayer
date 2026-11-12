@@ -2,7 +2,7 @@
 //!
 //! Which firmware a board runs is **never hand-authored**. It is computed
 //! from two checked-in stores (ADR
-//! `docs/adr/2026-08-01-firmware-manifest-architecture.md`, "the three-store
+//! `docs/adr/2026-08-01-firmware-manifest-architecture.ai.md`, "the three-store
 //! join"):
 //!
 //! - **build defs** (`lp-fw/builds/<id>.json`) — how an image is produced:

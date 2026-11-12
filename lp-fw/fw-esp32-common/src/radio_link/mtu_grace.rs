@@ -7,7 +7,7 @@
 //! GATT table it has cached, can write the CCCD first and exchange the MTU
 //! after, so a link opened at once would be sized for the Bluetooth minimum
 //! (12-byte payloads) and stay there
-//! (docs/defects/2026-10-17-an-android-reconnect-opens-the-ble-link-at-att-mtu-23.md).
+//! (docs/defects/2026-10-17-an-android-reconnect-opens-the-ble-link-at-att-mtu-23.ai.md).
 //!
 //! So a central that subscribes while the connection is still at 23 gets a
 //! short grace: the board polls the MTU and opens the link the moment it

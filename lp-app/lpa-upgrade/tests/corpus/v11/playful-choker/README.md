@@ -70,4 +70,4 @@ computer.
 
 ⚠️ On a choker **without** the resistor, D0 reads low and the board sleeps as
 soon as it boots on battery. Delete `power.json` and its `nodes` entry to run
-one without it. See `docs/adr/2026-06-16-power-button-runtime-event.md`.
+one without it. See `docs/adr/2026-06-16-power-button-runtime-event.ai.md`.

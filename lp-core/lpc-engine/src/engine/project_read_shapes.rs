@@ -5,7 +5,7 @@
 //! entry at a time (sent and dropped before the next is cloned), so peak
 //! memory is one `SlotShapeEntry`, not the whole shape forest (the classic's
 //! project-read OOM faulted inside `SlotShape::clone` —
-//! `docs/defects/2026-08-26-project-read-assembly-oom-resets-classic.md`).
+//! `docs/defects/2026-08-26-project-read-assembly-oom-resets-classic.ai.md`).
 
 use alloc::vec::Vec;
 

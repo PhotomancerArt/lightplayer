@@ -1,7 +1,7 @@
 //! Canonical GLSL sources for the lpfn builtin library.
 //!
 //! GLSL is the canonical source of truth for builtin **float** semantics
-//! (see `docs/adr/2026-07-08-glsl-canonical-builtins.md`). Each entry embeds
+//! (see `docs/adr/2026-07-08-glsl-canonical-builtins.ai.md`). Each entry embeds
 //! one `.glsl` file from the `glsl/lpfn/` tree, which mirrors the Rust
 //! concept-per-file layout under `src/builtins/lpfn/`. The Q32 Rust
 //! implementations remain the device execution path; they are conformance

@@ -11,9 +11,9 @@ memory; a collapsed side keeps its tab row as the reopen affordance; the
 Tree's body is view-keyed — the node tree on Nodes, the Graph's own tree
 on Graph. Below 820px it folds to a summon toolbar; the open project's
 state lives on the site header's session·project control. See
-`docs/adr/2026-08-12-studio-workbench-panel-dock.md` (amended
+`docs/adr/2026-08-12-studio-workbench-panel-dock.ai.md` (amended
 2026-08-14) and
-`docs/adr/2026-08-19-single-session-web-and-session-control.md`.
+`docs/adr/2026-08-19-single-session-web-and-session-control.ai.md`.
 
 The **Graph** (`/graph`, `src/app/workbench/graph_view.rs`) is Studio's
 one project canvas and its mapping editor. It mounts the Graph's canvas,
@@ -163,7 +163,7 @@ Nothing in `just check` compiles wasm32, and this crate takes
 in the browser bundle): `just check-wasm-cloud` is the cheap gate for that
 combination, `just studio-web-build` the full one. Neither recipe is wired
 into `just check` itself — see
-`docs/debt/wasm-cloud-check-not-in-just-check.md`.
+`docs/debt/wasm-cloud-check-not-in-just-check.ai.md`.
 
 #### The account surface
 
@@ -249,7 +249,7 @@ the popover explaining that version metadata is only present in deployed builds.
 Manual beta deployment uses the same artifact recipe with
 `beta.lightplayer.app` and is published by the `Deploy Pages Channel` workflow.
 Operational setup, DNS records, and GitHub Pages HTTPS steps are documented in
-[`docs/deploy/studio-pages.md`](../../docs/deploy/studio-pages.md).
+[`docs/deploy/studio-pages.ai.md`](../../docs/deploy/studio-pages.ai.md).
 
 Browser-worker assets are served from `pkg/` in the generated site. The source
 sidecar files are generated under `target/studio-web-assets/{debug,release}/pkg/`
@@ -372,8 +372,8 @@ that looked correct in markup and wrong on screen:
 
 Studio's design language is Aurora — violet-tinted graphite surfaces, the
 spectrum reserved for interaction feedback, liquid glass on overlays
-(`docs/adr/2026-08-30-studio-design-language-aurora.md`; rules in
-`docs/style/ui.md`'s "Color & Light"). New token groups added for it:
+(`docs/adr/2026-08-30-studio-design-language-aurora.ai.md`; rules in
+`docs/style/ui.ai.md`'s "Color & Light"). New token groups added for it:
 
 - `--studio-glass-*` (`bg`/`blur`/`saturate`/`edge`/`border`) — the glass
   recipe, centralized so one edit tunes every glass surface. Apply it with
@@ -407,7 +407,7 @@ ring around a glass panel is a *masked overlay*, not a border:
   **not** work over a translucent glass fill — see `.ux-glass-panel::after`
   in `style.css` for the working version.
 - The merged-outline popover (`src/base/popover.rs`,
-  `docs/adr/2026-07-15-popover-svg-merged-outline.md`) needed its own
+  `docs/adr/2026-07-15-popover-svg-merged-outline.ai.md`) needed its own
   version since it isn't a normal DOM box: a fixed, full-viewport
   `.ux-popover-glass` div sits under the outline SVG in DOM order, clipped
   with `clip-path: path(evenodd, '<same path string the outline draws>')`
@@ -475,7 +475,7 @@ compares against the nearest captured main ancestor, and posts a sticky PR
 comment with the changed stories and a compare link — **merging the PR is
 what accepts the changes**. Do not commit locally-captured PNGs — local
 rendering differs from the canonical environment. See
-`docs/adr/2026-08-17-story-baselines-companion-repo.md` and AGENTS.md
+`docs/adr/2026-08-17-story-baselines-companion-repo.ai.md` and AGENTS.ai.md
 "Studio UI visual baselines".
 
 Baselines are captured for `sm`, `md`, and `lg` viewports. Files are named as a

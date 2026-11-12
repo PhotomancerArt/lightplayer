@@ -2151,7 +2151,7 @@ pub static ALL_PAYLOADS: &[Payload] = &[
         // an emulated configuration run the SAME image over the SAME link, so
         // that a cycle difference is the machine's and not the link driver's.
         // `spike_uart0_link` would put a 115,200-baud ROM spin inside every
-        // bracket that logs (DD30, and `notes.md` F3 is what that costs).
+        // bracket that logs (DD30, and `notes.ai.md` F3 is what that costs).
         link: Link::UsbSerialJtag,
         emulator_features: None,
         // A cable in and an application reading, from the first byte. Without

@@ -3,14 +3,14 @@
 # Its 4 KB came out of nvs, which nothing reads: no LightPlayer code touches
 # NVS, and esp-radio's "NVS" is a RAM array, not this partition. Taking it
 # from nvs keeps every other offset fixed. See
-# docs/adr/2026-07-30-boot-control-sector.md.
+# docs/adr/2026-07-30-boot-control-sector.ai.md.
 #
 # The app/lpfs line has moved twice, deliberately, each time with a migration
 # that keeps a fielded board's files:
 #
 # 1. The 2026-10 repartition (D1): factory 0x300000 -> 0x340000, lpfs
 #    0xF0000 -> 0xB0000 at 0x350000 (littlefs). See
-#    docs/adr/2026-10-02-c6-repartition-and-layout-migration.md; that table is
+#    docs/adr/2026-10-02-c6-repartition-and-layout-migration.ai.md; that table is
 #    frozen at lp-app/lpa-link/testdata/partitions-esp32c6-legacy-v1.csv.
 # 2. The tree-store cutover (plan lp2025/2026-10-16-0848-tree-store-adoption,
 #    AD2): the 128-sector `lpfs` the tree store was designed for, at the END
@@ -19,7 +19,7 @@
 #    lp-app/lpa-link/testdata/partitions-esp32c6-legacy-v2.csv; a board still
 #    carrying it moves — files kept — only through Studio's USB update or
 #    `lp-cli hardware lpfs migrate --to tree`, never a plain flash:
-#    docs/adr/2026-10-16-c6-tree-store-cutover-migration.md.
+#    docs/adr/2026-10-16-c6-tree-store-cutover-migration.ai.md.
 #
 # Do not move lpfs again without a migration, and freeze the table it leaves
 # beside the other two.

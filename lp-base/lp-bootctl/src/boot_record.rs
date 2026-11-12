@@ -1,7 +1,7 @@
 //! The boot record: which core the split-link loader boots.
 //!
 //! A split-link image (the loader crate `lp-fw/fw-esp32c6-loader`, and
-//! `docs/adr/2026-10-04-c6-split-link-firmware-loader-and-boot-records.md`)
+//! `docs/adr/2026-10-04-c6-split-link-firmware-loader-and-boot-records.ai.md`)
 //! keeps two records in two flash sectors. Each names a core image by flash
 //! offset and length, with a sequence number; the loader boots the newest
 //! valid one — unless that one is a **trial** that has failed, in which case

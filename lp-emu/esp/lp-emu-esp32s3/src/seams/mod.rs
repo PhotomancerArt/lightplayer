@@ -1,5 +1,5 @@
 //! Emulator seams on the S3 machine: resolving, arming and answering
-//! (ADR `docs/adr/2026-10-05-emulator-seams.md`, its Xtensa amendment; the
+//! (ADR `docs/adr/2026-10-05-emulator-seams.ai.md`, its Xtensa amendment; the
 //! chip-neutral half is `lp_emu_esp_common::seam`).
 //!
 //! The C6's `crate::seams` is the model, and most of this is it, file for

@@ -11,7 +11,7 @@
 //! ([`LpFsTree::with_secret_paths`]: the firmware's write-only files) are
 //! scrubbed when replaced or deleted: the sectors that held the old version
 //! are collected right after the commit (`TreeStore::scrub`), not whenever
-//! GC gets there (FORMAT.md "Secret files").
+//! GC gets there (FORMAT.ai.md "Secret files").
 
 use alloc::format;
 use alloc::rc::Rc;
@@ -178,7 +178,7 @@ fn not_found(p: &str) -> FsError {
 }
 
 /// A normalized path a write may name: not the root, and not under the
-/// reserved snapshot namespace (FORMAT.md "The snapshot namespace": only a
+/// reserved snapshot namespace (FORMAT.ai.md "The snapshot namespace": only a
 /// snapshot feature writes there; deleting is allowed).
 fn writable(p: &str) -> Result<(), FsError> {
     if p == "/" {
@@ -192,7 +192,7 @@ fn writable(p: &str) -> Result<(), FsError> {
 
 /// Whether a file is at `p` already; when not, refuse a new one that would
 /// share a name with a directory — under a file, or where files are
-/// (FORMAT.md "Files and paths"; littlefs refuses the same).
+/// (FORMAT.ai.md "Files and paths"; littlefs refuses the same).
 fn existed_or_free<F: Flash, H: ObjectHasher>(
     st: &mut TreeStore<F, H>,
     p: &str,

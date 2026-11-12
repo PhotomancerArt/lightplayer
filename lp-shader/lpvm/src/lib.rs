@@ -163,7 +163,7 @@ mod validate_render_texture_tests {
     /// `return_types` is stamped onto the finished [`lpir::IrFunction`] rather
     /// than passed to [`FunctionBuilder::new`], because the builder now asserts
     /// that `push_return`'s arity matches what was declared (see
-    /// `docs/defects/2026-08-01-xt-pipeline-rigs-declare-param-types-as-return-types.md`).
+    /// `docs/defects/2026-08-01-xt-pipeline-rigs-declare-param-types-as-return-types.ai.md`).
     /// Building the mismatch through the builder would trip that assertion,
     /// which is the assertion doing its job: the subject here is
     /// `validate_*_sig_ir`, not the builder, so the malformed IR is constructed

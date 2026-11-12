@@ -1,0 +1,5 @@
+# AI notes files
+*.ai.md
+
+# Generated intent for backfill
+*.gen.md

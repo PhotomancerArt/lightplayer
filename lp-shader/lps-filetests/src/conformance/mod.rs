@@ -2,7 +2,7 @@
 //! oracle.
 //!
 //! GLSL is the canonical source of truth for lpfn builtin float semantics
-//! (`docs/adr/2026-07-08-glsl-canonical-builtins.md`; sources live in
+//! (`docs/adr/2026-07-08-glsl-canonical-builtins.ai.md`; sources live in
 //! `lp-shader/lps-builtins/glsl/`). This module:
 //!
 //! - builds a **float oracle** by compiling the canonical sources through

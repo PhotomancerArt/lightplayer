@@ -6,7 +6,7 @@
 // Algorithm: Sam Hocevar's branch-minimizing RGB→HSV
 // (http://lolengine.net/blog/2013/07/27/rgb-to-hsv-in-glsl), a widely
 // referenced standard formulation (see
-// docs/reports/2026-03-31-lpfx-license-audit.md).
+// docs/reports/2026-03-31-lpfx-license-audit.ai.md).
 //
 // NOTE: the epsilon is 1/65536 — the smallest positive Q16.16 value — chosen
 // so the canonical float semantics and the Q32 device implementation use the

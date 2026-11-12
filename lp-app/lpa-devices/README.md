@@ -9,7 +9,7 @@ thing but four state machines and five auxiliary stores with no shared
 lifetime, and every recurring bug (two cards for one board, a vanished
 Danger tab, a stale verdict, a connect that could not be cancelled) was an
 identity-join or lifetime failure between them. See
-`docs/adr/2026-08-25-event-fold-device-model.md` for the decision and
+`docs/adr/2026-08-25-event-fold-device-model.ai.md` for the decision and
 `~/.photomancer/planning/lp2025/2026-08-24-1612-device-serial-reliability/vision.md`
 for the ratified vision.
 
@@ -148,7 +148,7 @@ programmatic sweep. Both go through the same runner.
 | `device.rs` | `Device::handle`, supervision (cancel → grace → evict → recover) |
 | `evidence.rs` | The fold: presence, classification, freshness, observations |
 | `intent.rs` | The prescriptive half |
-| `activity/` | Supervision machinery + the reducers. `flash.rs` installs with no board picked first: its inspection's `BoardIdentified` marker (`board_identity.rs`) brings the build and board, and somebody else's firmware waits on `ConfirmFlashReplace` (`docs/adr/2026-10-28-install-identifies-the-board-first.md`); `set_board.rs` saves "Which board is this?" on a running board |
+| `activity/` | Supervision machinery + the reducers. `flash.rs` installs with no board picked first: its inspection's `BoardIdentified` marker (`board_identity.rs`) brings the build and board, and somebody else's firmware waits on `ConfirmFlashReplace` (`docs/adr/2026-10-28-install-identifies-the-board-first.ai.md`); `set_board.rs` saves "Which board is this?" on a running board |
 | `identity.rs` | The bindings chain: endpoint → MAC → uid → name |
 | `board_key.rs` | `BoardKey`: a board's id, its MAC as 12 lowercase hex |
 | `held_elsewhere.rs` | The fact "another tab of this browser holds this board" (`HeldElsewhere`: its way in, its level, whether this tab let go on request). It rides the board, addressed by MAC (`Event::BoardHeld`), and marks a port the tab must not open (`Event::LinkHeld`); the roster keeps it so arrival order does not matter, and `DeviceView.held_elsewhere` carries it. No tab id or key is in it |
@@ -234,7 +234,7 @@ learned, not to re-derive it every time. `DeviceView.board_id` and
 has nothing of its own to say, so an attached-but-closed or freshly
 rehydrated board keeps the identity line it already earned. The chip
 *family* join (a board id or a firmware package name → a catalog entry) is
-an app-layer concern, above this crate — see `docs/adr/2026-08-25-event-fold-device-model.md`
+an app-layer concern, above this crate — see `docs/adr/2026-08-25-event-fold-device-model.ai.md`
 and the device-card-v2 plan's D2.
 
 `DeviceView.firmware` carries the settled hello's raw firmware label
@@ -267,7 +267,7 @@ never ships with, so a made board can never take a real board's id.
 minted per browser profile and can be reused after a forget and a reload.
 The kind prefix in a path (`mac-`/`sim-`/`emu-`) is studio-core's, read
 off the endpoint scheme this crate never interprets. See
-`docs/adr/2026-10-02-board-ids-and-typed-offer-parameters.md`.
+`docs/adr/2026-10-02-board-ids-and-typed-offer-parameters.ai.md`.
 
 ## Validation
 

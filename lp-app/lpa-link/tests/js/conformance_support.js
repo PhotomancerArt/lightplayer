@@ -65,7 +65,7 @@ let modules = null;
 /// the served JS grows. So: **adding a sixth module here means keeping this
 /// loader serial** — do not restore the `Promise.all`, and do not parallelise
 /// "just the new one". (Emulator plan two, DD24; the residue is recorded in
-/// `docs/debt/web-serial-js-untestable.md`'s incident log, not a new debt
+/// `docs/debt/web-serial-js-untestable.ai.md`'s incident log, not a new debt
 /// entry — a third-party harness behaviour with a working mitigation is below
 /// the filing bar.)
 async function load() {
@@ -106,7 +106,7 @@ class ScriptedBoard {
     this.bytes = null;
     // What the board says the moment an application opens the port. The
     // real door no longer replays a boot console to its first byte client
-    // (docs/defects/2026-09-23-emulated-usb-port-drains-with-no-client-attached.md);
+    // (docs/defects/2026-09-23-emulated-usb-port-drains-with-no-client-attached.ai.md);
     // this fake greets on open so the read pump has something to carry.
     this.greeting = `M! {"hello":"${id}"}\n`;
   }
@@ -780,7 +780,7 @@ export function canShadowNavigatorSerial() {
 //
 // Chrome on Android lists no wired board in Web Serial, so `browser_serial.js`
 // speaks to one over `navigator.usb` instead, through `usb_cdc_serial.js`
-// (`docs/adr/2026-10-18-android-usb-over-webusb.md`). `routeOverWebUsb` makes
+// (`docs/adr/2026-10-18-android-usb-over-webusb.ai.md`). `routeOverWebUsb` makes
 // this page look like that browser — no `navigator.serial` of the page's own,
 // a `navigator.usb`, and `userAgentData.platform` "Android" — and puts each
 // board the polyfill holds behind a `USBDevice` double. `browser_serial.js`

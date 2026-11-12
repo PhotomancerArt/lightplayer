@@ -97,7 +97,7 @@ pub struct FlashPolicy {
     pub address: String,
     /// Flash size the image header declares — must match the physical chip
     /// or the bootloader rejects the partition table (see the ESP32-S3 8 MB
-    /// floor, `docs/adr/2026-07-30-esp32s3-partition-floor.md`).
+    /// floor, `docs/adr/2026-07-30-esp32s3-partition-floor.ai.md`).
     pub flash_size_bytes: u64,
     /// What flashing overwrites.
     pub erase_policy: String,

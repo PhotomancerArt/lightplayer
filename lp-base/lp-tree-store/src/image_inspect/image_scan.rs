@@ -1,6 +1,6 @@
 //! Reading a raw image sector by sector, the way mount's first pass does
 //! (`mount` + `record_scan.rs`), but keeping every record it looks at and
-//! never writing: classify each header (FORMAT.md "Sector"), then read a
+//! never writing: classify each header (FORMAT.ai.md "Sector"), then read a
 //! trusted sector's records until the end, or the first one that does not
 //! check.
 
@@ -19,7 +19,7 @@ use crate::sector_header::{
     FORMAT_VERSION, HeadKind, SECTOR_HEADER_LEN, SECTOR_MAGIC, SectorHeader, SectorRead,
 };
 
-/// The sector sizes the format allows (FORMAT.md "The medium").
+/// The sector sizes the format allows (FORMAT.ai.md "The medium").
 const SIZES: [u32; 7] = [512, 1024, 2048, 4096, 8192, 16384, 32768];
 
 /// The sector size an image's own headers give: the size whose stride finds

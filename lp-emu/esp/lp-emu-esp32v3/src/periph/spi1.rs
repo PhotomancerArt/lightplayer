@@ -21,7 +21,7 @@
 //!
 //! **esp-storage's IRAM copies of the same routines.** The shipped image
 //! links `esp_rom_spiflash_read` into its own `.rwtext` so a flash read can
-//! run with the cache off (`docs/debt/classic-iram-handlers-reach-flash.md`),
+//! run with the cache off (`docs/debt/classic-iram-handlers-reach-flash.ai.md`),
 //! and P3's tenth strict stop is inside that copy at `0x4008_3C98` — the
 //! same register sequence, from a different address. That is why this model
 //! is written against the *registers*, never against a pc.

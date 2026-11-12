@@ -11,7 +11,7 @@
 //! usually does. On the classic it is the **only** diagnostic channel that
 //! works for the fault class this bring-up is stuck on.
 //!
-//! Measured 2026-08-01 (`docs/defects/2026-08-01-classic-rmt-open-fault.md`): a
+//! Measured 2026-08-01 (`docs/defects/2026-08-01-classic-rmt-open-fault.ai.md`): a
 //! fault raised while WS281x channels are opening resets the chip in well under
 //! a millisecond, no matter what the panic handler does. Masking interrupts,
 //! draining the TX FIFO first, printing the line before the path, emitting the

@@ -51,7 +51,7 @@ pub struct UiAddNodeMenu {
     /// live ([`Self::offers_at`]): `add-node`, `import-pattern` and
     /// `paste-node`, the last of which takes the clipboard's contents that
     /// only the browser edge can read
-    /// (`docs/adr/2026-07-28-share-envelopes.md`).
+    /// (`docs/adr/2026-07-28-share-envelopes.ai.md`).
     pub attach: UiAttachTarget,
     /// The **import** source (module authoring unit, P5): one row per
     /// pattern export the local library offers, each pressing the menu's

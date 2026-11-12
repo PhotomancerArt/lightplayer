@@ -8,7 +8,7 @@
 //! emulator worlds and the exact case set + expectations.
 //!
 //! All payload bytes are objdump-derived (see the experiment repo's scratch
-//! `.s` sources and FINDINGS.md), never hand-recalled.
+//! `.s` sources and FINDINGS.ai.md), never hand-recalled.
 
 use lp_xt_emu::emu::RunOutcome as EmuOutcome;
 use lp_xt_emu::{BoardProfile, Emulator, TrapKind};

@@ -16,7 +16,7 @@ pub fn ser_id<S: Serializer>(id: &u64, s: S) -> Result<S::Ok, S::Error> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SectorSizeFrom {
-    /// The sector headers say it (FORMAT.md: byte 7 of a header that checks).
+    /// The sector headers say it (FORMAT.ai.md: byte 7 of a header that checks).
     Headers,
     /// The caller gave it.
     Given,
@@ -39,7 +39,7 @@ pub enum SectorState {
     /// erases it before it is used again.
     NeedsErase { why: &'static str },
     /// The magic and a format version above this tool's. The store refuses
-    /// to mount (FORMAT.md "Sector", rule 0); nothing in it is read.
+    /// to mount (FORMAT.ai.md "Sector", rule 0); nothing in it is read.
     Newer { version: u16 },
     /// A good header this version must not read past (an unknown incompat
     /// flag or head kind, or another sector size). The mount is refused.
@@ -92,7 +92,7 @@ pub enum RecordKindReport {
     Dir,
     Root,
     /// A kind (or kind and codec pair) this version does not define:
-    /// garbage by rule, skipped (FORMAT.md "Unknown records").
+    /// garbage by rule, skipped (FORMAT.ai.md "Unknown records").
     Unknown {
         kind: u8,
     },
@@ -133,7 +133,7 @@ pub enum RecordStatus {
 pub struct RecordReport {
     pub offset: u32,
     pub kind: RecordKindReport,
-    /// 0 stored, 1 deflate (FORMAT.md); anything else is an unknown record.
+    /// 0 stored, 1 deflate (FORMAT.ai.md); anything else is an unknown record.
     pub codec: u8,
     pub len: u16,
     #[serde(serialize_with = "ser_id")]

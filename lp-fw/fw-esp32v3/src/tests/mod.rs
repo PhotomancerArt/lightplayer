@@ -48,7 +48,7 @@ pub mod appcore_rom_path;
 /// `TranscriptHeader::agrees_with_inband`, "chip: in-band … vs sidecar …"),
 /// and the validation system's name for this chip is `esp32v3`. `esp32` is
 /// the espflash chip name and this crate's cargo feature — three names for
-/// one part, and M5 notes.md §1.1 is the table that keeps them apart.
+/// one part, and M5 notes.ai.md §1.1 is the table that keeps them apart.
 #[cfg(any(
     feature = "test_gpio_calibrate",
     feature = "test_cycle_probe",

@@ -24,7 +24,7 @@ pub async fn run_server_loop_async<T: ServerTransport>(
     let mut last_tick_ms = time_provider.now_ms();
 
     // Wire hello: the first id-0 frame this loop ever sends (see
-    // docs/adr/2026-07-14-wire-hello-versioning.md).
+    // docs/adr/2026-07-14-wire-hello-versioning.ai.md).
     if let Err(error) = send_unsolicited_hello(&server, &mut transport).await {
         match error {
             TransportError::ConnectionLost => return Ok(()),

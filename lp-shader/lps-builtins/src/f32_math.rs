@@ -6,7 +6,7 @@
 //! decision like "`fract` is `x - floor(x)`, not the truncated remainder"
 //! cannot drift between 80 call sites.
 //!
-//! Semantics follow `docs/design/float.md`: `floor`/`ceil`/`trunc` and `sqrt`
+//! Semantics follow `docs/design/float.ai.md`: `floor`/`ceil`/`trunc` and `sqrt`
 //! are §3 Guaranteed rows and must be the exact operations, not approximations.
 
 /// `floor(x)` — largest integer ≤ `x`. Exact (§3).
@@ -29,7 +29,7 @@ pub fn trunc(x: f32) -> f32 {
 
 /// Round to nearest integer, ties to even — the `f32.nearest` / `fnearest`
 /// rule. `round()` (ties away from zero) is a *different* operation and is
-/// target-defined per float.md §4; this one is not, so it is spelled
+/// target-defined per float.ai.md §4; this one is not, so it is spelled
 /// explicitly everywhere it is meant.
 #[inline(always)]
 pub fn round_ties_even(x: f32) -> f32 {
@@ -43,7 +43,7 @@ pub fn sqrt(x: f32) -> f32 {
 }
 
 /// `|x|` as a sign-bit clear: exact for NaN and ±0, which `x < 0.0` is not
-/// (float.md §3 — negate and abs never normalize their operand).
+/// (float.ai.md §3 — negate and abs never normalize their operand).
 #[inline(always)]
 pub fn abs(x: f32) -> f32 {
     f32::from_bits(x.to_bits() & 0x7fff_ffff)
@@ -185,7 +185,7 @@ unsafe extern "C" {
 /// - **Large or non-finite `x`** (`|x| > 100 000`, NaN, ±∞): `libm`, which
 ///   reduces exactly. Slow, correct, and rare in a shader.
 ///
-/// Within the family's declared band (`docs/design/float.md` §6: `1e-6`
+/// Within the family's declared band (`docs/design/float.ai.md` §6: `1e-6`
 /// relative, `1e-6` absolute floor) over the fast range; the tests sweep it.
 pub fn sincos(x: f32) -> (f32, f32) {
     if x.is_nan() || abs(x) > SINCOS_FAST_MAX {
@@ -229,7 +229,7 @@ const PIO2_C: f32 = f32::from_bits(0x35AA_2217);
 mod tests {
     use super::*;
 
-    /// The family's band (`float.md` §6) against the `f64` reference.
+    /// The family's band (`float.ai.md` §6) against the `f64` reference.
     fn within_band(got: f32, want: f64) -> bool {
         (got as f64 - want).abs() <= (1e-6 * want.abs()).max(1e-6)
     }

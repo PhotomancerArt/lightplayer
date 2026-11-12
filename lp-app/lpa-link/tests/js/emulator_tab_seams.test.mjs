@@ -1,5 +1,5 @@
 // A Devices-page emulated board asks the emulator for its LED seam, softly;
-// the dev path's board asks for nothing (docs/adr/2026-10-05-emulator-seams.md).
+// the dev path's board asks for nothing (docs/adr/2026-10-05-emulator-seams.ai.md).
 // `emulator_tab_seams.rs` decides WHAT a board asks for; this proves the
 // bridge writes it into the board's config text as the emulator reads it.
 

@@ -39,7 +39,7 @@ pub fn tree_deltas_since<'a, N>(
 /// The stream layer drives this directly so the whole-tree delta `Vec` never
 /// materializes on a bulk (`since == 0`) read — peak memory is one delta
 /// (the classic's project-read OOM class,
-/// `docs/defects/2026-08-26-project-read-assembly-oom-resets-classic.md`).
+/// `docs/defects/2026-08-26-project-read-assembly-oom-resets-classic.ai.md`).
 pub fn tree_deltas_since_iter<'a, N>(
     tree: &'a RuntimeNodeTree<N>,
     since: Revision,

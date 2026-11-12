@@ -3,7 +3,7 @@
 //!
 //! The link itself is `fw_esp32_radio::ble`, the C6's since
 //! `ble-remote-control` M4 (the decision record is
-//! `docs/adr/2026-09-24-ble-transport.md`): bring-up, the host runner,
+//! `docs/adr/2026-09-24-ble-transport.ai.md`): bring-up, the host runner,
 //! advertising, one untrusted lp-link per connection into the link mux. What
 //! is this chip's is the controller: BTDM, not the C6's NPL, so its
 //! configuration is its own ([`ble_controller_config`]). The S3 boards have

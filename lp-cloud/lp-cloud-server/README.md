@@ -122,12 +122,12 @@ them GitHub-shaped from a static server (with a releases list beside them)
 and runs both routes against them
 (`scripts/release/firmware-store-smoke.sh`). The assets themselves are
 attached to every release by `.github/workflows/release-firmware.yml`
-(`docs/adr/2026-10-06-firmware-distribution.md`).
+(`docs/adr/2026-10-06-firmware-distribution.ai.md`).
 
 ## The relay
 
 Boards on Wi-Fi reachable through lightplayer.app (`src/relay/`; decision
-record `docs/adr/2026-10-06-cloud-relay.md`). A board holds one plain
+record `docs/adr/2026-10-06-cloud-relay.ai.md`). A board holds one plain
 WebSocket to `/relay/device` speaking `lpc-relay`'s framing: a hello naming
 the salts of the account keys it holds, a 32-byte challenge, one proof per
 salt (checked against `MetaStore::account_by_key_salt`, the one store call on
@@ -153,7 +153,7 @@ board and back without reading — the session is sealed end to end.
   address, from `Fly-Client-IP`; always true locally), and each board's
   `relayProto`, `firmware` and `project` (its name).
 - **The board list is written by the hub's decisions, applied here**
-  (`docs/adr/2026-10-20-the-account-board-list.md`): the hub returns
+  (`docs/adr/2026-10-20-the-account-board-list.ai.md`): the hub returns
   `BoardRecordWrite`s — a board joins every account it proved as it
   registers, a new project name, its last picture at most every ten minutes
   while online, and its last sighting and picture when it leaves and when
@@ -206,7 +206,7 @@ LP_CLOUD_STATIC_DIR=target/pages/studio just cloud-serve   # serve the real app
 ```
 
 The port comes from `scripts/dev-port.sh` and the recipe prints the URL —
-never assume one (AGENTS.md, "Dev server ports").
+never assume one (AGENTS.ai.md, "Dev server ports").
 
 Configuration is all environment, parsed in one place: see the table at the
 top of `src/config.rs`.
@@ -214,7 +214,7 @@ top of `src/config.rs`.
 ## Auth: providers, LoginOptions, and sessions
 
 Auth is **provider-based**, not Google-shaped
-(`docs/adr/2026-08-07-provider-based-auth.md`). `AppState` carries a
+(`docs/adr/2026-08-07-provider-based-auth.ai.md`). `AppState` carries a
 `LoginProviders` (`lp-cloud-domain`) built once from config
 (`Config::login_providers`, `src/config.rs`) with two connection kinds:
 

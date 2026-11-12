@@ -5,7 +5,7 @@ The LED fixture mapping domain, shared by the engine, the device and Studio:
 and where on the hardware its data goes.
 
 The mapping rebuild (planning `lp2025/2026-10-27-0114-mapping-rebuild`;
-ADR `docs/adr/2026-10-27-mapping-model-parts-segments-patcher.md`):
+ADR `docs/adr/2026-10-27-mapping-model-parts-segments-patcher.ai.md`):
 
 - **The mapping model and map2d format 6** (`part`, `patching`, `map2d6`):
   parts, segments and the patcher, in one file. Built in M1; since M3

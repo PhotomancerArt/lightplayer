@@ -1,7 +1,7 @@
 // test run
 
 // ============================================================================
-// isinf(): Is infinity function (Q32: always false — docs/design/q32.md §6)
+// isinf(): Is infinity function (Q32: always false — docs/design/q32.ai.md §6)
 // ============================================================================
 
 bool test_isinf_normal() {

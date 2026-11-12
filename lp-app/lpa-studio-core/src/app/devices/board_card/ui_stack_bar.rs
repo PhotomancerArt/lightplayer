@@ -1,6 +1,6 @@
 //! [`UiStackBar`]: one of the card's eight rows — project, the four links
 //! (USB, Wi‑Fi, Bluetooth, lightplayer.app), access, firmware, hardware,
-//! always in that order (`docs/ux/anatomy/board-card.md`, "The row"). For a
+//! always in that order (`docs/ux/anatomy/board-card.ai.md`, "The row"). For a
 //! new board they are its setup list: a row with something left to do says
 //! so ([`UiStackBar::todo`]). One line each, one grammar: **icon · kind ·
 //! name · state · action**. The icon is the kind's own; the kind is a muted word that
@@ -54,7 +54,7 @@ pub struct UiStackBar {
     /// account") is the secrets vault's, once a store can say a value came
     /// from it.
     pub mark: Option<UiBarMark>,
-    /// The row's tint, in ui.md's status families: Neutral; Attention
+    /// The row's tint, in ui.ai.md's status families: Neutral; Attention
     /// (orange) when a device needs you; Error (red, striped) when it is
     /// broken. Never Warning (an unsaved edit's yellow), never Live (blue
     /// is the lit cloud's alone).

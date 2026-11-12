@@ -283,7 +283,7 @@ fn zexth_zero_extends_halfword() {
 //
 // Every word below came out of the assembler, not out of a sibling
 // instruction's shape — that is the standing lesson of
-// `docs/defects/2026-07-31-zexth-encoding-steals-xori-128.md`. They were
+// `docs/defects/2026-07-31-zexth-encoding-steals-xori-128.ai.md`. They were
 // produced by assembling
 //
 //     .option arch, +zba, +zbb, +zbs, +zbkb

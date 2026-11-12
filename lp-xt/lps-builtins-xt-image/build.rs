@@ -54,7 +54,7 @@ fn main() {
 /// path being rewritten — so the rewrite is what wakes us. Treating that window
 /// as "not built" would embed an empty slice and surface minutes later as every
 /// Xtensa test skipping or failing at once. See
-/// `docs/defects/2026-07-29-builtins-elf-uplift-race.md`.
+/// `docs/defects/2026-07-29-builtins-elf-uplift-race.ai.md`.
 fn copy_image(
     src: &std::path::Path,
     dst: &std::path::Path,

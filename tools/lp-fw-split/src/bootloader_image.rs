@@ -24,7 +24,7 @@
 //! maps nothing for it. The whole image must end before the partition table
 //! at `0x8000`. What the ROM checks of it was measured on the emulator, which
 //! runs the real mask ROM (ADR
-//! `docs/adr/2026-10-17-the-c6-boots-through-our-own-bootloader.md`).
+//! `docs/adr/2026-10-17-the-c6-boots-through-our-own-bootloader.ai.md`).
 
 use anyhow::{Context, Result, bail};
 use object::Endianness;

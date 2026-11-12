@@ -50,13 +50,13 @@
 //     iOS's 185, 180 B on the 247 macOS and the board agree). The 180 B
 //     chunker this rule used to be is gone with the `M!` lines it cut, and so
 //     is every Prepare … Execute write: the board now refuses one
-//     (docs/defects/2026-09-25-a-long-bluetooth-write-is-acknowledged-and-lost.md
+//     (docs/defects/2026-09-25-a-long-bluetooth-write-is-acknowledged-and-lost.ai.md
 //     is the bug that class of write was).
 //  3. **Every `gatt.connect()` is bounded (10 s).** Chrome's hung forever
 //     once in Run B and wedged the page with it.
 //  4. **A hidden page does not hear its link drop.** iOS suspends a hidden
 //     web view: Bluefy queues `gattserverdisconnected` until the page runs
-//     again (docs/defects/2026-09-23-bluefy-hidden-page-does-not-see-ble-drops.md).
+//     again (docs/defects/2026-09-23-bluefy-hidden-page-does-not-see-ble-drops.ai.md).
 //     So becoming visible is "state unknown": every session re-reads
 //     `gatt.connected`, a dead one is handled as a drop right then, and a
 //     session that was reconnecting starts again at once.

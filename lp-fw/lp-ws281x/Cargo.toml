@@ -34,7 +34,7 @@ test_hooks = []
 #   so the path is cold on each frame's first refills — 99.7 % of frames
 #   truncated under the meteor example with the path in flash, 0.25 % with
 #   it in RAM; refill work 15.6 → 5.7 words (defect
-#   `docs/defects/2026-09-02-c6-ws281x-first-three-leds-then-stale.md`).
+#   `docs/defects/2026-09-02-c6-ws281x-first-three-leds-then-stale.ai.md`).
 #
 # The feature is necessary, not sufficient: a backend's `RmtHw` methods must
 # be `#[inline(always)]` (plain `#[inline]` is ignored at `opt-level = "z"`),

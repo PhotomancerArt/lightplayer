@@ -1,5 +1,5 @@
 //! The card's surface: which state it says, in what words, over what
-//! picture (`docs/ux/anatomy/board-card.md`, "Surface"; the types are
+//! picture (`docs/ux/anatomy/board-card.ai.md`, "Surface"; the types are
 //! [`super::ui_board_surface`]).
 //!
 //! The surface explains; the primary gives the thing to do

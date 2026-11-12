@@ -1,6 +1,6 @@
 //! Native f32 division — the f32 sibling of [`super::fdiv_q32`].
 //!
-//! `/` is a `docs/design/float.md` §3 Guaranteed row: correctly rounded (RNE),
+//! `/` is a `docs/design/float.ai.md` §3 Guaranteed row: correctly rounded (RNE),
 //! `x/0 = ±inf` for finite non-zero `x`, `0/0 = NaN`. Nothing traps — the Q32
 //! sibling's divide-by-zero guard has no f32 analogue and adding one would
 //! contradict the spec.
@@ -13,8 +13,8 @@
 //! the Xtensa toolchain's own `__divsf3` uses, transcribed instruction for
 //! instruction from its disassembly (`lp-xt/lp-xt-fp-harness`'s
 //! `lp_fp_div_seq`, where the FP campaign checked it end to end on FS3 and
-//! the emulator models it exactly: `docs/adr/2026-07-31-xtensa-fp-behavior-contract.md`
-//! §5). Disassembly is output, not source (AGENTS.md's licence rule). It is
+//! the emulator models it exactly: `docs/adr/2026-07-31-xtensa-fp-behavior-contract.ai.md`
+//! §5). Disassembly is output, not source (AGENTS.ai.md's licence rule). It is
 //! correctly rounded under the default rounding mode, which nothing changes.
 
 /// f32 division: `a / b`.

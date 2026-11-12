@@ -27,7 +27,7 @@ pub enum CycleModel {
     /// This variant exists rather than a correction to `Esp32C6` because a
     /// committed transcript names its grade: moving `Esp32C6` would move
     /// every `lp-emu:esp32c6:t2` cycle count already on the record. See
-    /// `docs/reports/2026-09-08-esp32c6-t3-calibration.md` §2 for the
+    /// `docs/reports/2026-09-08-esp32c6-t3-calibration.ai.md` §2 for the
     /// kernel behind each number and §3 for what is *not* measured here
     /// (every class this variant does not name keeps `Esp32C6`'s figure,
     /// which no kernel has checked).

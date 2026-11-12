@@ -144,7 +144,7 @@ pub struct ChipSpec {
     /// the run this field describes is always the default one.
     pub core_quantum: Option<u32>,
     /// Does this chip's machine answer emulator seams (`--seams`, ADR
-    /// docs/adr/2026-10-05-emulator-seams.md)? Only the C6's does. On it a
+    /// docs/adr/2026-10-05-emulator-seams.ai.md)? Only the C6's does. On it a
     /// plan always states the run's seams, `none` included, so the label the
     /// machine earns is exactly the configuration the plan was made for; on
     /// a chip whose machine has no seams the flag does not exist, and a
@@ -248,7 +248,7 @@ pub const ESP32S3: ChipSpec = ChipSpec {
     partitions: "lp-fw/fw-esp32s3/partitions.csv",
     // ⚠️ EIGHT megabytes. Both other chips are 4 MB and this table does not
     // fit a 4 MB board, deliberately —
-    // `docs/adr/2026-07-30-esp32s3-partition-floor.md`. The canonical source
+    // `docs/adr/2026-07-30-esp32s3-partition-floor.ai.md`. The canonical source
     // is `lp-fw/builds/esp32s3-8mb.json`'s `flashSizeMb`; `justfile`'s
     // `s3_flash_size` (`:29`) and `lp-fw/fw-esp32s3/.cargo/config.toml` are
     // its other two mirrors, and `scripts/emu/build-merged-image.sh` reads

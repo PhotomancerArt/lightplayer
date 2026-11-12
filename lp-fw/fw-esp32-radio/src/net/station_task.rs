@@ -35,7 +35,7 @@
 //!   (CX2, 2026-10-17: 1,320 ms against 409 with no network; a 64-hex raw
 //!   key joins in ~130 ms and costs no light). Waiting moves the join ~0.1 s
 //!   later and leaves its one long frame just after the light. See
-//!   `docs/defects/2026-10-17-a-saved-network-held-the-c6s-first-light-back-900-ms.md`.
+//!   `docs/defects/2026-10-17-a-saved-network-held-the-c6s-first-light-back-900-ms.ai.md`.
 //! - Every radio call is bounded (`EspStation`'s limits, which the seam's
 //!   station keeps), so an emulated board whose radio never finishes a scan
 //!   still answers. A scan that

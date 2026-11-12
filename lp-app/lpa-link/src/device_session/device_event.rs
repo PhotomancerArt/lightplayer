@@ -39,7 +39,7 @@ pub enum DeviceEvent {
     /// A protocol frame or line failed to parse (a malformed `M!` frame, a
     /// mid-frame cut). Counted per session by consumers: garbled input that
     /// precedes a disconnect attributes the failure to line corruption (see
-    /// docs/defects/2026-08-02-serial-line-interleaving.md) rather than a
+    /// docs/defects/2026-08-02-serial-line-interleaving.ai.md) rather than a
     /// clean drop.
     ParseAnomaly { detail: String },
     /// One app-protocol frame Studio WROTE to the wire, as its JSON body.

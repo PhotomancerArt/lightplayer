@@ -1,6 +1,6 @@
 # Core test sites that build a user-verb action directly, per file — a ratchet:
 # counts may only go down. Written by `scripts/check-core-test-ops.py --bless`;
-# see that script and docs/adr/2026-10-01-agentic-control-offers-in-core.md.
+# see that script and docs/adr/2026-10-01-agentic-control-offers-in-core.ai.md.
 5 lp-app/lpa-studio-core/src/app/agent/app_agent_readout.rs
 6 lp-app/lpa-studio-core/src/app/agent/evals/app_agent_eval_driver.rs
 2 lp-app/lpa-studio-core/src/app/agent/evals/app_agent_eval_harness.rs

@@ -20,7 +20,7 @@
 //!              and disclaimer are retained in licenses/ and must travel with
 //!              any source or binary redistribution. MSA Visuals' name may
 //!              not be used to endorse products derived from it.
-//!              See docs/adr/2026-07-29-license-provenance-discipline.md.
+//!              See docs/adr/2026-07-29-license-provenance-discipline.ai.md.
 //!
 //! ## Scratch layout
 //!

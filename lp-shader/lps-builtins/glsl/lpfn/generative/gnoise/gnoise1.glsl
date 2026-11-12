@@ -4,7 +4,7 @@
 // builtin, matching `src/builtins/lpfn/generative/gnoise/gnoise1_q32.rs`:
 // random values at integer lattice points, cubic-smoothstep interpolation.
 // Value/gradient lattice noise is a standard algorithm from graphics
-// literature (see docs/reports/2026-03-31-lpfx-license-audit.md).
+// literature (see docs/reports/2026-03-31-lpfx-license-audit.ai.md).
 //
 // The Q32 device implementation approximates the cubic smoothstep with a
 // 256-entry LUT; the canonical uses the exact polynomial 3t^2 - 2t^3.

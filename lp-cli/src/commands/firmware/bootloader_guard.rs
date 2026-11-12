@@ -10,7 +10,7 @@
 //! own ESP image header, so the truth is one parse away — this refuses to
 //! package an image whose bootloader is not one the table names.
 //!
-//! See `docs/defects/2026-09-06-c6-first-flash-bootloader-hang-lp-analog-i2c-clock.md`.
+//! See `docs/defects/2026-09-06-c6-first-flash-bootloader-hang-lp-analog-i2c-clock.ai.md`.
 
 use std::ops::Range;
 

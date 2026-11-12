@@ -6,7 +6,7 @@ register file, the bus trace, the host byte streams, and an ELF
 program-header view.
 
 MIT, inside the `lp-emu/` fence (`just lint-emu-fence`). See `../../README.md`
-and `docs/adr/2026-09-06-lp-emu-home-and-mit-fence.md`.
+and `docs/adr/2026-09-06-lp-emu-home-and-mit-fence.ai.md`.
 
 ## The neutrality rule
 
@@ -225,7 +225,7 @@ Three policies:
   silicon faults. The C6 turns it on. Its split loader once copied a segment
   to address 0; the board faulted while this bus dropped 26,452 stores and
   booted
-  (`docs/defects/2026-10-14-the-emulated-c6-ignores-stores-to-address-0.md`).
+  (`docs/defects/2026-10-14-the-emulated-c6-ignores-stores-to-address-0.ai.md`).
   An unmapped store inside a window is an unmodelled block and is still
   dropped.
 - **Watchpoints fire before the access.** esp-rtos's stack guard is a
@@ -482,7 +482,7 @@ writes in the `esp32c6` PAC — the same source the M3 register inventory came
 from — and every output file carries a provenance header naming the repo,
 the crate path and version, the svd2rust version read out of the crate, and
 the vendored licence (`licenses/esp-pacs-MIT.txt`), per
-`docs/adr/2026-07-29-license-provenance-discipline.md`.
+`docs/adr/2026-07-29-license-provenance-discipline.ai.md`.
 
 Names are block-local (`fifo`, `unit0load.hi`), not `uart0.fifo`: the block
 token in a trace line comes from the peripheral *instance* (`UART0` vs
@@ -552,7 +552,7 @@ beside `forward()` (`uplink()`, `uplinks()`). Generic TCP, MIT, no product
 crate; a host configures it in the fixture's `[[uplink]]` table
 (`lp-cli/src/commands/emu/lan_fixture.rs`). No NAT, no real resolver, no
 internet latency: the ADR's amendment
-(`docs/adr/2026-10-05-emulator-seams.md` §11) says what it does not model.
+(`docs/adr/2026-10-05-emulator-seams.ai.md` §11) says what it does not model.
 
 A forward's connection follows the address it was opened to: when the
 board's lease moves or goes, the forward closes it (host side too), and one
@@ -588,7 +588,7 @@ its host (`SharedLan::set_pace`; `lp-cli emu run --pace`, `emu serve`'s
   round trip was 10–17 ms on the board's clock and its lp-link resend timer
   and tail probe fired on frames the host had not yet had time to acknowledge
   (74–95 resent per upload, nothing lost;
-  `docs/defects/2026-10-06-an-emulated-boards-clock-outran-its-lan-host.md`);
+  `docs/defects/2026-10-06-an-emulated-boards-clock-outran-its-lan-host.ai.md`);
 - **`realtime`**: held for the whole run, host or no host (1×, for watching a
   pattern). It needs the network seam engaged on a self-driven or wall-clock
   LAN, so a runner's LAN refuses it and the C6 refuses it with no `net=lan`;

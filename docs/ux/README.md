@@ -21,7 +21,7 @@ Notation:
 ◌              working (spinner)
 ━━━━────       progress
 (dim)          drawn stale
-← red          the tone the line takes (ui.md's status families)
+← red          the tone the line takes (ui.ai.md's status families)
 # card 10-14   where the bad was caught: a feel gate, a spike round, a review
 ```
 
@@ -68,7 +68,7 @@ bad:  In this tab · off                # card 10-14: "does that mean it's emula
 bad:  Nothing on it yet                # card 10-14: it has firmware; the project is what's missing
 ```
 
-anatomy: [board card](anatomy/board-card.md) (round 2, shipped) ·
+anatomy: [board card](anatomy/board-card.ai.md) (round 2, shipped) ·
 app: `lpa-studio-core/…/board_card/project_bar.rs`
 
 ## P2. say it once
@@ -269,7 +269,7 @@ bad:  studio                     # shipped: a name alone
 
 The card's bars share one shape in code (icon · summary · aside · tone ·
 action). Their words had no shared grammar until the anatomy gave them one:
-[board card](anatomy/board-card.md).
+[board card](anatomy/board-card.ai.md).
 
 One row grammar in every state: the name column is the value (a dash while
 it isn't known), the state column is what is happening. Work never moves a
@@ -423,7 +423,7 @@ bad:  ▲ 2026.10.08                │ Update │  ← blue     # shipped: blue
 
 app: `lpa-studio-core/src/core/status.rs` (`UiStatusKind`) ·
 `lpa-studio-web/src/base/icon.rs` (`StudioIconName`) ·
-`docs/style/ui.md` (the status families) · `docs/style/language.md` (the verbs)
+`docs/style/ui.ai.md` (the status families) · `docs/style/language.ai.md` (the verbs)
 
 ## P17. one way per kind of data
 

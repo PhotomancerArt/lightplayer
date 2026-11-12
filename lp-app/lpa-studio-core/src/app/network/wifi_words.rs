@@ -173,7 +173,7 @@ pub mod row {
 
 /// What the board card's Wi‑Fi and lightplayer.app rows say: label voice,
 /// lower case, the state the fact and the button the fix
-/// (`docs/ux/anatomy/board-card.md`, the link rows).
+/// (`docs/ux/anatomy/board-card.ai.md`, the link rows).
 pub mod card {
     /// The board is joining a saved network (its row's work).
     pub const JOINING: &str = "joining";

@@ -786,7 +786,7 @@ impl ProjectRegistry {
     /// the enclosing operation removed (revert / clear / commit).
     ///
     /// Effective revisions must stay monotonic for the revision-gated read
-    /// contract (`docs/adr/2026-07-03-revision-gated-project-reads.md`): while
+    /// contract (`docs/adr/2026-07-03-revision-gated-project-reads.ai.md`): while
     /// an artifact carries overlay edits its derived entries are stamped with
     /// the overlay revision, and when the last edit is removed
     /// `revision_for_artifact` falls back to the base artifact revision —
@@ -1181,7 +1181,7 @@ impl ProjectRegistry {
     /// edit ever reaches `put_edit`. Without the normalized-case sweep,
     /// re-selecting the base variant would normalize to a no-op while the
     /// stored sibling switch survived, leaving the effective def stuck on the
-    /// pending variant (`docs/adr/2026-07-04-studio-editing-model.md`, D7).
+    /// pending variant (`docs/adr/2026-07-04-studio-editing-model.ai.md`, D7).
     fn variant_switch_sibling_paths(
         &self,
         mutation: &MutationOp,
@@ -1265,7 +1265,7 @@ impl ProjectRegistry {
     /// path, so "edited then changed back" (and add-then-remove of a map
     /// entry) is indistinguishable from an explicit revert and the overlay
     /// stays a minimal diff against saved state
-    /// (`docs/adr/2026-07-04-studio-editing-model.md`, D6; structural cases:
+    /// (`docs/adr/2026-07-04-studio-editing-model.ai.md`, D6; structural cases:
     /// M3 plan, D2). Per-op rule against the base definition:
     ///
     /// - `AssignValue`: the assigned value equals

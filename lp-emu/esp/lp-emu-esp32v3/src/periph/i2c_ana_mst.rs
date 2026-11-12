@@ -9,7 +9,7 @@
 //! # The transaction, from the mask ROM's own code
 //!
 //! The PAC has no block at this address, so the layout is read out of the
-//! ROM (`docs/reports/2026-09-10-esp32v3-strict-boot-inventory.md` §3.2):
+//! ROM (`docs/reports/2026-09-10-esp32v3-strict-boot-inventory.ai.md` §3.2):
 //!
 //! ```text
 //! 40004168 <rom_chip_i2c_writeReg>:          (block, host_id, reg, data)
@@ -43,7 +43,7 @@
 //! inside it: two hundred distinct analog registers behind eight words. An
 //! accept block answers a read of **any** of them with the last byte written
 //! to **any other**, which on the C6 was a real defect with a real symptom
-//! (`docs/defects/2026-09-08-regi2c-is-one-data-register-not-a-register-file.md`:
+//! (`docs/defects/2026-09-08-regi2c-is-one-data-register-not-a-register-file.ai.md`:
 //! three `error: pll_cal exceeds 2ms!!!` lines silicon does not print).
 //!
 //! P3 recorded that the shipped image only ever *writes* through this master

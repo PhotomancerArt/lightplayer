@@ -16,7 +16,7 @@ description: >
 # a 10 GB repo budget. Measured 2026-09-25 02:15 UTC: 10.86 GB held, the
 # oldest last-access in the whole repo 13 minutes old, i.e. anything not
 # touched every ~15 min was evicted (the emu-ref and stories entries among
-# them). docs/debt/actions-cache-budget.md has the numbers.
+# them). docs/debt/actions-cache-budget.ai.md has the numbers.
 #
 # Key: `cargo-registry-v1-<sha256 of Cargo.lock>`, so only a lockfile change
 # (not a feature or manifest-comment edit) makes a new generation. Restore

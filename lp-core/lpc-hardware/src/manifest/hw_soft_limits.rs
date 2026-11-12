@@ -26,7 +26,7 @@
 //! the classic's heap. The limits make that trade board-side and
 //! deterministic (a function of the lamps open, never of the heap's mood);
 //! a board without a record never degrades. See
-//! `docs/adr/2026-09-06-smoothing-degrades-by-measured-lamp-limits.md`.
+//! `docs/adr/2026-09-06-smoothing-degrades-by-measured-lamp-limits.ai.md`.
 
 use alloc::string::String;
 

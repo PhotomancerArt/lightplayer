@@ -1,4 +1,4 @@
-//! The Hardware row: what the board is (`docs/ux/anatomy/board-card.md`,
+//! The Hardware row: what the board is (`docs/ux/anatomy/board-card.ai.md`,
 //! "Hardware ■"). **Hardware · model · state**, the chip icon.
 //!
 //! First match wins:

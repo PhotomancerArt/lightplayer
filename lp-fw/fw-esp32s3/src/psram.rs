@@ -398,7 +398,7 @@ fn largest_block(bound: usize, alloc: impl Fn(core::alloc::Layout) -> *mut u8) -
             return false;
         };
         // `black_box`: an allocation only freed may otherwise be deleted
-        // (docs/defects/2026-10-09-the-s3s-largest-block-probe-was-optimized-away.md).
+        // (docs/defects/2026-10-09-the-s3s-largest-block-probe-was-optimized-away.ai.md).
         let ptr = core::hint::black_box(alloc(layout));
         if ptr.is_null() {
             false

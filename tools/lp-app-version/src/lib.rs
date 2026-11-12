@@ -63,7 +63,7 @@ pub const FIGURE_BUILD_ENV: &str = "LP_FIGURE_BUILD";
 /// Before the pin, CI's own re-check after a bless — on a tree the bless had
 /// just written to — was always stamped dirty and could never pass, and a
 /// desk and a runner read different figures off one commit
-/// (`docs/debt/heap-budget-record-churns-on-routine-changes.md`).
+/// (`docs/debt/heap-budget-record-churns-on-routine-changes.ai.md`).
 ///
 /// Seven lowercase hex digits: a dev version by `lpc-firmware-release`'s
 /// grammar (so nothing treats a figure build as malformed), and the length
@@ -82,7 +82,7 @@ pub const FIGURE_VERSION: &str = "0000000";
 /// addresses one differently. `lp-emu:esp32c6:t4` charges for where code and
 /// data land in flash and cache, so the first-light ratchet read 386 or
 /// 391 ms by the commit alone, on PRs that changed no firmware
-/// (`docs/defects/2026-10-21-first-light-flipped-with-the-commit.md`).
+/// (`docs/defects/2026-10-21-first-light-flipped-with-the-commit.ai.md`).
 ///
 /// Twelve lowercase hex digits: the length of the real stamp
 /// (`git rev-parse --short=12`), so what a stamp's length reaches (the boot

@@ -1,6 +1,6 @@
 //! The module card's permanent face — **one face, every depth**.
 //!
-//! `docs/design/modules.md` §5. The root module wears this as the single
+//! `docs/design/modules.ai.md` §5. The root module wears this as the single
 //! top-level workspace card (the flat-root reversal); an embedded module
 //! wears the identical component as a child card inside its host, one level
 //! in; play mode renders the panel alone with no face at all
@@ -44,10 +44,10 @@
 //! group on this panel, and on the child module's own card below. That is
 //! deliberate, and it is the playlist precedent (a bound control shows on
 //! the parent's face and on the child's card): one control, two views
-//! (`panel.md` P1), which the shared `(scope, channel)` identity keeps in
+//! (`panel.ai.md` P1), which the shared `(scope, channel)` identity keeps in
 //! lockstep.
 //!
-//! Widget writes ride their own wire op (`PanelWriteOp`, panel.md P8) via
+//! Widget writes ride their own wire op (`PanelWriteOp`, panel.ai.md P8) via
 //! the control's `panel_target`; nothing in this face depends on which
 //! path carries the value.
 

@@ -25,7 +25,7 @@
 # `--no-stub`: espflash 3.3.0's RAM stub times out connecting to the boards of
 # this fixture (~5 s, `espflash::timeout`) while the same command without it
 # connects immediately. See
-# docs/defects/2026-09-06-c6-analog-master-wedges-the-bootloader.md.
+# docs/defects/2026-09-06-c6-analog-master-wedges-the-bootloader.ai.md.
 set -euo pipefail
 
 mac="${1:?usage: flash-image.sh <MAC> <sentinel> [elf] [max-secs]}"
@@ -62,6 +62,6 @@ if grep -qa 'TG0_WDT_HPSYS' "$cap" 2>/dev/null; then
     echo "    is spinning on LP_I2C_ANA_MAST_I2C0_BUSY, which lives in the LP"
     echo "    domain and survives every reset short of power-on."
     echo "    UNPLUG THE BOARD AND PLUG IT BACK IN, then re-run this."
-    echo "    docs/defects/2026-09-06-c6-analog-master-wedges-the-bootloader.md"
+    echo "    docs/defects/2026-09-06-c6-analog-master-wedges-the-bootloader.ai.md"
 fi
 exit "$status"

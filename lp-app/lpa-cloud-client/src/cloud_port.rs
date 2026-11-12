@@ -36,7 +36,7 @@ use crate::sync_error::SyncError;
 /// Implementations return plain futures: no spawning, no executor-flavored
 /// sleeps, no `Send` bound (the wasm edge that drives them is
 /// single-threaded). Any edge must be able to drive them — see the sans-IO
-/// rule in AGENTS.md and [`crate::block_on`] for the test driver.
+/// rule in AGENTS.ai.md and [`crate::block_on`] for the test driver.
 #[allow(
     async_fn_in_trait,
     reason = "runtime-neutral futures by design: a Send bound would exclude the single-threaded wasm edge this is written for"

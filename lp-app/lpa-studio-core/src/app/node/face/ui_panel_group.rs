@@ -1,6 +1,6 @@
 //! A panel's channel list, and the nested groups it presents beneath it.
 //!
-//! `docs/design/modules.md` R8: a module's panel presents its scope's
+//! `docs/design/modules.ai.md` R8: a module's panel presents its scope's
 //! channel list — the aggregate of its children's publicity — plus each
 //! child module's panel as a **nested group**. The recursion is
 //! presentation only: nothing is promoted, no dataflow construct sits
@@ -18,7 +18,7 @@ pub struct UiPanelGroup {
     /// the project name; a nested group wears the embedded module's.
     pub label: String,
     /// The scope this group presents, as a node path (`/`, `/plasma-1`).
-    /// Together with a channel name this is a control's identity (panel.md
+    /// Together with a channel name this is a control's identity (panel.ai.md
     /// P1) — the DISPLAY half; the dispatchable half is [`Self::target`].
     pub scope: String,
     /// The structured scope the group's reset gesture clears
@@ -82,7 +82,7 @@ impl UiPanelGroup {
     }
 
     /// Engaged controls in this group and every nested group — what "reset
-    /// this module" clears (panel.md P2 clear at scope granularity; P-Q4's
+    /// this module" clears (panel.ai.md P2 clear at scope granularity; P-Q4's
     /// lean is that a clear descends).
     pub fn engaged_total(&self) -> usize {
         self.engaged_here() + self.groups.iter().map(Self::engaged_total).sum::<usize>()

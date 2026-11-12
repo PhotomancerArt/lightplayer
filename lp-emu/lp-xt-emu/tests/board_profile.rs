@@ -1,6 +1,6 @@
 //! Board-profile tests: the classic-ESP32 (LX6) memory map, emulator-side.
 //!
-//! The classic map is hardware-measured (FINDINGS.md, classic C1–C5 section,
+//! The classic map is hardware-measured (FINDINGS.ai.md, classic C1–C5 section,
 //! plus the 2026-09-05 SRAM0 probe): JIT code lives in **SRAM0**, which is
 //! identity-mapped and **word-only**; SRAM1's dual mapping — the legacy code
 //! placement — is **word-mirrored** (`iram = 0x400B_FFFC − (dram −
@@ -8,7 +8,7 @@
 //! tests pin the emulator to that model; agreement with silicon is the
 //! hardware walks' job.
 //!
-//! Payload bytes are assembler-derived golden vectors from FINDINGS.md,
+//! Payload bytes are assembler-derived golden vectors from FINDINGS.ai.md,
 //! never hand-encoded.
 
 use lp_xt_emu::board::BoardProfile;
@@ -18,7 +18,7 @@ use lp_xt_emu::emu::{
 use lp_xt_emu::memory::{AliasRule, EXC_INSTR_FETCH_ERROR, EXC_LOAD_STORE_ERROR, Memory};
 use lp_xt_emu::{Emulator, TrapKind};
 
-/// GV1 `spike_stub42` (FINDINGS.md): entry a1,32; movi a2,42; retw. f(_) = 42.
+/// GV1 `spike_stub42` (FINDINGS.ai.md): entry a1,32; movi a2,42; retw. f(_) = 42.
 /// Ran byte-for-byte unmodified on LX6 in all three regions (C2x/C3).
 const GV1: &[u8] = &[0x36, 0x41, 0x00, 0x22, 0xa0, 0x2a, 0x90, 0x00, 0x00];
 

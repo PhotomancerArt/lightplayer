@@ -52,7 +52,7 @@ pub fn starter_project_files(
     ));
 
     // A texture declares no `input` slot: binding one made the whole project
-    // refuse to load (docs/defects/2026-10-28-lp-cli-create-project-did-not-load.md).
+    // refuse to load (docs/defects/2026-10-28-lp-cli-create-project-did-not-load.ai.md).
     let texture = starter_def_for_kind(NodeKind::Texture);
     files.push((String::from("texture.json"), node_json(&texture, registry)?));
 

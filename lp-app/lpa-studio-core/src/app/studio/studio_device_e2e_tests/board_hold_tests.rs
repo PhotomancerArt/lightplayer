@@ -525,7 +525,7 @@ fn t7_an_idle_holder_lets_go_in_order() {
 /// not start on the link being let go: a request on a closing port is
 /// never answered, and the actor (the close, the release) would wait out
 /// its five-second budget behind it
-/// (`docs/defects/2026-10-09-a-holders-release-can-outlast-the-askers-five-seconds.md`).
+/// (`docs/defects/2026-10-09-a-holders-release-can-outlast-the-askers-five-seconds.ai.md`).
 #[test]
 fn t7_a_feeding_holder_answers_within_a_second() {
     let desk = Desk::new(&[("dev000000holdt7cc", MAC_A)]);

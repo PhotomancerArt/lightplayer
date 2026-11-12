@@ -1,6 +1,6 @@
 //! How many allocations does a steady frame make?
 //!
-//! The emulator heap-budget gate (`docs/heap-budget-gate.md`) ratchets the
+//! The emulator heap-budget gate (`docs/heap-budget-gate.ai.md`) ratchets the
 //! per-frame allocation count of real projects in CI, but an emulator run is
 //! minutes. These tests ask the same question of a small graph on the host in
 //! milliseconds, through the test binary's counting allocator

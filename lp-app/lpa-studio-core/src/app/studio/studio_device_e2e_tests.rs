@@ -1874,7 +1874,7 @@ fn unplugging_mid_lens_holds_the_editor_until_the_grace_runs_out() {
 ///
 /// The 2026-09-24 walk's own failure was below this layer: the shim left the
 /// dead generation's byte channel open, so the replugged port's `open()` was
-/// refused (`docs/defects/2026-09-24-emulated-replug-leaves-the-old-byte-channel-open.md`,
+/// refused (`docs/defects/2026-09-24-emulated-replug-leaves-the-old-byte-channel-open.ai.md`,
 /// pinned by `a_port_open_across_a_replug_reopens_on_the_new_generation` in
 /// lpa-link's conformance suite).
 #[test]
@@ -7064,7 +7064,7 @@ fn an_effect_that_outlives_its_activity_gives_the_wire_back_and_the_pump_resumes
     // the push took the wire; the reopen flushes the wire, not the server,
     // so the late hello landed in the fresh window and the card read Ready
     // (CI, 2026-09-25, twice in 30 minutes; 11/96 under local load).
-    // docs/defects/2026-09-25-a-late-hello-answer-reaches-the-fresh-window.md
+    // docs/defects/2026-09-25-a-late-hello-answer-reaches-the-fresh-window.ai.md
     bench.run_until(&tasks, "every request to be answered onto the wire", |_| {
         device.unanswered_requests() == 0
     });

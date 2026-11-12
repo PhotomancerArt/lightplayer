@@ -448,7 +448,7 @@ fn a_frame_the_client_writes_is_answered_by_the_guest() {
 /// **No client means nobody is reading** — the default door delivers no
 /// pre-attach backlog.
 ///
-/// `docs/defects/2026-09-23-emulated-usb-port-drains-with-no-client-attached.md`:
+/// `docs/defects/2026-09-23-emulated-usb-port-drains-with-no-client-attached.ai.md`:
 /// the door used to power its boards on with the port open and draining and
 /// nobody connected, so every write the firmware made succeeded and the
 /// first client was replayed all of it — 299 heartbeats (~160 KB) in the

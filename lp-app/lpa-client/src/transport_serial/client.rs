@@ -50,7 +50,7 @@ pub struct AsyncSerialClientTransport {
 /// loop's slowest pass is one 100 ms read timeout plus a bounded write, and
 /// it re-checks the shutdown signal between writes. Anything past this is a
 /// backend wedged inside a blocking call, which is a bug in that backend —
-/// see `docs/defects/2026-09-08-serial-close-leaks-the-port-on-a-wedged-device.md`.
+/// see `docs/defects/2026-09-08-serial-close-leaks-the-port-on-a-wedged-device.ai.md`.
 pub(crate) const CLOSE_JOIN_BUDGET: Duration = Duration::from_secs(2);
 
 /// What a backend thread hands the transport.

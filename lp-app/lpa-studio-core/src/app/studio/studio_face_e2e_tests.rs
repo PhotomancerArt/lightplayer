@@ -694,7 +694,7 @@ fn a_bound_panel_uniform_keeps_an_interactive_control() {
     // `bus:glow`, `speed` is bound to nothing. The bound knob must stay a
     // working control — it derives a panel target (the command-channel write
     // path) AND keeps the editable, addressed authored default underneath
-    // (modules.md R6: the authored default is what an unwritten channel
+    // (modules.ai.md R6: the authored default is what an unwritten channel
     // resolves to, so it stays reachable). Nothing pinned interactivity
     // before: the knob rendered correctly bound and dispatched nothing when
     // turned.
@@ -1033,7 +1033,7 @@ fn the_root_module_card_derives_its_panel_from_scoped_channels() {
     // The flat-root reversal made the root module a real card, and this is
     // what it is FOR: its face carries the root scope's panel, derived from
     // the binding graph and the panel targets its subtree already produced
-    // (`docs/design/modules.md` R8, `panel.md` P1). Nothing is mock-fed.
+    // (`docs/design/modules.ai.md` R8, `panel.ai.md` P1). Nothing is mock-fed.
     let server = Rc::new(RefCell::new(bound_glow_e2e_server()));
     let io = InProcessServerIo {
         server: Rc::clone(&server),
@@ -1919,7 +1919,7 @@ fn every_gallery_example_opens_onto_a_populated_root_panel() {
     //
     // Booting each example through a real `LpServer` also compiles its
     // shaders on the device frontend, which is coverage the checked-in
-    // examples otherwise lack (`docs/debt/example-shaders-not-compile-gated.md`).
+    // examples otherwise lack (`docs/debt/example-shaders-not-compile-gated.ai.md`).
     for example in crate::app::home::embedded_examples() {
         let server = Rc::new(RefCell::new(example_e2e_server(example)));
         let io = InProcessServerIo {
@@ -3642,7 +3642,7 @@ fn fixture_fader(view: &UiStudioView) -> UiPanelControl {
 /// default. Six of the packages wore one on their shader card the moment
 /// they opened (`reach`/`sparks`, `scale`, `tail`, `depth`, `count`/`speed`)
 /// while the panel's own control for the very same channel read "default" —
-/// `modules.md` R6 calls that an invitation, and the engine now agrees
+/// `modules.ai.md` R6 calls that an invitation, and the engine now agrees
 /// (`unwritten_channel_at_rest`).
 ///
 /// Warning tone only, deliberately: `fyeah-sign`'s radio card reports an

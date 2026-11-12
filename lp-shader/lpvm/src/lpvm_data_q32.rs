@@ -685,7 +685,7 @@ mod tests {
     }
 
     /// The LP ABI's layout packs vec3 arrays tight (alignment 4, stride 12
-    /// — its documented std430 deviation, `docs/design/glsl-layout.md`), so
+    /// — its documented std430 deviation, `docs/design/glsl-layout.ai.md`), so
     /// a vec3 buffer's packed words match the layout stride exactly. The
     /// write/read paths compute the stride rather than assuming it, so a
     /// future padded layout would keep round-tripping.

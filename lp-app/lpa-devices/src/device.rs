@@ -93,7 +93,7 @@ pub struct Device {
     /// nothing else would until its first heartbeat. A board that boots
     /// slowly misses identify's window this way: a cold board compiling a
     /// big shader, or an emulated S3, whose hello came minutes after the
-    /// 5 s verdict (docs/defects/2026-10-22-a-hello-after-identify-settled-never-asks-what-the-board-runs.md).
+    /// 5 s verdict (docs/defects/2026-10-22-a-hello-after-identify-settled-never-asks-what-the-board-runs.ai.md).
     /// Set when such an identify ends; cleared when it is used, and by any
     /// identify that starts.
     #[serde(default)]
@@ -112,7 +112,7 @@ pub struct Device {
     /// silence from a board that once said hello reads as "stopped
     /// responding", with Retry — a dead end for a board that is waiting
     /// for firmware (2026-10-19, a real C6:
-    /// docs/defects/2026-10-19-a-board-erased-over-webusb-reads-not-responding-until-a-reload.md).
+    /// docs/defects/2026-10-19-a-board-erased-over-webusb-reads-not-responding-until-a-reload.ai.md).
     /// Set when an Erase ends well; cleared by any firmware verdict (a
     /// hello, a core, other firmware) and by a flash or update that ends
     /// well. Kept for this session only: what a reload knows is what the
@@ -2294,7 +2294,7 @@ mod tests {
     /// compiling a big shader). The late hello re-identifies: the card
     /// ends up a recognized LightPlayer and the board is asked what it
     /// runs, with no gesture from anyone
-    /// (docs/defects/2026-10-22-a-hello-after-identify-settled-never-asks-what-the-board-runs.md).
+    /// (docs/defects/2026-10-22-a-hello-after-identify-settled-never-asks-what-the-board-runs.ai.md).
     #[test]
     fn a_hello_after_identify_settled_unrecognized_reidentifies_and_asks_what_it_runs() {
         let mut harness = Harness::new();
@@ -2351,7 +2351,7 @@ mod tests {
         // It asks for no hello of its own: an answer would be a second
         // `hello_at` on one connection, and everything once per connection
         // keys on it (the account report went out twice:
-        // docs/defects/2026-10-23-a-re-identify-reported-the-board-to-the-account-twice.md).
+        // docs/defects/2026-10-23-a-re-identify-reported-the-board-to-the-account-twice.ai.md).
         assert!(
             !spawned.iter().any(|command| matches!(
                 command,

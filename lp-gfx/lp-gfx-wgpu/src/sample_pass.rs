@@ -38,7 +38,7 @@
 //!   issues a copy+map for the frame just drawn when the buffer is free,
 //!   and serves the most recent completed frame (black until the first
 //!   readback lands). This is the async-readback exit of
-//!   `docs/debt/gpu-tier-cannot-sample-led-output.md`.
+//!   `docs/debt/gpu-tier-cannot-sample-led-output.ai.md`.
 
 use lp_gfx::GfxError;
 use lp_shader::ShaderEntrySpace;

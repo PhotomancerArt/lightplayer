@@ -184,7 +184,7 @@ one() {
     if [[ "$chip" == esp32s3 ]]; then
         # The S3's `[CORE]` line rides the log channel and can be lost when
         # the first link session after a reset is reset
-        # (docs/defects/2026-10-22-the-s3-loses-its-core-line-after-an-updates-reset.md):
+        # (docs/defects/2026-10-22-the-s3-loses-its-core-line-after-an-updates-reset.ai.md):
         # the boot is the loader's line (raw console), reachability the
         # board answering on its link (an engine's hello, or a manifest the
         # host recorded), Y the newest hello's firmware since the last boot.

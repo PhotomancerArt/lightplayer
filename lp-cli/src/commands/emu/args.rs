@@ -172,7 +172,7 @@ pub struct RunArgs {
     /// sent, as a board on a desk does when no application has the port
     /// open. A late client gets at most what the 64-byte IN FIFO still holds,
     /// then fresh frames, never a replay of the boot console
-    /// (`docs/defects/2026-09-23-emulated-usb-port-drains-with-no-client-attached.md`).
+    /// (`docs/defects/2026-09-23-emulated-usb-port-drains-with-no-client-attached.ai.md`).
     ///
     /// With no `--link`, or a UART0 one, nothing couples a client to the
     /// USB port, so it stays `attached`: open and draining from power-on,
@@ -426,7 +426,7 @@ pub struct RunArgs {
     /// analog master's busy bit before its first console line, the MWDT0
     /// flash-boot watchdog shoots it 0.325 s in, and the next boot lands in
     /// the same hang, because an HP reset does not reach the LP island. That
-    /// is `docs/defects/2026-09-06-c6-first-flash-bootloader-hang-lp-analog-i2c-clock.md`
+    /// is `docs/defects/2026-09-06-c6-first-flash-bootloader-hang-lp-analog-i2c-clock.ai.md`
     /// reproduced with no board. `power-cycle` on a served board's control
     /// channel does not clear it either: the value IS the power-on value.
     #[arg(long = "lpperi-clk-en", value_name = "HEX", value_parser = parse_hex_u32)]
@@ -437,7 +437,7 @@ pub struct RunArgs {
     /// with an error. Every chip start prints `SEAM <atom> engaged (…)` and
     /// the run's label becomes `<grade>+led=fast`. A performance seam
     /// (`led=fast`) is never for testing: see
-    /// docs/adr/2026-10-05-emulator-seams.md.
+    /// docs/adr/2026-10-05-emulator-seams.ai.md.
     #[arg(long)]
     pub seams: Option<String>,
 
@@ -564,7 +564,7 @@ pub struct ServeArgs {
     /// By default a board asks for the **capability defaults** softly
     /// (`net=lan`: engaged when the image carries the seam, one `SEAM none
     /// engaged: …` line when it does not) and nothing else: a performance
-    /// seam is never for testing (ADR docs/adr/2026-10-05-emulator-seams.md),
+    /// seam is never for testing (ADR docs/adr/2026-10-05-emulator-seams.ai.md),
     /// and `seams=none` turns even the defaults off. `GET /boards` names each
     /// board's configuration label and its `SEAM` lines.
     ///
@@ -640,7 +640,7 @@ pub struct ServeArgs {
     /// the port open. A client that connects later gets at most what the
     /// 64-byte IN FIFO still holds, then fresh frames — never a replay of
     /// the boot console or of the heartbeats nobody read
-    /// (`docs/defects/2026-09-23-emulated-usb-port-drains-with-no-client-attached.md`).
+    /// (`docs/defects/2026-09-23-emulated-usb-port-drains-with-no-client-attached.ai.md`).
     /// The boot console is not lost: `--console-dir` writes it to
     /// `<id>.console-untaken.log`.
     ///
@@ -679,7 +679,7 @@ pub struct ServeArgs {
     /// analog master's busy bit before its first console line, the MWDT0
     /// flash-boot watchdog shoots it 0.325 s in, and the next boot lands in
     /// the same hang, because an HP reset does not reach the LP island. That
-    /// is `docs/defects/2026-09-06-c6-first-flash-bootloader-hang-lp-analog-i2c-clock.md`
+    /// is `docs/defects/2026-09-06-c6-first-flash-bootloader-hang-lp-analog-i2c-clock.ai.md`
     /// reproduced with no board. `power-cycle` on a served board's control
     /// channel does not clear it either: the value IS the power-on value.
     #[arg(long = "lpperi-clk-en", value_name = "HEX", value_parser = parse_hex_u32)]

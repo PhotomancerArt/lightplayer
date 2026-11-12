@@ -4,7 +4,7 @@
 # `over` or `tight` (exit code 2), the same way a wedge used to go
 # unnoticed until it hit its budget and got cancelled with every test
 # passing (emu-c6 2026-09-08, heap-budget-chips 2026-10-06). See
-# docs/debt/ci-runner-time-over-the-concurrency-cap.md.
+# docs/debt/ci-runner-time-over-the-concurrency-cap.ai.md.
 #
 # Deliberately its own workflow, not a pre-merge job: it runs on a
 # schedule, never on `pull_request`, and reads pre-merge.yml's history

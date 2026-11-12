@@ -165,7 +165,7 @@ jobs:
       # cargo-registry entry, restored read-only — pre-merge's lint job on
       # main is its only writer (this workflow used to save its own
       # ~517 MB `deploy` copy of the same bytes;
-      # docs/debt/actions-cache-budget.md). `@main` for the reason the
+      # docs/debt/actions-cache-budget.ai.md). `@main` for the reason the
       # xtensa-toolchain step above gives.
       - name: Restore cargo registry
         uses: PhotomancerArt/lightplayer/.github/actions/cargo-registry@main

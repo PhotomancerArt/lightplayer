@@ -2,7 +2,7 @@
 # Assemble the FP-subset fixtures with the esp toolchain's GNU as, staging the
 # results in fixtures/fp/obj/ for the lp-xt-inst objdiff rig.
 #
-# Golden rule (AGENTS.md): instruction bytes are assembler-derived, never
+# Golden rule (AGENTS.ai.md): instruction bytes are assembler-derived, never
 # hand-written — that is the entire point of this script. binutils' *output* is
 # fact and carries no license obligation; its source is off limits.
 #

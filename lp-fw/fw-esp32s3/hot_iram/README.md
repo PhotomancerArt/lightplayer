@@ -3,7 +3,7 @@
 ~40 KB of flash functions — the engine's per-lane graph walk, the allocator,
 the hottest shader builtins — linked into `.rwtext` (internal SRAM) instead of
 `.text` (flash, through the 32 KB instruction cache). The decision and its
-numbers are `docs/adr/2026-10-24-s3-hot-code-in-iram.md`.
+numbers are `docs/adr/2026-10-24-s3-hot-code-in-iram.ai.md`.
 
 | File | What | Written by |
 |---|---|---|

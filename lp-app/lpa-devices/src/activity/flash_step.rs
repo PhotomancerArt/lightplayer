@@ -14,7 +14,7 @@
 //! Yona's phone install (2026-10-25) sat on a bare spinner through both,
 //! after a stale 100 % from the layout read and a percent that flickered
 //! away on every esptool log line
-//! (`docs/defects/2026-10-25-install-progress-jumped-to-100-and-vanished.md`).
+//! (`docs/defects/2026-10-25-install-progress-jumped-to-100-and-vanished.ai.md`).
 
 use serde::{Deserialize, Serialize};
 

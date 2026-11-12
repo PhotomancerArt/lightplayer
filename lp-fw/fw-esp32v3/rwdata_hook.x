@@ -57,6 +57,6 @@
  * esp-hal's level-3 dispatch matches on the CPU-internal source number, and
  * esp-rtos's embassy `__pender` matches on the executor id. Both run on every
  * peripheral interrupt / wake, both used to fall through to flash `.rodata`
- * (docs/debt/classic-iram-handlers-reach-flash.md). ~0xd0 B together. */
+ * (docs/debt/classic-iram-handlers-reach-flash.ai.md). ~0xd0 B together. */
 *(.rodata.__level_*_interrupt)
 *(.rodata.__pender)

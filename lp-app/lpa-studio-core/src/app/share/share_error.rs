@@ -3,7 +3,7 @@
 //! Envelope errors are read by a human who just pasted something and got
 //! nothing, so every variant names the thing that was wrong — the version
 //! found, the kind found, the offending path — rather than surfacing a
-//! serde position. See `docs/adr/2026-07-28-share-envelopes.md`.
+//! serde position. See `docs/adr/2026-07-28-share-envelopes.ai.md`.
 
 use core::fmt;
 

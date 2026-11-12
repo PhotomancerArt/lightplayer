@@ -1,4 +1,4 @@
-//! A dedup hit compares bytes (FORMAT.md "Ids"): ids are 64 bits of
+//! A dedup hit compares bytes (FORMAT.ai.md "Ids"): ids are 64 bits of
 //! SHA-256, so someone who can write can, with ~2³² work, make bytes whose
 //! id equals a predictable file's. Under a hasher that collides on purpose
 //! (`EVIL` hashes as `GOOD`), the second of two colliding writes — planted

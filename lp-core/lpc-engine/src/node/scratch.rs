@@ -9,7 +9,7 @@ use super::NodeError;
 /// Tick-path buffers must never grow through the infallible-alloc route: on
 /// device, a failed infallible allocation stages an OOM reset, so a transient
 /// heap squeeze mid-frame becomes a reboot
-/// (`docs/defects/2026-08-29-flash-write-wedges-under-zook-playback.md`).
+/// (`docs/defects/2026-08-29-flash-write-wedges-under-zook-playback.ai.md`).
 /// Failing here surfaces a [`NodeError`] instead — the frame's product
 /// degrades, the board stays up, and the next tick retries.
 ///

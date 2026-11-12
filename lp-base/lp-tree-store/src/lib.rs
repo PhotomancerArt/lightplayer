@@ -2,7 +2,7 @@
 //! flash. `no_std` + `alloc`, sans-IO over a small [`Flash`] trait and an
 //! injected [`ObjectHasher`]. RAM-bounded: a sorted index of 12-byte
 //! entries and 12 bytes per sector are all it keeps between operations (no
-//! path in RAM: lookups walk the directories on flash). See `FORMAT.md` for every on-flash byte and the
+//! path in RAM: lookups walk the directories on flash). See `FORMAT.ai.md` for every on-flash byte and the
 //! README for the design, the invariants (I1 root, I2 at least one copy, I3
 //! derived liveness), the dials and the measurements.
 

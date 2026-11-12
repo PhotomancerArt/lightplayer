@@ -29,14 +29,14 @@ Better to have one `lpvm-cranelift` crate with:
 
 | File | Purpose |
 |------|---------|
-| `00-notes.md` | Architecture notes and decisions |
-| `01-design.md` | High-level design document |
-| `02-phase-1-rename.md` | Rename crate, update workspace |
-| `03-phase-2-engine.md` | Add `CraneliftEngine` (LpvmEngine) |
-| `04-phase-3-module.md` | Add `CraneliftModule` (LpvmModule) |
-| `05-phase-4-instance.md` | Add `CraneliftInstance` (LpvmInstance) |
-| `06-phase-5-tests.md` | Integration and validation |
-| `07-phase-6-docs.md` | Documentation updates |
+| `00-notes.ai.md` | Architecture notes and decisions |
+| `01-design.ai.md` | High-level design document |
+| `02-phase-1-rename.ai.md` | Rename crate, update workspace |
+| `03-phase-2-engine.ai.md` | Add `CraneliftEngine` (LpvmEngine) |
+| `04-phase-3-module.ai.md` | Add `CraneliftModule` (LpvmModule) |
+| `05-phase-4-instance.ai.md` | Add `CraneliftInstance` (LpvmInstance) |
+| `06-phase-5-tests.ai.md` | Integration and validation |
+| `07-phase-6-docs.ai.md` | Documentation updates |
 
 ## Phases
 

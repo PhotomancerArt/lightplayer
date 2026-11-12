@@ -192,7 +192,7 @@ pub struct UiStudioView {
     pub app_agent: crate::UiAppAgentView,
     /// Every verb this view offers, by path, in publish order — the one
     /// place the web renders migrated surfaces' buttons from and the app
-    /// agent reads and presses (`docs/adr/2026-10-01-agentic-control-offers-in-core.md`).
+    /// agent reads and presses (`docs/adr/2026-10-01-agentic-control-offers-in-core.ai.md`).
     pub offers: crate::UiOfferTree,
     /// The Graph tab's slice (`app/graph`): `None` until the Graph has
     /// been asked for on the open project.

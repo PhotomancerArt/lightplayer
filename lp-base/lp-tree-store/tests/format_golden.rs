@@ -3,7 +3,7 @@
 //! bytes up to its last non-`0xFF` byte, 64 per line).
 //!
 //! A mismatch is a format change. Never re-record the golden to make a
-//! change pass: a deliberate change bumps `FORMAT_VERSION` (FORMAT.md
+//! change pass: a deliberate change bumps `FORMAT_VERSION` (FORMAT.ai.md
 //! "Versioning") and re-records with a commit message saying so
 //! (`LP_TREE_STORE_RECORD_GOLDEN=1 cargo test -p lp-tree-store --test
 //! format_golden`).

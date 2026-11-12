@@ -1,6 +1,6 @@
 //! The wire version a hello claims, read without reading the hello.
 //!
-//! The hello is the version handshake (`docs/adr/2026-07-14-wire-hello-versioning.md`):
+//! The hello is the version handshake (`docs/adr/2026-07-14-wire-hello-versioning.ai.md`):
 //! a host compares its `proto` with [`WIRE_PROTO_VERSION`] and treats any
 //! difference as "assume nothing works; update the firmware". That only
 //! works if the host can SEE the `proto` of a hello it cannot otherwise
@@ -28,7 +28,7 @@
 //! Three more are read the same way, for the one thing a board on another
 //! wire still needs from this host — its firmware update, which rides
 //! lp-link's update channel (channel 3), never this wire
-//! (`docs/adr/2026-10-06-studio-updates-over-the-update-channel.md`, its
+//! (`docs/adr/2026-10-06-studio-updates-over-the-update-channel.ai.md`, its
 //! 2026-10-28 amendment). Without them a board on an older wire, reached
 //! over Wi‑Fi, Bluetooth or the relay, could not be updated at all: no
 //! cable gives its MAC, and no announcement lets a host speak channel 3:

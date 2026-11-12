@@ -1,10 +1,10 @@
 //! Server-side lifecycle state for node entries.
 //!
-//! The archived design (`docs-archive/roadmaps/2026-04-28-node-runtime/design/01-tree.md`
+//! The archived design (`docs-archive/roadmaps/2026-04-28-node-runtime/design/01-tree.ai.md`
 //! §EntryState) had `Pending` children woken by the resolver and `Failed`
 //! reads falling through to slot defaults. Neither holds: the resolver never
 //! wakes a node, a parent that wants a child loaded asks for it
-//! (`docs/adr/2026-09-25-parent-owned-child-residency.md`), and reading from a
+//! (`docs/adr/2026-09-25-parent-owned-child-residency.ai.md`), and reading from a
 //! node that is not `Alive` is a hard resolve error.
 
 use alloc::string::String;

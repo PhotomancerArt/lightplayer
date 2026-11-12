@@ -25,7 +25,7 @@
 //! one, with no `node`; the output-frame probe lists one per output it
 //! holds, each naming its node. Every probe shares this one request shape,
 //! which is also one deserializer on a device whose flash is budgeted
-//! (`docs/adr/2026-07-28-esp32c6-flash-budget.md`).
+//! (`docs/adr/2026-07-28-esp32c6-flash-budget.ai.md`).
 //!
 //! # The revision
 //!

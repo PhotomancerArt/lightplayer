@@ -5,7 +5,7 @@
 //! PAC; one that says `LP_CLKRST+0x010 reset_cause` can be read. The tables
 //! are **generated** from the `esp32c6` PAC's svd2rust offset comments by
 //! `scripts/emu/pac-regnames.py`, carry the provenance header
-//! `docs/adr/2026-07-29-license-provenance-discipline.md` requires, and are
+//! `docs/adr/2026-07-29-license-provenance-discipline.ai.md` requires, and are
 //! checked by `just lint-emu-regnames` — a hand edit is reverted by the next
 //! regeneration and takes its provenance with it.
 //!

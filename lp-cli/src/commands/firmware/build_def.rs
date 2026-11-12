@@ -3,7 +3,7 @@
 //!
 //! A build def is a build *input*. It never restates what a build contains —
 //! features, wire proto and limits are extracted from the artifact's embedded
-//! manifest core (`docs/adr/2026-08-01-firmware-manifest-architecture.md`).
+//! manifest core (`docs/adr/2026-08-01-firmware-manifest-architecture.ai.md`).
 //! See `lp-fw/builds/README.md` for the authoring rules.
 
 use std::path::{Path, PathBuf};
@@ -83,7 +83,7 @@ impl BuildDef {
     }
 
     /// Crate directory. Linked firmware builds must run here so the crate's
-    /// `.cargo/config.toml` and `rust-toolchain.toml` apply (AGENTS.md,
+    /// `.cargo/config.toml` and `rust-toolchain.toml` apply (AGENTS.ai.md,
     /// ADR 2026-07-29-per-chip-fw-toolchains).
     pub fn crate_dir(&self, repo_root: &Path) -> Result<PathBuf> {
         let dir = repo_root.join("lp-fw").join(&self.package);

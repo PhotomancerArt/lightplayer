@@ -3,7 +3,7 @@
 //! The server/transport traits are async, but the wasm export boundary is
 //! synchronous, and every future this runtime drives (in-memory transport
 //! queues) is **immediately ready by construction**. Per the sans-IO core
-//! ADR (`docs/adr/2026-07-06-sans-io-core.md`), that invariant is loud, not
+//! ADR (`docs/adr/2026-07-06-sans-io-core.ai.md`), that invariant is loud, not
 //! spun through: a `Pending` here means someone introduced genuinely async
 //! IO into the worker's dispatch path, which needs a real executor decision
 //! — panicking immediately beats busy-looping a single-threaded worker

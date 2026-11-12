@@ -1,4 +1,4 @@
-//! The sector header (FORMAT.md "Sector"): programmed right after a
+//! The sector header (FORMAT.ai.md "Sector"): programmed right after a
 //! completed, verified erase, it is the only thing that makes a sector
 //! trusted.
 //!
@@ -12,12 +12,12 @@
 use lp_crc32::crc32;
 
 pub const SECTOR_MAGIC: u32 = 0x3153_544C; // "LTS1" read little-endian
-/// The on-flash format version (FORMAT.md "Versioning"). 1 was the race
+/// The on-flash format version (FORMAT.ai.md "Versioning"). 1 was the race
 /// prototype and 2 the first v1 layout (neither fielded; this code reads
 /// neither).
 pub const FORMAT_VERSION: u16 = 3;
 pub const SECTOR_HEADER_LEN: u32 = 24;
-/// What a kill programs to zero, in this order (FORMAT.md "Writing and
+/// What a kill programs to zero, in this order (FORMAT.ai.md "Writing and
 /// killing"): the magic (bytes 0..4), then the header CRC (20..24). Bytes
 /// 4..20 — version, head kind, sector size, flags, seq and erase count —
 /// are left as they read, so the erase count survives the kill.

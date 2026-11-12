@@ -25,9 +25,9 @@
 //! | its inputs, and what the UI reads | [`access_command`], [`ui_access_view`] |
 //! | Unlock as an offer, `devices/<board>/unlock` | [`unlock_offer`], [`unlock_op`], [`unlock_password`] |
 //!
-//! Decision records: `docs/adr/2026-09-23-ble-access-model.md` (the model),
-//! `docs/adr/2026-09-24-ble-transport-studio.md` (the Studio transport),
-//! `docs/adr/2026-09-24-easy-bluetooth-access.md` (key holders, the silent
+//! Decision records: `docs/adr/2026-09-23-ble-access-model.ai.md` (the model),
+//! `docs/adr/2026-09-24-ble-transport-studio.ai.md` (the Studio transport),
+//! `docs/adr/2026-09-24-easy-bluetooth-access.ai.md` (key holders, the silent
 //! add over USB, and this UX). The board still honours a project's own
 //! `.lp/access.json`; Studio no longer writes one.
 

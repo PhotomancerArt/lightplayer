@@ -2,7 +2,7 @@
 //!
 //! Catalog transactions and project open/close await platform things —
 //! Web Locks, OPFS mounts, flushes — that the core must not own
-//! (`docs/adr/2026-07-06-sans-io-core.md`). The platform edge injects an
+//! (`docs/adr/2026-07-06-sans-io-core.ai.md`). The platform edge injects an
 //! implementation of [`LibraryHost`]; its futures are runtime-neutral
 //! (no spawns, no executor-flavored sleeps), so any edge can drive them —
 //! the `ClientIo` precedent. Tests inject [`MemoryLibraryHost`], whose

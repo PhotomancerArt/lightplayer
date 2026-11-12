@@ -135,7 +135,7 @@ async function main() {
     fresh: true,
   });
   // `WALK_RECORD_SINK=<an lp-cli record serve sink>` records the session
-  // (docs/recording-a-studio-session.md); with none, nothing is recorded.
+  // (docs/recording-a-studio-session.ai.md); with none, nothing is recorded.
   const recordSink = process.env.WALK_RECORD_SINK ?? null;
   const url =
     (recordSink

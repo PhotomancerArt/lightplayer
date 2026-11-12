@@ -28,7 +28,7 @@ Complete carrying Status and Connection_Handle — 2 bytes. trouble-host sends
 them when a central asks for connection parameters over the link layer, which
 Android does on every connection and Mac Chrome and iOS never did; the C6
 panicked with `range end index 2 out of range for slice of length 0` each
-time (`docs/defects/2026-10-17-an-android-phone-connecting-over-bluetooth-panics-the-c6.md`).
+time (`docs/defects/2026-10-17-an-android-phone-connecting-over-bluetooth-panics-the-c6.ai.md`).
 
 The fork copies what fits, signals the command with that length, and warns
 (`[bt-hci] command 0x2021 completed with 2 return bytes, room for 0; extra

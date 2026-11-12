@@ -992,7 +992,7 @@ export class StudioDriver {
   /// `expectChip`: the card must know that chip once the install is done —
   /// the chip the bootloader session named, not one a boot banner may never
   /// have printed
-  /// (docs/defects/2026-10-25-a-blank-board-opened-mid-boot-loop-offered-every-board.md).
+  /// (docs/defects/2026-10-25-a-blank-board-opened-mid-boot-loop-offered-every-board.ai.md).
   async flashBlank(
     model,
     { board = null, timeoutMs = DEFAULT_WAIT_MS, flashTimeoutMs = 900_000, expectChip = null } = {},

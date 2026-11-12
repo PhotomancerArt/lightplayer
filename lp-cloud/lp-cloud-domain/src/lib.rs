@@ -1,7 +1,7 @@
 //! The cloud sync service's domain logic, behind injected ports.
 //!
 //! [`CloudService`] answers every [`lpc_cloud_api::CloudRequest`] against a
-//! [`MetaStore`], a [`Clock`], and an [`IdMint`]. It is sans-IO (AGENTS.md):
+//! [`MetaStore`], a [`Clock`], and an [`IdMint`]. It is sans-IO (AGENTS.ai.md):
 //! no executor, no ambient clock, no randomness — timestamps arrive through
 //! the clock port and random bytes through the mint port, mirroring
 //! `lpc-history`'s caller-supplied-randomness posture. Transport, cookies,

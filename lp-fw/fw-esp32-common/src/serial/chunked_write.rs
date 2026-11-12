@@ -77,7 +77,7 @@ impl WritePolicy {
     /// it is a backstop against a wedged peripheral. It also fires when the
     /// io task goes unpolled for the whole period (executor starvation; see
     /// fw-esp32v3's `serial::io_task` docs and
-    /// `docs/debt/shared-uart-io-task-starvation.md`), which is what
+    /// `docs/debt/shared-uart-io-task-starvation.ai.md`), which is what
     /// [`WriteFailure`]'s chunk/elapsed numbers exist to distinguish.
     pub const UART_921600: Self = Self {
         timeout: Duration::from_millis(250),
@@ -98,7 +98,7 @@ const IO_ERROR_TEXT_CAPACITY: usize = 48;
 /// this used to be built with `alloc::format!` on every write error, which
 /// allocated on exactly that executor. See the module docs on
 /// [`ChunkedWriter::new`]'s `delay` seam and
-/// `docs/adr/2026-08-25-classic-uart-io-task-executor-isolation.md`. This
+/// `docs/adr/2026-08-25-classic-uart-io-task-executor-isolation.ai.md`. This
 /// type holds the same one-line detail in a `Copy` fixed-capacity buffer
 /// instead; a `Debug` longer than [`IO_ERROR_TEXT_CAPACITY`] is truncated,
 /// never allocated or panicked on.
@@ -237,7 +237,7 @@ impl<'a, W: Write, F: FnMut(), D: DelayNs> ChunkedWriter<'a, W, F, D> {
     /// processing such a queue entry while the engine runs can crash the
     /// chip). The v3 passes a delay backed by its own hardware pacer tick,
     /// whose wakes are plain signal wakes. See
-    /// `docs/adr/2026-08-25-classic-uart-io-task-executor-isolation.md`.
+    /// `docs/adr/2026-08-25-classic-uart-io-task-executor-isolation.ai.md`.
     pub fn new(tx: &'a mut W, policy: WritePolicy, on_chunk: F, delay: D) -> Self {
         Self {
             tx,
@@ -396,7 +396,7 @@ mod tests {
     /// when": the error path builds a [`WriteFailure`] with no allocation.
     /// `write_chunks` runs on the classic's swi2 interrupt executor via
     /// [`ChunkedWriter::try_write_link_bytes`]
-    /// (`docs/adr/2026-08-25-classic-uart-io-task-executor-isolation.md`),
+    /// (`docs/adr/2026-08-25-classic-uart-io-task-executor-isolation.ai.md`),
     /// where a heap allocation is forbidden — so this file's *production*
     /// code (everything before this test module) must never call the
     /// allocating `format!`/`String` machinery. Sliced at the `#[cfg(test)]`

@@ -1,7 +1,7 @@
 //! One tab holds a board, over the network (P5): tabs of one browser on the
 //! hold bus, and one board whose single network slot — reached on the LAN
 //! or through lightplayer.app's relay — takes one client, the way a C6
-//! does (`docs/adr/2026-10-07-c6-wifi-link.md`):
+//! does (`docs/adr/2026-10-07-c6-wifi-link.ai.md`):
 //!
 //! - a newcomer that proves the holder's key takes the slot, and the board
 //!   closes the holder (`parked_handshake.rs`); every tab of one browser

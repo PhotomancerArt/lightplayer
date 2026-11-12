@@ -24,7 +24,7 @@
 > transcript. Read them as history and use the new path.
 >
 > **The rest of this directory stays where it is.** These are the spike's own
-> record: `docs/reports/2026-09-07-esp-emu-c6-spike.md` §10 names these paths
+> record: `docs/reports/2026-09-07-esp-emu-c6-spike.ai.md` §10 names these paths
 > in its reproduce section, none of them is a dependency of anything that
 > runs today, and moving them would cost that report its provenance and buy
 > nothing.
@@ -32,7 +32,7 @@
 
 Host-only tooling from the 2026-09-06 spike that ran `fw-esp32c6` under
 Espressif's binary emulator (`esp-emu` 0.42.0). Report:
-`docs/reports/2026-09-07-esp-emu-c6-spike.md`. The emulator scripts never
+`docs/reports/2026-09-07-esp-emu-c6-spike.ai.md`. The emulator scripts never
 open a serial port; `run-desk-tcp-walk.sh` and `usb-tcp-bridge.py` are the
 desk half (report §11) and do — one named
 USB-Serial-JTAG port, one step at a time.

@@ -200,7 +200,7 @@ pub struct TranscriptHeader {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub quantum: Option<u32>,
     /// **The emulator seams this capture ran with**, `{"<seam>": "<impl>"}`
-    /// (ADR docs/adr/2026-10-05-emulator-seams.md). Tools read this, never
+    /// (ADR docs/adr/2026-10-05-emulator-seams.ai.md). Tools read this, never
     /// the label.
     ///
     /// Additive and written **only when a seam was engaged**, so every

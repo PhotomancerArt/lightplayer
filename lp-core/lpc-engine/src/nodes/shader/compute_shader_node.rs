@@ -144,7 +144,7 @@ impl ComputeShaderNode {
         // Compile-window deferral (memory-pressure seam) — same protocol and
         // at-most-once progress guarantee as `shader_node.rs::ensure_compiled`;
         // see the comment there and
-        // docs/adr/2026-08-03-memory-pressure-at-compile-safe-points.md.
+        // docs/adr/2026-08-03-memory-pressure-at-compile-safe-points.ai.md.
         if self.compile_window != Some(ctx.revision()) && !self.compile_window_requested {
             self.compile_window_requested = true;
             return Ok(self.shader.is_some());
@@ -653,7 +653,7 @@ mod tests {
     /// uniform name onto `consumed[<name>]`: every unbound uniform came back
     /// `UnresolvedConsumedSlot`, so a normal node wore a permanent `Warn`
     /// indistinguishable from a genuinely broken binding —
-    /// docs/defects/2026-08-04-unbound-shader-uniform-warns.md.
+    /// docs/defects/2026-08-04-unbound-shader-uniform-warns.ai.md.
     #[test]
     fn unbound_uniform_runs_on_its_authored_default_without_warning() {
         let (mut engine, registry, node_id) = build_compute_engine();
@@ -692,7 +692,7 @@ mod tests {
     /// A value input bound to a channel **nothing writes**, with its own
     /// declared default, is the panel-knob idiom at rest: the channel lists
     /// (so the panel derives a control for it) and the uniform takes the
-    /// authored default until someone touches it — `modules.md` R6's
+    /// authored default until someone touches it — `modules.ai.md` R6's
     /// "invitation, not an error". The node stays quiet.
     ///
     /// This used to be the one `Warn`, which put a permanent badge on every

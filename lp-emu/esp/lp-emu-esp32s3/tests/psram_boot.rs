@@ -187,7 +187,7 @@ fn the_shipped_image_uses_psram_when_the_part_has_it() {
     // Asks for the probe's variable too, so it runs in the PSRAM recipe (the
     // S3 seams job), not in the S3 gate, which runs every ignored test here
     // with the shipped image's variables set and has no time left for four
-    // more boots (docs/debt/emulator-ci-jobs-outgrow-their-time-budgets.md).
+    // more boots (docs/debt/emulator-ci-jobs-outgrow-their-time-budgets.ai.md).
     let (elf, merged) = match (fw_esp32s3_image(), merged_chip_image(), psram_image()) {
         (Ok(e), Ok(m), Ok(_)) => (e, m),
         (Err(r), _, _) | (_, Err(r), _) | (_, _, Err(r)) => {

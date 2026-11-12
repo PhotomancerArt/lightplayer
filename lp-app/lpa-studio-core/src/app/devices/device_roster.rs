@@ -495,7 +495,7 @@ impl DeviceRoster {
     /// identity: two boards whose rows share an id are two boards, and
     /// skipping the second hid its card and handed its frames and renames
     /// to the first (docs/defects/
-    /// 2026-10-02-saved-records-sharing-a-device-id-misroute-the-board.md).
+    /// 2026-10-02-saved-records-sharing-a-device-id-misroute-the-board.ai.md).
     fn is_already_known(&self, row: &RegisteredDevice) -> bool {
         let row_identity = super::device_records::record_from_registry_row(row, 0).identity;
         self.roster.devices().iter().any(|device| {

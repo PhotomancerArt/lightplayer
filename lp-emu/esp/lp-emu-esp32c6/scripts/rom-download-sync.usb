@@ -13,7 +13,7 @@
 # them microseconds. Under the grammar they were 20 and 40 SECONDS,
 # past the end of every run that ever attached the file, so the
 # console's "silence" was a SYNC that had not been sent yet (M3 P1,
-# docs/reports/2026-09-08-esp32c6-rom-console-trace.md). The bytes
+# docs/reports/2026-09-08-esp32c6-rom-console-trace.ai.md). The bytes
 # were right all along; only the stamps moved.
 #
 # Replayed as a gate by tests/rom_download_console.rs.

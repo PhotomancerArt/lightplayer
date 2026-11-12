@@ -6,9 +6,9 @@
 //! buffers the previous app gave them, and keep writing into them while the
 //! next boot runs. A boot stage whose code, data or stack sits on such a
 //! buffer is corrupted mid-boot. That is the crash of
-//! `docs/defects/2026-10-05-a-requested-reboot-crashed-the-c6-bootloader.md`
+//! `docs/defects/2026-10-05-a-requested-reboot-crashed-the-c6-bootloader.ai.md`
 //! (the IDF bootloader, in `dram2_seg`), and the loader's own range has the
-//! same exposure (`docs/defects/2026-10-17-radio-heap-overflow-reached-the-split-loaders-ram.md`).
+//! same exposure (`docs/defects/2026-10-17-radio-heap-overflow-reached-the-split-loaders-ram.ai.md`).
 //!
 //! [`BOOT_STAGE_RAM`] is where both of our boot stages run: the split
 //! image's loader and our second-stage bootloader (`loader.x`'s and

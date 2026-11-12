@@ -6,7 +6,7 @@ registry. Do not edit the JSON files by hand — regenerate them. Output is
 deterministic and byte-stable, so any format change shows up in review as a
 readable diff here (the story-PNG golden-file pattern, applied to the
 artifact format). Decision record:
-`docs/adr/2026-07-05-artifact-format-version-and-schema-snapshots.md`.
+`docs/adr/2026-07-05-artifact-format-version-and-schema-snapshots.ai.md`.
 
 ## Contents
 

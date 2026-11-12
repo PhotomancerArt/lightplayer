@@ -218,7 +218,7 @@ fn generate_glsl_builtin_mapping(
 //! builtin taking a vector receives an `IrType::Pointer`, both sides are
 //! `i32`, so a Q32 builtin handed an f32 module's memory reinterprets f32 bit
 //! patterns as Q16.16 — wrong answers, no validation error, nothing to catch
-//! it. See `docs/design/float.md` §6.
+//! it. See `docs/design/float.ai.md` §6.
 //!
 //! Regenerate: `cargo run -p lps-builtins-gen-app` or `scripts/build-builtins.sh`
 

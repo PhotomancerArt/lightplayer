@@ -1,5 +1,5 @@
 # Where agent planning artifacts for this repo live, and how the repo ships.
-# Read by the yona-* skills; see AGENTS.md "Personal planning workflow".
+# Read by the yona-* skills; see AGENTS.ai.md "Personal planning workflow".
 #
 # Plans:    <planning_root>/<repo_slug>/<YYYY-MM-DD-HHMM>-<name>/
 # Archive:  <planning_root>/<repo_slug>/_archive/

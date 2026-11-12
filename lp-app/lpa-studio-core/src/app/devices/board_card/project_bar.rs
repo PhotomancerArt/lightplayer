@@ -1,4 +1,4 @@
-//! The Project row: what the board plays (`docs/ux/anatomy/board-card.md`,
+//! The Project row: what the board plays (`docs/ux/anatomy/board-card.ai.md`,
 //! "Project ◆"). **Project · name · state · action**, the layers icon.
 //!
 //! First match wins:

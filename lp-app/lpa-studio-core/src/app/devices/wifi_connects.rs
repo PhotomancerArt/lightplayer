@@ -13,7 +13,7 @@
 //! hello, when it says [`CONNECT_GAVE_UP`] (a held Connect's words). Before,
 //! the socket's answer cleared it, and the card offered its Connect again
 //! while the board was still being identified — the press looked lost
-//! (`docs/defects/2026-10-25-a-relay-connect-looked-like-it-needed-two-presses.md`).
+//! (`docs/defects/2026-10-25-a-relay-connect-looked-like-it-needed-two-presses.ai.md`).
 //! The address field's connect ends at the socket's answer: the new board's
 //! own card takes over. A failure stays, in plain words, until the next
 //! press — or until the board is reached by another road (plugged in, say),

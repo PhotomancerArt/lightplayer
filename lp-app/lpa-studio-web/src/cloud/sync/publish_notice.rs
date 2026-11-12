@@ -8,7 +8,7 @@
 //! looking). That is the right shape for a diagnostic, and the wrong shape
 //! for "the bar's face is stale until you reload": a face may not wait on a
 //! poll, and the ledger must not grow a nervous system to give it one
-//! (`docs/debt/relationship-face-stale-after-publish.md`).
+//! (`docs/debt/relationship-face-stale-after-publish.ai.md`).
 //!
 //! So this module carries the other half — the smallest push there is. The
 //! driver records the uid of every trip that concluded `Published` or

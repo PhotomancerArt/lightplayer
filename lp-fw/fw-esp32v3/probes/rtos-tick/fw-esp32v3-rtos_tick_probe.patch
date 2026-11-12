@@ -61,7 +61,7 @@ index 000000000..7eadedfd4
 +//! Scheduler-interrupt cost on the PRO core, printed over the serial log.
 +//!
 +//! The classic's `#[ram]` esp-rtos handlers call flash-resident code on their
-+//! executed paths (`docs/debt/classic-iram-handlers-reach-flash.md`), and the
++//! executed paths (`docs/debt/classic-iram-handlers-reach-flash.ai.md`), and the
 +//! PRO core's render loop thrashes the one 32 KB flash cache that core has.
 +//! This probe prices that: the vendored esp-rtos (`third_party/esp-rtos`,
 +//! feature `lp-tick-probe`) reads `CCOUNT` at the entry and exit of

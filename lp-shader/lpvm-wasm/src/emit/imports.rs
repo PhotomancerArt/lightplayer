@@ -243,7 +243,7 @@ fn builtin_mode(mode: FloatMode) -> Mode {
 ///
 /// Shape 2 is why the rule is stated as a property of the *resolver* rather
 /// than a check on the signature: no inspection of the ABI can tell you a
-/// pointer is safe. See `docs/design/float.md` §6.
+/// pointer is safe. See `docs/design/float.ai.md` §6.
 fn resolve_builtin_id_for_mode(decl: &ImportDecl, mode: FloatMode) -> Result<BuiltinId, String> {
     let m = builtin_mode(mode);
     let unsupported = |detail: alloc::string::String| {

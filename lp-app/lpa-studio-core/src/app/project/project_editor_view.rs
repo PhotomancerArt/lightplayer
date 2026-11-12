@@ -228,7 +228,7 @@ impl ProjectEditorView {
 
     /// The workspace root's face, when it is a module face: the face whose
     /// panel the play page renders alone, the docs embed shows, and the
-    /// board card picks its controls from (`docs/design/modules.md` §5,
+    /// board card picks its controls from (`docs/design/modules.ai.md` §5,
     /// R8). `None` before the tree has synced, and for a root that wears
     /// another face.
     pub fn root_module_face(&self) -> Option<&crate::UiModuleFace> {

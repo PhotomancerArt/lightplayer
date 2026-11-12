@@ -47,7 +47,7 @@
 //! **real** sequences, transcribed instruction-for-instruction from
 //! `xtensa-esp32s3-elf-objdump` of the esp-14.2.0 toolchain's `__divsf3`
 //! (libgcc) and `__ieee754_sqrtf` (libm). Disassembly output is fact
-//! (AGENTS.md license rule: no library *source* was read), and these are the
+//! (AGENTS.ai.md license rule: no library *source* was read), and these are the
 //! sequences M7's codegen will face — so their end-to-end results are both a
 //! conformance surface and the independent oracle that keeps the helper-probe
 //! characterization honest.
@@ -783,7 +783,7 @@ fn park() -> ! {
 /// compiler's opinion of it.
 ///
 /// Assembled from mnemonics — no hand-written encodings, and no assembler source
-/// adapted from binutils, GCC, or QEMU (AGENTS.md license rule). The syntax
+/// adapted from binutils, GCC, or QEMU (AGENTS.ai.md license rule). The syntax
 /// matches `lp-xt/fixtures/fp/probe.S`, which assembled and ran on this silicon
 /// in the M6 P1 desk session.
 mod kernels {
@@ -876,7 +876,7 @@ mod kernels {
     // of the esp-14.2.0_20240906 toolchain: `__divsf3` from libgcc and
     // `__ieee754_sqrtf` from libm (the raw sequence, not the errno-setting
     // `sqrtf` wrapper around it). Disassembly output is fact; no library source
-    // was read (AGENTS.md license rule). These are the code shapes M7's
+    // was read (AGENTS.ai.md license rule). These are the code shapes M7's
     // division and square-root lowering will emit, so their end-to-end results
     // are the campaign's independent oracle for the helper semantics.
     fp_kernel!(lp_fp_div_seq(a: u32, b: u32) {

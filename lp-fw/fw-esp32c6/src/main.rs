@@ -374,7 +374,7 @@ fn log_heartbeat_stack_lines() {
 /// single ask, the 8 KB mapping slot JSON below, not twice it. A Wi-Fi-joined
 /// C6 with a LAN link open sat at a 16,164-16,172 B block after a switch, and
 /// the old 16 KiB floor refused every read there (emulated; the defect is
-/// `docs/defects/2026-10-06-a-wifi-joined-c6-refuses-every-project-switch.md`).
+/// `docs/defects/2026-10-06-a-wifi-joined-c6-refuses-every-project-switch.ai.md`).
 ///
 /// Measured on the emulated C6 with Bluetooth on (`lp-emu:esp32c6:t1@4caa5b658`,
 /// plan `lp2025/2026-09-27-1218-fragmentation-tolerant-reads`, REPORT.md):
@@ -411,7 +411,7 @@ const READ_GATE: lpa_server::ReadGate = lpa_server::ReadGate {
 /// - [`READ_GATE`] was 4.7x the device card's read at the choker's 73 lamps
 ///   (8,656 B emulated with its layout; 3,996 B on loose-c6 with a Bluetooth
 ///   central), so a phone's ~18 KB link left the card refused at 40.6 KB
-///   free (`docs/defects/2026-10-09-a-phones-bluetooth-link-leaves-the-choker-under-the-read-gate.md`),
+///   free (`docs/defects/2026-10-09-a-phones-bluetooth-link-leaves-the-choker-under-the-read-gate.ai.md`),
 ///   and 0.8–1.06x the same read at 512 lamps (38,716 B, three 10,240 B
 ///   asks), so a 512-lamp board just over it could reset;
 /// - inside a read's window on silicon no other task's allocation showed:
@@ -644,7 +644,7 @@ fn core_boot(spawner: embassy_executor::Spawner) -> CoreBoot {
     // Boot-control sector: a flash-persisted instruction from a previous run
     // or from the host over esptool. Read (and consumed) before the
     // filesystem mounts, because it must survive the power cycle that wipes
-    // the RTC recovery region — see docs/adr/2026-07-30-boot-control-sector.md.
+    // the RTC recovery region — see docs/adr/2026-07-30-boot-control-sector.ai.md.
     #[cfg(lp_split)]
     let ota_state;
     #[cfg(not(feature = "memory_fs"))]

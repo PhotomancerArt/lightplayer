@@ -178,7 +178,7 @@ pub fn sweep_from(
         step(&mut st).unwrap_or_else(|e| panic!("step {si} fault-free: {e:?}"));
         let n = st.flash().ops_since_plan();
         report.gc_runs += st.stats().gc_runs;
-        // I4 and I5 (FORMAT.md): the step only appended at heads' ends and
+        // I4 and I5 (FORMAT.ai.md): the step only appended at heads' ends and
         // changed headers, and the roots stay in log order.
         let ctx = format!("step {si} fault-free");
         check_log_order(&mounted, st.flash(), &ctx);
@@ -268,7 +268,7 @@ pub struct RemountReport {
 /// clear is weak reads whole on some reads and not on others; a mount that
 /// trusts (or distrusts) it on one read and a later mount that reads it the
 /// other way show up here as two different states
-/// (`docs/defects/2026-10-14-tree-store-trusts-a-torn-record-that-reads-whole-once.md`).
+/// (`docs/defects/2026-10-14-tree-store-trusts-a-torn-record-that-reads-whole-once.ai.md`).
 pub fn remount_sweep(
     geom: NorGeometry,
     cfg: &StoreConfig,

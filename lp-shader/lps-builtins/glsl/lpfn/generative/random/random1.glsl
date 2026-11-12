@@ -5,7 +5,7 @@
 //
 // Classic sin-hash: fract(sin(x) * 43758.5453). Credit: David Hoskins /
 // the widely used one-liner distributed by LYGIA under MIT for random.glsl
-// (see docs/reports/2026-03-31-lpfx-license-audit.md).
+// (see docs/reports/2026-03-31-lpfx-license-audit.ai.md).
 //
 // Seed semantics (LightPlayer): the Q32 implementation adds the raw seed
 // word to the Q16.16 angle, i.e. the phase shifts by seed * 2^-16 radians.

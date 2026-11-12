@@ -9,12 +9,12 @@
 //! backend emits one. So none of it was ever exercised, and it was transcribed
 //! rather than derived — and a transcription of a dense encoding space is a bug
 //! report until checked, the lesson of
-//! `docs/defects/2026-07-31-zexth-encoding-steals-xori-128.md`.
+//! `docs/defects/2026-07-31-zexth-encoding-steals-xori-128.ai.md`.
 //!
 //! Checked against an assembler (`rustc --target riscv32imac-unknown-none-elf`
 //! with `.option arch, +zba,+zbb,+zbs,+zbkb`), a bit over half of what was here
 //! did not survive; see
-//! `docs/defects/2026-09-09-op-imm-bitmanip-dispatch-dead-and-mislabelled.md`.
+//! `docs/defects/2026-09-09-op-imm-bitmanip-dispatch-dead-and-mislabelled.ai.md`.
 //! What remains — `binvi`, `orc.b`, `clz`, `ctz`, `cpop`, `sext.b`, `sext.h` —
 //! is reachable and agrees with the assembler, and
 //! [`tests::zb_immediates_are_shifts_or_faults`] pins the whole surface,
@@ -23,7 +23,7 @@
 //!
 //! Whether an RV32IMAC emulator should execute *any* of the survivors, rather
 //! than trapping them as the chip would, is the open question raised by
-//! `docs/reports/2026-04-27-rv32-load16-issue.md`. This module does not answer
+//! `docs/reports/2026-04-27-rv32-load16-issue.ai.md`. This module does not answer
 //! it; it only stops claiming instructions it does not implement.
 
 extern crate alloc;
@@ -93,7 +93,7 @@ pub(crate) fn decode_execute_itype<M: LoggingMode, B: Bus>(
         // silently reinterpreted `xori rd, rs1, 128` — LLVM's jump-table
         // index bias — as a halfword zero-extend, which is a no-op for small
         // values and so failed without a trace. See
-        // `docs/defects/2026-07-31-zexth-encoding-steals-xori-128.md`.
+        // `docs/defects/2026-07-31-zexth-encoding-steals-xori-128.ai.md`.
         0x4 => execute_xori::<M>(rd, rs1, imm, inst_word, pc, regs),
         0x5 => {
             let funct12 = ((inst_word >> 20) & 0xfff) as u16;
@@ -939,7 +939,7 @@ mod tests {
     /// `.option arch, +zba, +zbb, +zbs, +zbkb`, disassembled with
     /// `llvm-objdump`. Deriving an encoding from the shape of a sibling is how
     /// this block went wrong in the first place
-    /// (`docs/defects/2026-07-31-zexth-encoding-steals-xori-128.md`), so the
+    /// (`docs/defects/2026-07-31-zexth-encoding-steals-xori-128.ai.md`), so the
     /// test refuses to do it too.
     ///
     /// This is the test that would have caught the dead arms: `rori`, `rev8`,

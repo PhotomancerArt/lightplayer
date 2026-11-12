@@ -38,7 +38,7 @@
 //!                       address is the bare path and a hint nothing can
 //!                       answer is dropped from the bar rather than
 //!                       obeyed. See `device_hint.rs`.
-//! /p/<link>/play        the SAME session, rendered as play mode (panel.md
+//! /p/<link>/play        the SAME session, rendered as play mode (panel.ai.md
 //!                       P12: the root module's panel, nothing else).
 //! /p/<slug>             an EMBEDDED EXAMPLE's canonical address (examples
 //!                       vision D4): a bare segment with no uid tail that
@@ -63,7 +63,7 @@
 //!                       when the library does not hold it yet (the board's
 //!                       package is pulled and installed under its own uid,
 //!                       `PulledFromDevice` provenance) — see
-//!                       `docs/adr/2026-09-22-opening-a-board-adopts-its-project.md`.
+//!                       `docs/adr/2026-09-22-opening-a-board-adopts-its-project.ai.md`.
 //!                       Devices keep their own `dev…` identity (vision
 //!                       D13), so the address stays parseable and
 //!                       linkable; the app writes it in the one case above
@@ -87,7 +87,7 @@
 //! `2026-08-05-1642-cloud-folders-sync/p09-router-paths.md` (D24 the share
 //! path, D25 the path re-encoding); the cloud-hosting ADR lands with the
 //! service phases, beside the sibling
-//! `docs/adr/2026-08-05-project-history-dag-joins.md`.
+//! `docs/adr/2026-08-05-project-history-dag-joins.ai.md`.
 //!
 //! **Old hashes keep working forever.** [`install_legacy_hash_shim`] runs
 //! at boot, before anything reads the URL, and `replaceState`s a `#/…`
@@ -132,7 +132,7 @@
 //!   heals the address to the project the device is running — by binding
 //!   the library's own copy of it, or by adopting it into the library
 //!   first when this library did not already have it (D1-D5 of
-//!   `docs/adr/2026-09-22-opening-a-board-adopts-its-project.md`).
+//!   `docs/adr/2026-09-22-opening-a-board-adopts-its-project.ai.md`).
 //!   A `/device/` address's view suffix rides the heal, so
 //!   `/device/<uid>/play` lands on `/p/…/play`.
 //!   A not-yet-identified device, and a board whose content is not at the
@@ -195,7 +195,7 @@ use lpc_history::PrefixedUid;
 )]
 pub(crate) enum StudioRoute {
     /// The home page (`/`): the boards, the projects and the catalog on
-    /// one page (`docs/adr/2026-10-08-the-board-card-and-one-home-page.md`).
+    /// one page (`docs/adr/2026-10-08-the-board-card-and-one-home-page.ai.md`).
     /// Reached through the logo, not a nav tab (vision D1/D11).
     ///
     /// `/devices`, `/projects` and `/home` are its aliases — the Devices
@@ -510,7 +510,7 @@ impl StudioRoute {
     }
 
     /// Whether two routes address the same runtime SESSION — play and
-    /// non-play are the same document at different zoom (panel.md P12), so
+    /// non-play are the same document at different zoom (panel.ai.md P12), so
     /// every "already here?" question uses this instead of `==`. Without it
     /// the view→URL sync would see `/p/x/play` as a different route from
     /// the lens's `/p/x` and rewrite the user straight back out of play.
@@ -991,7 +991,7 @@ pub(crate) struct LensSyncMove {
 /// 3. On a `/p/` or example route the lens's address REPLACES the entry.
 /// 4. On `/device/<uid>[/<view>]` it is pushed with the device route's
 ///    view kept, so `/device/<uid>/play` heals to `/p/…/play`
-///    (`docs/defects/2026-10-08-the-device-play-address-loses-play.md`).
+///    (`docs/defects/2026-10-08-the-device-play-address-loses-play.ai.md`).
 ///    [`lens_route`] only answers `/p/` addresses (a project or an
 ///    example), and both carry a view.
 /// 5. From any other page it is pushed as it is: Back returns there.
@@ -2717,7 +2717,7 @@ mod tests {
     // routes. The tests pass it by hand, `true` for those and `false` for
     // every other page.
 
-    /// The defect (docs/defects/2026-10-08-the-device-play-address-loses-play.md):
+    /// The defect (docs/defects/2026-10-08-the-device-play-address-loses-play.ai.md):
     /// a `/device/<uid>/play` load heals to the project's address WITH
     /// play, as a push, both on the emission the lens binds and on any
     /// steady one after it.

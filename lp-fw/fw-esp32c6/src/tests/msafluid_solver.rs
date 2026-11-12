@@ -24,9 +24,9 @@
 //!              and disclaimer are retained in licenses/ and must travel with
 //!              any source or binary redistribution. MSA Visuals' name may
 //!              not be used to endorse products derived from it.
-//!              See docs/adr/2026-07-29-license-provenance-discipline.md.
+//!              See docs/adr/2026-07-29-license-provenance-discipline.ai.md.
 //!
-//! See docs/plans/2026-04-20-fluid-perf-experiment/00-notes.md for
+//! See docs/plans/2026-04-20-fluid-perf-experiment/00-notes.ai.md for
 //! the full context and the motivating engine-pipeline architecture
 //! discussion.
 //!

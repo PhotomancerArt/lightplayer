@@ -1,9 +1,9 @@
 //! Content identity: 64 bits of SHA-256 over a one-byte tag and a record's
-//! logical bytes (FORMAT.md "Ids").
+//! logical bytes (FORMAT.ai.md "Ids").
 //!
 //! Not cryptography (spike U9): a crafted collision costs ~2³² hashes, so a
 //! dedup hit compares bytes before it reuses a record (`node_write.rs`,
-//! FORMAT.md "Ids"). The tag keeps a blob, a directory, a multi and a root
+//! FORMAT.ai.md "Ids"). The tag keeps a blob, a directory, a multi and a root
 //! with equal bytes apart.
 
 use crate::object_hasher::ObjectHasher;
@@ -25,7 +25,7 @@ pub enum IdTag {
     Multi = 3,
     /// A `Root` record: its payload.
     Root = 4,
-    // 5 was the RAM path table's path hash (never written; FORMAT.md "Ids").
+    // 5 was the RAM path table's path hash (never written; FORMAT.ai.md "Ids").
 }
 
 impl ObjectId {
@@ -75,7 +75,7 @@ mod tests {
             ObjectId::of(h, IdTag::Blob, &[b"abc"])
         );
         assert!(!ObjectId::of(h, IdTag::Blob, &[]).is_none());
-        // The documented vector (FORMAT.md): SHA-256(01 "hello")[..8], BE.
+        // The documented vector (FORMAT.ai.md): SHA-256(01 "hello")[..8], BE.
         assert_eq!(
             ObjectId::of(h, IdTag::Blob, &[b"hello"]).0,
             u64::from_be_bytes(h.sha256(&[&[1], b"hello"])[..8].try_into().unwrap())

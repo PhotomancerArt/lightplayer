@@ -55,7 +55,7 @@ pub struct UiBusChannelView {
     pub primary_visual: bool,
     /// Two or more writers tie at top priority (E3): resolution is
     /// ambiguous until the author picks. Display-only — the pick gesture
-    /// is future work (modules.md §5).
+    /// is future work (modules.ai.md §5).
     pub contended: bool,
     /// Live preview payload when the resolved value is a visual product —
     /// exactly the fields the shared `ProductPreview` component consumes,
@@ -231,7 +231,7 @@ pub enum UiBusSiteOrigin {
     /// Authored in project data.
     Authored,
     /// An engaged panel writer — lazy runtime state, never authored
-    /// (panel.md P1/P2; styled attention-orange like the engaged knob).
+    /// (panel.ai.md P1/P2; styled attention-orange like the engaged knob).
     Panel,
     /// Materialized from default binding policy.
     Default,

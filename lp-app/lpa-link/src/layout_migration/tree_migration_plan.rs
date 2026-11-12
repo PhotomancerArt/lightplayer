@@ -1,6 +1,6 @@
 //! The ordered flash steps that move a board's files into a tree store —
 //! the cutover migration (plan `lp2025/2026-10-16-0848-tree-store-adoption`,
-//! A6; ADR `2026-10-16-c6-tree-store-cutover-migration.md`).
+//! A6; ADR `2026-10-16-c6-tree-store-cutover-migration.ai.md`).
 //!
 //! A fielded C6 holds littlefs at `0x350000` (176 sectors); the tree-store
 //! image's table puts `lpfs` at `0x380000` (128 sectors) and grows `factory`
@@ -11,7 +11,7 @@
 //!
 //! # Staged — the old filesystem stays whole until the switch
 //!
-//! The tree store is position-independent (FORMAT.md: no sector header or
+//! The tree store is position-independent (FORMAT.ai.md: no sector header or
 //! record names its own sector; mount orders sectors by their sequence), so
 //! its sectors can be written into the target sectors whose littlefs blocks
 //! the old filesystem does **not** use ([`super::lpfs_tree::used_blocks`]).
@@ -38,7 +38,7 @@
 //! A cut before 4 leaves the old board, working; between 4 and 5, a board
 //! with no app, its old files whole (the migration runs again from them);
 //! after 5, the new board, its store complete — the junk of step 6 is
-//! untrusted to the store (FORMAT.md "Sector", rule 1) and erased on the
+//! untrusted to the store (FORMAT.ai.md "Sector", rule 1) and erased on the
 //! next attempt.
 //!
 //! # Retired — when the files cannot be staged

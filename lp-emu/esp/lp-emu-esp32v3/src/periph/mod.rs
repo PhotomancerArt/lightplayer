@@ -5,7 +5,7 @@
 //! the technique of the strict bring-up pass, not a shortcut: an accept block
 //! is a **probe** — it lets the boot get past a block so the *next* strict
 //! stop is visible, and the order the blocks were needed in is the order
-//! P4–P8 model them. `docs/reports/2026-09-10-esp32v3-strict-boot-inventory.md`
+//! P4–P8 model them. `docs/reports/2026-09-10-esp32v3-strict-boot-inventory.ai.md`
 //! is that ledger.
 //!
 //! The grades, one line each, as the C6's `periph/mod.rs` carries them:

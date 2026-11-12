@@ -13,7 +13,7 @@ Two families, both `no_std`, IO-free and clock-free:
 
 The C6's product image is a loader, two boot records, a core and an engine,
 all inside `factory` (layout 1, `SplitLayout`). The decisions are in
-[`docs/adr/2026-10-04-c6-split-link-firmware-loader-and-boot-records.md`](../../docs/adr/2026-10-04-c6-split-link-firmware-loader-and-boot-records.md);
+[`docs/adr/2026-10-04-c6-split-link-firmware-loader-and-boot-records.ai.md`](../../docs/adr/2026-10-04-c6-split-link-firmware-loader-and-boot-records.ai.md);
 the formats **bind from the first release whose core can install an update**
 (they have since 2026-10-06) and are persisted: a change is an amendment or a
 new version, never a re-spelling.
@@ -65,7 +65,7 @@ layout. It performs no IO. Flash access lives in the edges —
 on the host.
 
 Design rationale, alternatives, and the partition-layout change:
-[`docs/adr/2026-07-30-boot-control-sector.md`](../../docs/adr/2026-07-30-boot-control-sector.md).
+[`docs/adr/2026-07-30-boot-control-sector.ai.md`](../../docs/adr/2026-07-30-boot-control-sector.ai.md).
 
 ## Why not the recovery region
 

@@ -63,7 +63,7 @@ the shipped concurrency cap (2). The Yona-gated cap-4 flip
 ## 2026-08-04 (later still): dual-core RMT ISR — wire time off the frame
 
 RMT refill ISR on the APP core + `isr-in-ram` + conditional flush barrier
-(ADR `2026-08-04-rmt-isr-on-app-core.md`, PR #341): transmission overlaps
+(ADR `2026-08-04-rmt-isr-on-app-core.ai.md`, PR #341): transmission overlaps
 render, and the admission cap becomes the ISR-duty knob:
 
 | config | fps | tick | trips |

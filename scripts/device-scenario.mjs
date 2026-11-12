@@ -23,7 +23,7 @@
 //    backgrounded espflash has died silently mid-write).
 //  - The runner never uses a NON-canonical port — it reuses or starts the
 //    worktree's own `just studio-dev`, never a substitute server
-//    (docs/defects/2026-07-27-launch-json-pinned-port.md).
+//    (docs/defects/2026-07-27-launch-json-pinned-port.ai.md).
 //  - A re-run that captures nothing never destroys a previous fixture
 //    (.partial swap on non-empty finish only).
 //
@@ -340,7 +340,7 @@ async function ensurePortFree(portPath) {
 // probably have this app start its own studio… just pressing enter should
 // get you through the happy path"). It reuses a dev server already on this
 // worktree's canonical port, or starts `just studio-dev` itself — NEVER a
-// different port (docs/defects/2026-07-27-launch-json-pinned-port.md).
+// different port (docs/defects/2026-07-27-launch-json-pinned-port.ai.md).
 
 function studioPort() {
   return execSync('bash scripts/dev-port.sh --query studio-dev "${STUDIO_WEB_PORT:-}"', {
@@ -463,7 +463,7 @@ function summarize(records) {
     else if (record.kind === "sync") lines.push(`  sync   ${record.content}`);
     else if (record.kind === "anomaly") anomalies += 1;
   }
-  if (anomalies) lines.push(`  ⚠️ ${anomalies} parse anomalies (serial-interleaving evidence — see docs/defects/2026-08-02-serial-line-interleaving.md)`);
+  if (anomalies) lines.push(`  ⚠️ ${anomalies} parse anomalies (serial-interleaving evidence — see docs/defects/2026-08-02-serial-line-interleaving.ai.md)`);
   return lines.join("\n") || "  (no lifecycle events captured)";
 }
 
@@ -594,12 +594,12 @@ function startSink() {
 /// A scenario run that did NOT do what its spec expects is EVIDENCE, not
 /// garbage (sitting feedback, 2026-08-03: "when the scenario fails we need
 /// a way of indicating that for you to look at later"): the trace moves to
-/// <id>.failed.jsonl and FINDINGS.md gets an entry an agent can pick up.
+/// <id>.failed.jsonl and FINDINGS.ai.md gets an entry an agent can pick up.
 /// Failed traces are never golden fixtures — the replay test skips them.
 function fileFinding(spec, records, failures, partial, note, lane = "silicon") {
   const failed = assertLaneMayWrite(findingPath(spec.id, lane), lane);
   renameSync(partial, failed);
-  const findings = path.join(TRACE_DIR, "FINDINGS.md");
+  const findings = path.join(TRACE_DIR, "FINDINGS.ai.md");
   const entry = [
     `## ${new Date().toISOString()} — ${spec.id}${lane === "emulated" ? " (emulated lane)" : ""}`,
     ``,

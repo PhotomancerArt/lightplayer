@@ -24,7 +24,7 @@
 //! asker's patience (`take_over_state::ASK_PATIENCE_SECS`) is this budget
 //! with room to spare, never only its first step: a fallback counted from
 //! after the picture write could outlast it on a slow machine
-//! (`docs/defects/2026-10-09-a-holders-release-can-outlast-the-askers-five-seconds.md`).
+//! (`docs/defects/2026-10-09-a-holders-release-can-outlast-the-askers-five-seconds.ai.md`).
 
 use lpa_devices::{DeviceId, HoldLevel};
 

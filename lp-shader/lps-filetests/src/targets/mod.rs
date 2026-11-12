@@ -20,7 +20,7 @@ pub enum Backend {
     ///
     /// Same engine as [`Backend::Rv32fa`] — `rt_emu` takes the ISA as a runtime
     /// parameter — so this variant only picks `IsaTarget::Xtensa` at engine
-    /// construction. See `docs/adr/2026-07-30-isa-parameterized-host-emu-engine.md`.
+    /// construction. See `docs/adr/2026-07-30-isa-parameterized-host-emu-engine.ai.md`.
     Xtfa,
     /// WebAssembly via wasmtime.
     Wasm,
@@ -116,7 +116,7 @@ pub struct Target {
 /// artifact — wasmtime is already a test dependency.
 ///
 /// That same stale claim also lived in `lpvm-wasm`'s runtime guards and in
-/// `docs/adr/2026-08-01-float-mode-reaches-the-device.md`; both now carry the
+/// `docs/adr/2026-08-01-float-mode-reaches-the-device.ai.md`; both now carry the
 /// measured correction. If you are about to write "wasm has no f32 builtin
 /// lowering" anywhere, it is false — check `wasm.f32` first.
 ///

@@ -8,7 +8,7 @@ mechanism is recognized the next time it dresses up in a different
 symptom.
 
 Entries live in this directory, one dated file each:
-`YYYY-MM-DD-slug.md`, dated by when the defect was **found**.
+`YYYY-MM-DD-slug.ai.md`, dated by when the defect was **found** (`.ai.md`: an agent wrote it).
 
 ## The filing bar
 
@@ -41,7 +41,7 @@ anyone decides when to fix them.
 
 ## Entry template
 
-The file name is `YYYY-MM-DD-slug.md`, and the frontmatter's `status`,
+The file name is `YYYY-MM-DD-slug.ai.md`, and the frontmatter's `status`,
 `found`, `area` and `class`, with the `# title` line, are what the index
 shows. `just lint-defects` fails an entry missing any of them.
 
@@ -320,7 +320,7 @@ The index is built from each entry's frontmatter when you read it, and
 it is never written down. Every defect PR used to add a row to a table
 here, so any two of them open at once conflicted, and a conflicted PR
 gets no CI at all
-([`docs/debt/hand-written-defects-index.md`](../debt/hand-written-defects-index.md)).
+([`docs/debt/hand-written-defects-index.ai.md`](../debt/hand-written-defects-index.ai.md)).
 
 ```bash
 just defects-index                    # every entry, newest first
@@ -438,7 +438,7 @@ eyes looking at the result carried a typed "fault" signal. They are classed
 differently because each names *how* the symptom was misread rather than
 *why* the underlying signal never arrived — which is the same split noted
 for `split-source-of-truth`/`config-masked-defect` above. Four in a month,
-now with a fix (`docs/adr/2026-09-02-fault-is-never-black.md`): watch whether
+now with a fix (`docs/adr/2026-09-02-fault-is-never-black.ai.md`): watch whether
 a fifth still lands somewhere the new `Fault` status and pattern don't reach.
 
 ## Predecessor: `docs/bugs/`

@@ -55,7 +55,7 @@ enum Cli {
     /// Waits, after the deploy is acked, for evidence the newly deployed
     /// project is running before exiting — otherwise the compile line an
     /// operator observes describes the *previous* upload (see
-    /// docs/defects/2026-07-30-deploy-compiles-previous-upload.md).
+    /// docs/defects/2026-07-30-deploy-compiles-previous-upload.ai.md).
     Upload {
         /// Project directory
         dir: std::path::PathBuf,

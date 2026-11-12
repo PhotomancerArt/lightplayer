@@ -15,7 +15,7 @@
 
   The rules it keeps (the same as Studio's `lpa-link` browser_ble.js):
   - Every write is a COPY (`slice()`), never a view: Bluefy writes a view's
-    whole underlying buffer (docs/defects/2026-10-02-bluefy-writes-a-views-whole-buffer.md).
+    whole underlying buffer (docs/defects/2026-10-02-bluefy-writes-a-views-whole-buffer.ai.md).
   - One write at a time, in order: Web Bluetooth refuses a second GATT
     operation while one is in flight, and the link's frames must arrive as
     sent.

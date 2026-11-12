@@ -6,7 +6,7 @@
 //! where the RISC-V text defers to it. Citations name the section title as well
 //! as its number so they survive a renumbering. No GPL implementation (QEMU,
 //! GDB, GCC, glibc soft-float) was read or transliterated; see
-//! `docs/adr/2026-07-29-license-provenance-discipline.md`.
+//! `docs/adr/2026-07-29-license-provenance-discipline.ai.md`.
 //!
 //! ## Why this is a soft-float implementation
 //!
@@ -34,7 +34,7 @@
 //!
 //! §21.4 (`Subnormal Arithmetic`) requires full IEEE 754 subnormal behaviour:
 //! subnormal inputs are used at their real value and subnormal results are
-//! produced, never flushed to zero. `docs/design/float.md` §4 lists
+//! produced, never flushed to zero. `docs/design/float.ai.md` §4 lists
 //! flush-to-zero as *target-defined* — that latitude is about the **shader**
 //! tier on wasm/GPU/S3, and explicitly records that "wasm and RV32F preserve
 //! denormals (their specs require it)". Do not add an FTZ mode here.
@@ -1370,7 +1370,7 @@ mod tests {
     #[test]
     fn subnormals_are_preserved_not_flushed() {
         // §21.4: full IEEE subnormal arithmetic. Contrast with the
-        // target-defined FTZ latitude in docs/design/float.md §4, which is
+        // target-defined FTZ latitude in docs/design/float.ai.md §4, which is
         // about the shader tier and not about this emulator.
         assert_eq!(f32_add(MIN_SUBNORMAL, MIN_SUBNORMAL, RNE), (0x0000_0002, 0));
         // Halving the smallest normal lands exactly on a subnormal: exact, so

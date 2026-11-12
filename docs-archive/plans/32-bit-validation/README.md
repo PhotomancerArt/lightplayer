@@ -4,17 +4,17 @@ This directory contains plans for implementing comprehensive validation for the 
 
 ## Overview
 
-See [00-overview.md](00-overview.md) for the complete overview of the validation project.
+See [00-overview.ai.md](00-overview.ai.md) for the complete overview of the validation project.
 
 ## Phase Plans
 
-- **[00-overview.md](00-overview.md)** - Project overview, phases, and approach
-- **[01-infrastructure-setup.md](01-infrastructure-setup.md)** - Infrastructure setup and test directory creation
-- **[02-function-calls.md](02-function-calls.md)** - Function call and multi-return value tests
+- **[00-overview.ai.md](00-overview.ai.md)** - Project overview, phases, and approach
+- **[01-infrastructure-setup.ai.md](01-infrastructure-setup.ai.md)** - Infrastructure setup and test directory creation
+- **[02-function-calls.ai.md](02-function-calls.ai.md)** - Function call and multi-return value tests
 
 ### Future Phases (to be created)
 
-- **02-control-flow.md** - Control flow instruction validation
+- **02-control-flow.ai.md** - Control flow instruction validation
 - **03-arithmetic.md** - Arithmetic instruction validation
 - **04-bitwise.md** - Bitwise operation validation
 - **05-memory.md** - Memory operation validation
@@ -26,8 +26,8 @@ See [00-overview.md](00-overview.md) for the complete overview of the validation
 
 ## Quick Start
 
-1. Read [00-overview.md](00-overview.md) to understand the project
-2. Start with [01-infrastructure-setup.md](01-infrastructure-setup.md) to set up the infrastructure
+1. Read [00-overview.ai.md](00-overview.ai.md) to understand the project
+2. Start with [01-infrastructure-setup.ai.md](01-infrastructure-setup.ai.md) to set up the infrastructure
 3. Work through phases 02-10 systematically
 
 ## Goals

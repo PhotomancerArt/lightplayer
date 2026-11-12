@@ -2,7 +2,7 @@
 //!
 //! **Ties go to even**, matching wasm's `f32.nearest` and the Q32 sibling's
 //! documented rule. This is a different operation from GLSL `round()`, whose
-//! tie behavior `docs/design/float.md` §4 marks *target-defined*; `fnearest` is
+//! tie behavior `docs/design/float.ai.md` §4 marks *target-defined*; `fnearest` is
 //! the one with a fixed rule, so it is the one shared lowerings use.
 
 /// f32 round to nearest integer, ties to even.

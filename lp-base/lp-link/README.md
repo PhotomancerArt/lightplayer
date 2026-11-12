@@ -27,8 +27,8 @@ and the emulator tools run the same crate.
 > negotiated MTU), with no ATT long-write reassembly path. Only `fw-emu`
 > still speaks the old `M!`-line framing, until a future milestone brings it
 > onto lp-link too. The decision is
-> `docs/adr/2026-09-27-lp-link-one-comms-layer.md`; BLE's own is
-> `docs/adr/2026-09-24-ble-transport.md`'s dated Amendment.
+> `docs/adr/2026-09-27-lp-link-one-comms-layer.ai.md`; BLE's own is
+> `docs/adr/2026-09-24-ble-transport.ai.md`'s dated Amendment.
 >
 > **The `secure` feature** (Noise NNpsk0 inside the SYN, then every frame
 > sealed; [Secure links](#secure-links)) is built and proven against `snow`,
@@ -36,8 +36,8 @@ and the emulator tools run the same crate.
 > C6's network links** (M6's LAN WebSocket, and the cloud relay's routes, which
 > carry the same `ws()` link as one binary relay `Frame` per lp-link frame
 > through lightplayer.app, which reads none of them); off on every other
-> product link. Its decision is `docs/adr/2026-10-01-network-link-security.md`
-> and the relay's is `docs/adr/2026-10-06-cloud-relay.md`.
+> product link. Its decision is `docs/adr/2026-10-01-network-link-security.ai.md`
+> and the relay's is `docs/adr/2026-10-06-cloud-relay.ai.md`.
 
 ## Why it exists
 
@@ -46,7 +46,7 @@ no shared notion of "the other end restarted". Every lost byte became an
 app-level failure. The 2026-09-26 investigation found that the board and USB
 lose nothing, while macOS + Chromium Web Serial drops ~1 KB runs whenever the
 stream carries `0xFF`
-(`docs/defects/2026-09-26-web-serial-on-macos-drops-bytes-of-packed-frames.md`).
+(`docs/defects/2026-09-26-web-serial-on-macos-drops-bytes-of-packed-frames.ai.md`).
 Our own edges have lost bytes too (esp-hal's USB ISR, BLE long writes, the
 classic UART). lp-link makes delivery reliable end to end, and counts every
 recovery so edge bugs stay visible.
@@ -68,7 +68,7 @@ wire's messages over channel 1 lives at each edge:
   `fw-esp32v3`'s `serial/io_task.rs` on the swi2 interrupt executor, now only
   a byte shuttle between UART0's FIFOs and two static pipes
   (`uart_link_pipes.rs`) — see
-  `docs/adr/2026-08-25-classic-uart-io-task-executor-isolation.md`'s
+  `docs/adr/2026-08-25-classic-uart-io-task-executor-isolation.ai.md`'s
   2026-09-29 amendment. A UART has no cable signal, so the board SYNs into
   the void until a host answers; `syn_backoff` (below) keeps that to one SYN
   every 1.6 s. The backoff covers the handshake only: a host that brings the
@@ -91,7 +91,7 @@ wire's messages over channel 1 lives at each edge:
   cloud relay's device leg from `net/relay/` (`relay_task.rs` on the chip, one
   relay `Frame` per lp-link frame). Behind `fw-esp32-common`'s `wifi`
   feature; a newcomer on the other path takes the slot only with the
-  holder's own key (`docs/adr/2026-10-06-cloud-relay.md`, "Device side").
+  holder's own key (`docs/adr/2026-10-06-cloud-relay.ai.md`, "Device side").
 - **Native host:** `lpc_wire::WireLinkPort` — the one type every native
   reader drives (a real serial port, `serial:tcp`, `serial:ws`, the fake
   board double). `lpa-client`'s `transport_serial/link_pump.rs` and `lp-cli`'s
@@ -211,11 +211,11 @@ sequence space is future work if a measurement ever calls for it).
    use: one frame per WebSocket message, the `secure` channel on, and
    selective-repeat ARQ with a window of 2, acks every 2 frames and a 200 ms
    resend floor (TCP already delivers, and the hosts' `WireLinkPort` speaks
-   selective-repeat; `docs/adr/2026-10-07-c6-wifi-link.md`). **The cloud relay carries the same
+   selective-repeat; `docs/adr/2026-10-07-c6-wifi-link.ai.md`). **The cloud relay carries the same
    link unchanged**: through lightplayer.app one lp-link frame is one binary
    WebSocket message on the browser's leg and one relay `Frame` (a 3-byte route
    header and the frame) on the board's, and no timeout was changed for the
-   longer round trip (`docs/adr/2026-10-06-cloud-relay.md`). A preset is what a **host** runs; a board takes its own cut of one
+   longer round trip (`docs/adr/2026-10-06-cloud-relay.ai.md`). A preset is what a **host** runs; a board takes its own cut of one
    (the C6's `UsbLinkShared::config`, the classic's
    `uart_board_link_config`), smaller buffers and a slower resend floor,
    because a host queues upload-sized requests through `send()` and a board
@@ -291,7 +291,7 @@ pin `max_message` bytes on a board for the link's life (the presets keep
 
 ## Secure links
 
-The `secure` feature (`docs/adr/2026-10-01-network-link-security.md`) runs
+The `secure` feature (`docs/adr/2026-10-01-network-link-security.ai.md`) runs
 **`Noise_NNpsk0_25519_ChaChaPoly_SHA256`** merged into the session handshake,
 then seals every frame. It is for untrusted network links (the LAN
 WebSocket, the relay); USB and UART never use it (the cable is the trust).
@@ -418,7 +418,7 @@ it is full, `send()` returns `Full`; it does not grow.
 
 Time is `Micros`, a `u64` count of microseconds from any epoch the edge likes.
 That is an exception to the repo's rule of caller-supplied `f64` epoch seconds
-(`docs/adr/2026-07-06-sans-io-core.md`), for two reasons: the C6 has no FPU, so
+(`docs/adr/2026-07-06-sans-io-core.ai.md`), for two reasons: the C6 has no FPU, so
 `f64` arithmetic on every frame would be soft-float, and the link's times are
 relative durations (round trips, retransmit and ACK timers, idle flushes), never
 timestamps shown to anyone. The edge passes its monotonic clock in; nothing in

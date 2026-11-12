@@ -28,7 +28,7 @@
 //!
 //! Step 2 asks the board, not a build fact: the `BeginBatch` answer's
 //! `atomic` is what the filesystem under this request does
-//! (`docs/adr/2026-10-10-fs-push-boundary-and-deflated-writes.md`). A board
+//! (`docs/adr/2026-10-10-fs-push-boundary-and-deflated-writes.ai.md`). A board
 //! with batches replaces the project in its own folder and commits after the
 //! load and the hash; any failure aborts, and the old project is whole. A
 //! board without them opens nothing and gets the two-slot push.

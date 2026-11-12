@@ -314,7 +314,7 @@ full_commit="$(git -C "$repo" rev-parse "$commit")"
 # CI's classic reference job (`emu-esp32v3-ref`, which builds HEAD every run)
 # that was ~310 objects uploaded per main run that nothing ever read, out of
 # the repo's one 10 GB Actions cache, and ~380 lookups per PR run that could
-# only miss, against its read rate limit (docs/debt/actions-cache-budget.md).
+# only miss, against its read rate limit (docs/debt/actions-cache-budget.ai.md).
 # A pinned commit keeps a stable path from run to run, so its builds keep
 # whatever wrapper the caller set. The bytes are the same either way — an
 # empty RUSTC_WRAPPER just makes cargo call rustc directly (it overrides a
@@ -388,7 +388,7 @@ fi
 #      which gives cargo the ordering edge it was missing; `fw-esp32c6/build.rs`
 #      is told the directory instead of scanning for it, and aborts rather than
 #      skipping. See
-#      docs/defects/2026-09-08-cold-target-dir-links-esp-hals-stock-rodata.md.
+#      docs/defects/2026-09-08-cold-target-dir-links-esp-hals-stock-rodata.ai.md.
 #      But THIS recipe builds pinned historical commits (d6cfaa205, 735af98ae),
 #      which predate that fix and still have the race — so `image_drift`'s
 #      `.rodata_merge` check and the rebuild it triggers are load-bearing here
@@ -565,7 +565,7 @@ build_image() {
             echo "build-reference-image: $full_commit contains $LINKS_FIX_COMMIT (#601), which" >&2
             echo "  ended the linker-script race — but the first build still took esp-hal's" >&2
             echo "  stock rodata.x. That is a regression in the fix, not a race to rebuild" >&2
-            echo "  around. See docs/defects/2026-09-08-cold-target-dir-links-esp-hals-stock-rodata.md" >&2
+            echo "  around. See docs/defects/2026-09-08-cold-target-dir-links-esp-hals-stock-rodata.ai.md" >&2
             exit 7
         fi
         healed=$((healed + 1))

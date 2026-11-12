@@ -2,7 +2,7 @@
 
 Every catalog entry is CC0-1.0 by Photomancer unless a row below says
 otherwise. This file is the second half of the license discipline
-(`docs/adr/2026-07-29-license-provenance-discipline.md` and its
+(`docs/adr/2026-07-29-license-provenance-discipline.ai.md` and its
 2026-08-01 addendum): the first half is the per-file provenance header
 inside each ported `.glsl` and the `provenance` block on the module that
 carries it (for patterns, the exported `effect/module.json`; for projects,

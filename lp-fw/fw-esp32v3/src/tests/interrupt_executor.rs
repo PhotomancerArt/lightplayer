@@ -1,5 +1,5 @@
 //! Silicon rig for the interrupt-executor wake assumptions behind
-//! `docs/adr/2026-08-25-classic-uart-io-task-executor-isolation.md`.
+//! `docs/adr/2026-08-25-classic-uart-io-task-executor-isolation.ai.md`.
 //!
 //! The ADR's load-bearing claim (finding 1) is that esp-rtos never delivers
 //! embassy-time wakes to tasks on an `InterruptExecutor` — the reason

@@ -82,7 +82,7 @@ as an oracle. See the module doc of `src/helpers.rs` for the full reasoning.
 round-2 grid, designed from the round-1 fit to close `divn.s` off the
 sequence envelope and accumulator-NaN payload priority. It is built and
 wired into `just fwtest-xt-fp-esp32s3 <port> helpers` and queued for the
-next desk session (`docs/adr/2026-07-31-xtensa-fp-behavior-contract.md`
+next desk session (`docs/adr/2026-07-31-xtensa-fp-behavior-contract.ai.md`
 §10) — nothing here is a blocker, just the closing item.
 
 ## Adding a family

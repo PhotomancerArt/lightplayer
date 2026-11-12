@@ -739,7 +739,7 @@ impl StudioServerClient {
         })
     }
 
-    /// Flip panel-state auto-save (panel.md P11). The value Studio renders
+    /// Flip panel-state auto-save (panel.ai.md P11). The value Studio renders
     /// comes back on the next project read, not from this response.
     pub async fn panel_auto_save(
         &mut self,

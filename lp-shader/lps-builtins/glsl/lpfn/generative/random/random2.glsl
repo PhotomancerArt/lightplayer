@@ -5,7 +5,7 @@
 //
 // fract(sin(dot(p, K)) * 43758.5453). Credit: MIT License (MIT)
 // Copyright 2014, David Hoskins; distributed by LYGIA in
-// generative/random.glsl (see docs/reports/2026-03-31-lpfx-license-audit.md).
+// generative/random.glsl (see docs/reports/2026-03-31-lpfx-license-audit.ai.md).
 //
 // Seed semantics: raw seed word added to the Q16.16 angle = seed * 2^-16
 // radians of phase (see random1.glsl).

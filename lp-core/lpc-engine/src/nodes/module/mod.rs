@@ -1,4 +1,4 @@
-//! Module runtime node — the bus-scope output mirror (modules.md R7).
+//! Module runtime node — the bus-scope output mirror (modules.ai.md R7).
 //!
 //! Deliberately NOT feature-gated: every project has a root module, so the
 //! runtime links into every firmware build including the C6 minimal image.

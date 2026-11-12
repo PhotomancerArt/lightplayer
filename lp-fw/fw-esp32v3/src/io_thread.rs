@@ -25,7 +25,7 @@
 //! Priority2, its 1 ms TIMG0 pacer, `SendUart` and the two pipes — is
 //! untouched, and is still the only thing that touches UART0. The `Link` is
 //! never polled from io_task's executor (ruling DD20 of plan
-//! `classic-uart-on-lp-link`; `docs/adr/2026-08-25-classic-uart-io-task-executor-isolation.md`):
+//! `classic-uart-on-lp-link`; `docs/adr/2026-08-25-classic-uart-io-task-executor-isolation.ai.md`):
 //! io_task stays a byte shuttle with an ISR-scale stack, no embassy-time and
 //! no logging, and this thread is where the link's timers and logs live —
 //! embassy-time works here, because this is a thread and not an interrupt

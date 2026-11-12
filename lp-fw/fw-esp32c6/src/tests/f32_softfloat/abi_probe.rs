@@ -148,7 +148,7 @@ fn edge_values(report: &mut Report) {
         bits(unsafe { __divsf3(of(F_1_0), of(F_NEG_ZERO)) }),
         F_NEG_INF,
     );
-    // 0/0 is a NaN; the *payload* is not something we pin (float.md §5), so
+    // 0/0 is a NaN; the *payload* is not something we pin (float.ai.md §5), so
     // this only asserts NaN-ness.
     let zero_over_zero = bits(unsafe { __divsf3(of(F_ZERO), of(F_ZERO)) });
     report.record(
@@ -161,7 +161,7 @@ fn edge_values(report: &mut Report) {
 
 fn subnormals(report: &mut Report) {
     // The reason this is here: flush-to-zero would make both of these come back
-    // as 0x00000000. `docs/design/float.md` marks denormal FTZ target-defined,
+    // as 0x00000000. `docs/design/float.ai.md` marks denormal FTZ target-defined,
     // so a `0` here is data rather than a defect — but it is data we must have
     // before the C6 can be trusted as an f32 oracle.
     check(

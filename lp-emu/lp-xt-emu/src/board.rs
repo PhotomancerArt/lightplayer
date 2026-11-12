@@ -28,7 +28,7 @@
 //! resident builtins image compete with JIT'd shader code for the same bytes,
 //! and hides the fact that a shader→builtin call crosses from SRAM to flash,
 //! tens of megabytes away and far outside any direct-call displacement. See
-//! `docs/defects/2026-08-01-xt-f32-builtins-exhaust-the-emulator-code-region.md`.
+//! `docs/defects/2026-08-01-xt-f32-builtins-exhaust-the-emulator-code-region.ai.md`.
 
 use crate::memory::{AliasRule, IBUS_ALIAS_OFFSET, Memory, SRAM1_DBUS_END, SRAM1_DBUS_START};
 

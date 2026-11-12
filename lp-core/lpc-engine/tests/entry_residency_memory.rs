@@ -21,7 +21,7 @@
 //! allocations. Process-wide counters also saw the libtest harness's main
 //! thread, which allocates its running-test map and timeout queue right
 //! *after* spawning the test thread — bytes a loaded runner can land between
-//! two readings (`docs/debt/process-wide-heap-counters-in-tests.md`).
+//! two readings (`docs/debt/process-wide-heap-counters-in-tests.ai.md`).
 
 mod entry_residency_support;
 

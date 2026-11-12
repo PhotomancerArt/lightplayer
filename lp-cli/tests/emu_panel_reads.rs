@@ -1,5 +1,5 @@
 //! The choker tryout's first sync still reaches Studio after its playlist
-//! has stepped once (`docs/defects/2026-10-31-a-big-playlist-loses-the-panel-after-its-first-step.md`).
+//! has stepped once (`docs/defects/2026-10-31-a-big-playlist-loses-the-panel-after-its-first-step.ai.md`).
 //!
 //! The tryout's playlist (25 entries) is a ~16 KB slot root. When the
 //! playlist steps to its next pattern the board re-reads its def, and every

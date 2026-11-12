@@ -1,5 +1,5 @@
 //! The board's end of the cloud relay (Wi-Fi relay plan P6; decision record
-//! `docs/adr/2026-10-06-cloud-relay.md`):
+//! `docs/adr/2026-10-06-cloud-relay.ai.md`):
 //!
 //! - [`relay_driver`]: the sans-IO glue between `lpc-relay`'s board client
 //!   and the network slot — a route the hub opens becomes a relayed network

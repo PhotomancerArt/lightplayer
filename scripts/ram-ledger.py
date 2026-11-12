@@ -127,7 +127,7 @@ MEMORY_X_S3 = "third_party/esp-hal/ld/esp32s3/memory.x"
 CODEMEM = "lp-shader/lpvm-native/src/codemem_esp32.rs"
 V3_MAIN = "lp-fw/fw-esp32v3/src/main.rs"
 S3_MAIN = "lp-fw/fw-esp32s3/src/main.rs"
-V3_BUDGET = "docs/reports/2026-09-04-classic-ram-budget.md"
+V3_BUDGET = "docs/reports/2026-09-04-classic-ram-budget.ai.md"
 
 CHIP_C6 = Chip(
     name="esp32c6",

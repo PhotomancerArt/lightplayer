@@ -122,7 +122,7 @@ pub type FirmwareManifestFn = fn() -> Option<lpc_update::BoardManifest>;
 /// Below this, assembly of even a well-behaved streamed read (one slot root or
 /// shape entry + one ~16 KiB frame batch + serde transients) risks the
 /// infallible-alloc abort path, which RESETS the board
-/// (`docs/defects/2026-08-26-project-read-assembly-oom-resets-classic.md`).
+/// (`docs/defects/2026-08-26-project-read-assembly-oom-resets-classic.ai.md`).
 /// Refusing with a structured error is always better than resetting.
 ///
 /// Calibrated on silicon at the 2026-08-29 G1 bench walk (classic,
@@ -633,7 +633,7 @@ impl LpServer {
     /// An embedder whose heap is placed by first fit calls it at boot: a
     /// list that grows when a link opens lands above the link's own memory
     /// and outlives it, splitting the hole the link leaves
-    /// (`docs/defects/2026-10-06-a-lan-link-strands-the-heap-below-the-load-floor.md`).
+    /// (`docs/defects/2026-10-06-a-lan-link-strands-the-heap-below-the-load-floor.ai.md`).
     /// Hosts need not call it.
     pub fn reserve_links(&mut self, links: usize) {
         self.access.reserve_links(links);
@@ -705,7 +705,7 @@ impl LpServer {
     /// periodic flash read is exactly the kind of interrupt-masking op that
     /// starves the serial io task on the classic. A heartbeat must stay
     /// cheap. Nothing is lost in practice — identity is silicon
-    /// (`docs/adr/2026-08-04-device-identity-anchored-in-silicon.md`: efuse
+    /// (`docs/adr/2026-08-04-device-identity-anchored-in-silicon.ai.md`: efuse
     /// MAC, no stamp step), and the legacy
     /// root uid file is written only by host-class embedders, whose hello
     /// answer remains the live truth.

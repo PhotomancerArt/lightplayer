@@ -3,7 +3,7 @@
 //! A dev board is a chip plus decisions its maker took, and some of those
 //! decisions need the firmware's cooperation. The XIAO ESP32-C6 puts an RF
 //! switch between the chip and its antennas that is dead until a GPIO powers
-//! it (docs/defects/2026-09-23-xiao-c6-rf-switch-never-powered.md).
+//! it (docs/defects/2026-09-23-xiao-c6-rf-switch-never-powered.ai.md).
 //!
 //! The table is keyed on the board id of the manifest **in effect** —
 //! [`HwManifest::board_id`](crate::HwManifest::board_id), which includes a

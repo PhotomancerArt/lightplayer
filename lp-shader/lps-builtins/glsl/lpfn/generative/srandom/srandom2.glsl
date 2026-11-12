@@ -4,7 +4,7 @@
 // builtin, matching `src/builtins/lpfn/generative/srandom/srandom2_q32.rs`.
 // Trivial transform of lpfn_random: -1 + 2 * random(p, seed) — basic
 // arithmetic applied to our MIT-licensed random
-// (see docs/reports/2026-03-31-lpfx-license-audit.md).
+// (see docs/reports/2026-03-31-lpfx-license-audit.ai.md).
 //
 // Depends on: generative/random/random2.glsl
 

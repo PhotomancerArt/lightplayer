@@ -11,7 +11,7 @@ use crate::shader::ShaderCompileStats;
 /// named consumed inputs, execute `tick`, and read named produced globals.
 /// Slot maps, merge behavior, and value-shape materialization are handled by
 /// runtime nodes above this boundary. Compute shaders stay on the CPU tier
-/// permanently (see `docs/adr/2026-07-09-preview-fidelity-tiers.md`).
+/// permanently (see `docs/adr/2026-07-09-preview-fidelity-tiers.ai.md`).
 pub trait LpComputeShader {
     fn tick(&mut self, inputs: &[(&str, LpsValueF32)]) -> Result<(), GfxError>;
 

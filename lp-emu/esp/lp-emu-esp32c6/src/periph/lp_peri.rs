@@ -25,8 +25,8 @@
 //! **0**). A board whose previous firmware gated that clock hangs the
 //! ESP-IDF second-stage bootloader on [`super::lp_i2c_ana_mst`]'s busy bit
 //! before its first console line
-//! (`docs/defects/2026-09-06-c6-first-flash-bootloader-hang-lp-analog-i2c-clock.md`,
-//! `docs/defects/2026-09-06-c6-analog-master-wedges-the-bootloader.md`), and
+//! (`docs/defects/2026-09-06-c6-first-flash-bootloader-hang-lp-analog-i2c-clock.ai.md`,
+//! `docs/defects/2026-09-06-c6-analog-master-wedges-the-bootloader.ai.md`), and
 //! the cure the flashers ship is a write to each of these two registers.
 //!
 //! A peripheral is not allowed to see another peripheral, so the two bits
@@ -206,10 +206,10 @@ impl Peripheral for LpPeri {
     /// every HP reset leaves it clear, and only removing power puts the PAC's
     /// `0x7f80_0000` back. That is what the bench measured — the cure is a
     /// register write or a power cycle, and nothing else works
-    /// (`docs/defects/2026-09-06-c6-analog-master-wedges-the-bootloader.md`).
+    /// (`docs/defects/2026-09-06-c6-analog-master-wedges-the-bootloader.ai.md`).
     ///
     /// The RNG's xorshift state rides along, because it is in this block
-    /// (plan `notes.md` D6). Silicon's RNG has no state to restore anyway,
+    /// (plan `notes.ai.md` D6). Silicon's RNG has no state to restore anyway,
     /// and no clean board's transcript can see the difference: a clean boot
     /// never reboots.
     fn domain(&self) -> Domain {

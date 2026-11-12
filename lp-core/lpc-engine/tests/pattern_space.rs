@@ -1,7 +1,7 @@
 //! Pattern space end to end: what `pos` and the scope intrinsics a shader
 //! actually receives, through the real engine, fixture and CPU backend.
 //!
-//! The rule (ADR `docs/adr/2026-09-24-pattern-space.md`): a shader that
+//! The rule (ADR `docs/adr/2026-09-24-pattern-space.ai.md`): a shader that
 //! declares `"coords": "pattern"` sees the lamps' bounding box, centred at
 //! the origin, scaled uniformly so the long side runs −1…1, y up — and in 1D,
 //! 0 → 1 from the strand's first lamp to its last — plus `patternExtent`,

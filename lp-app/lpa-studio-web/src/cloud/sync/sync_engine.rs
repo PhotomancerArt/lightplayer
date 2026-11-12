@@ -38,7 +38,7 @@
 //! A project another tab holds is skipped — that tab's own driver has it.
 //!
 //! **The project lock is never held across the network** (D1;
-//! `docs/adr/2026-07-08-per-project-library-locking.md`, amended). It
+//! `docs/adr/2026-07-08-per-project-library-locking.ai.md`, amended). It
 //! guards local OPFS consistency, and a refusal of it is a user-facing
 //! claim ("open in another tab") that a round trip has no business making
 //! true. So the trip is three phases: snapshot under the lock, publish

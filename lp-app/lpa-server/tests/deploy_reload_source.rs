@@ -11,7 +11,7 @@
 //! assertion says "this deploy rendered THAT source", not merely "the output
 //! changed".
 //!
-//! Coverage for `docs/defects/2026-07-30-deploy-compiles-previous-upload.md`.
+//! Coverage for `docs/defects/2026-07-30-deploy-compiles-previous-upload.ai.md`.
 //! These were green when written: they pin the deploy path rather than fix it,
 //! so that investigation does not have to re-suspect it.
 

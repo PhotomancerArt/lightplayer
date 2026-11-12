@@ -2060,7 +2060,7 @@ mod tests {
     /// into its own record, and every frame after it landed on the OTHER
     /// record as an `IdentityConflict`, and a rename aimed at the board
     /// renamed its neighbour (docs/defects/
-    /// 2026-10-02-saved-records-sharing-a-device-id-misroute-the-board.md).
+    /// 2026-10-02-saved-records-sharing-a-device-id-misroute-the-board.ai.md).
     #[test]
     fn records_sharing_an_id_load_apart_and_the_board_keeps_its_own_frames() {
         for fast in [false, true] {

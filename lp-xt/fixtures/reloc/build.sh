@@ -5,7 +5,7 @@
 # *behavioral oracle* executable the differential test runs via the plain
 # linked-ELF loader.
 #
-# Golden rule (AGENTS.md): instruction bytes are assembler-derived, never
+# Golden rule (AGENTS.ai.md): instruction bytes are assembler-derived, never
 # hand-written — that is the entire point of this script.
 set -euo pipefail
 cd "$(dirname "$0")"

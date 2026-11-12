@@ -8,7 +8,7 @@
 //! chip's table points into the middle of this chip's **factory** partition —
 //! a filesystem mount would silently erase running code, with no diagnostic.
 //! (The C6 transcribed its offset until 2026-10; all three chips now read
-//! their table — `docs/debt/firmware-partition-constants-transcribed.md`.)
+//! their table — `docs/debt/firmware-partition-constants-transcribed.ai.md`.)
 //!
 //! So the offset and length are read from the partition table at runtime,
 //! matched by the `lpfs` label. `esp-bootloader-esp-idf` is already a

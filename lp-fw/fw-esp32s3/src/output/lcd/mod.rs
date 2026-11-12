@@ -8,7 +8,7 @@
 //!
 //! The encoding itself is `lp_ws281x::parallel`, host-tested; the evidence
 //! that a frame survives radio interrupts and flash writes is the
-//! LED-channels spike's on FS3 (`docs/adr/2026-10-22-s3-parallel-ws281x-output.md`).
+//! LED-channels spike's on FS3 (`docs/adr/2026-10-22-s3-parallel-ws281x-output.ai.md`).
 
 extern crate alloc;
 

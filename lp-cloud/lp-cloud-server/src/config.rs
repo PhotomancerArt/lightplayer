@@ -64,7 +64,7 @@ pub struct ServerConfig {
     /// Address to bind.
     pub bind: IpAddr,
     /// Port to bind. Never pinned in a recipe — `scripts/dev-port.sh` picks
-    /// it for local runs (AGENTS.md "Dev server ports").
+    /// it for local runs (AGENTS.ai.md "Dev server ports").
     pub port: u16,
     /// Which [`MetaStore`](lp_cloud_domain::MetaStore) adapter to open.
     pub meta: MetaBackend,

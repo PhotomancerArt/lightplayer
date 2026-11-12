@@ -143,7 +143,7 @@ pub fn project_2d_to_1d(cell: crate::products::visual::CellProjection, u: f32, v
 ///
 /// The float form is four libcalls on a part with no FPU (two compares, a
 /// multiply, a float-to-int), and since bounded sample batches
-/// (`docs/adr/2026-09-06-direct-sampling-bounded-batches.md`) a Direct
+/// (`docs/adr/2026-09-06-direct-sampling-bounded-batches.ai.md`) a Direct
 /// fixture converts every lamp's centre on every render. This is ~15
 /// integer ops instead. `q16_conversion_matches_the_float_reference_exhaustively`
 /// is the proof, over every non-negative bit pattern.

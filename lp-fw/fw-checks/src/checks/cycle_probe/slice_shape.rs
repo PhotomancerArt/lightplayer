@@ -1,7 +1,7 @@
 //! `slice_shape` — the per-slice fixed cost the compile harness pays and the
 //! emulator does not.
 //!
-//! `notes.md` F4: tick 15 is the smallest slice in the compile harness —
+//! `notes.ai.md` F4: tick 15 is the smallest slice in the compile harness —
 //! **silicon 5,153 cycles against `t1`'s 1,078**, so roughly **4,075 cycles
 //! of fixed per-slice cost** that the emulator charges nothing for. The
 //! candidates named there are an interrupt or yield around the slice and a

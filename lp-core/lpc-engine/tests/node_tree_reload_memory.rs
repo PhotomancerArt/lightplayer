@@ -6,7 +6,7 @@
 //! its entries as a dense `Vec<Option<_>>` indexed by id: a removed node
 //! left a `None` tombstone, ids are never reused, so every reload grew the
 //! vector by the subtree's size, forever
-//! (`docs/defects/2026-09-25-node-tree-tombstones-grow-per-reload.md`).
+//! (`docs/defects/2026-09-25-node-tree-tombstones-grow-per-reload.ai.md`).
 //!
 //! What this pins: after a warm-up reload, a hundred more reloads of the
 //! same three-node subtree retain **zero** additional heap, while ids keep
@@ -20,7 +20,7 @@
 //! A process-wide counter also saw the libtest harness's main thread, which
 //! allocates its running-test map and timeout queue right *after* spawning
 //! the test thread — about 900 B that a loaded runner can land between the
-//! two readings (`docs/debt/process-wide-heap-counters-in-tests.md`).
+//! two readings (`docs/debt/process-wide-heap-counters-in-tests.ai.md`).
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;

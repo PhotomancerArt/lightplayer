@@ -31,7 +31,7 @@
 # Request 2 waits on `Stopped all projects` where the C6 waits on the
 # `stopAllProjects` reply's `"id":1,`. That reply does go out — but on this
 # chip the link dropped one 64 B packet of it, which was the defect
-# `docs/defects/2026-09-13-the-s3-link-drops-the-io-tasks-next-chunk-on-a-stale-serial-in-empty.md`
+# `docs/defects/2026-09-13-the-s3-link-drops-the-io-tasks-next-chunk-on-a-stale-serial-in-empty.ai.md`
 # (now fixed; P09 measured the silicon side, DD103). A walk that waited on
 # the reply's bytes would have stalled for ever at request 2 — it did, and
 # that is how this was found. The handler's own log line is the same event,
@@ -93,7 +93,7 @@ then +20ms "ng rendered\\\".\\n\\nThe test prints two transcripts. `[ORACLE]` is
 then +20ms " wasmtime; `[ORACLE-RV32]` is\\n`lpvm-native`'s rv32 emulation \xe2\x80"
 then +20ms "\x94 the same code generator firmware JITs, one ISA\\nover. Which of"
 then +20ms " the two a device agrees with is the diagnosis, not a detail:\\ns"
-then +20ms "ee `docs/defects/2026-07-30-q32-native-vs-wasmtime-last-bit.md`,"
+then +20ms "ee `docs/defects/2026-07-30-q32-native-vs-wasmtime-last-bit.ai.md`,"
 then +20ms " where the\\ndistinction was the difference between \\\"the Xtensa "
 then +20ms "backend is broken\\\" and \\\"the\\nnative and WASM engines have alwa"
 then +20ms "ys differed in the last bit\\\".\\n\\n## Known-good\\n\\n2026-07-30, E"

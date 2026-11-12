@@ -22,7 +22,7 @@
 //! node JSON. That is not a shortcut around authoring: it is the `Shared`
 //! provenance path, which is the one this milestone has to get right.
 //! (Inline authoring itself is ordinary now — a gradient spells token
-//! metadata plus one stops literal on every surface, `color.md` §5.)
+//! metadata plus one stops literal on every surface, `color.ai.md` §5.)
 
 use alloc::string::{String, ToString};
 use alloc::sync::Arc;
@@ -339,7 +339,7 @@ fn close(actual: [f32; 3], expected: [f32; 3], tolerance: f32) {
 /// The unbound slot has no authored config, so it bakes
 /// [`GradientConfig::default`]: an sRGB black→white ramp. Reading that back
 /// through a linear-filtered strip is also the end-to-end check that
-/// interpolation happened in the authored space (`color.md` §6) — a linear
+/// interpolation happened in the authored space (`color.ai.md` §6) — a linear
 /// midpoint would read ~0.5 where sRGB's reads ~0.214.
 #[test]
 fn a_palette_uniform_compiles_and_renders_its_baked_strip() {

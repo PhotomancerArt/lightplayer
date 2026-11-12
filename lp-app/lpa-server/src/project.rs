@@ -63,7 +63,7 @@ pub struct Project {
     /// filtered out before that seam, so this is the diagnostic that says
     /// whether a write cost a binding-graph rebuild.
     applied_refreshes: u64,
-    /// Whether panel state keeps saving (panel.md P11 — on by default,
+    /// Whether panel state keeps saving (panel.ai.md P11 — on by default,
     /// restored from the state file itself).
     panel_auto_save: bool,
     /// Engine-time since the last panel-state write, for the flash
@@ -122,7 +122,7 @@ impl Project {
         log_memory(memory_stats, "project new after graphics");
 
         // Panel state comes back BEFORE the first tick, therefore before
-        // the first render (panel.md P10): the scarf that was dimmed from
+        // the first render (panel.ai.md P10): the scarf that was dimmed from
         // a phone must not flash bright on replug, not for one frame.
         // This is the boot seam on device too — `auto_load_project` runs
         // here, ahead of the main loop.
@@ -252,7 +252,7 @@ impl Project {
     }
 
     /// Write panel state if it changed and the throttle window has
-    /// elapsed (panel.md P11: flash preservation — a knob wiggled for a
+    /// elapsed (panel.ai.md P11: flash preservation — a knob wiggled for a
     /// minute writes ~6 times, not once per input event).
     fn persist_panel_state_if_due(&mut self, delta_ms: u32) {
         self.panel_state_age_ms = self.panel_state_age_ms.saturating_add(delta_ms);
@@ -269,7 +269,7 @@ impl Project {
     }
 
     /// Write panel state now, regardless of the throttle — the
-    /// clean-shutdown flush (panel.md P11), so the last few seconds of a
+    /// clean-shutdown flush (panel.ai.md P11), so the last few seconds of a
     /// gesture are not lost on an orderly stop.
     pub fn flush_panel_state(&mut self) {
         if !self.panel_auto_save || self.panel_state_mutations() == self.panel_state_saved_mutations
@@ -300,7 +300,7 @@ impl Project {
             .unwrap_or(self.panel_state_saved_mutations)
     }
 
-    /// Whether panel state is being saved (panel.md P11 — on by default).
+    /// Whether panel state is being saved (panel.ai.md P11 — on by default).
     pub fn panel_auto_save(&self) -> bool {
         self.panel_auto_save
     }
@@ -408,7 +408,7 @@ impl Project {
         )
     }
 
-    /// Dispatch a panel write (panel.md P8): engage/update the writer at
+    /// Dispatch a panel write (panel.ai.md P8): engage/update the writer at
     /// `(scope, channel)`. Runtime state only — no overlay, no dirty.
     pub fn panel_write(
         &mut self,
@@ -434,7 +434,7 @@ impl Project {
         }
     }
 
-    /// Dispatch a panel clear (panel.md P3; P-Q4: `All` reaches sink
+    /// Dispatch a panel clear (panel.ai.md P3; P-Q4: `All` reaches sink
     /// scopes too).
     pub fn panel_clear(
         &mut self,
@@ -459,7 +459,7 @@ impl Project {
         }
     }
 
-    /// Dispatch the panel-state auto-save toggle (panel.md P11). Always
+    /// Dispatch the panel-state auto-save toggle (panel.ai.md P11). Always
     /// accepted: the flag is project-level state with no scope to be stale
     /// about, and [`Self::set_panel_auto_save`] is idempotent. The
     /// engaged-writer count rides back so the toggle answers in exactly

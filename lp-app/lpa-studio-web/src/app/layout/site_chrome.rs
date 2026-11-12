@@ -6,7 +6,7 @@
 //! spike PR #269, `spikes/top-bar/`):
 //!
 //! - **Your things are the home page.** The boards and the projects live
-//!   on one page at `/` (`docs/adr/2026-10-08-the-board-card-and-one-home-page.md`),
+//!   on one page at `/` (`docs/adr/2026-10-08-the-board-card-and-one-home-page.ai.md`),
 //!   so the bar carries no tab for them: the Devices and Projects tabs
 //!   retired with the pages they named (their old addresses heal to `/`).
 //!   The world's things (Boards, Docs) ride the right cluster, lighter.
@@ -389,7 +389,7 @@ fn ProjectMenuRows(menu: ChromeProjectMenu) -> Element {
 }
 
 /// The play-mode toggle, shown in the right-hand cluster whenever a lens
-/// route is open (`docs/design/panel.md` P12). It is a plain hash link to
+/// route is open (`docs/design/panel.ai.md` P12). It is a plain hash link to
 /// the play variant of the CURRENT route — the same session at a different
 /// zoom — so the route listener sees no new document and nothing re-opens.
 ///

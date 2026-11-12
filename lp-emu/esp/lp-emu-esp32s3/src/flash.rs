@@ -30,7 +30,7 @@
 //!
 //! The chip is **8 MB**, not the 4 MB both other machines model:
 //! `lp-fw/fw-esp32s3/partitions.csv` deliberately does not fit a 4 MB board
-//! (`docs/adr/2026-07-30-esp32s3-partition-floor.md`). The flash-size string
+//! (`docs/adr/2026-07-30-esp32s3-partition-floor.ai.md`). The flash-size string
 //! `8mb` has three mirrors that cannot read each other —
 //! `lp-fw/fw-esp32s3/.cargo/config.toml`'s runner, the `justfile`'s
 //! `s3_flash_size`, and the canonical `lp-fw/builds/esp32s3-8mb.json`
@@ -72,7 +72,7 @@ pub const NVS_OFFSET: u32 = 0x0000_9000;
 pub const NVS_LEN: u32 = 0x0000_5000;
 
 /// `bootctl` — the boot-control sector carved out of `nvs`
-/// (`docs/adr/2026-07-30-boot-control-sector.md`).
+/// (`docs/adr/2026-07-30-boot-control-sector.ai.md`).
 pub const BOOTCTL_OFFSET: u32 = 0x0000_E000;
 pub const BOOTCTL_LEN: u32 = 0x0000_1000;
 

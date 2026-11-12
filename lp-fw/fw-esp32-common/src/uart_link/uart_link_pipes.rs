@@ -1,7 +1,7 @@
 //! The bytes between the classic's UART I/O task and its link task.
 //!
 //! The two run on different executors, and that is the design, not an
-//! accident (`docs/adr/2026-08-25-classic-uart-io-task-executor-isolation.md`):
+//! accident (`docs/adr/2026-08-25-classic-uart-io-task-executor-isolation.ai.md`):
 //!
 //! - the **I/O task** (`fw-esp32v3`'s `serial::io_task`) owns UART0 and polls
 //!   it every 1 ms from an esp-rtos *interrupt* executor (swi2), whatever the
@@ -24,7 +24,7 @@
 //! the TX pipe, and the link task puts each frame into it whole
 //! ([`put_frame`]), or not at all. So a frame is never split by another
 //! writer's bytes: the concurrent-writer defect
-//! (`docs/defects/2026-08-02-serial-line-interleaving.md`) has no second
+//! (`docs/defects/2026-08-02-serial-line-interleaving.ai.md`) has no second
 //! writer left to interleave with, apart from boot text written before any
 //! host can have a session, and a panic's text, which follows lp-link's
 //! `0xFF` text mark. A diagnostic too long for a log record queues whole

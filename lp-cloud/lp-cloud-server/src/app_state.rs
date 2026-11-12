@@ -170,7 +170,7 @@ impl AppState {
     /// only mean some *other* panic unwound inside `work` while holding the
     /// guard; treating that as survivable produced a zombie in production
     /// (every request 502 behind a green `/healthz` — see
-    /// `docs/defects/2026-08-08-fatal-store-panic-poisons-not-restarts.md`),
+    /// `docs/defects/2026-08-08-fatal-store-panic-poisons-not-restarts.ai.md`),
     /// so a poisoned lock aborts too. "This node is dead, restart it" is
     /// only true if something actually restarts it.
     pub async fn with_service<T, F>(&self, work: F) -> T

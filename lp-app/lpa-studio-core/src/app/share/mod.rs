@@ -12,8 +12,8 @@
 //! **Versioned, not migrated.** `format` mismatches are rejected outright.
 //! During alpha the tree moves too fast to carry migrations, and a loud
 //! refusal beats silently misreading a neighbouring version's bytes. See
-//! `docs/adr/2026-07-28-share-envelopes.md` for the decision and
-//! `docs/debt/library-format-migration-gap.md` for the standing burden.
+//! `docs/adr/2026-07-28-share-envelopes.ai.md` for the decision and
+//! `docs/debt/library-format-migration-gap.ai.md` for the standing burden.
 //!
 //! That `format` is the ENVELOPE's version, and it is separate from the
 //! PROJECT format of whatever the envelope carries:

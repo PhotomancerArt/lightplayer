@@ -1,4 +1,4 @@
-//! The reserved snapshot namespace (FORMAT.md "Files and paths", "The
+//! The reserved snapshot namespace (FORMAT.ai.md "Files and paths", "The
 //! snapshot namespace"). Version 3 builds no snapshot: it reserves the path
 //! so that a later core can keep snapshots there as ordinary directory
 //! entries, which every core already traces, collects around and lists as

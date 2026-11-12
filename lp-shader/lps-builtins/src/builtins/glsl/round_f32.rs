@@ -1,6 +1,6 @@
 //! Native f32 `round` — the f32 sibling of [`super::round_q32`].
 //!
-//! **Ties round away from zero**, not to even. `docs/design/float.md` §4 lists
+//! **Ties round away from zero**, not to even. `docs/design/float.ai.md` §4 lists
 //! `round()` tie behavior as *target-defined*, so both are legal — but this is
 //! not a free choice in practice:
 //!

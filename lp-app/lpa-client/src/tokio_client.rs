@@ -110,7 +110,7 @@ impl TokioLpClient {
     /// (unsolicited boot frame or explicit [`TokioLpClient::hello`] call);
     /// `None` until one arrives. Absence of a hello from a connected,
     /// responding server means pre-hello firmware — treat as a version
-    /// mismatch (see docs/adr/2026-07-14-wire-hello-versioning.md).
+    /// mismatch (see docs/adr/2026-07-14-wire-hello-versioning.ai.md).
     pub fn server_hello(&self) -> Option<lpc_wire::ServerHello> {
         self.last_hello.lock().expect("hello mutex").clone()
     }

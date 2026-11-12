@@ -50,7 +50,7 @@ just web-demo-smoke target/pages/web-demo
 
 The staged artifact includes `version.json`, `.nojekyll`, and `CNAME`. Manual
 deployment to the demo Pages repository runs through the `Deploy Pages Channel`
-workflow. See `docs/deploy/studio-pages.md` for DNS and GitHub Pages setup.
+workflow. See `docs/deploy/studio-pages.ai.md` for DNS and GitHub Pages setup.
 
 ## Linear memory
 

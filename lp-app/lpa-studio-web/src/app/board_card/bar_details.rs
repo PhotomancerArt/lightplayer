@@ -1,6 +1,6 @@
 //! [`BarDetails`]: the details card of a bar, or of the status corner —
 //! Studio's detail card, merged with the bar that opened it
-//! (`docs/style/ui.md` "The board card").
+//! (`docs/style/ui.ai.md` "The board card").
 //!
 //! It is the shared [`DetailPopover`] in its custom-trigger mode, the way
 //! the Connections group's rows used it: the trigger is the bar's own
@@ -8,7 +8,7 @@
 //! the anchored mode (the `anchored-popover-open-render-drift` debt). A bar
 //! is wider than the 320 px card, so the 2026-10-06 overlap fix in the
 //! shared popover is what keeps a tall details card readable over its own
-//! bar (`docs/defects/2026-10-06-a-card-row-shows-through-its-own-popover.md`).
+//! bar (`docs/defects/2026-10-06-a-card-row-shows-through-its-own-popover.ai.md`).
 //!
 //! Inside, a radio row's switch comes first ([`DetailSwitchHead`]: its icon
 //! and name, and the board's on/off switch at the line's end), then core's

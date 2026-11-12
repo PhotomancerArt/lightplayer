@@ -5,7 +5,7 @@
 //! The emulated C6 link never loses bytes (its single writer makes the
 //! IN-endpoint gate a no-op), but a real one did: frames arriving a few
 //! bytes short with no sign on the board
-//! (`docs/defects/2026-09-24-the-real-c6-link-loses-bytes-inside-a-packed-frame.md`).
+//! (`docs/defects/2026-09-24-the-real-c6-link-loses-bytes-inside-a-packed-frame.ai.md`).
 //! Since the USB link is an lp-link (plan
 //! `lp2025/2026-09-27-0215-lp-link-usb-cutover`) such a frame fails its
 //! checksum and is resent: the host must count it and deliver the message

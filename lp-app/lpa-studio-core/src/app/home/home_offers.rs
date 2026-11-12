@@ -9,7 +9,7 @@
 //!
 //! Both follow the board-ids ADR's rule for a verb that takes a value: one
 //! offer with a choice list, never one offer per choice
-//! (`docs/adr/2026-10-02-board-ids-and-typed-offer-parameters.md`).
+//! (`docs/adr/2026-10-02-board-ids-and-typed-offer-parameters.ai.md`).
 //!
 //! - `project/new` takes `template` (the New menu's rows, blank by default)
 //!   and an optional `name`, and binds the menu's own

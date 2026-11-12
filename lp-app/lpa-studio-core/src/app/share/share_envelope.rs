@@ -20,8 +20,8 @@ pub const NODE_KIND: &str = "lp.node";
 ///
 /// **Not migrated.** A mismatch is rejected outright
 /// ([`ShareError::UnsupportedFormat`]) — see
-/// `docs/adr/2026-07-28-share-envelopes.md` for why that is the right
-/// trade during alpha, and `docs/debt/library-format-migration-gap.md` for
+/// `docs/adr/2026-07-28-share-envelopes.ai.md` for why that is the right
+/// trade during alpha, and `docs/debt/library-format-migration-gap.ai.md` for
 /// the standing burden it joins.
 pub const SHARE_FORMAT_VERSION: u32 = 1;
 

@@ -9,7 +9,7 @@
 // https://github.com/Razaekel/noise-rs) of Steven Worley's 1996 algorithm,
 // using the integer lpfn_hash for feature points — NOT LYGIA's
 // Prosperity-licensed worley.glsl
-// (see docs/reports/2026-03-31-lpfx-license-audit.md).
+// (see docs/reports/2026-03-31-lpfx-license-audit.ai.md).
 //
 // Returns the squared euclidean distance to the nearest feature point,
 // shifted to approximately [-1, 1].

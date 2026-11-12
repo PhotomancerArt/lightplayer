@@ -196,7 +196,7 @@ fn cut_sweep_through_gc() {
     }
 }
 
-/// A secret replaced and scrubbed (`TreeStore::scrub`, FORMAT.md "Secret
+/// A secret replaced and scrubbed (`TreeStore::scrub`, FORMAT.ai.md "Secret
 /// files") on a small flash: the scrub is GC run on purpose after the
 /// write's commit, so a cut anywhere in it leaves the new state.
 fn secret_workload() -> Vec<Step> {

@@ -12,7 +12,7 @@
 // (`lp-emu/LICENSE-MIT`), and NOT the workspace's AGPL-3.0-or-later.
 // `just lint-emu-fence` polices the crate graph rather than loose files, so
 // this line is what carries the posture for a `.js` file inside the fence.
-// See `docs/adr/2026-09-06-lp-emu-home-and-mit-fence.md`.
+// See `docs/adr/2026-09-06-lp-emu-home-and-mit-fence.ai.md`.
 //
 // **This module is the product, not the rig.** JD25 makes Studio's `?on=emu`
 // worker import exactly this file, so it knows nothing about the bench page,

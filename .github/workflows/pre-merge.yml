@@ -14,7 +14,7 @@ on:
     # above and so gets no CI at all) retargeted to main still gets NO CI until
     # its next push. The PR sits there looking clean, never validated. That is
     # the failure #195 was caught on, back on purpose, now with a workaround
-    # and a net: docs/debt/stacked-pr-retarget-gets-no-ci.md (push any commit,
+    # and a net: docs/debt/stacked-pr-retarget-gets-no-ci.ai.md (push any commit,
     # or close and reopen; scripts/watch-pr.sh exits 2 on a PR with no CI run).
     #
     # Why not keep `edited` and filter it with a job-level `if:` on
@@ -62,7 +62,7 @@ env:
   # every other PR reads. Cost: a re-push of the same PR recompiles the
   # crates that PR changed (and their dependents) instead of hitting its
   # own previous push. See the budget note above `jobs:` and
-  # docs/debt/actions-cache-budget.md.
+  # docs/debt/actions-cache-budget.ai.md.
   SCCACHE_GHA_RW_MODE: ${{ github.ref == 'refs/heads/main' && 'READ_WRITE' || 'READ_ONLY' }}
   # Make sccache's backend failures visible. Its `Cache write errors` stat
   # counts every failed upload but says nothing about why, and the server is
@@ -160,7 +160,7 @@ env:
 #     job and both deploy workflows restore it), sccache objects, the
 #     stories bundle, Chrome for Testing, the emu-ref builds (the one
 #     exception: a PR adding a reference pin may save its 26 MB entry).
-# Steady state, and the arithmetic, is docs/debt/actions-cache-budget.md.
+# Steady state, and the arithmetic, is docs/debt/actions-cache-budget.ai.md.
 # Re-check the listing (`gh api repos/<r>/actions/caches`) before adding any
 # entry over ~100 MB; what it displaces matters more than what it saves.
 #
@@ -169,7 +169,7 @@ env:
 # default — burning a runner and leaving the PR's checks pending all day. Two
 # validate-stories wedges on 2026-08-05 alone cost 5h08m and 3h35m of runner
 # time and had to be cancelled by hand
-# (docs/debt/story-capture-pipeline.md). The numbers below are sized from the
+# (docs/debt/story-capture-pipeline.ai.md). The numbers below are sized from the
 # p95 and max of the last ~60 runs' SUCCESSFUL jobs (each stated in the
 # comment above the value), at roughly 2-3x the observed max. That is
 # deliberately generous: the goal is to convert a wedge into a fast red, not
@@ -204,13 +204,13 @@ jobs:
       emu_esp32s3: ${{ github.event_name != 'pull_request' && 'true' || steps.some.outputs.emu_esp32s3 }}
       emu_ref_recipe: ${{ github.event_name != 'pull_request' && 'true' || steps.some.outputs.emu_ref_recipe }}
       emu_esp32v3_fw: ${{ github.event_name != 'pull_request' && 'true' || steps.some.outputs.emu_esp32v3_fw }}
-      # The jobs that hold a chip's PINNED FIGURES (docs/chip-figures.md) run
+      # The jobs that hold a chip's PINNED FIGURES (docs/chip-figures.ai.md) run
       # on that chip's own emulator filter OR on any crate linked into its
       # shipped firmware (the generated `fw_closure_*` filters below). The
       # figures are read off the shipped image, so a statics change in a
       # shared crate moves them; on the emulator filter alone such a PR
       # skipped them and main went red instead (#1049 → #1075, #1088 →
-      # #1142; docs/debt/firmware-figures-skip-on-shared-crate-prs.md). Jobs
+      # #1142; docs/debt/firmware-figures-skip-on-shared-crate-prs.ai.md). Jobs
       # with no pinned figure of the image (emu-c6-cli, emu-esp32v3-ref, the
       # layout migration) stay on the narrower filters (DD77).
       # `emu_c6_cli` (the `emu-c6-cli` job) is `emu_c6` OR the tree store's own
@@ -222,7 +222,7 @@ jobs:
       # users do not start on a store-only PR (DD77).
       emu_c6_cli: ${{ github.event_name != 'pull_request' && 'true' || (steps.some.outputs.emu_c6 == 'true' || steps.some.outputs.tree_store_walks == 'true') && 'true' || 'false' }}
       figures_esp32c6: ${{ github.event_name != 'pull_request' && 'true' || (steps.some.outputs.emu_c6 == 'true' || steps.closure.outputs.fw_closure_esp32c6 == 'true') && 'true' || 'false' }}
-      # The first-light ratchet (`c6-first-light`, docs/first-light-ratchet.md)
+      # The first-light ratchet (`c6-first-light`, docs/first-light-ratchet.ai.md)
       # runs where the C6's figures do, and on its own record and script.
       # `c6_image` is whether the PR changes the image it boots (or the
       # project it measures): when it does not, a moved first light is the
@@ -283,7 +283,7 @@ jobs:
               # example-shader compile gate (`just test-example-shaders`),
               # which compiles every catalog/ + projects/test/ shader on every
               # filetest target — so a shader-only content edit is a shader
-              # change (docs/debt/example-shaders-not-compile-gated.md).
+              # change (docs/debt/example-shaders-not-compile-gated.ai.md).
               - 'catalog/**'
               - 'projects/test/**'
               - 'Cargo.toml'
@@ -320,7 +320,7 @@ jobs:
               # under it (emulator plan two, M2). Until 2026-09-09 this filter
               # listed neither, so a conformance suite for that layer would
               # have run on nothing on the very PRs that changed it — which is
-              # the failure mode `docs/debt/web-serial-js-untestable.md` exists
+              # the failure mode `docs/debt/web-serial-js-untestable.ai.md` exists
               # about. `lpa-link` was already in the `core` filter; it is here
               # for `lpa-link-browser-test`, and `lpa-studio-web` for the two
               # polyfill files and the device controller it serves.
@@ -620,7 +620,7 @@ jobs:
               - '.github/actions/**'
             # c6_layout gates `emu-c6-layout-migration` (`just
             # test-emu-layout-migration`): the old→new C6 partition migration
-            # (#896, docs/adr/2026-10-02-c6-repartition-and-layout-migration.md)
+            # (#896, docs/adr/2026-10-02-c6-repartition-and-layout-migration.ai.md)
             # proved end to end on the emulated C6. ~29 minutes of test alone
             # on this runner (16 on an M2 Max), ~35 for the job, so it is
             # deliberately the NARROWEST filter here: the table, the
@@ -788,7 +788,7 @@ jobs:
   # It also hosts `just test-rust-features` (the feature-variant test lines,
   # see the step) — off validate-x64's critical path, in a job with the same
   # gate, runner and cache, instead of a new job's setup against the org's
-  # 20-job cap (docs/debt/ci-runner-time-over-the-concurrency-cap.md).
+  # 20-job cap (docs/debt/ci-runner-time-over-the-concurrency-cap.ai.md).
   lint:
     name: Lint (x64)
     runs-on: ubuntu-24.04
@@ -847,7 +847,7 @@ jobs:
       # entries of ~517 MB each, re-saved together on every Cargo.toml edit
       # that reached main (~3.1 GB a time) — which, with the sccache write
       # rate, had shrunk the repo's LRU horizon to ~15 minutes on 2026-09-25
-      # (docs/debt/actions-cache-budget.md).
+      # (docs/debt/actions-cache-budget.ai.md).
       #
       # On main the restore is exact-key only, and on a miss `cargo fetch`
       # downloads everything this lockfile resolves to (all targets) before
@@ -923,7 +923,7 @@ jobs:
 
   # The defect registry has no committed index: `just defects-index` builds it
   # from each entry's frontmatter when it is read, so two PRs that each file a
-  # defect never conflict on a shared table (docs/debt/hand-written-defects-index.md).
+  # defect never conflict on a shared table (docs/debt/hand-written-defects-index.ai.md).
   # This lints that every entry carries what the index reads, and that no
   # hand-written row came back to the README. Lint's `just check-lint` runs it
   # too, but a defect-only PR is docs-only (`core` false, no Lint job), so
@@ -1467,13 +1467,13 @@ jobs:
         run: cd lp2025 && scripts/filetests.sh -t xtlpn.q32 --summary
 
   # The esp32c6 app image must fit its 3.25 MB partition (3 MB until the
-  # 2026-10 repartition, docs/adr/2026-10-02-c6-repartition-and-layout-migration.md;
+  # 2026-10 repartition, docs/adr/2026-10-02-c6-repartition-and-layout-migration.ai.md;
   # the recipe reads it from partitions.csv). It has overrun twice, and
   # both times the signal was a red `Build and deploy Studio` run *after* the merge,
   # because no pre-merge job built the device firmware. This job builds it and
   # fails under 64 KB of headroom; it prints the number either way, so the size
   # is visible on every PR that can move it.
-  # See docs/adr/2026-07-28-esp32c6-flash-budget.md.
+  # See docs/adr/2026-07-28-esp32c6-flash-budget.ai.md.
   firmware-size:
     name: Firmware size (esp32c6)
     runs-on: ubuntu-24.04
@@ -1844,7 +1844,7 @@ jobs:
       # commit and the script refuses a mismatched one). A recipe or
       # toolchain change misses outright and rebuilds everything cold. The
       # runner is in the key because the bytes are NOT reproducible across
-      # hosts (docs/debt/reference-images-are-not-reproducible-across-hosts.md):
+      # hosts (docs/debt/reference-images-are-not-reproducible-across-hosts.ai.md):
       # a hit must only ever hand this runner image what this runner image
       # built.
       #
@@ -1922,7 +1922,7 @@ jobs:
         shell: bash
         run: cd lp2025 && just test-emu-c6-boot 2>&1 | tee "$RUNNER_TEMP/figures-tests.log"
 
-      # **CI's images, for a desk that wants no firmware build** (docs/ci-images.md).
+      # **CI's images, for a desk that wants no firmware build** (docs/ci-images.ai.md).
       # The images the step above built and booted — ELFs, merged chips, the
       # pinned reference images and their sidecars, never target dirs or
       # worktrees — packed with a manifest (commit, run, features/profile, the
@@ -2110,7 +2110,7 @@ jobs:
             !lp2025/target/emu-ref/wt-*
           key: ${{ steps.emu-ref-set.outputs.key }}
 
-      # A moved FIGURE hands back its patch (docs/chip-figures.md, "When CI
+      # A moved FIGURE hands back its patch (docs/chip-figures.ai.md, "When CI
       # hands back the patch"). Only on a failed figure check, so a green run
       # pays nothing: re-run the failed tests as a bless against the images
       # this job already built (`test_support`'s cache — no rebuild), and
@@ -2465,7 +2465,7 @@ jobs:
       # (`v0-rust-emu-esp32v3-…`, `cache-targets: false`, so registry only):
       # ~496 MB of the same crates that entry holds, re-saved on every
       # manifest change reaching main — two generations, 1.04 GB, were live
-      # at once (docs/debt/actions-cache-budget.md). The sibling job had
+      # at once (docs/debt/actions-cache-budget.ai.md). The sibling job had
       # already moved; this one was missed.
       - name: Restore cargo registry
         uses: ./lp2025/.github/actions/cargo-registry
@@ -2542,7 +2542,7 @@ jobs:
   #     because the whole gate is about the SHIPPED image and not a fixture;
   #   * `espflash save-image --chip esp32s3 --merge` on it — 8 MiB here, not
   #     4: this chip's partition table does not fit a 4 MB part
-  #     (docs/adr/2026-07-30-esp32s3-partition-floor.md). The bundled
+  #     (docs/adr/2026-07-30-esp32s3-partition-floor.ai.md). The bundled
   #     second-stage bootloader is what the ROM-up tests boot through, so the
   #     espflash version is load-bearing and pinned to 3.3.0 like the other
   #     two jobs';
@@ -2747,7 +2747,7 @@ jobs:
   # which already ran 28–30.5 minutes of its 35 on main when this landed
   # (the gate, P4's split boot and the heap ratchet) and was cancelled at its
   # budget with every step passing when this was a step of it
-  # (docs/debt/emulator-ci-jobs-outgrow-their-time-budgets.md: split, don't
+  # (docs/debt/emulator-ci-jobs-outgrow-their-time-budgets.ai.md: split, don't
   # bump). Locally ~2 minutes warm. **The first green run's wall clock goes
   # in this comment.**
   emu-esp32s3-seams:
@@ -2906,7 +2906,7 @@ jobs:
   # started loading `projects/test/basic` again (PSRAM holds the heap) and
   # that job was cancelled at its 30-minute budget in its heap step with every
   # test passed: wifi 3.4 min and relay 8.4 min on the runner
-  # (docs/debt/emulator-ci-jobs-outgrow-their-time-budgets.md: split, don't
+  # (docs/debt/emulator-ci-jobs-outgrow-their-time-budgets.ai.md: split, don't
   # bump). One Xtensa firmware build (the `wifi` image, merged) shared by
   # both. Path-gated as the seams job. First green run: 15 min 15 s (run
   # 40982870684); the seams job beside it 17 min 10 s.
@@ -3007,7 +3007,7 @@ jobs:
           fi
 
   # The heap-budget record's chip half (`just heap-budget-check-chips`,
-  # docs/heap-budget-gate.md "The second source"), the LINK half of lp-cli's
+  # docs/heap-budget-gate.ai.md "The second source"), the LINK half of lp-cli's
   # emulator-backed tests (`just test-emu-c6-cli-link`) and the app-agent
   # evals' stage A and B (`just test-emu-c6-cli-agent`). The first two were
   # steps of `emu-c6` until 2026-09-08. That job had been cut at its 20-minute
@@ -3284,7 +3284,7 @@ jobs:
             grep -m 5 -E "$kinds" "$log" | cut -c1-400 || true
           fi
 
-  # The first-light ratchet (docs/first-light-ratchet.md; Yona, 2026-10-18):
+  # The first-light ratchet (docs/first-light-ratchet.ai.md; Yona, 2026-10-18):
   # the C6's split image booted ROM-up through our bootloader on
   # lp-emu:esp32c6:t4, power-on, `projects/test/basic` with a saved Wi-Fi
   # network on the emulated LAN, read off the firmware's `[perf] first
@@ -3661,7 +3661,7 @@ jobs:
 
       # Heap-budget ratchet: emulator window deltas vs the checked-in
       # measured record. Deterministic, 0% margin; re-baseline explicitly
-      # with `just heap-budget-baseline`. See docs/heap-budget-gate.md.
+      # with `just heap-budget-baseline`. See docs/heap-budget-gate.ai.md.
       # Runs after the tests: fw-emu reuses warm deps and lp-cli is the
       # test-built binary (LP_CLI, exported by the step above).
       - name: Heap budget ratchet
@@ -3907,7 +3907,7 @@ jobs:
       # and a re-run of the same commit was green). A crash is reported as
       # `ENVIRONMENT FAILURE, not a test failure` and retried once, loudly; a
       # test failure is passed straight through. See
-      # `docs/defects/2026-09-09-browser-crash-reported-as-test-failure.md`.
+      # `docs/defects/2026-09-09-browser-crash-reported-as-test-failure.ai.md`.
       - name: Browser wasm tests
         run: cd lp2025 && just lpa-fs-opfs-test fw-browser-test lpa-link-browser-test lpa-link-js-test
 
@@ -4023,7 +4023,7 @@ jobs:
 
       # The tools (~/.cargo/bin: the pinned dx, wasm-bindgen, oxipng) and
       # target/, in one entry saved from main only — the same repo-wide
-      # budget as every other cache (docs/debt/actions-cache-budget.md). Not
+      # budget as every other cache (docs/debt/actions-cache-budget.ai.md). Not
       # rust-cache: the tools must be keyed on their pinned versions.
       #
       # ONE ENTRY PER UTC DAY, and main restores only that day's exact key.
@@ -4157,7 +4157,7 @@ jobs:
 
       # `shell: bash` (not the default) so pipefail keeps tee from masking the
       # check's exit code — piped-away failures have bitten this pipeline
-      # before (docs/debt/story-capture-pipeline.md).
+      # before (docs/debt/story-capture-pipeline.ai.md).
       #
       # continue-on-error: a failing check with a COMPLETE capture means
       # story drift, which is expected output here (the snapshot + comment
@@ -4420,7 +4420,7 @@ jobs:
           key: ${{ steps.chrome_cache.outputs.cache-primary-key }}
 
   # ONE sticky PR comment for every moved firmware figure in this run
-  # (docs/chip-figures.md, "When CI hands back the patch"). Each figure job
+  # (docs/chip-figures.ai.md, "When CI hands back the patch"). Each figure job
   # that failed on a figure check uploads a `figures-patch-<job>` artifact —
   # the records' diff when the failure was figures and nothing else, or a
   # summary saying it was not a figure move. This job gathers them into one
@@ -4483,7 +4483,7 @@ jobs:
   # A red MAIN names its suspects. CI validates each PR against its own
   # branch, never the merge result, so two independently-green PRs can merge
   # into a red main and the blame lands on whichever merged last
-  # (docs/debt/two-green-prs-can-red-main.md). Main pushes force every gate
+  # (docs/debt/two-green-prs-can-red-main.ai.md). Main pushes force every gate
   # on, so a main run is the canary; this job makes it say which PRs landed
   # since the last green main run, so the diagnosis starts in the right place.
   # It never runs on a pull_request, and it exits 0: the run is already red.

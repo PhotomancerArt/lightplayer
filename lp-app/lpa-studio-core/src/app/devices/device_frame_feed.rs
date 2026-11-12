@@ -37,7 +37,7 @@
 //!   until its close comes back, and a request on it then is never
 //!   answered — the pull would wait out its reply budget, five seconds,
 //!   with the actor and everything queued behind it
-//!   (`docs/defects/2026-10-09-a-holders-release-can-outlast-the-askers-five-seconds.md`);
+//!   (`docs/defects/2026-10-09-a-holders-release-can-outlast-the-askers-five-seconds.ai.md`);
 //! - the card is WANTED (mounted on the home page) and the page is
 //!   visible — a picture nobody can see is serial time the board would
 //!   rather spend on the wire's other traffic;

@@ -183,7 +183,7 @@ fn status_error(what: &str, status: u16) -> TransportError {
     // retryable family — classifying a 500 as a protocol violation made
     // the sync queue drop the trip outright, so one transient server
     // error meant "publish never happens until the next save"
-    // (`docs/defects/2026-08-28-auto-publish-outcomes-invisible.md`).
+    // (`docs/defects/2026-08-28-auto-publish-outcomes-invisible.ai.md`).
     if status >= 500 {
         TransportError::Offline
     } else {

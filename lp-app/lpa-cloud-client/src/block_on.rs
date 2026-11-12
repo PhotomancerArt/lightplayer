@@ -14,7 +14,7 @@ const MAX_POLLS: usize = 1024;
 
 /// Drive a future that does not actually wait for anything.
 ///
-/// This is the null-waker `block_on` AGENTS.md sanctions for tests and for
+/// This is the null-waker `block_on` AGENTS.ai.md sanctions for tests and for
 /// edges driving [`InProcessCloud`](crate::InProcessCloud), whose futures are
 /// ready the moment they are polled. It is **not** a runtime: there is no
 /// reactor to wake anything, so a future that returns `Poll::Pending`

@@ -286,7 +286,7 @@ fn g3_1b_a_port_held_closed_after_the_replug_holds_a_packet_until_it_opens() {
     // Nothing is written past the committed packet. ⚠️ Re-pinned 2026-09-24
     // for the io_task's IN-endpoint gate (`fw_esp32_common::serial::
     // in_endpoint`, PR #805, ported to the C6 for
-    // docs/defects/2026-09-24-the-real-c6-link-loses-bytes-inside-a-packed-frame.md):
+    // docs/defects/2026-09-24-the-real-c6-link-loses-bytes-inside-a-packed-frame.ai.md):
     // before it, esp-hal 1.1.1's `write_async` kept writing the rest of the
     // heartbeat and the `\n` probes into the held packet and the model
     // dropped them (`(host attached-idle): byte … dropped`) — this used to

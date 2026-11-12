@@ -581,7 +581,7 @@ pub const CASES: &[XtCase] = &[
 // the arithmetic *means*, not what any implementation rounded to. The two
 // exceptions are marked where they occur: the builtin case (whose oracle is
 // the builtin's own implementation, exactly as `builtin_call_sin_q32`'s is)
-// and the infinity row (an IEEE Guaranteed row from `docs/design/float.md`).
+// and the infinity row (an IEEE Guaranteed row from `docs/design/float.ai.md`).
 
 /// One f32-mode call: argument bit patterns in, expected result words out.
 #[cfg(feature = "float-f32")]
@@ -746,7 +746,7 @@ fn build_f32_arith() -> (LpirModule, LpsModuleSig) {
 /// inverting — and M7 D5 fuses the compare into the consumer with `b0` as
 /// implicit scratch. The NaN invocation is the row that caught D5's first
 /// mapping table: it tabulated `ueq.s` + `movf` for `!=`, which computes
-/// "ordered and unequal" and answers *false* on NaN, where `float.md` §3 makes
+/// "ordered and unequal" and answers *false* on NaN, where `float.ai.md` §3 makes
 /// `!=` a Guaranteed *true*.
 #[cfg(feature = "float-f32")]
 fn build_f32_compare_mask() -> (LpirModule, LpsModuleSig) {
@@ -1102,7 +1102,7 @@ pub const F32_CASES: &[XtF32Case] = &[
                 golden: &[0xC060_0000],
             },
             XtF32Invocation {
-                // inf * 1 + inf - 1, scaled: still inf. float.md §3
+                // inf * 1 + inf - 1, scaled: still inf. float.ai.md §3
                 // Guaranteed — infinity arithmetic is IEEE at RNE everywhere.
                 args: &[0x7F80_0000, 0x3F80_0000],
                 golden: &[0x7F80_0000],
@@ -1133,7 +1133,7 @@ pub const F32_CASES: &[XtF32Case] = &[
             },
             XtF32Invocation {
                 // NaN vs 1.0: every ordered compare false, `!=` true => 32.
-                // float.md §3 Guaranteed. A quiet NaN, not a signalling one.
+                // float.ai.md §3 Guaranteed. A quiet NaN, not a signalling one.
                 args: &[0x7FC0_0000, 0x3F80_0000],
                 golden: &[32],
             },

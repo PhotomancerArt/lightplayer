@@ -1,4 +1,4 @@
-//! Test support: drive an immediately-ready future (AGENTS.md: tests count
+//! Test support: drive an immediately-ready future (AGENTS.ai.md: tests count
 //! as edges; a null-waker loop is fine there and nowhere else).
 
 use std::future::Future;

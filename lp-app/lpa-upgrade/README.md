@@ -136,7 +136,7 @@ all three lists.
 
 Project format 12 moves every fixture's mapping and patching into one map2d
 format-6 file (`lpc-mapping`'s parts, segments and patcher; ADR
-`docs/adr/2026-10-27-mapping-model-parts-segments-patcher.md`, amendment
+`docs/adr/2026-10-27-mapping-model-parts-segments-patcher.ai.md`, amendment
 "the upgrade"). `src/steps/v11_to_v12.rs` freezes where every lamp lands
 today into a fixture start and overrides, mints ids, names the outputs a
 start names, writes the map2d at format 6 and removes the patch document;
@@ -173,7 +173,7 @@ its golden with it.
   `upgrade_with_chain(files, engine_format, …)` on the host, and writes the
   result back in one atomic batch per project, startup project first, with
   no click; a board found later with older projects is finished the same way
-  on connect (`docs/adr/2026-10-28-firmware-updates-upgrade-the-boards-projects.md`).
+  on connect (`docs/adr/2026-10-28-firmware-updates-upgrade-the-boards-projects.ai.md`).
 
 `upgrade_to(files, target)` runs the chain to a given format rather than to
 this build's: a project already at `target` comes back untouched with an

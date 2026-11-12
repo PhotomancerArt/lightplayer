@@ -138,7 +138,7 @@ mod tests {
     }
 
     /// A registry row written before `board_id`/`chip`/`firmware` existed
-    /// must still load — the persisted-format rule (AGENTS.md): additive
+    /// must still load — the persisted-format rule (AGENTS.ai.md): additive
     /// `#[serde(default)]` fields, no version bump, old rows still parse.
     #[test]
     fn a_legacy_record_without_board_id_chip_or_firmware_deserialises() {

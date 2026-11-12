@@ -64,7 +64,7 @@
 //! answers on the link each message came from ([`update_links`], one
 //! [`update_outbox`] per link). Core-only runs as its own embassy task, as
 //! the engine's server loop does. The protocol and its compatibility rules
-//! are `docs/adr/2026-10-06-ota-update-protocol.md`.
+//! are `docs/adr/2026-10-06-ota-update-protocol.ai.md`.
 //!
 //! # The update light
 //!

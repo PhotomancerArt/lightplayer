@@ -51,7 +51,7 @@ pub struct NativeJitInstance {
 /// nothing else holds it. Without this it outlived every instance — a leak
 /// per compile, and one that splits the heap: it is allocated while a project
 /// runs, above the project's memory, and stays when the project is stopped
-/// (docs/defects/2026-09-24-ble-enabled-c6-refuses-a-project-switch-after-the-heap-cut.md).
+/// (docs/defects/2026-09-24-ble-enabled-c6-refuses-a-project-switch-after-the-heap-cut.ai.md).
 impl Drop for NativeJitInstance {
     fn drop(&mut self) {
         if let Ok(layout) =

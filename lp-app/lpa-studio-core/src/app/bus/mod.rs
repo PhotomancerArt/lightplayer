@@ -1,7 +1,7 @@
 //! Bus **wiring** view models.
 //!
 //! A derived view over the binding-graph probe snapshot
-//! (docs/adr/2026-07-06-binding-graph-probe.md); it owns no state of its
+//! (docs/adr/2026-07-06-binding-graph-probe.ai.md); it owns no state of its
 //! own. `ProjectController::ui_bus_view_for_scope` performs the projection
 //! so node labels and focus actions come from the same controllers the
 //! project pane uses.

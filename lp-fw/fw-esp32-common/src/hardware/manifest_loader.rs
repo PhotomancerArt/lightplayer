@@ -9,7 +9,7 @@
 //! staging, so it is written over the live file (which may be torn); one
 //! that does not parse is a stamp that never reached the live file, so it is
 //! dropped and the live file — the previous stamp, whole — stands.
-//! `docs/defects/2026-10-02-a-closed-tab-mid-stamp-leaves-hardware-json-truncated.md`.
+//! `docs/defects/2026-10-02-a-closed-tab-mid-stamp-leaves-hardware-json-truncated.ai.md`.
 
 use alloc::string::{String, ToString};
 use core::str;
@@ -355,7 +355,7 @@ mod tests {
         }
     }
 
-    /// Tests are an edge (AGENTS.md, sans-IO): a null-waker loop driving a
+    /// Tests are an edge (AGENTS.ai.md, sans-IO): a null-waker loop driving a
     /// conversation whose every future is immediately ready.
     fn block_on<F: Future>(future: F) -> F::Output {
         let mut future = pin!(future);

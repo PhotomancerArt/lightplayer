@@ -86,7 +86,7 @@ pub struct Engine {
     services: EngineServices,
     demand_roots: Vec<NodeId>,
     graphics: Option<Arc<dyn LpGraphics>>,
-    /// Engaged panel writers (panel.md P1–P4). A side store on purpose:
+    /// Engaged panel writers (panel.ai.md P1–P4). A side store on purpose:
     /// `apply_project_changes` rebuilds bindings from defs and must never
     /// destroy an engaged control.
     panel_writers: crate::dataflow::panel_writers::PanelWriterStore,
@@ -503,7 +503,7 @@ impl Engine {
     }
 
     /// Optional graphics backend for core shader nodes; clone is cheap (`Arc`).
-    /// Engage (or update) a panel writer (panel.md P1/P2): latched until
+    /// Engage (or update) a panel writer (panel.ai.md P1/P2): latched until
     /// an explicit clear, landing in `scope` at panel priority. Changes
     /// the winning provider set, so cached routes are invalidated.
     pub fn panel_write(
@@ -513,7 +513,7 @@ impl Engine {
         value: lpc_model::LpValue,
         ttl_ms: Option<u32>,
     ) {
-        // Momentary liveness (panel.md P14): the deadline is an engine-time
+        // Momentary liveness (panel.ai.md P14): the deadline is an engine-time
         // instant; renewal is just another write with a fresh TTL.
         let expires_at_ms = ttl_ms.map(|ttl| self.frame_time.total_ms as u64 + u64::from(ttl));
         self.panel_writers
@@ -531,7 +531,7 @@ impl Engine {
         cleared
     }
 
-    /// Clear one engaged panel writer (panel.md P3). Returns whether
+    /// Clear one engaged panel writer (panel.ai.md P3). Returns whether
     /// anything was engaged.
     pub fn panel_clear(
         &mut self,
@@ -778,7 +778,7 @@ impl Engine {
     /// ([`NodeRuntime::load_deciding_slots`]), so a restored playlist pick
     /// is the entry the first tick's residency step loads — the authored
     /// entry is never sampled or compiled (playlists-on-the-bus Q3; the
-    /// scarf rule, panel.md P10). Writers that are nodes resolve on the
+    /// scarf rule, panel.ai.md P10). Writers that are nodes resolve on the
     /// first produce as before.
     pub fn settle_load_deciding_panel_values(&mut self) {
         let mut settled: Vec<(NodeId, &'static str, lpc_model::LpValue, u64)> = Vec::new();
@@ -889,7 +889,7 @@ impl Engine {
         // fault pattern (never-black), and until 2026-09-02 that buffer never
         // reached the wall — the `?` here returned before the flush, so the
         // sim (which reads the published buffer) breathed red while the LEDs
-        // stayed dark (G1 bench, docs/adr/2026-09-02-fault-is-never-black.md).
+        // stayed dark (G1 bench, docs/adr/2026-09-02-fault-is-never-black.ai.md).
         let walk = self.tick_nodes(registry, delta_ms);
         let flushed = {
             let revision = self.revision;
@@ -915,7 +915,7 @@ impl Engine {
     /// ticks (e.g. from an allocation-failure retry hook, OUTSIDE the
     /// allocator lock). Anything a node drops here must be rebuilt lazily on
     /// its next render — that is the contract in
-    /// `docs/adr/2026-08-03-memory-pressure-at-compile-safe-points.md`.
+    /// `docs/adr/2026-08-03-memory-pressure-at-compile-safe-points.ai.md`.
     pub fn broadcast_memory_pressure(
         &mut self,
         level: crate::node::PressureLevel,
@@ -953,7 +953,7 @@ impl Engine {
                     let message = alloc::format!(
                         "frame plan check: {changed} output sink configuration(s) changed under \
                          a held structure epoch — an output def edit did not move it \
-                         (docs/adr/2026-10-24-frame-plan-once-per-edit.md)"
+                         (docs/adr/2026-10-24-frame-plan-once-per-edit.ai.md)"
                     );
                     if strict {
                         panic!("{message}");
@@ -1007,7 +1007,7 @@ impl Engine {
         self.revision = advance_revision();
         self.frame_time =
             FrameTime::new(delta_ms, self.frame_time.total_ms.saturating_add(delta_ms));
-        // Momentary panel writers despawn on expiry (panel.md P14) — the
+        // Momentary panel writers despawn on expiry (panel.ai.md P14) — the
         // despawn IS the release fallback for a dropped client.
         if self
             .panel_writers
@@ -1025,7 +1025,7 @@ impl Engine {
         // the compile runs before the fixture seams rebuild what was dropped:
         // the fixture resolves its visual input (where the shader compiles)
         // before `ensure_direct_points`/sample-buffer allocation. See
-        // docs/adr/2026-08-03-memory-pressure-at-compile-safe-points.md.
+        // docs/adr/2026-08-03-memory-pressure-at-compile-safe-points.ai.md.
         let window_wanted = self.tree.entries().any(|entry| {
             matches!(entry.state.value(), NodeEntryState::Alive(node) if node.wants_compile_window())
         });
@@ -1184,7 +1184,7 @@ impl Engine {
                 "the node tree changed shape ({previous_fingerprint:?} -> {fingerprint:?}) \
                  without Resolver::invalidate_structure(); resolution cached against the old \
                  graph is now being served. Whatever mutated the tree or its bindings must \
-                 announce it — see docs/adr/2026-07-31-resolver-persistent-resolution.md"
+                 announce it — see docs/adr/2026-07-31-resolver-persistent-resolution.ai.md"
             );
         }
         self.last_structural_check = Some((fingerprint, epoch));
@@ -1690,7 +1690,7 @@ struct EngineResolveHost<'a> {
     /// process, or parallel tests sharing the binary) desyncs the two and
     /// the node sees a window that never matches its render frame. That is
     /// exactly how a shader deferred its compile forever — see
-    /// `docs/defects/2026-08-03-render-context-revision-read-from-ambient-counter.md`.
+    /// `docs/defects/2026-08-03-render-context-revision-read-from-ambient-counter.ai.md`.
     frame_revision: Revision,
     /// The PREVIOUS tick's project-fault verdict and the engine's
     /// presentation knob, stamped onto every [`TickContext`] this host
@@ -2096,7 +2096,7 @@ impl ResolveHost for EngineResolveHost<'_> {
         scope: Option<crate::node::ScopeRef>,
         channel: &lpc_model::ChannelName,
     ) -> Vec<(BindingRef, crate::dataflow::binding::BindingEntry)> {
-        // The R5 walk with the panel overlay (panel.md P4): at each scope,
+        // The R5 walk with the panel overlay (panel.ai.md P4): at each scope,
         // an engaged panel writer REPLACES the scope's provider set —
         // including for ByKey merge channels, where max priority wins
         // rather than merging — and an engaged scope counts as "has a
@@ -2488,7 +2488,7 @@ impl EngineResolveHost<'_> {
     /// and every unbound uniform came back `UnresolvedConsumedSlot` — a
     /// node behaving exactly as authored reported a permanent `Warn`,
     /// indistinguishable from a genuinely broken binding
-    /// (`docs/defects/2026-08-04-unbound-shader-uniform-warns.md`).
+    /// (`docs/defects/2026-08-04-unbound-shader-uniform-warns.ai.md`).
     ///
     /// The data produced is what [`materialize_shader_input`] already
     /// builds for absent data, so the *value* an unbound uniform runs on is
@@ -2520,7 +2520,7 @@ impl EngineResolveHost<'_> {
                 // A palette's authored default is its whole `GradientConfig`
                 // — the same value shape a `bus:palette` channel carries, so
                 // the bake path reads one thing whether or not anything
-                // drives it (`docs/design/color.md` §5).
+                // drives it (`docs/design/color.ai.md` §5).
                 lpc_model::ShaderSlotKind::Palette => SlotData::Value(WithRevision::new(
                     self.frame_revision,
                     lpc_model::ToLpValue::to_lp_value(&slot.gradient_config()),

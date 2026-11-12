@@ -293,7 +293,7 @@ fn the_merged_image_carries_a_bootloader_and_this_app() {
 /// S3 updates plan's P9), mount **settles** the newest record of each head —
 /// programs it again with the bytes it just read, so a weak program reads the
 /// same on every later read (`lp-tree-store`'s `record_scan.rs`,
-/// `docs/defects/2026-10-14-tree-store-trusts-a-torn-record-that-reads-whole-once.md`).
+/// `docs/defects/2026-10-14-tree-store-trusts-a-torn-record-that-reads-whole-once.ai.md`).
 /// Those programs change no byte, which is what is asserted: the chip's
 /// `lpfs` is the first boot's, byte for byte.
 #[test]

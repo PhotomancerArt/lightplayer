@@ -23,7 +23,7 @@ use lp_link::{CH_CONTROL, CH_PROTO, Link, LinkConfig, LinkState, Micros, Selecti
 /// The region-1 floor this sizing has to respect: the largest free block
 /// with BLE on and idle, no lp-link BLE traffic yet
 /// (`2026-09-27-1218-fragmentation-tolerant-reads/REPORT.md`, quoted in this
-/// plan's `notes.md`). Not asserted against — reported alongside the
+/// plan's `notes.ai.md`). Not asserted against — reported alongside the
 /// measured figure so the director can judge R1 (drop `RADIO_LINK_SLOTS` to
 /// 1?) with both numbers in hand.
 const REGION_1_FLOOR_BYTES: usize = 19_500;

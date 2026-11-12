@@ -7,7 +7,7 @@ other legal entity ("Corporation") to authorize Contributions Submitted by its
 designated employees or contractors to the LightPlayer project, and to grant
 the licenses those Contributions require. It parallels the LightPlayer
 Individual Contributor License Agreement
-([individual-cla.md](individual-cla.md)); an individual whose work is owned by
+([individual-cla.ai.md](individual-cla.ai.md)); an individual whose work is owned by
 their employer is covered by this Agreement rather than by an individual
 signature alone.
 
@@ -95,7 +95,7 @@ Contributor made in the course of their work for You, or is identified on
 Submission as third-party material together with the complete details of its
 source and of any license or other restriction of which You are aware —
 consistent with the Project's license-provenance rules in
-`docs/adr/2026-07-29-license-provenance-discipline.md`.
+`docs/adr/2026-07-29-license-provenance-discipline.ai.md`.
 
 (d) You will notify Us in writing when a person should be added to or removed
 from Schedule A. A removal does not affect licenses already granted for

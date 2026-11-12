@@ -52,7 +52,7 @@ engine (`lpc-engine`) and shader execution backends.
   support. **Never a default** — every host, the studio, and the shipping
   ESP32 firmware construct the real backend — and **not** a step toward
   making the compiler an opt-in feature on `lpc-engine`/`lpa-server`, which
-  `AGENTS.md` forbids outright.
+  `AGENTS.ai.md` forbids outright.
 
   The feature gate is not ceremony. Merely *adding* the module — which links
   no symbols; `rust-nm` finds none of it in the C6 image — grew `.text` by
@@ -62,7 +62,7 @@ engine (`lpc-engine`) and shader execution backends.
 - **Never silent.** A backend must error on options it cannot honor — in
   particular the `ShaderSemantics` tier — rather than substitute different
   semantics. Which tier/backend is active is user-visible state. See
-  `docs/adr/2026-07-09-preview-fidelity-tiers.md`.
+  `docs/adr/2026-07-09-preview-fidelity-tiers.ai.md`.
 
 ## GPU-resident texture ops
 

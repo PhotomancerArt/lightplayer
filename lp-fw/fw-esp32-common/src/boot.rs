@@ -128,7 +128,7 @@ fn log_memory(server: &LpServer, label: &str) {
         // costs, and the per-LED figure this chip's LED ceiling is quoted from
         // is derived by differencing two such brackets. At KB granularity that
         // difference carries ±8 B/LED of rounding — enough to hide a whole
-        // optimisation. See `docs/adr/2026-08-01-esp32v3-flash-budget.md`.
+        // optimisation. See `docs/adr/2026-08-01-esp32v3-flash-budget.ai.md`.
         log::info!(
             "[mem] {label}: {free} B free / {used} B used ({}k / {}k)",
             free / 1024,

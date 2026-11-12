@@ -30,10 +30,10 @@
 //! Firefox on CI, where the polyfill is the whole `navigator.serial` — and the
 //! live half against a real `emu serve` (`just lpa-link-browser-test-live`)
 //! runs in Chrome; the suite is documented as runnable locally in Chrome and
-//! Brave too (`AGENTS.md`). The frozen-file discipline that once backed the
+//! Brave too (`AGENTS.ai.md`). The frozen-file discipline that once backed the
 //! "runs unchanged" claim mechanically (a content-hash lint) was retired when
 //! emulator plan two closed — the rule now lives permanently in
-//! `docs/adr/2026-09-09-studio-device-stack-over-a-virtual-serial-port.md`,
+//! `docs/adr/2026-09-09-studio-device-stack-over-a-virtual-serial-port.ai.md`,
 //! rule 1.
 
 mod browser_esp32_flash;

@@ -6,9 +6,9 @@
 //! [`InterpMethod`](lpc_model::InterpMethod). This module owns what the engine
 //! does with it: interpolate in the authored space, convert the result to
 //! canonical, and write the height-one texture a `sampler2D` palette uniform
-//! reads (`docs/design/color.md` §6, §7).
+//! reads (`docs/design/color.ai.md` §6, §7).
 //!
-//! The split is the one `color.md` §7 draws. Conversion is the *engine's*
+//! The split is the one `color.ai.md` §7 draws. Conversion is the *engine's*
 //! responsibility, never the shader's: a shader only ever sees canonical F32
 //! LinearSrgb, quantized to the texture's Unorm16 storage.
 

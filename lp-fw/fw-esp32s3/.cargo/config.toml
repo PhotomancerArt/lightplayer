@@ -13,7 +13,7 @@ target = "xtensa-esp32s3-none-elf"
 # physical chip. Omit it and even a 16 MB board boot-loops with
 # "partition N invalid ... exceeds flash chip size 0x400000". Keep this value
 # in sync with `s3_flash_size` in the workspace justfile and with
-# partitions.csv — see docs/adr/2026-07-30-esp32s3-partition-floor.md.
+# partitions.csv — see docs/adr/2026-07-30-esp32s3-partition-floor.ai.md.
 runner = "espflash flash --chip esp32s3 --partition-table partitions.csv --flash-size 8mb --monitor --after hard-reset"
 rustflags = [
   # The Xtensa target links through xtensa-esp32s3-elf-gcc (GNU ld), so linker
@@ -40,7 +40,7 @@ ESP_LOG = "info"
 # reason: no code runs during a flash write (esp-storage takes
 # `esp_sync::RawMutex`, `rsil 5`, around every ROM flash call, and every
 # flash writer stalls core 1 first, which runs no radio code anyway: `src/core1.rs`,
-# since `two-core`). The S3's RAM ADR (docs/adr/2026-10-21-s3-radio-memory.md)
+# since `two-core`). The S3's RAM ADR (docs/adr/2026-10-21-s3-radio-memory.ai.md)
 # carries the argument and the bytes. A build that links no radio blob is
 # unchanged. The BLE controller switch is not set: it names the C6's NPL
 # archive (`libble_app.a`), and this chip's controller is BTDM.
@@ -75,7 +75,7 @@ ESP_HAL_CONFIG_USE_RWDATA_LD_HOOK = "true"
 # `hot_iram/README.md` says how it is measured and kept current, and
 # `just s3-hot-iram-check` (CI's S3 size job) fails when it goes stale. The
 # arena gives the bytes back (`HOT_IRAM_BYTES` in src/main.rs). ADR:
-# docs/adr/2026-10-24-s3-hot-code-in-iram.md.
+# docs/adr/2026-10-24-s3-hot-code-in-iram.ai.md.
 ESP_HAL_CONFIG_USE_RWTEXT_LD_HOOK = "true"
 
 [unstable]

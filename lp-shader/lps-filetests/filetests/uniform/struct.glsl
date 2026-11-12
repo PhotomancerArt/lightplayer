@@ -97,12 +97,12 @@ vec4 test_shared_struct_match_combined() {
 // result: wasm.f32 returns vec4(NaN..), interp.f32 returns vec4(0..).
 //
 // G1 answered this (2026-07-31): the authority is the product spec, not IEEE and
-// not silicon. docs/design/float.md §5 classifies BOTH operations as
+// not silicon. docs/design/float.ai.md §5 classifies BOTH operations as
 // **Unspecified** — `max` with a NaN operand (IEEE defines competing operations
 // and GLSL declares it undefined) and `normalize(vec3(0))` (a GLSL-undefined
 // library input). Neither target is wrong.
 //
-// So the f32 expectation is **retired, not carried** (2026-08-02): float.md §5
+// So the f32 expectation is **retired, not carried** (2026-08-02): float.ai.md §5
 // rule 3 says unspecified behavior is never asserted, and `@broken` asserted it
 // while calling the disagreement a bug. Scoping the directive to `run[q32]:`
 // states the real rule — Q32 has one defined answer here and must keep hitting

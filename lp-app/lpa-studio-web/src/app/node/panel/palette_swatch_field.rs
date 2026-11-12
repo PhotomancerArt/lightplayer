@@ -33,7 +33,7 @@
 //!
 //! Colors are the panel families: violet when the backing slot is bound,
 //! the gold `status-engaged` family when a panel writer holds the channel
-//! (`docs/design/panel.md` P6; the family was minted at the M4 P6 gate).
+//! (`docs/design/panel.ai.md` P6; the family was minted at the M4 P6 gate).
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 

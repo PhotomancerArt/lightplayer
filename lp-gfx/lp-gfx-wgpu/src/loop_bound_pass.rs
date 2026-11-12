@@ -5,7 +5,7 @@
 //! back-edges per invocation — and traps when the tank is empty. A GPU has no
 //! meter: a kernel that never returns is stopped only by the driver's
 //! watchdog, which resets the device and takes every other surface in flight
-//! with it (`docs/defects/2026-09-06-gpu-tier-executes-unbounded-shaders.md`).
+//! with it (`docs/defects/2026-09-06-gpu-tier-executes-unbounded-shaders.ai.md`).
 //! This module closes that contract gap in two layers, both run between
 //! `glsl-in` and validation:
 //!
@@ -492,7 +492,7 @@ fn bound_block(
 /// the pre-store sum (`let e = budget + 1u; …; budget = e; break if e >
 /// cap`) Metal bounds the loop correctly but drops the guarded `atomicAdd`
 /// entirely — a top-level loop never counted, a nested one did
-/// (`docs/defects/2026-09-07-metal-drops-atomic-guarded-by-loop-exit-sum.md`).
+/// (`docs/defects/2026-09-07-metal-drops-atomic-guarded-by-loop-exit-sum.ai.md`).
 /// Every shape whose `break if` reads the variable back after the store
 /// counts; `tests/loop_fault.rs` holds it on a device.
 fn charge_loop(

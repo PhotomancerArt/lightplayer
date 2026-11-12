@@ -48,7 +48,7 @@ manifest.
 Xtensa has no upstream Rust target, so — like `fw-esp32s3` — this crate
 carries its own `rust-toolchain.toml` with `channel = "esp"` (Espressif's
 fork, installed by `espup`), per
-`docs/adr/2026-07-29-per-chip-fw-toolchains.md`.
+`docs/adr/2026-07-29-per-chip-fw-toolchains.ai.md`.
 
 ```bash
 just build-fw-esp32v3        # or, by hand:
@@ -78,7 +78,7 @@ the RAM ledger, never from the RMT channel count — the measured ceiling is
 **~240 LEDs comfortable / ~300 at the edge / 400 impossible**, at ≈89.5 B per
 LED. Full flash and RAM ledgers, the cross-chip comparison and the
 serde-surface go/no-go are in
-[`docs/adr/2026-08-01-esp32v3-flash-budget.md`](../../docs/adr/2026-08-01-esp32v3-flash-budget.md).
+[`docs/adr/2026-08-01-esp32v3-flash-budget.ai.md`](../../docs/adr/2026-08-01-esp32v3-flash-budget.ai.md).
 
 ### Release profile
 
@@ -111,7 +111,7 @@ Boards whose manifest declares `power_gate` entries (the dig2go's GPIO12 LED
 relay) additionally get `output/power_gate.rs`: an esp-hal pin + `Instant`
 clock handed to `fw-esp32-common`'s rail state machine at boot. Gateless
 boards construct the provider exactly as before. See
-`docs/adr/2026-08-08-switched-power-rail-mechanism.md`.
+`docs/adr/2026-08-08-switched-power-rail-mechanism.ai.md`.
 
 Ported from the experiment repo's hardware-validated classic backend
 (`2026-esp32s3-experiment`, `fw/led-lab-esp32/src/esp32_rmt.rs`). All
@@ -266,8 +266,8 @@ collision the compiler cannot see is the linker's: `.rwtext` shares SRAM0 with
 the JIT region and grows upward, so boot asserts that it ends below the region
 base (`assert_jit_region_clear_of_rwtext`, decoding esp-hal's section-relative
 `_rwtext_len`). Total heap is `HEAP_SIZE + 98,304` = 210,944 B; see
-`docs/adr/2026-09-05-classic-jit-code-lives-in-sram0.md` and
-`docs/adr/2026-08-01-esp32v3-flash-budget.md`.
+`docs/adr/2026-09-05-classic-jit-code-lives-in-sram0.ai.md` and
+`docs/adr/2026-08-01-esp32v3-flash-budget.ai.md`.
 
 ### Amended 2026-09-05 — the stack is measured, and the heap is four regions
 
@@ -340,7 +340,7 @@ on macOS before it enumerates as a `/dev/cu.wchusbserial*` device at all —
 unlike the S3 (USB-Serial-JTAG, no driver needed) or the C6. After
 installing the driver, macOS may block the kernel extension under
 **System Settings → Login Items & Extensions** until you explicitly allow
-it. See the planning roadmap's notes.md and memory
+it. See the planning roadmap's notes.ai.md and memory
 `classic-esp32-ch340k-macos-driver` for the full procedure; this is a
 one-time machine setup step, not a per-flash one.
 
@@ -357,7 +357,7 @@ into a loud espflash refusal instead of a confusing boot-loop.
 
 `partitions.csv` copies `fw-esp32c6`'s **4 MB** shape verbatim (Q7 in the
 bring-up roadmap). **Ratified at M6** —
-[`docs/adr/2026-08-01-esp32v3-flash-budget.md`](../../docs/adr/2026-08-01-esp32v3-flash-budget.md) —
+[`docs/adr/2026-08-01-esp32v3-flash-budget.ai.md`](../../docs/adr/2026-08-01-esp32v3-flash-budget.ai.md) —
 though the reasoning that produced it turned out to be wrong in a harmless
 direction: the guess was that this chip is flash-constrained like the C6, and
 it is not. The measured image is within 8,720 B of the **S3's**, not the C6's
@@ -385,7 +385,7 @@ divisor itself** — the ROM bootloader leaves a divisor set for its own
 `CpuClock::max()`, the stale divisor makes every `esp_println!` print
 garbage at any standard host baud. This was diagnosed and fixed on real
 classic-ESP32 hardware in the experiment repo (`fw/xt-runner-esp32`,
-FINDINGS.md "C1"): construct an `esp_hal::uart::Uart` on UART0 once at boot
+FINDINGS.ai.md "C1"): construct an `esp_hal::uart::Uart` on UART0 once at boot
 (115200 8N1, TX=GPIO1, RX=GPIO3). `board::esp32v3::init::init_board` does
 exactly that, before the first `esp_println!` — and since M3-P1 that binding
 is no longer a keep-alive hack, it is the actual server transport.
@@ -420,8 +420,8 @@ transfer. Messages-first stays **off** here, unlike the C6/S3: Studio's
 editor read costs the classic ~150–175 ms of CPU, and answered before the
 render it delays every frame's display by that much. io_task (swi2, the
 1 ms pacer) is untouched and still the only thing that touches UART0; see
-`docs/adr/2026-08-25-classic-uart-io-task-executor-isolation.md`'s
-2026-10-03 amendment and `docs/adr/2026-10-02-c6-link-io-thread.md`'s
+`docs/adr/2026-08-25-classic-uart-io-task-executor-isolation.ai.md`'s
+2026-10-03 amendment and `docs/adr/2026-10-02-c6-link-io-thread.ai.md`'s
 classic amendment for the numbers, the lock and why the thread is pinned
 to core 0 (never the APP core — it is the RMT core and stalls on every
 flash write). The diagnostic feature `io_thread_stack_diag` paints the

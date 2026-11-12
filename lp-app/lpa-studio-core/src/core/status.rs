@@ -63,7 +63,7 @@ pub enum UiStatusKind {
     Good,
     /// The live family (blue): something current that is not a problem —
     /// on the board card, only the lit cloud (a board lightplayer.app
-    /// reaches right now; `docs/style/ui.md`, "Status hues never move").
+    /// reaches right now; `docs/style/ui.ai.md`, "Status hues never move").
     /// Never a health warning, and never an update on offer: that row is
     /// Neutral and its button carries it (P16).
     Live,

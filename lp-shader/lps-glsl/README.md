@@ -133,8 +133,8 @@ and shader reload latency.
 
 See:
 
-- [`docs/reports/2026-05-12-lps-glsl-frontend-experiment.md`](../../docs/reports/2026-05-12-lps-glsl-frontend-experiment.md)
-- [`docs/design/lps-glsl-native-frontend.md`](../../docs/design/lps-glsl-native-frontend.md)
+- [`docs/reports/2026-05-12-lps-glsl-frontend-experiment.ai.md`](../../docs/reports/2026-05-12-lps-glsl-frontend-experiment.ai.md)
+- [`docs/design/lps-glsl-native-frontend.ai.md`](../../docs/design/lps-glsl-native-frontend.ai.md)
 
 ## Filetest Targets
 

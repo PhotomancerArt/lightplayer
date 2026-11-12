@@ -3,7 +3,7 @@
 //!
 //! P3's ledger recorded 543 bytes of `[INIT]` chain written into an
 //! accept block that remembers only the last one
-//! (`docs/reports/2026-09-10-esp32v3-strict-boot-inventory.md` §1.1). This
+//! (`docs/reports/2026-09-10-esp32v3-strict-boot-inventory.ai.md` §1.1). This
 //! file is the same 543 bytes coming out of the **host stream** — through a
 //! FIFO, through a shifter draining at 921,600 baud in emulated time, and
 //! into a sink — byte for byte, with nothing unmapped and with two runs
@@ -471,7 +471,7 @@ const HEAP_USED_GAP: u64 = 84;
 /// in `LpFs::read_file` ~30k cycles after the release; that was the
 /// emulator's own defect (the APP core was being run through the mask ROM's
 /// reset path over heap region 0 —
-/// `docs/defects/2026-09-10-the-emulator-ran-the-rom-reset-path-on-the-app-core.md`),
+/// `docs/defects/2026-09-10-the-emulator-ran-the-rom-reset-path-on-the-app-core.ai.md`),
 /// and with it fixed the boot reaches the heartbeat and the figure can be
 /// read. On 2026-09-11, second boot, `[INIT] RMT ISR on APP core` on both
 /// sides:
@@ -556,7 +556,7 @@ const STACK_HIGH_WATER_GAP: u64 = 640;
 // ⚠️ **And it is positional, so the record holds CI's value.** A high-water
 // is where an interrupt happened to land, and the tree's image is not the
 // same bytes on two hosts (host paths, the host rustc's own build; see
-// `docs/debt/reference-images-are-not-reproducible-across-hosts.md`). At
+// `docs/debt/reference-images-are-not-reproducible-across-hosts.ai.md`). At
 // `5e864de73` CI's runner reads −96 and a desk worktree reads −64 off the
 // same commit — a desk failure of this test predates the record. So it is
 // observed with `positional_int`: checked exactly, but a desk bless does not

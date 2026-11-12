@@ -263,7 +263,7 @@ class Interp:
 
     `&&` / `||` short-circuit exactly as GLSL requires; both frontends now
     lower side-effecting right operands to control flow (see
-    docs/design/lpir/02-core-ops.md).
+    docs/design/lpir/02-core-ops.ai.md).
     """
 
     FUEL = 100_000

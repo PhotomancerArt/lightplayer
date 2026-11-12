@@ -1,6 +1,6 @@
 //! Native f32 square root — the f32 sibling of [`super::fsqrt_q32`].
 //!
-//! `sqrt` is a `docs/design/float.md` §3 **Guaranteed** row: correctly rounded
+//! `sqrt` is a `docs/design/float.ai.md` §3 **Guaranteed** row: correctly rounded
 //! (RNE) on every target. So this is the hardware/`libm` square root, not an
 //! approximation — unlike [`super::super::glsl::inversesqrt_f32`], which is a
 //! §6 builtin and may approximate.

@@ -7,7 +7,7 @@
 //! `scripts/emu/pac-regnames.py` from the svd2rust offset comments in the
 //! `esp32c6` PAC — the same source the register inventory came from — and
 //! each generated file carries the provenance header the license ADR
-//! requires (`docs/adr/2026-07-29-license-provenance-discipline.md`).
+//! requires (`docs/adr/2026-07-29-license-provenance-discipline.ai.md`).
 //! `just lint-emu-regnames` regenerates and diffs, so a hand edit is caught
 //! the way `lint-vec-corpus` catches one in the shader corpus.
 //!
@@ -60,7 +60,7 @@ pub struct RegNames {
     /// [`RegFile::with_names`](crate::RegFile::with_names) seeds from this,
     /// which is what turns "the resets a boot was observed to need" into
     /// "the resets the PAC states" — see
-    /// `docs/defects/2026-09-07-accept-blocks-carry-only-the-reset-values-a-boot-needed.md`.
+    /// `docs/defects/2026-09-07-accept-blocks-carry-only-the-reset-values-a-boot-needed.ai.md`.
     pub resets: &'static [(u32, u32)],
     /// `(offset, access)` for every register that is **not** plain
     /// read-write, sorted by offset. Read-write is the common case and the

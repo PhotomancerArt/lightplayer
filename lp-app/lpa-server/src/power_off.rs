@@ -10,7 +10,7 @@
 //! returns `Ok` at once: it hands the actual sleep to the USB link task,
 //! which drains the link (up to 1 s) before sleeping, so the process does
 //! not stop on the spot — waking is still a reset either way. See
-//! `docs/adr/2026-06-16-power-button-runtime-event.md`.
+//! `docs/adr/2026-06-16-power-button-runtime-event.ai.md`.
 
 extern crate alloc;
 

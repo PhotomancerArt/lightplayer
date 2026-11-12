@@ -5,7 +5,7 @@
 //! of reaching a `Vec` resize or the VMContext sizing. The default is
 //! deliberately one round number; board-aware construction can replace
 //! `default()` later without touching the enforcement seams
-//! (`docs/debt/shader-budget-is-a-fixed-default.md`).
+//! (`docs/debt/shader-budget-is-a-fixed-default.ai.md`).
 
 use alloc::string::String;
 

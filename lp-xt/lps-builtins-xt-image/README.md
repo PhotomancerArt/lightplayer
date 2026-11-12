@@ -32,7 +32,7 @@ no esp toolchain, so consumers skip the Xtensa host path with a loud note naming
 
 ## Why a separate crate
 
-- `lp-shader/*` crates are **sans-IO** (`docs/adr/2026-07-06-sans-io-core.md`), so
+- `lp-shader/*` crates are **sans-IO** (`docs/adr/2026-07-06-sans-io-core.ai.md`), so
   the consumer cannot read the ELF from a path at runtime. Embedding at build
   time is the compliant answer.
 - The consumer, `lpvm-native`, is also compiled for device firmware. A build
@@ -46,7 +46,7 @@ rewrite is what wakes it. Treating that window as "not built" would embed an
 empty slice and surface minutes later as every Xtensa test skipping at once. The
 copy therefore verifies ELF magic and a stable size, retrying briefly. Same
 hazard and same fix as the rv32 image; see
-`docs/defects/2026-07-29-builtins-elf-uplift-race.md`.
+`docs/defects/2026-07-29-builtins-elf-uplift-race.ai.md`.
 
 **"Every Xtensa test skipped or failed at 0.00s" means a missing or half-written
 image, not a codegen bug.**

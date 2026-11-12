@@ -587,7 +587,7 @@ impl FixtureNode {
 /// render straight into the point handle (the mapping is their one home),
 /// so nothing here carries a key and a memory-pressure drop of the window
 /// loses nothing but the allocation
-/// (`docs/adr/2026-09-06-direct-sampling-bounded-batches.md`).
+/// (`docs/adr/2026-09-06-direct-sampling-bounded-batches.ai.md`).
 struct SampleBatch {
     points: SamplePointsHandle,
     samples: SampleOutHandle,
@@ -738,9 +738,9 @@ impl NodeRuntime for FixtureNode {
         // EARLIER in the same tick — so net freed at the compile instant is
         // ~0 B, and clearing the staleness keys forces the mapping-point walk
         // to re-run inside the window frame. Removed in M6 P4; see
-        // `docs/defects/2026-08-04-compile-window-drops-rebuilt-before-compile.md`
+        // `docs/defects/2026-08-04-compile-window-drops-rebuilt-before-compile.ai.md`
         // and the 2026-08-04 amendment to
-        // `docs/adr/2026-08-03-memory-pressure-at-compile-safe-points.md`.
+        // `docs/adr/2026-08-03-memory-pressure-at-compile-safe-points.ai.md`.
         //
         // Seam kept on purpose: the broadcast reaches this node at a safe
         // point, so anything genuinely droppable — state this node's own tick
@@ -2013,7 +2013,7 @@ fn finalize_fixture_rgb(
 /// then emits `s` of the photons and keeps `s` of the wire's 256 codes.
 /// Applied before the encode it would be raised to the 2.8 power on its way
 /// to the wire (`(s·c)^γ = s^γ·c^γ`), starving the 8-bit output at dim
-/// settings. See `docs/design/brightness-gamma-dithering.md`.
+/// settings. See `docs/design/brightness-gamma-dithering.ai.md`.
 pub(crate) fn encode_fixture_channel(
     value: u16,
     gamma_correction: bool,
@@ -4123,7 +4123,7 @@ mod tests {
     /// node's own `produce` has already rebuilt every one of them, so the
     /// drop freed nothing at the compile instant and forced the mapping-point
     /// walk to re-run inside the window frame. See
-    /// `docs/defects/2026-08-04-compile-window-drops-rebuilt-before-compile.md`.
+    /// `docs/defects/2026-08-04-compile-window-drops-rebuilt-before-compile.ai.md`.
     ///
     /// Sentinel identity, not mere `is_some()`: this must fail if the drops
     /// come back without the ordering fact changing first.

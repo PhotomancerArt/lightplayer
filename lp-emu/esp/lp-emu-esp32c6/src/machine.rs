@@ -639,7 +639,7 @@ pub enum UsbSjSink {
     ///   all (up to `TCP_BACKLOG_CAP`, 4 MiB) and replays it to the first
     ///   client. That models an application that had the port open since
     ///   power-on, not an unopened port:
-    ///   `docs/defects/2026-09-23-emulated-usb-port-drains-with-no-client-attached.md`.
+    ///   `docs/defects/2026-09-23-emulated-usb-port-drains-with-no-client-attached.ai.md`.
     /// - `--usb-sj-drain manual` holds `draining` on across a client that
     ///   disconnects and reconnects, so that reconnect is replayed too.
     ///
@@ -4978,7 +4978,7 @@ impl Esp32C6Machine {
     /// ring being full, and that is counted rather than papered over.
     ///
     /// **Why a cursor and not the base** — this is
-    /// `docs/debt/emu-c6-air-delivers-every-other-frame.md`, and it cost the
+    /// `docs/debt/emu-c6-air-delivers-every-other-frame.ai.md`, and it cost the
     /// guest every second frame. The blob recycles a descriptor it has
     /// consumed by moving it to the **tail** of its chain (`owner` back to 1,
     /// `next` to NULL, the old tail linked to it) and advancing
@@ -5748,7 +5748,7 @@ impl Esp32C6Machine {
                 // deadlines `reboot` itself zeroes. Without the rebase the
                 // loop `continue`s against a bound the board's whole prior
                 // lifetime away and replays it inside this one slice, which
-                // is `docs/defects/2026-09-11-a-reset-replays-the-boards-lifetime.md`:
+                // is `docs/defects/2026-09-11-a-reset-replays-the-boards-lifetime.ai.md`:
                 // measured at exactly `old + budget`, so a board minutes old
                 // freezes its host for minutes.
                 //
@@ -6147,7 +6147,7 @@ impl Esp32C6Machine {
             // `reset` is (which becomes one inside `UsbSerialJtag::reset`):
             // the run loop is the one place that knows how to restart the
             // chip AND rebase the run's cycle budget onto the new clock
-            // (`docs/defects/2026-09-11-a-reset-replays-the-boards-lifetime.md`).
+            // (`docs/defects/2026-09-11-a-reset-replays-the-boards-lifetime.ai.md`).
             // The strapping is the machine's current one — a power cycle
             // re-reads the pins, and nothing moved them.
             ControlCommand::PowerCycle => {
@@ -6824,7 +6824,7 @@ mod tests {
     /// rebased, the slice that carries a reboot runs the board's whole prior
     /// lifetime over again before it reaches a cycle count it has already
     /// passed once — silently, with the host frozen for the duration.
-    /// `docs/defects/2026-09-11-a-reset-replays-the-boards-lifetime.md`.
+    /// `docs/defects/2026-09-11-a-reset-replays-the-boards-lifetime.ai.md`.
     ///
     /// The measurement is in cycles and only in cycles: the age and the
     /// budget are guest quantities, and nothing here reads a clock.
@@ -6975,7 +6975,7 @@ mod tests {
             m.peek_word(lp),
             Some(0xabad_1dea),
             "an HP-only reset does not reach the LP island — the whole of \
-             docs/defects/2026-09-06-c6-analog-master-wedges-the-bootloader.md"
+             docs/defects/2026-09-06-c6-analog-master-wedges-the-bootloader.ai.md"
         );
         assert_eq!(
             m.peek_word(hp),

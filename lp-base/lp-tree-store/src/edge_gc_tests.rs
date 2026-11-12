@@ -1,7 +1,7 @@
 //! A nearly full store: a write GC can make room for is not refused, and a
 //! re-run after a power cut fits where the step fitted
-//! (`docs/defects/2026-10-09-tree-store-rerun-after-a-cut-is-refused-at-the-edge.md`,
-//! `docs/defects/2026-10-10-tree-store-gc-cannot-pack-what-the-bound-admits.md`).
+//! (`docs/defects/2026-10-09-tree-store-rerun-after-a-cut-is-refused-at-the-edge.ai.md`,
+//! `docs/defects/2026-10-10-tree-store-gc-cannot-pack-what-the-bound-admits.ai.md`).
 //! Small geometries on lp-nor-sim; each test fails on the store before
 //! its defect's fix.
 

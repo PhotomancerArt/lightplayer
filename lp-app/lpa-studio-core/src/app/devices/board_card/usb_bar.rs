@@ -1,4 +1,4 @@
-//! The USB row: the board's cable (`docs/ux/anatomy/board-card.md`, "USB").
+//! The USB row: the board's cable (`docs/ux/anatomy/board-card.ai.md`, "USB").
 //! Its kind is the link's own name, "USB"; its name says how the cable
 //! stands: "connected" while this tab reaches the board by it, else "not
 //! connected" — quiet, and normal for a board that lives on a house.
@@ -237,7 +237,7 @@ mod tests {
             assert_eq!(work.state, BarWorkState::Running);
             assert_eq!(work.cancel, None);
             assert_eq!(bar.summary, "Open in another tab", "unchanged");
-            // The row reads neutral while it works (`ui.md`, D34).
+            // The row reads neutral while it works (`ui.ai.md`, D34).
             assert_eq!(bar.tone, UiStatusKind::Neutral);
             assert_eq!(bar.action, None);
         }
