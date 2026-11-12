@@ -4,7 +4,7 @@
 //! `glsl/lpfn/generative/fbm/fbm3.glsl` (normative): octave sum of
 //! `lpfn_snoise` with amplitude 0.5, gain 0.5, lacunarity 2.0. FBM is a
 //! standard procedure from Perlin's 1985 paper (see
-//! docs/reports/2026-03-31-lpfx-license-audit.md).
+//! docs/reports/2026-03-31-lpfx-license-audit.ai.md).
 //!
 //! **Tolerance:** exact against the canonical f32.
 

@@ -23,7 +23,7 @@
 //! `__addsf3 = 0x400009f8`, and `__divsf3 = 0x400008dc` from the libgcc group).
 //! So the call costs one `auipc`+`jalr` and nothing else, and on the C6 it does
 //! not consume a byte of app flash. See
-//! `docs/adr/2026-07-31-soft-float-via-compiler-builtins.md`.
+//! `docs/adr/2026-07-31-soft-float-via-compiler-builtins.ai.md`.
 //!
 //! **f32 values live in integer registers on this path.** That is the
 //! soft-float ABI (`float` is passed and returned in `a0`-class registers), and
@@ -64,7 +64,7 @@
 //! `Fneg`, `Fabs`, `FconstF32`, and `FfromI32Bits` are pure bit manipulation on
 //! the IEEE encoding and lower to one or two integer instructions. `Fabs` in
 //! particular **must** be the sign-bit mask rather than a comparison, so it
-//! stays exact on NaN and `-0.0` (`docs/design/float.md` §3).
+//! stays exact on NaN and `-0.0` (`docs/design/float.ai.md` §3).
 //!
 //! # Hardware FPU: single instructions, and a call for the rest
 //!
@@ -87,7 +87,7 @@
 //! is parity; inlining the `div0.s`/`divn.s` estimate sequence buys speed and
 //! costs a hard dependency on an exhaustive extraction of the chip's
 //! implementation-defined estimate tables. **Float→int** is routed because
-//! `trunc.s` alone may not satisfy `float.md` §3: whether this silicon
+//! `trunc.s` alone may not satisfy `float.ai.md` §3: whether this silicon
 //! saturates or wraps for finite out-of-range inputs is an open measurement,
 //! and a builtin that is correct by construction beats an instruction that
 //! might be.
@@ -231,7 +231,7 @@ fn lower_soft_float_op(
         // A real divide, not the Q32 path's multiply-by-reciprocal. The Q32
         // rewrite is legitimate there because Q16.16 division is already
         // approximate; in f32 it would silently lose the last bits of an
-        // operation `docs/design/float.md` §3 marks correctly rounded.
+        // operation `docs/design/float.ai.md` §3 marks correctly rounded.
         LpirOp::FdivConstF32 { dst, lhs, rhs } => {
             let divisor = temps.mint();
             out.push(VInst::IConst32 {
@@ -348,7 +348,7 @@ fn lower_soft_float_op(
             Ok(())
         }
         // Flip the sign bit. Not `0.0 - x`: that turns `-0.0` into `+0.0` and
-        // quiets a signaling NaN, both of which `float.md` §3 forbids for `-x`.
+        // quiets a signaling NaN, both of which `float.ai.md` §3 forbids for `-x`.
         LpirOp::Fneg { dst, src } => {
             mask_op(
                 out,
@@ -625,7 +625,7 @@ pub fn push_entry_param_transfers(out: &mut Vec<VInst>, func: &IrFunction) -> us
 /// Reading that AR instead would be one instruction cheaper and wrong: LPIR is
 /// not SSA, so a parameter the body assigns to has its current value in the FR
 /// shadow only, and the AR keeps the value the caller passed. That shortcut is
-/// exactly `docs/defects/2026-08-01-xtlpn-f32-loses-writes-to-value-parameters.md`
+/// exactly `docs/defects/2026-08-01-xtlpn-f32-loses-writes-to-value-parameters.ai.md`
 /// — `float f(float x) { x = x + 1.0; return x; }` returned the argument
 /// untouched. The rule that replaces it is unconditional and therefore cannot be
 /// wrong about which values it applies to: **after the entry transfer, a float
@@ -730,7 +730,7 @@ fn lower_hardware_fpu_op(
         }
         // Sign-bit operations in the float domain. `abs.s`/`neg.s` are defined
         // as bit manipulations, so they stay exact on NaN and `-0.0`
-        // (`docs/design/float.md` §3) — the same property the soft-float path
+        // (`docs/design/float.ai.md` §3) — the same property the soft-float path
         // gets from its integer masks.
         LpirOp::Fabs { dst, src } => {
             push_falu_rr(out, FAluRROp::Abs, f(*dst), f(*src), po);
@@ -744,7 +744,7 @@ fn lower_hardware_fpu_op(
         // Comparisons produce an ordinary integer 0/1, so `dst` is the plain
         // vreg. Each condition is its own `FcmpCond` — `Fne` in particular is
         // NOT a negated `Eq`, because the two differ exactly on NaN, which is
-        // the row `float.md` §3 makes normative.
+        // the row `float.ai.md` §3 makes normative.
         LpirOp::Feq { dst, lhs, rhs } => {
             push_fcmp(out, FcmpCond::Eq, i(*dst), f(*lhs), f(*rhs), po);
             Ok(())
@@ -918,7 +918,7 @@ fn lower_hardware_fpu_op(
             po,
         ),
         // Saturating float→int. `trunc.s` alone does not satisfy
-        // `float.md` §3 — whether the S3's truncation saturates or wraps for
+        // `float.ai.md` §3 — whether the S3's truncation saturates or wraps for
         // finite out-of-range inputs is an unresolved M6-P6 measurement — so
         // this routes to a builtin that is correct by construction rather than
         // to an instruction that might be. An inline `trunc.s` (plus a clamp,
@@ -991,7 +991,7 @@ fn lower_hardware_fpu_op(
         ),
         // `x / c`. The Q32 path rewrites this to a multiply by a precomputed
         // reciprocal, which is a legitimate approximation in Q16.16 and an
-        // incorrect one here: `/` is a correctly-rounded row of `float.md` §3.
+        // incorrect one here: `/` is a correctly-rounded row of `float.ai.md` §3.
         LpirOp::FdivConstF32 { dst, lhs, rhs } => {
             let divisor_word = temps.mint();
             out.push(VInst::IConst32 {
@@ -1101,7 +1101,7 @@ pub fn push_return_transfer(out: &mut Vec<VInst>, word: VReg, float_dst: Option<
 /// `__fixsfsi` **is** in the soft-float ABI, and the direct-call rule would
 /// otherwise apply. It is skipped because the ABI does not pin the answers LPIR
 /// needs: libgcc documents float→int conversion as undefined for out-of-range
-/// inputs, and `docs/design/float.md` §3 requires finite out-of-range values to
+/// inputs, and `docs/design/float.ai.md` §3 requires finite out-of-range values to
 /// saturate. Rust's `compiler_builtins` happens to saturate (and map NaN to 0),
 /// but the ESP32-C6 resolves this symbol to the chip's ROM `rvfplib`, which is a
 /// *different implementation* — so calling it would mean the emulator and the
@@ -1448,7 +1448,7 @@ mod tests {
     }
 
     /// `abs`/`neg` are sign-bit masks, not arithmetic — the property that keeps
-    /// them exact on NaN and `-0.0` (`float.md` §3).
+    /// them exact on NaN and `-0.0` (`float.ai.md` §3).
     #[cfg(feature = "isa-rv32")]
     #[test]
     fn neg_and_abs_are_bit_masks_with_no_call() {
@@ -1696,7 +1696,7 @@ mod tests {
     }
 
     /// Each comparison keeps its own condition. `Fne` in particular must **not**
-    /// be a negated `Eq`: they differ exactly on NaN, which `float.md` §3 makes
+    /// be a negated `Eq`: they differ exactly on NaN, which `float.ai.md` §3 makes
     /// a guaranteed row, and no ordinary test input would catch the rewrite.
     #[cfg(feature = "isa-xt")]
     #[test]
@@ -1996,7 +1996,7 @@ mod tests {
     /// shadow**, never from the address register it arrived in.
     ///
     /// The AR shortcut this replaces was
-    /// `docs/defects/2026-08-01-xtlpn-f32-loses-writes-to-value-parameters.md`:
+    /// `docs/defects/2026-08-01-xtlpn-f32-loses-writes-to-value-parameters.ai.md`:
     /// LPIR is not SSA, so a body that assigns to the parameter leaves the AR
     /// holding the caller's argument while the shadow holds the current value.
     #[cfg(feature = "isa-xt")]

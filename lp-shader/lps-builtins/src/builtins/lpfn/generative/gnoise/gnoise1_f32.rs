@@ -4,7 +4,7 @@
 //! `glsl/lpfn/generative/gnoise/gnoise1.glsl` (normative): random values at
 //! integer lattice points, cubic-smoothstep interpolation. Value/gradient
 //! lattice noise is a standard algorithm from graphics literature (see
-//! docs/reports/2026-03-31-lpfx-license-audit.md).
+//! docs/reports/2026-03-31-lpfx-license-audit.ai.md).
 //!
 //! **Follows the canonical, not the Q32 implementation:** the Q32 device code
 //! approximates the cubic smoothstep with a 256-entry LUT to avoid two

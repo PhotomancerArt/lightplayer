@@ -1344,7 +1344,7 @@ fn the_direct_load_mounts_the_flash_filesystem() {
 /// because the chip changes what the firmware finds.
 ///
 /// P3 measured a 543-byte chain and printed it in
-/// `docs/reports/2026-09-10-esp32v3-strict-boot-inventory.md` §1.1, ending at
+/// `docs/reports/2026-09-10-esp32v3-strict-boot-inventory.ai.md` §1.1, ending at
 /// `[INIT] I/O task spawned`, because there was no flash chip and the boot
 /// spun at the door of the mount. P7 gave it one, so the chain continues —
 /// and where it goes depends on what is on the part. Each golden is a whole

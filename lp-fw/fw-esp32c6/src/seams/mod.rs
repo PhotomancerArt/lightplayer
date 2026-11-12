@@ -1,5 +1,5 @@
 //! Emulator seams on the C6: the image's one seam table
-//! (`fw_esp32_common::seam_table!`; ADR `docs/adr/2026-10-05-emulator-seams.md`).
+//! (`fw_esp32_common::seam_table!`; ADR `docs/adr/2026-10-05-emulator-seams.ai.md`).
 //!
 //! The shipped image carries the LED wait step
 //! (`fw_esp32_common::seams::ws281x_wait_step`) and the network seam's nine

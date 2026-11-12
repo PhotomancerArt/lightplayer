@@ -7,11 +7,11 @@ This report analyzes the feasibility of building a custom lightweight backend to
 
 | File                                                           | Contents                                                          |
 | -------------------------------------------------------------- | ----------------------------------------------------------------- |
-| `[00-overview.md](./00-overview.md)`                           | Feasibility analysis, size estimates, register allocation options |
-| `[01-interval-analysis.md](./01-interval-analysis.md)`         | O(n) live interval computation for structured control flow        |
-| `[02-instruction-selection.md](./02-instruction-selection.md)` | Direct LPIR→RV32 instruction mapping and encoding                 |
-| `[03-implementation-plan.md](./03-implementation-plan.md)`     | 4-week phased implementation plan with decision gates             |
-| `[04-plumbing-risks.md](./04-plumbing-risks.md)`                 | **Critical: ABI, stack, linking risks and mitigation strategies** |
+| `[00-overview.ai.md](./00-overview.ai.md)`                           | Feasibility analysis, size estimates, register allocation options |
+| `[01-interval-analysis.ai.md](./01-interval-analysis.ai.md)`         | O(n) live interval computation for structured control flow        |
+| `[02-instruction-selection.ai.md](./02-instruction-selection.ai.md)` | Direct LPIR→RV32 instruction mapping and encoding                 |
+| `[03-implementation-plan.ai.md](./03-implementation-plan.ai.md)`     | 4-week phased implementation plan with decision gates             |
+| `[04-plumbing-risks.ai.md](./04-plumbing-risks.ai.md)`                 | **Critical: ABI, stack, linking risks and mitigation strategies** |
 
 
 ## Key Findings

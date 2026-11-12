@@ -14,8 +14,8 @@
 //! a free-floating kind.
 //! Color coordinates default to [`Constraint::Free`] in the spec so
 //! out-of-gamut/boost stays meaningful; a slot that needs strict in-gamut
-//! authoring can override with range form (`color.md` pointer in
-//! `quantity.md` §5).
+//! authoring can override with range form (`color.ai.md` pointer in
+//! `quantity.ai.md` §5).
 //!
 //! v0 **narrows** range and choice payloads to `f32` so this enum derives
 //! `serde`/`JsonSchema` without pulling in shader-runtime serde yet.
@@ -26,17 +26,17 @@
 use alloc::string::String;
 use alloc::vec::Vec;
 
-/// Inclusive `[min, max]` with optional discrete **step** (`quantity.md` §5).
+/// Inclusive `[min, max]` with optional discrete **step** (`quantity.ai.md` §5).
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
-#[serde(deny_unknown_fields)] // Mutex flat keys; typos → hard errors per 00-design.md §Constraint.
+#[serde(deny_unknown_fields)] // Mutex flat keys; typos → hard errors per 00-design.ai.md §Constraint.
 pub struct ConstraintRange {
     pub range: [f32; 2],
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub step: Option<f32>,
 }
 
-/// Discrete choices: parallel `choices` and `labels` (`quantity.md` §5).
+/// Discrete choices: parallel `choices` and `labels` (`quantity.ai.md` §5).
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]

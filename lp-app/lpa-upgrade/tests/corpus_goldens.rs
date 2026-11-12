@@ -138,7 +138,7 @@ fn no_migrated_project_still_mentions_the_old_time_binding() {
 #[test]
 fn every_migrated_project_loads_through_the_real_registry() {
     // A writer whose output no reader consumes is an unverified contract —
-    // docs/defects/2026-07-27-created-package-unloadable.md.
+    // docs/defects/2026-07-27-created-package-unloadable.ai.md.
     for (version, project) in all_corpus_projects() {
         let mut files = read_tree(&corpus_root(version).join(&project));
         upgrade_to_current(&mut files).expect("upgrade");
@@ -164,7 +164,7 @@ fn every_migrated_project_loads_through_the_real_registry() {
         // to parse stays in the inventory as an error state, not an `Err`.
         // So every node definition is checked here, or a migrated project
         // whose module the engine refuses passes (the old-uid-sign defect,
-        // docs/defects/2026-10-27-the-upgrade-corpus-loaded-only-its-manifest.md).
+        // docs/defects/2026-10-27-the-upgrade-corpus-loaded-only-its-manifest.ai.md).
         let inventory = registry.inventory();
         assert!(
             !inventory.defs.is_empty(),

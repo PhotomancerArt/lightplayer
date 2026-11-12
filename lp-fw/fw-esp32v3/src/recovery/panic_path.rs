@@ -13,7 +13,7 @@
 //!
 //! This handler does the opposite, and the inversion is the entire point of
 //! the module. Measured on this board 2026-08-01
-//! (`docs/defects/2026-08-01-classic-rmt-open-fault.md`): a fault raised while
+//! (`docs/defects/2026-08-01-classic-rmt-open-fault.ai.md`): a fault raised while
 //! WS281x channels are opening resets the chip after roughly **five characters**
 //! of output, in well under a millisecond. Interrupt masking, draining the TX
 //! FIFO first, printing the line before the path, chunking the path into 4-byte
@@ -188,7 +188,7 @@ const MAX_RUNS: usize = 64;
 ///
 /// This is what [`largest_free_block`] only estimates, and it answers the
 /// question that estimate cannot: is the heap one block or forty? At the OOM in
-/// `docs/defects/2026-08-02-classic-oom-retry-succeeds.md` the two numbers agreed
+/// `docs/defects/2026-08-02-classic-oom-retry-succeeds.ai.md` the two numbers agreed
 /// to within 13 bytes, which *implied* one hole — but "implied" is what put an
 /// hour into a fragmentation theory the free list would have killed in one line.
 ///
@@ -303,7 +303,7 @@ pub fn free_list_shape() -> FreeListShape {
 /// ROM/bootloader text ahead of it was sent at a different baud than a host
 /// reads UART0 at, so the host's lp-link deframer is left mid-frame when the
 /// app's text starts. See
-/// `docs/defects/2026-10-03-the-classic-loses-its-boot-text-when-a-host-holds-the-link.md`.
+/// `docs/defects/2026-10-03-the-classic-loses-its-boot-text-when-a-host-holds-the-link.ai.md`.
 #[inline(always)]
 pub(crate) fn write_link_text_mark() {
     esp_println::Printer::write_bytes(&[0xFF, b'\r', b'\n']);
@@ -417,7 +417,7 @@ pub fn stage_oom_and_reset(layout: core::alloc::Layout) -> ! {
     // without a host replay, and it would NOT hold under `esp-alloc`'s TLSF
     // algorithm, whose free lists are rebuilt by exactly this traffic. A probe
     // that has to be proven harmless before its output means anything is the
-    // wrong probe. See `docs/defects/2026-08-02-classic-oom-retry-succeeds.md`.
+    // wrong probe. See `docs/defects/2026-08-02-classic-oom-retry-succeeds.ai.md`.
     //
     // SAFETY: `layout` came from a real allocation request, so its size is
     // non-zero, and the block is released immediately with the same layout.

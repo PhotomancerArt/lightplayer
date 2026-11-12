@@ -25,7 +25,7 @@ pub fn ToggleField(
     /// Violet bound treatment on the pill ring.
     #[props(default = false)]
     bound: bool,
-    /// Gold ENGAGED ring (`docs/design/panel.md` P2/P6): a panel writer
+    /// Gold ENGAGED ring (`docs/design/panel.ai.md` P2/P6): a panel writer
     /// has captured this channel and holds it. Outranks the bound violet.
     #[props(default = false)]
     engaged: bool,

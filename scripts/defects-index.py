@@ -4,7 +4,7 @@
 docs/defects/ keeps no hand-written index. Every PR that files or closes a
 defect used to add or edit a row at the top of one table in README.md, so
 any two such PRs open at once conflicted on the same lines, and a
-conflicted PR gets no CI at all (docs/debt/hand-written-defects-index.md).
+conflicted PR gets no CI at all (docs/debt/hand-written-defects-index.ai.md).
 Now an entry's frontmatter IS its index row: filing a defect touches only
 its own new file, and this script builds the table when someone reads it.
 
@@ -19,7 +19,7 @@ Usage:
 Output is a markdown table; links are relative to the repo root.
 
 `--check` (`just lint-defects`, in `just check-lint`, and CI's "Defect
-registry" job) fails when an entry is not named `YYYY-MM-DD-slug.md`, has
+registry" job) fails when an entry is not named `YYYY-MM-DD-slug.ai.md`, has
 no frontmatter, has a `status` other than open/fixed/wontfix, a `found`
 that does not start with a date, an empty `area`, a `class` that is not
 one kebab-case word, or no `# title` line. It also fails on a hand-written
@@ -49,13 +49,13 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFECTS_DIR = os.path.join(REPO_ROOT, "docs", "defects")
 
 STATUSES = ("open", "fixed", "wontfix")
-ENTRY_NAME = re.compile(r"^(\d{4}-\d{2}-\d{2})-([a-z0-9]+(?:-[a-z0-9]+)*)\.md$")
+ENTRY_NAME = re.compile(r"^(\d{4}-\d{2}-\d{2})-([a-z0-9]+(?:-[a-z0-9]+)*)(?:\.ai)?\.md$")
 CLASS_NAME = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 DATE_PREFIX = re.compile(r"^(\d{4}-\d{2}-\d{2})\b")
 FM_KEY = re.compile(r"^([A-Za-z][A-Za-z0-9_-]*):(.*)$")
 VOCAB_ITEM = re.compile(r"^- \*\*`([a-z0-9-]+)`\*\*")
 # A README table row linking to a dated entry in this directory.
-README_ROW = re.compile(r"^\|.*\]\((?:\./)?\d{4}-\d{2}-\d{2}-[^)/]+\.md\)")
+README_ROW = re.compile(r"^\|.*\]\((?:\./)?\d{4}-\d{2}-\d{2}-[^)/]+(?:\.ai)?\.md\)")
 
 
 def main() -> int:
@@ -142,7 +142,7 @@ def load_entry(directory: str, name: str) -> tuple[Entry | None, list[str]]:
     m = ENTRY_NAME.match(name)
     date = ""
     if not m:
-        bad("not named YYYY-MM-DD-slug.md (dated by when the defect was found)")
+        bad("not named YYYY-MM-DD-slug.ai.md (dated by when the defect was found)")
     elif not valid_date(m.group(1)):
         bad(f"{m.group(1)} in the file name is not a date")
     else:
@@ -334,7 +334,7 @@ def self_test() -> int:
             good.replace("area: lp-x", "area: lp-x\n  continued here"),
             None,
         ),
-        "undated.md": (good, "not named YYYY-MM-DD-slug.md"),
+        "undated.md": (good, "not named YYYY-MM-DD-slug.ai.md"),
         "2026-02-30-bad-date.md": (good, "is not a date"),
         "2026-10-09-no-frontmatter.md": ("# Title\n\n- **Status:** fixed\n", "no frontmatter"),
         "2026-10-09-unclosed.md": ("---\nstatus: fixed\n# Title\n", "no frontmatter"),

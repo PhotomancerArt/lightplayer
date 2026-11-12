@@ -4,7 +4,7 @@ A **lane** is a fixture and the output it feeds. On the S3 the engine's
 non-shader frame time fits `a + b × lanes + c × LEDs`, and the lane term
 (`b`, ~1.85 ms on FS3 with the IRAM hot set) is what the engine frame-plan
 work removes (planning `lp2025/2026-10-24-0208-engine-frame-plan`,
-`docs/debt/s3-frame-cost-scales-per-fixture.md`). These are the tools that
+`docs/debt/s3-frame-cost-scales-per-fixture.ai.md`). These are the tools that
 measure `b`.
 
 ## The lane projects

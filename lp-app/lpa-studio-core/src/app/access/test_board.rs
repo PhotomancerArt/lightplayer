@@ -357,7 +357,7 @@ impl ClientIo for FakeBoardIo {
     }
 }
 
-/// Drive an immediately-ready future (tests are an edge; see AGENTS.md).
+/// Drive an immediately-ready future (tests are an edge; see AGENTS.ai.md).
 pub fn block_on<F: Future>(future: F) -> F::Output {
     use core::task::{Context, Poll};
     use std::sync::Arc;

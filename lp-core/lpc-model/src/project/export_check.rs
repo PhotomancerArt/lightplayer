@@ -1,6 +1,6 @@
 //! Export lint, static half: is each exported module folder *self-contained*?
 //!
-//! A library project (`kind = "pattern"` / `"rig"`, `docs/design/modules.md`)
+//! A library project (`kind = "pattern"` / `"rig"`, `docs/design/modules.ai.md`)
 //! names module folders in its manifest's `exports` list; another project
 //! imports one by vendoring that folder wholesale. Whether that vendored copy
 //! still works depends entirely on whether the folder is closed over its own
@@ -22,7 +22,7 @@
 //! | the exported module carries no provenance (license especially) | warning |
 //!
 //! Refs are file-relative and location-independent by construction
-//! (modules.md §6), so "escapes the folder" is decidable by resolving each
+//! (modules.ai.md §6), so "escapes the folder" is decidable by resolving each
 //! ref against its containing file and comparing prefixes — exactly what
 //! [`crate::resolve_artifact_specifier`] already does for the loader.
 //!

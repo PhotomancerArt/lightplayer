@@ -1,5 +1,5 @@
 //! The Bluetooth row: the board's own radio, the name a phone sees
-//! (`docs/ux/anatomy/board-card.md`, "Bluetooth"). Its kind is the link's
+//! (`docs/ux/anatomy/board-card.ai.md`, "Bluetooth"). Its kind is the link's
 //! name, "Bluetooth"; its name is the board's advertised name while
 //! Bluetooth is on.
 //!

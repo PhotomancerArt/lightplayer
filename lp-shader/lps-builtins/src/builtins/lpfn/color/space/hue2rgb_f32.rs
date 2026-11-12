@@ -2,12 +2,12 @@
 //!
 //! Transliterated from the canonical GLSL
 //! `glsl/lpfn/color/space/hue2rgb.glsl` (normative — see
-//! `docs/adr/2026-07-08-glsl-canonical-builtins.md`).
+//! `docs/adr/2026-07-08-glsl-canonical-builtins.ai.md`).
 //!
 //! The hue2rgb formula (abs/arithmetic ramp per channel) is standard color
 //! space mathematics documented in graphics literature; the LightPlayer port
 //! was originally written with reference to LYGIA's hue2rgb.glsl
-//! (see docs/reports/2026-03-31-lpfx-license-audit.md).
+//! (see docs/reports/2026-03-31-lpfx-license-audit.ai.md).
 //!
 //! **Tolerance:** exact against the canonical f32 — three multiplies, three
 //! `abs`, and a clamp.

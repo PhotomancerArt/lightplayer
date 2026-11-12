@@ -7,7 +7,7 @@
 //! the ONE primary affordance every surface consumes — cards, detail
 //! popovers, and pane headers are renderers over the same model, never
 //! re-derivers. Decision record:
-//! `docs/adr/2026-07-17-rich-object-pattern.md` (builds on the 2026-07-16
+//! `docs/adr/2026-07-17-rich-object-pattern.ai.md` (builds on the 2026-07-16
 //! card-vocabulary ADR).
 //!
 //! Concept map:

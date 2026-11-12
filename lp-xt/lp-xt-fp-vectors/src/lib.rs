@@ -282,7 +282,7 @@ pub struct Vector {
     /// The conversion instructions' 0..=15 binary scale.
     pub imm: u8,
     /// The `FCR` rounding-mode field to install before the operation. Non-zero
-    /// only in [`Family::Rounding`]; `docs/design/float.md` §2 puts it out of
+    /// only in [`Family::Rounding`]; `docs/design/float.ai.md` §2 puts it out of
     /// shader reach, and M6 measures whether silicon honors it at all.
     pub fcr: u8,
 }

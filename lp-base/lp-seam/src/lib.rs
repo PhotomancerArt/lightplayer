@@ -8,7 +8,7 @@
 //! only when a run asked for that seam (it is **engaged**), patches the seam
 //! function's first instruction to `ebreak` and answers the call itself.
 //! See `README.md` beside this crate, and the ADR
-//! `docs/adr/2026-10-05-emulator-seams.md`.
+//! `docs/adr/2026-10-05-emulator-seams.ai.md`.
 //!
 //! What lives here, one concept per file:
 //!

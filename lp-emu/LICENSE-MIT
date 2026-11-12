@@ -26,4 +26,4 @@ Scope: this license covers every crate whose manifest lives under `lp-emu/`.
 The rest of the LightPlayer repository is AGPL-3.0-or-later (see the root
 `LICENSE`). `just lint-emu-fence` is what keeps the two apart: it fails if a
 crate here stops declaring MIT, or if one of them grows a path dependency on
-a product crate. See `docs/adr/2026-09-06-lp-emu-home-and-mit-fence.md`.
+a product crate. See `docs/adr/2026-09-06-lp-emu-home-and-mit-fence.ai.md`.

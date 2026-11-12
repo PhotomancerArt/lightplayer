@@ -79,7 +79,7 @@ pub struct BoardDisplayFile {
     /// Each entry is a silkscreen label from this board's own pin/terminal
     /// tables (`IO18`, `LED1`, `D10`, `18`), so an endpoint spec is the
     /// label with the target prefix:
-    /// `ws281x:local:<wire>` (`docs/adr/2026-08-03-multi-endpoint-output-node.md`
+    /// `ws281x:local:<wire>` (`docs/adr/2026-08-03-multi-endpoint-output-node.ai.md`
     /// — the middle segment names the device, the last one names the wire).
     /// [`Self::validate`] refuses a name that is not an output-eligible pin
     /// or terminal with a gpio, because a wrong wire is the
@@ -175,7 +175,7 @@ pub struct PurchaseUrl {
 /// The drawing block the row-engine diagram renderer consumes.
 ///
 /// Geometry is in board-local units; the renderer derives every other size
-/// from the pin pitch (`u`). See `docs/design/board-diagrams.md`.
+/// from the pin pitch (`u`). See `docs/design/board-diagrams.ai.md`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 pub struct BoardDrawing {

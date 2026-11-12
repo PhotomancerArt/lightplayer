@@ -4,7 +4,7 @@
 second stage** (`lp-fw/fw-esp32c6-loader --features bootloader`, built and
 written by `tools/lp-fw-split` — `bootloader.bin`, at `0x0` of every split
 `merged.bin` and so of every package, release and Studio USB install; ADR
-`docs/adr/2026-10-17-the-c6-boots-through-our-own-bootloader.md`). The IDF
+`docs/adr/2026-10-17-the-c6-boots-through-our-own-bootloader.ai.md`). The IDF
 bootloaders below remain **the IDF door**: `merged-idf.bin` (the same
 `app.bin`), the boards that have only been updated over the air, the
 monolithic dev images the `espflash flash` recipes write, and the emulator
@@ -70,7 +70,7 @@ variant too.
 
 The quiet bootloader prints nothing on UART0 during a good boot; the stock
 one prints ~22 lines at 115,200 baud, ~145 ms of every boot (the A8 first-light
-breakdown, `docs/reports/2026-10-16-c6-time-to-first-light.md`). Its asserts
+breakdown, `docs/reports/2026-10-16-c6-time-to-first-light.ai.md`). Its asserts
 and `abort()` still print (`esp_rom_printf`). It has been booted on the
 emulator only, never on silicon.
 
@@ -95,9 +95,9 @@ seg2 0x4086e610 len 0x31c4   (code)
 
 The v5.5.1 one does not hang on the LP analog I2C state a factory-fresh
 board's firmware leaves
-(`docs/defects/2026-09-06-c6-first-flash-bootloader-hang-lp-analog-i2c-clock.md`;
+(`docs/defects/2026-09-06-c6-first-flash-bootloader-hang-lp-analog-i2c-clock.ai.md`;
 the flashers restore that state instead); adopting it waits on a hardware
 walk. Anything under 32 KiB fits: the partition table sits at 0x8000.
 
 All three are build products of Apache-2.0 sources, unmodified; no GPL
-material is involved (AGENTS.md, license discipline).
+material is involved (AGENTS.ai.md, license discipline).

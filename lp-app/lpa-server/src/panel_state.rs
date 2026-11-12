@@ -1,4 +1,4 @@
-//! Panel state persistence: `/.lp/panel.json` (panel.md P10/P11).
+//! Panel state persistence: `/.lp/panel.json` (panel.ai.md P10/P11).
 //!
 //! Latched panel writers outlive a power cycle. The defining scenario is
 //! the scarf: dimmed from a phone at 4 a.m., unplugged, replugged — it
@@ -49,7 +49,7 @@ pub const PANEL_STATE_PATH: &str = "/.lp/panel.json";
 pub const PANEL_STATE_VERSION: u32 = 1;
 
 /// Minimum spacing between panel-state writes, for flash preservation
-/// (panel.md P11): a knob wiggled for a minute writes ~6 times, not once
+/// (panel.ai.md P11): a knob wiggled for a minute writes ~6 times, not once
 /// per input event.
 pub const PANEL_STATE_WRITE_INTERVAL_MS: u32 = 10_000;
 
@@ -57,7 +57,7 @@ pub const PANEL_STATE_WRITE_INTERVAL_MS: u32 = 10_000;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PanelStateFile {
     pub version: u32,
-    /// Whether panel state keeps saving (panel.md P11 — on by default).
+    /// Whether panel state keeps saving (panel.ai.md P11 — on by default).
     /// Persisted with the state so the choice itself survives a reboot.
     #[serde(default = "auto_save_default")]
     pub auto_save: bool,
@@ -77,7 +77,7 @@ pub struct PanelStateEntry {
     /// The owning scope's stable persist path.
     pub scope: String,
     pub channel: String,
-    /// The RAW held value (panel.md P7 — emission clamps, storage never
+    /// The RAW held value (panel.ai.md P7 — emission clamps, storage never
     /// does, so a range that shrinks and grows back restores exactly).
     pub value: LpValue,
 }

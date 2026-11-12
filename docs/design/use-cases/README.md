@@ -7,9 +7,9 @@ ask which of these it serves and which it costs.
 
 | Case | Shape | Ports | Wiring policy |
 | --- | --- | --- | --- |
-| [scarf](scarf.md) | one strip, one piece | 1 | **auto** — it should Just Work |
-| [sign](sign.md) | laid-out lamps (letters, shapes) | 1–5 | **manual** — per-lamp placement matters |
-| [dome-scale](dome-scale.md) | tens of thousands of lamps, many boxes | dozens | **manual**, re-wired every build |
+| [scarf](scarf.ai.md) | one strip, one piece | 1 | **auto** — it should Just Work |
+| [sign](sign.ai.md) | laid-out lamps (letters, shapes) | 1–5 | **manual** — per-lamp placement matters |
+| [dome-scale](dome-scale.ai.md) | tens of thousands of lamps, many boxes | dozens | **manual**, re-wired every build |
 
 ## Why the list exists: the flow flag
 
@@ -52,7 +52,7 @@ patch a fixture by hand from nothing (`lp-app/lpa-graph/README.md`).
 
 ## See also
 
-- [walk-up patching](../walk-up-patching.md) — the assignment flow these
+- [walk-up patching](../walk-up-patching.ai.md) — the assignment flow these
   cases are patched with.
-- [the selection-model ADR](../../adr/2026-08-20-walk-up-assignment-selection-model.md)
+- [the selection-model ADR](../../adr/2026-08-20-walk-up-assignment-selection-model.ai.md)
   — one selection, armed verbs, and the flag's place in it.

@@ -1,5 +1,5 @@
 //! The status corner: a quiet ⋯ cut out of the picture's corner, in every
-//! state (`docs/ux/anatomy/board-card.md`, "Corner"). It says nothing
+//! state (`docs/ux/anatomy/board-card.ai.md`, "Corner"). It says nothing
 //! itself: what needs you is the surface's (P2: once, and loud there), the
 //! editor holding the board too. It opens the card's details: every notice,
 //! how the board is running, the picture's facts and the terminal.

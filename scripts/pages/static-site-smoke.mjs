@@ -160,7 +160,7 @@ async function maybeRunBrowserSmoke() {
     return;
   }
   // A headless Chrome sometimes hangs and prints nothing (twice on
-  // 2026-10-20, each costing a deploy: docs/debt/story-capture-pipeline.md).
+  // 2026-10-20, each costing a deploy: docs/debt/story-capture-pipeline.ai.md).
   // A hang is retried once on a fresh process and profile; a Chrome that
   // answers, however wrongly, is judged on that answer at once.
   let attempt = dumpDom(chrome);
@@ -229,7 +229,7 @@ function isChromeHang(result) {
 // The thrown message is the only record a CI run leaves of what Chrome
 // actually returned, so it carries enough of stdout/stderr to diagnose the
 // next occurrence without a re-run: see
-// docs/debt/story-capture-pipeline.md for the sibling --dump-dom hang this
+// docs/debt/story-capture-pipeline.ai.md for the sibling --dump-dom hang this
 // mirrors.
 function describeBrowserSmokeMismatch(result, elapsedMs) {
   const stdout = result.stdout ?? "";

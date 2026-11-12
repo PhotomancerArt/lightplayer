@@ -23,7 +23,7 @@
 //!
 //! It also drives the XIAO ESP32C6's RF switch (GPIO3 LOW, GPIO14 LOW), which
 //! the product firmware does not — see
-//! `docs/defects/2026-09-23-xiao-c6-rf-switch-never-powered.md`. The desk rig
+//! `docs/defects/2026-09-23-xiao-c6-rf-switch-never-powered.ai.md`. The desk rig
 //! that drives all of this is `spikes/ble-lab/`.
 //!
 //! Heap is printed at each bring-up stage with the PRODUCT's heap layout

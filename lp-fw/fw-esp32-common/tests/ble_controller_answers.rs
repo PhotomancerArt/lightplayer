@@ -8,7 +8,7 @@
 //! connection handle the spec gives them — 2 return bytes the command, as
 //! bt-hci declares it, has no room for. Upstream sliced past the empty
 //! buffer and the board panicked on every Android connection
-//! (`docs/defects/2026-10-17-an-android-phone-connecting-over-bluetooth-panics-the-c6.md`).
+//! (`docs/defects/2026-10-17-an-android-phone-connecting-over-bluetooth-panics-the-c6.ai.md`).
 
 use core::cell::RefCell;
 use core::future::{Future, poll_fn};

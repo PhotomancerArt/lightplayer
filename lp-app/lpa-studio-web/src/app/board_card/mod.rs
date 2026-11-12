@@ -1,11 +1,11 @@
-//! The board card's web pieces (`docs/style/ui.md` "The board card"; the
-//! decision `docs/adr/2026-10-08-the-board-card-and-one-home-page.md` §2;
+//! The board card's web pieces (`docs/style/ui.ai.md` "The board card"; the
+//! decision `docs/adr/2026-10-08-the-board-card-and-one-home-page.ai.md` §2;
 //! the look as decided `spikes/board-card-stack/index.html`).
 //!
 //! Core builds the card ([`lpa_studio_core::UiBoardCard`]): every word,
 //! every tone and every offer on it. These pieces draw any card and decide
 //! only its look — never what a bar says, its tone, or which offer it
-//! carries (`docs/adr/2026-10-01-agentic-control-offers-in-core.md`). No
+//! carries (`docs/adr/2026-10-01-agentic-control-offers-in-core.ai.md`). No
 //! piece here builds a user verb's action: a button is an offer pressed by
 //! its path ([`CardAction`]).
 //!

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Deterministic repro + regression check for the code-editor gutter alignment
-// defect (docs/defects/2026-07-27-code-editor-gutter-misaligned.md).
+// defect (docs/defects/2026-07-27-code-editor-gutter-misaligned.ai.md).
 //
 // Loads a story the way the capture pipeline does — full page load in headless
 // Chrome with forced BeginFrames — and reports whether the line-number gutter

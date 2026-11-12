@@ -23,7 +23,7 @@
 //! - **Anything else** is refused by name, address 0 first: espflash's image
 //!   builder fills a gap before a flash segment with an address-0 segment,
 //!   which the IDF bootloader skips and a copy would write to address 0
-//!   (`docs/defects/2026-10-14-the-c6-loader-copies-an-address-zero-padding-segment-to-address-zero.md`).
+//!   (`docs/defects/2026-10-14-the-c6-loader-copies-an-address-zero-padding-segment-to-address-zero.ai.md`).
 
 use core::ffi::CStr;
 use core::ops::Range;

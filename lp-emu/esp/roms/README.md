@@ -40,7 +40,7 @@ one unanswerable question — the S3's flash-MMU table address, entry count and
 page-size encoding, which is in no PAC and in no metadata crate — can be read
 out of the ROM's own `Cache_*` disassembly rather than guessed from the
 classic's or from a datasheet paragraph
-(`docs/reports/2026-09-11-esp32s3-firmware-inventory.md` §8). The in-process
+(`docs/reports/2026-09-11-esp32s3-firmware-inventory.ai.md` §8). The in-process
 digest test arrives with the machine crate's own `tests/rom_vendoring.rs`;
 until then `--check` is the assertion.
 
@@ -50,7 +50,7 @@ board and every board this firmware ships on are v3 silicon, so a second
 826 KB image no configuration loads would be 826 KB nobody can check. The
 `rev300` file's sha256 was verified twice and independently — once by hand
 against the release's own checksum file when M0 read the ROM
-(`docs/reports/2026-09-10-xtensa-firmware-isa-inventory.md` §6), and again by
+(`docs/reports/2026-09-10-xtensa-firmware-isa-inventory.ai.md` §6), and again by
 this script re-deriving it from the tarball's extracted bytes.
 
 ## Why the ROM is here at all

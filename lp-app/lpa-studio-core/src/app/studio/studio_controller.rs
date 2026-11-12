@@ -2353,7 +2353,7 @@ impl StudioController {
         // batch just wrote, and, worse, the device's sidecars with it: a
         // remembered board whose port came back would silently lose its last
         // picture, and a sim would lose the file that says it is one.
-        // (`docs/defects/2026-09-07-merge-delete-erased-the-merged-row.md`.)
+        // (`docs/defects/2026-09-07-merge-delete-erased-the-merged-row.ai.md`.)
         let mut written: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
         for record in writes.persist {
             let Some(row) = crate::app::devices::registry_row_from_record(&record) else {
@@ -12291,7 +12291,7 @@ mod tests {
     // that before, which is how a device-gone hole stayed invisible long
     // enough for the shell to keep falling back to the retired
     // step-stack pane — defect
-    // docs/defects/2026-07-28-retired-device-pane-still-reachable.md.
+    // docs/defects/2026-07-28-retired-device-pane-still-reachable.ai.md.
     // -----------------------------------------------------------------
 
     /// A controller with a stubbed sim-backed lens session, a connected

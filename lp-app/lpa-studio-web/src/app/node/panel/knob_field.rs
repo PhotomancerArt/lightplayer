@@ -81,7 +81,7 @@ pub fn KnobField(
     /// feel, `super::speed_knob`). `min`/`max` are ignored.
     #[props(default = false)]
     speed: bool,
-    /// Gold ENGAGED treatment (`docs/design/panel.md` P2/P6): a panel
+    /// Gold ENGAGED treatment (`docs/design/panel.ai.md` P2/P6): a panel
     /// writer has captured this channel and holds it. Deliberately NOT the
     /// violet bound family — bound means "wired", engaged means "captured"
     /// — and it outranks violet, because a captured control has stopped
@@ -652,7 +652,7 @@ pub(crate) fn knob_key_value(
 ///
 /// Engaged outranks bound: a captured control is no longer following the
 /// thing it is wired to, and the panel's whole point is that you can see
-/// that at a glance (panel.md P-Q2).
+/// that at a glance (panel.ai.md P-Q2).
 fn knob_value_stroke(
     state: &UiSlotFieldState,
     bound: bool,
@@ -916,7 +916,7 @@ mod tests {
     fn engaged_outranks_bound_and_never_reuses_violet() {
         // A captured control has stopped following its binding, so the
         // amber engaged family wins over the violet bound family — the
-        // three panel states must stay visibly distinct (panel.md P-Q2).
+        // three panel states must stay visibly distinct (panel.ai.md P-Q2).
         let stroke = knob_value_stroke(&UiSlotFieldState::editable(), true, true, true);
         assert_eq!(stroke, "var(--studio-status-engaged-text)");
         assert!(!stroke.contains("bound"));

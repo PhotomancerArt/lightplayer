@@ -37,7 +37,7 @@
 // every request is answered at the edit tier. Tiers are proven by
 // `lpa-server`'s host tests. And NOT the radio: the network seam stands in
 // for it (no signal, airtime or coexistence; ADR
-// `2026-10-05-emulator-seams.md` §11).
+// `2026-10-05-emulator-seams.ai.md` §11).
 //
 // Every claim keys off the BOARD, never a Studio string something else could
 // satisfy: its status answer over its own LAN address (`lp-cli wifi status`

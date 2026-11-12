@@ -7,7 +7,7 @@ board's update session, a sans-IO state machine the firmware drives.
 
 `no_std` + `alloc`, sans-IO: no clock (time is the caller's `now_ms`), no
 randomness (injected), no IO (flash is the `UpdateTarget` trait). It is a
-core crate (`AGENTS.md`'s sans-IO rule) and is meant to link into the C6's
+core crate (`AGENTS.ai.md`'s sans-IO rule) and is meant to link into the C6's
 core.
 
 **Binding:** protocol v1 binds from Part B's first release (the split

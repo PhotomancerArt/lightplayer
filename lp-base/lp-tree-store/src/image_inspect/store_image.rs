@@ -1,5 +1,5 @@
 //! [`StoreImage`]: a raw image of a tree-store partition, read without
-//! mounting it. It repeats mount's decisions (FORMAT.md "Finding the
+//! mounting it. It repeats mount's decisions (FORMAT.ai.md "Finding the
 //! committed state") over the bytes instead of a `Flash`, so it can answer
 //! where mount would refuse: which sectors refuse it, and whether the
 //! sectors that do not hold a complete store anyway. It never writes.
@@ -57,7 +57,7 @@ pub struct StoreImage<'a> {
 
 impl<'a> StoreImage<'a> {
     /// Read `bytes`. `sector_size` = the caller's choice; `None` reads it
-    /// from the headers (FORMAT.md "The medium"), and assumes 4096 when no
+    /// from the headers (FORMAT.ai.md "The medium"), and assumes 4096 when no
     /// header gives one.
     pub fn open(bytes: &'a [u8], sector_size: Option<u32>) -> Result<Self, ImageError> {
         let (size, from) = match sector_size {
@@ -200,7 +200,7 @@ impl<'a> StoreImage<'a> {
     // ---- mount's choice ---------------------------------------------------
 
     /// Try the two newest roots, newest first; the first whose closure is
-    /// complete is the committed state (FORMAT.md mount step 3).
+    /// complete is the committed state (FORMAT.ai.md mount step 3).
     fn choose_root(&mut self) {
         let mut chosen = None;
         for i in 0..self.report.roots.len().min(2) {
@@ -476,7 +476,7 @@ struct Closure {
     root: RootRecord,
 }
 
-/// The writer's name rules (FORMAT.md "Dir"): UTF-8, non-empty, no `/`.
+/// The writer's name rules (FORMAT.ai.md "Dir"): UTF-8, non-empty, no `/`.
 /// In the hot directory (`full_path`) a name is a whole path, so `/` is
 /// fine there.
 pub(super) fn name_problem(name: &[u8], full_path: bool) -> Option<&'static str> {

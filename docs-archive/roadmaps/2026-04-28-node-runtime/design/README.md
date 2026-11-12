@@ -15,15 +15,15 @@ These files build on each other; read in order.
 
 | #  | File                                                            | What it covers                                                                                          |
 |----|-----------------------------------------------------------------|---------------------------------------------------------------------------------------------------------|
-| 00 | [overview](00-overview.md)                                      | Motivation, crate map, conceptual diagram, glossary, **what's load-bearing-novel**                       |
-| 01 | [tree](01-tree.md)                                              | `NodeTree`, `NodeEntry`, `NodeId` / `NodePath`, `EntryState` lazy lifecycle, `ChildKind`                |
-| 02 | [node](02-node.md)                                              | `Node` trait surface, `tick`, panic isolation, contexts, what's *not* on the trait                      |
-| 03 | [artifact](03-artifact.md)                                      | `Artifact` trait, `ArtifactSpec`, `ArtifactManager` state machine, hot reload, refcount                 |
-| 04 | [config](04-config.md)                                          | `NodeConfig` — per-instance authored data, override map, structural-vs-overrides split, legacy bridge   |
-| 05 | [slots-and-props](05-slots-and-props.md)                        | `Slot` (schema) vs `Prop<T>` (runtime), four namespaces, `PropAccess` reflection                        |
-| 06 | [bindings-and-resolution](06-bindings-and-resolution.md)        | `Binding` enum (`Bus`/`Literal`/`NodeProp`), pull-based resolution, cascade `[bindings]`                |
-| 07 | [sync](07-sync.md)                                              | Client/server mirror, `FrameId`, `NodeView` snapshots, delta computation                                |
-| 08 | [domain](08-domain.md)                                          | `ProjectDomain` trait, legacy / visual / future-domain mapping, M2 flag resolution                      |
+| 00 | [overview](00-overview.ai.md)                                      | Motivation, crate map, conceptual diagram, glossary, **what's load-bearing-novel**                       |
+| 01 | [tree](01-tree.ai.md)                                              | `NodeTree`, `NodeEntry`, `NodeId` / `NodePath`, `EntryState` lazy lifecycle, `ChildKind`                |
+| 02 | [node](02-node.ai.md)                                              | `Node` trait surface, `tick`, panic isolation, contexts, what's *not* on the trait                      |
+| 03 | [artifact](03-artifact.ai.md)                                      | `Artifact` trait, `ArtifactSpec`, `ArtifactManager` state machine, hot reload, refcount                 |
+| 04 | [config](04-config.ai.md)                                          | `NodeConfig` — per-instance authored data, override map, structural-vs-overrides split, legacy bridge   |
+| 05 | [slots-and-props](05-slots-and-props.ai.md)                        | `Slot` (schema) vs `Prop<T>` (runtime), four namespaces, `PropAccess` reflection                        |
+| 06 | [bindings-and-resolution](06-bindings-and-resolution.ai.md)        | `Binding` enum (`Bus`/`Literal`/`NodeProp`), pull-based resolution, cascade `[bindings]`                |
+| 07 | [sync](07-sync.ai.md)                                              | Client/server mirror, `FrameId`, `NodeView` snapshots, delta computation                                |
+| 08 | [domain](08-domain.ai.md)                                          | `ProjectDomain` trait, legacy / visual / future-domain mapping, M2 flag resolution                      |
 
 ## M4.3a / M4.3b crate split update
 
@@ -46,7 +46,7 @@ runtime-only **`LpsValueF32`** behavior.
 
 ## Cross-references
 
-- Strawman + decisions log: [`../notes.md`](../notes.md). Files here
+- Strawman + decisions log: [`../notes.ai.md`](../notes.ai.md). Files here
   don't re-decide anything resolved there; they build on it.
 - Prior-art synthesis: [`../m1-prior-art/synthesis.md`](../m1-prior-art/synthesis.md).
   Cited inline as "(prior-art §N)" where decisions trace to specific

@@ -7,7 +7,7 @@
 //! `Disconnection Complete` event, so the host never learns they are gone:
 //! each connection's task waits forever on a link that no longer exists, its
 //! slot is never freed, and the board stops advertising for good
-//! (docs/defects/2026-09-25-a-knob-jump-over-bluetooth-kills-the-c6-ble-host.md).
+//! (docs/defects/2026-09-25-a-knob-jump-over-bluetooth-kills-the-c6-ble-host.ai.md).
 //!
 //! The ledger closes that gap from the HCI transport, where every packet
 //! already passes: it records each connection the controller reports opened

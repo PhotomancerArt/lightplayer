@@ -1,6 +1,6 @@
 //! Where does zook-dome's heap actually go? Load + first-ticks memory
 //! phases on the host, for the classic compile-transient defect
-//! (`docs/defects/2026-08-29-shader-jit-compile-transient-starves-classic-heap.md`).
+//! (`docs/defects/2026-08-29-shader-jit-compile-transient-starves-classic-heap.ai.md`).
 //!
 //! The defect attributes the classic's OOM to the shader compile's
 //! transient; the sibling probe in

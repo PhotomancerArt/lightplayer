@@ -5,7 +5,7 @@
 //! **Positions live once.** [`render`] writes every lamp into one
 //! exact-size buffer; [`Tree::take_positions`] moves that buffer out and the
 //! fit rewrites it in place, with no copy
-//! (`docs/reports/2026-09-02-per-lamp-memory-table.md`).
+//! (`docs/reports/2026-09-02-per-lamp-memory-table.ai.md`).
 //! The rest of the tree is dropped: the patcher lays out its own for each
 //! patch (`parts_patch.rs`).
 //!
@@ -68,7 +68,7 @@ pub fn render_parts_carrier(
     let frame = view_box_bounds(mapping);
     let fit = |error| format!("fit fixture mapping: {error}");
     // The diameter is a drawing-space length and rides the same fit as the
-    // positions (`docs/defects/2026-08-24-map2d-sample-diameter-unit-mismatch.md`).
+    // positions (`docs/defects/2026-08-24-map2d-sample-diameter-unit-mismatch.ai.md`).
     let sample_diameter = AREA_SAMPLE_DIAMETER
         * fit_scale(&points, frame, texture_width, texture_height).map_err(fit)?;
     fit_points_in_place(&mut points, frame, texture_width, texture_height).map_err(fit)?;

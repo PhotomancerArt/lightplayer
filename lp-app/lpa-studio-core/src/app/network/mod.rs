@@ -21,7 +21,7 @@
 //! | each saved network's id in an offer path | [`wifi_network_slug`] |
 //! | the Wi‑Fi verbs as offers | [`wifi_offers`] |
 //!
-//! Decision record: `docs/adr/2026-10-04-device-wifi-settings.md`.
+//! Decision record: `docs/adr/2026-10-04-device-wifi-settings.ai.md`.
 
 pub mod device_network_ops;
 pub mod network_command;

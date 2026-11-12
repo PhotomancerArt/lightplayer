@@ -7,7 +7,7 @@
 // reaches the same board: the C6's USB-Serial-JTAG is a CDC-ACM function (a
 // communications interface, class 2, beside a data interface, class 10, with
 // one bulk IN and one bulk OUT endpoint), and CDC-ACM is small enough to speak
-// from a page. See `docs/adr/2026-10-18-android-usb-over-webusb.md`.
+// from a page. See `docs/adr/2026-10-18-android-usb-over-webusb.ai.md`.
 //
 // `UsbCdcSerialPort` presents the part of `SerialPort` that the device
 // controller (`browser_esp32_device_controller.js`) and esptool-js's

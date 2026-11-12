@@ -41,7 +41,7 @@ radio = [
     "dep:fw-esp32-radio",
     "fw-esp32-radio/radio",
 ]  # Root-owned ESP-NOW radio capability (its driver: `fw-esp32-radio`)
-# The BLE link (plan `ble-remote-control` M4, docs/adr/2026-09-24-ble-transport.md):
+# The BLE link (plan `ble-remote-control` M4, docs/adr/2026-09-24-ble-transport.ai.md):
 # the wire over a Nordic-UART GATT service, one untrusted link per connection.
 # In the default image, but INERT until the device store (`/.lp/access.json`)
 # says `bleEnabled: true` — read once at boot; nothing initialises the BLE
@@ -200,7 +200,7 @@ desk_espnow_meter = ["radio"]
 # layout);
 # `heap_diag_ble_standin` leaks BLE's boot-time heap (Run I: 19,436 + 3,500 +
 # 1,372 B) where BLE would start, for an emulated board, which never starts
-# BLE. Written for docs/defects/2026-09-24-ble-enabled-c6-refuses-a-project-switch-after-the-heap-cut.md.
+# BLE. Written for docs/defects/2026-09-24-ble-enabled-c6-refuses-a-project-switch-after-the-heap-cut.ai.md.
 # BLE M4 round 3's connection-parameter experiment (Run K) — OFF by default,
 # never shipped: the requested interval / latency / timeout (and an
 # active/idle switch) come from `/.lp/ble-exp.txt`, read at boot. See
@@ -242,7 +242,7 @@ test_gpio = []  # Test GPIO pin toggle
 # Host-driven GPIO square-wave calibration. The line protocol and the duty
 # ramp live in fw-checks as the `gpio-calibrate` payload; this feature is the
 # alias that keeps `just fwtest-gpio-calibrate-esp32c6` and `just
-# calibrate-gpio` working (Q12 retirement ledger, notes.md).
+# calibrate-gpio` working (Q12 retirement ledger, notes.ai.md).
 test_gpio_calibrate = ["dep:fw-checks", "fw-checks/check-gpio-calibrate"]
 # The lab's USB-to-UART tap: this board becomes a transparent bridge between
 # its own USB-Serial-JTAG link and UART0 (GPIO16/17), so a SECOND board's UART0
@@ -283,8 +283,8 @@ memory_fs = []
 # written, files kept, access locked (`fs: refused`). Its update session
 # refuses a core install that does not carry the tree-store mark in its own
 # bytes (`fw_esp32_common::fs_tree_core_guard`). See
-# docs/adr/2026-10-10-fs-tree-refused-state-and-update-guard.md and
-# docs/adr/2026-10-16-c6-tree-store-cutover-migration.md. The name stays for
+# docs/adr/2026-10-10-fs-tree-refused-state-and-update-guard.ai.md and
+# docs/adr/2026-10-16-c6-tree-store-cutover-migration.ai.md. The name stays for
 # the build defs and recipes that spell it; `server` implies it.
 fs-tree = ["fw-esp32-common/fs-tree", "dep:lp-tree-store"]
 test_msafluid = []  # MSAFluid perf harness (solver + cycle timing; phase 02 wires runner)
@@ -292,7 +292,7 @@ test_fluid_demo = []  # RGB MSAFluid demo on the basic ring fixture (gpio4, 241 
 # JIT Q32 math perf harness (cycle timing; no pipeline). The corpus and
 # kernels live in fw-checks as the `jit-math-perf` payload; this feature is
 # the alias that keeps `just fwtest-jit-math-perf-esp32c6` working (Q12
-# retirement ledger, notes.md).
+# retirement ledger, notes.ai.md).
 test_jit_math_perf = ["dep:fw-checks", "fw-checks/check-jit-math-perf"]
 # The `cycle-probe` payload's harness: kernels that isolate one term of a
 # cycle model each, every one bracketed by BOTH the PMU cycle counter and
@@ -412,7 +412,7 @@ diag_secure_link = ["server", "dep:lp-link", "lp-link/secure"]
 # LIE about its wire protocol.
 fixture-old-proto = ["lpa-server/fixture-old-proto"]
 
-# esp-emu SPIKE scaffolding (docs/reports/2026-09-07-esp-emu-c6-spike.md),
+# esp-emu SPIKE scaffolding (docs/reports/2026-09-07-esp-emu-c6-spike.ai.md),
 # OFF by default, never shipped. Espressif's binary emulator has no USB host
 # behind its USB-Serial-JTAG model: SOF is asserted forever and the EP1 FIFO
 # always reports "data free" (the connection monitor therefore believes a
@@ -431,7 +431,7 @@ fixture-no-hello = ["lpa-server/fixture-no-hello", "fw-core/fixture-no-hello"]
 # (fw_esp32_common::serial::in_endpoint) — the write path as it was before
 # PR #795. Exists so the emulated C6 can show the loss the gate fixes, under
 # the link model's free-lag hypothesis (lp-cli/tests/emu_usb_free_lag.rs;
-# docs/defects/2026-09-24-the-real-c6-link-loses-bytes-inside-a-packed-frame.md).
+# docs/defects/2026-09-24-the-real-c6-link-loses-bytes-inside-a-packed-frame.ai.md).
 # Since the link runs lp-link that loss is resent and counted, not seen.
 # Not `test_*`: that prefix selects a harness entrypoint instead of the app.
 fixture-no-in-endpoint-gate = []
@@ -469,9 +469,9 @@ esp-radio = { version = "0.18.0", optional = true, features = ["esp-now", "log-0
 esp-println = { version = "0.17.0", default-features = false, features = ["esp32c6", "jtag-serial", "log-04"] }
 # `compat` (esp-alloc's C `malloc` family) is OFF: `src/c_heap.rs` provides
 # those symbols, placing the radio blobs' allocations in a region of their own
-# (docs/defects/2026-09-24-ble-enabled-c6-refuses-a-project-switch-after-the-heap-cut.md)
+# (docs/defects/2026-09-24-ble-enabled-c6-refuses-a-project-switch-after-the-heap-cut.ai.md)
 # that is not the reclaimed bootloader segment
-# (docs/defects/2026-10-05-a-requested-reboot-crashed-the-c6-bootloader.md).
+# (docs/defects/2026-10-05-a-requested-reboot-crashed-the-c6-bootloader.ai.md).
 # No `internal-heap-stats`: it keeps a lifetime `max_usage` and two running
 # totals by walking every region's `used()` on every allocation (~210
 # instructions each; fps spike, 2026-10-23), and only `heap_peak_diag` reads

@@ -8,7 +8,7 @@
 // its port OPEN, the read pump heard the dead port's own error and detached
 // the link at once: the board was offline for that moment, and its card
 // left Online boards for Offline boards and came back, remounted, its open
-// details closed (docs/defects/2026-10-19-a-re-enumerating-board-remounts-its-card.md).
+// details closed (docs/defects/2026-10-19-a-re-enumerating-board-remounts-its-card.ai.md).
 //
 // This walks it on an emulated C6, in headless Chrome, through Studio's
 // real device stack (`?emu=`):

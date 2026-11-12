@@ -114,7 +114,7 @@ pub(crate) fn overflow_menu_project_group() -> Element {
 }
 
 #[story(
-    description = "The three-segment session·project control (spike \u{a7}2-E) across every project state — saved / unsaved / failed / syncing — crossed with device rows: the sim naming its board, a boardless sim (bare \"Sim\", ruling Q6), and the hardware stand-in (a boardless sim until the rebuilt device model returns). The dirty wash lives on the CHANGES segment now (D8), so the project segment stays neutral and nothing is announced twice; failed here is the failed-ONLY edge (persisted=0, failed>0) — red changes bed with a red count, and no Save, because the controller only publishes actions while persisted edits are pending (see docs/debt/failed-only-asset-edit-header-blindness.md); syncing shows the busy dot with a quiet \u{2713}."
+    description = "The three-segment session·project control (spike \u{a7}2-E) across every project state — saved / unsaved / failed / syncing — crossed with device rows: the sim naming its board, a boardless sim (bare \"Sim\", ruling Q6), and the hardware stand-in (a boardless sim until the rebuilt device model returns). The dirty wash lives on the CHANGES segment now (D8), so the project segment stays neutral and nothing is announced twice; failed here is the failed-ONLY edge (persisted=0, failed>0) — red changes bed with a red count, and no Save, because the controller only publishes actions while persisted edits are pending (see docs/debt/failed-only-asset-edit-header-blindness.ai.md); syncing shows the busy dot with a quiet \u{2713}."
 )]
 pub(crate) fn control_states() -> Element {
     rsx! {
@@ -584,7 +584,7 @@ fn hardware_empty_control() -> UiChromeSessionControl {
 /// controller's `publish_project_offers` applies (persisted > 0, never
 /// failed alone), so a failed-only row here renders exactly the header's
 /// real blind spot
-/// (`docs/debt/failed-only-asset-edit-header-blindness.md`).
+/// (`docs/debt/failed-only-asset-edit-header-blindness.ai.md`).
 fn control_content(persisted: usize, failed: usize, status: UiStatus) -> ProjectDetailContent {
     let mut editor = project_editor_fixture(ProjectSyncPhase::Ready);
     editor.dirty = DirtySummary { persisted, failed };

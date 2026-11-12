@@ -114,7 +114,7 @@ fn accepts_brotli(headers: &HeaderMap) -> bool {
 /// first shipped healthz never took the store lock ("a wedged store must
 /// read as unhealthy via timeouts"), but nothing supplied the timeout, so
 /// a poisoned/wedged store served every request 502 behind a green check
-/// (`docs/defects/2026-08-08-fatal-store-panic-poisons-not-restarts.md`).
+/// (`docs/defects/2026-08-08-fatal-store-panic-poisons-not-restarts.ai.md`).
 /// Now: one trivial SELECT through `with_service` under a 2s budget. A
 /// healthy store answers in microseconds; a hung one turns the check 503
 /// (fly restarts us) without ever hanging the handler; a poisoned one

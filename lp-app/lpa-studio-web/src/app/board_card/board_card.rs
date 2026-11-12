@@ -7,7 +7,7 @@
 //! Connected, the board's whole panel stands in the rows' place
 //! ([`CompactPanel`]: `card.panel`), Edit at its foot.
 //!
-//! **One height in every state but one** (AC5, `docs/style/ui.md` "Stable
+//! **One height in every state but one** (AC5, `docs/style/ui.ai.md` "Stable
 //! Layout"): the card is an explicit grid — the picture's row (138 px, or
 //! 108 px when the card is narrow), the 50 px name bar, eight 28 px rows —
 //! so a board's events never move it. Work, notices and details live inside

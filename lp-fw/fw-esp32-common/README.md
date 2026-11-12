@@ -6,7 +6,7 @@ chip crate reuses the firmware substance instead of forking ~9k LOC.
 
 ## Seam rules
 
-Per `docs/adr/2026-07-29-per-chip-fw-toolchains.md`, this crate must build under
+Per `docs/adr/2026-07-29-per-chip-fw-toolchains.ai.md`, this crate must build under
 BOTH the pinned workspace nightly and the Espressif Xtensa rustc fork:
 
 - No `esp-hal` / `esp-alloc` / `esp-println` / `esp-storage` / `esp-rtos` /
@@ -39,7 +39,7 @@ host-log symbol), `lp_fs` (littlefs-backed `LpFs`), `hardware::manifest_loader`,
 `output::provider` (trait-driven output provider), `output::power_gate`
 (switched-power-rail state machine behind the manifest's `power_gate`
 descriptors — the chip crate supplies the pin and the clock; see
-`docs/adr/2026-08-08-switched-power-rail-mechanism.md`), `serial::shared_serial`.
+`docs/adr/2026-08-08-switched-power-rail-mechanism.ai.md`), `serial::shared_serial`.
 
 `output::rmt_state` used to sit beside the provider; it went away with its only
 consumer when `fw-esp32c6` moved onto `lp-ws281x` (2026-08-01). Per-channel RMT
@@ -121,4 +121,4 @@ its picture and its project's name to the relay — the main thread makes
 them (`serve_relay`, engine-side) and hands them to the leg through
 `RelayBoard` (`RelayPictureSlot`, one buffer going back and forth); the
 heartbeat says `pictures N idle|watched|off` (`relay_picture_tests`).
-Decisions: `docs/adr/2026-10-06-cloud-relay.md` ("Device side").
+Decisions: `docs/adr/2026-10-06-cloud-relay.ai.md` ("Device side").

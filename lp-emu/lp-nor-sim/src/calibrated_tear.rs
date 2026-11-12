@@ -1,7 +1,7 @@
 //! The `calibrated` tear model: torn erases and programs shaped the way a
 //! real part tore, in the proportions it tore them.
 //!
-//! **Source:** `docs/reports/2026-10-08-c6-nor-tear-calibration.md` — 700
+//! **Source:** `docs/reports/2026-10-08-c6-nor-tear-calibration.ai.md` — 700
 //! power cuts on CX1 (`c6-expendable`, MAC `14:C1:9F:E6:54:90`, a generic
 //! ESP32-C6 dev board), flash part JEDEC id `0x464016` (4 MiB), VBUS cut at
 //! the board's USB hub, `silicon:esp32c6`: 500 of the page-aligned

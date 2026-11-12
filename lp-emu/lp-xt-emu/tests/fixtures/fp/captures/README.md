@@ -1,7 +1,7 @@
 # M6 P6 silicon captures
 
 The behavior contract these captures back is
-`docs/adr/2026-07-31-xtensa-fp-behavior-contract.md`; the row-by-row triage
+`docs/adr/2026-07-31-xtensa-fp-behavior-contract.ai.md`; the row-by-row triage
 that produced them is `p6-campaign-results.md` in the M6 planning directory.
 
 Verbatim serial transcripts (filtered to their `[FPCONF]` lines) from the
@@ -77,10 +77,10 @@ silicon-first. With one chip they were an unfalsifiable measurement. With two,
 one board's capture becomes the other's oracle, and the answer is that the
 lookup tables are the same silicon behavior on both parts.
 
-The practical consequence: `docs/design/float.md`'s guarantees, and the
+The practical consequence: `docs/design/float.ai.md`'s guarantees, and the
 emulator's fitted `divn.s` model, carry from the S3 to the classic without a
 per-chip arm. That was an open question at
-`docs/adr/2026-07-31-xtensa-fp-behavior-contract.md` ("**LX6 (classic ESP32)
+`docs/adr/2026-07-31-xtensa-fp-behavior-contract.ai.md` ("**LX6 (classic ESP32)
 FPU** — untouched"), and it is now measured rather than assumed.
 
 `cpenable before=0x000000ff` on this board too — the classic's boot chain also

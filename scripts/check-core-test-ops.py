@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The core test-ops ratchet (docs/adr/2026-10-01-agentic-control-offers-in-core.md).
+"""The core test-ops ratchet (docs/adr/2026-10-01-agentic-control-offers-in-core.ai.md).
 
 Core's tests are the third consumer of the offer tree, after the web and
 the app agent: a test that presses `project/save` by path fails the moment
@@ -283,7 +283,7 @@ def write_record(counts):
         handle.write(
             "# Core test sites that build a user-verb action directly, per file — a ratchet:\n"
             "# counts may only go down. Written by `scripts/check-core-test-ops.py --bless`;\n"
-            "# see that script and docs/adr/2026-10-01-agentic-control-offers-in-core.md.\n"
+            "# see that script and docs/adr/2026-10-01-agentic-control-offers-in-core.ai.md.\n"
         )
         for path in sorted(counts):
             handle.write(f"{counts[path]} {path}\n")

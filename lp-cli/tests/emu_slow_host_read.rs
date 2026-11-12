@@ -1,5 +1,5 @@
 //! A slow-draining host cannot hold one C6 server pass past the watchdog
-//! (`docs/defects/2026-10-09-the-editor-never-opens-on-an-emu-serve-usb-board.md`,
+//! (`docs/defects/2026-10-09-the-editor-never-opens-on-an-emu-serve-usb-board.ai.md`,
 //! ticket `2026-10-20-send-room-wait-starves-watchdog`).
 //!
 //! A `ProjectRead` is one server pass that streams several reply frames, and

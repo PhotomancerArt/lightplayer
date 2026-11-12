@@ -18,7 +18,7 @@
 //! Validated the way `?record=` is (`device_events_io.rs`): a query is
 //! user input, a value that does not parse reads as no flag, and the page
 //! says so once in the console. Both are documented beside `?emu=` in
-//! `AGENTS.md` ("Studio against an emulated board").
+//! `AGENTS.ai.md` ("Studio against an emulated board").
 
 use lpa_link::providers::browser_ble_write_policy::BleWritePolicy;
 use lpc_wire::server::api::LogLevel;

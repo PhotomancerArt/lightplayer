@@ -23,7 +23,7 @@ read as an instruction, and no amount of decoder work makes it go away.
 This is the same test the classic's M0 report ran, run the same way, so the
 two chips' numbers are comparable.
 
-Licence note (AGENTS.md): objdump and nm are used here as tools whose *output*
+Licence note (AGENTS.ai.md): objdump and nm are used here as tools whose *output*
 is fact. No binutils source, table or logic is read or adapted.
 
 Usage

@@ -6,7 +6,7 @@ One that says `UART0+0x01c status` can be read. The names come from the same
 place the M3 register inventory came from — the `#[doc = "0xNN - ..."]`
 comments svd2rust writes above each register accessor — so they are derived
 data, not transcription, and each generated file carries the provenance
-header `docs/adr/2026-07-29-license-provenance-discipline.md` requires.
+header `docs/adr/2026-07-29-license-provenance-discipline.ai.md` requires.
 
 Each table also carries two more things svd2rust states per register, from
 the same source and under the same provenance and `--check` lint:
@@ -16,7 +16,7 @@ the same source and under the same provenance and `--check` lint:
   (an empty impl means zero). A `RegFile` seeds itself from them, so an
   accept block reads what the part reads before anyone writes it rather than
   what a boot was observed to need — the sweep
-  `docs/defects/2026-09-07-accept-blocks-carry-only-the-reset-values-a-boot-needed.md`
+  `docs/defects/2026-09-07-accept-blocks-carry-only-the-reset-values-a-boot-needed.ai.md`
   asked for.
 - the **access**, from which of `impl crate::Readable` / `impl
   crate::Writable` the register has. Only the registers that are not plain
@@ -372,7 +372,7 @@ def _s3(block: str, static: str) -> Target:
 
 # The blocks generated for the **ESP32-S3**, from M6 P01's static inventory of
 # the shipped `fw-esp32s3` image
-# (`docs/reports/2026-09-11-esp32s3-firmware-inventory.md` §6): every block the
+# (`docs/reports/2026-09-11-esp32s3-firmware-inventory.ai.md` §6): every block the
 # image's own MMIO census names, plus the four the ROM-up path will reach that
 # the application never does.
 #

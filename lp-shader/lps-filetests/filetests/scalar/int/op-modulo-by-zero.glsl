@@ -2,7 +2,7 @@
 
 // ============================================================================
 // Integer remainder edge cases. LPIR follows RISC-V (RV32M) semantics on all
-// targets — remainder never traps (docs/design/lpir/02-core-ops.md):
+// targets — remainder never traps (docs/design/lpir/02-core-ops.ai.md):
 //   x % 0        == x
 //   INT_MIN % -1 == 0
 // ============================================================================

@@ -72,7 +72,7 @@ pub struct NetChip {
     /// `set_max_tx_power`, 8..=84), set before every join; `None` keeps the
     /// blob's 20 dBm. The S3 caps it: at 20 dBm its authentication frames
     /// never reach the access point
-    /// (docs/defects/2026-10-22-the-s3-wifi-image-never-authenticates.md).
+    /// (docs/defects/2026-10-22-the-s3-wifi-image-never-authenticates.ai.md).
     pub max_tx_power_qdbm: Option<i8>,
     /// The emulator's network seam engaged: bind its wake line
     /// (`net_bringup`).

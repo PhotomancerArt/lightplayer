@@ -8,7 +8,7 @@ stored in `i32`). This crate provides the reference implementation: `Q32` scalar
 and matrix types (`Vec2Q32`–`Vec4Q32`, `Mat2Q32`–`Mat4Q32`), helper functions, and compiler
 encode/decode utilities.
 
-**Normative Q32 semantics** are defined in `[docs/design/q32.md](../../docs/design/q32.md)` — all
+**Normative Q32 semantics** are defined in `[docs/design/q32.ai.md](../../docs/design/q32.ai.md)` — all
 implementations (this crate, JIT builtins, native/Cranelift emitters, WASM emitter, LPIR interpreter)
 must conform.
 
@@ -76,7 +76,7 @@ use lps_q32::{Q32Options, AddSubMode, MulMode, DivMode, Q32_SHIFT, Q32_FRAC};
 - Div by zero: `0/0 → 0`, `positive/0 → MAX`, `negative/0 → MIN`
 - Remainder: raw `i32 % i32`; `x % 0 → 0`
 
-See `[docs/design/q32.md](../../docs/design/q32.md)` for full specification.
+See `[docs/design/q32.ai.md](../../docs/design/q32.ai.md)` for full specification.
 
 ## Usage
 

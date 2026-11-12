@@ -15,7 +15,7 @@ fw_esp32c6_elf := "target/" + rv32_target + "/" + fw_esp32c6_profile + "/fw-esp3
 xt_s3_target := "xtensa-esp32s3-none-elf"
 fw_esp32s3_elf := "target/" + xt_s3_target + "/release-esp32s3/fw-esp32s3"
 
-# The S3's 8 MB flash floor (docs/adr/2026-07-30-esp32s3-partition-floor.md).
+# The S3's 8 MB flash floor (docs/adr/2026-07-30-esp32s3-partition-floor.ai.md).
 # This MUST be passed to every `espflash flash` for this chip and MUST match
 # partitions.csv: espflash writes a flash-size field into the image header and
 # defaults it to 4MB, and the bootloader validates the partition table against
@@ -38,7 +38,7 @@ xt_v3_target := "xtensa-esp32-none-elf"
 fw_esp32v3_dir := "lp-fw/fw-esp32v3"
 fw_esp32v3_elf := "target/" + xt_v3_target + "/release-esp32v3/fw-esp32v3"
 
-# This crate's 4 MB flash size (docs/adr/2026-07-29-per-chip-fw-toolchains.md,
+# This crate's 4 MB flash size (docs/adr/2026-07-29-per-chip-fw-toolchains.ai.md,
 # Q7 in the classic-ESP32 bring-up plan: C6-shaped table, not the S3's 8 MB
 # floor). Must match lp-fw/fw-esp32v3/partitions.csv and the runner in
 # lp-fw/fw-esp32v3/.cargo/config.toml, which cannot read this var — same
@@ -104,7 +104,7 @@ install-rv32-target:
         echo "Target {{ rv32_target }} already installed"; \
     fi
 
-# Pin the nightly toolchain and validate (date defaults to today UTC; see docs/toolchain-notes.md)
+# Pin the nightly toolchain and validate (date defaults to today UTC; see docs/toolchain-notes.ai.md)
 bump-nightly date="":
     scripts/bump-nightly.sh {{ date }}
 
@@ -277,13 +277,13 @@ lpa-fs-opfs-test: install-wasm32-target
 # The Web Serial JS layer's node tests (`lp-app/lpa-link/tests/js/*.test.mjs`):
 # no browser, no board. Today: the Mac serial-path model `virtual_serial.js`
 # puts between emulated boards and a page on a Mac, and the flash read that
-# survives it (G1-F2, docs/defects/2026-10-02-studio-reading-a-boards-files-stalls-on-a-mac.md).
+# survives it (G1-F2, docs/defects/2026-10-02-studio-reading-a-boards-files-stalls-on-a-mac.ai.md).
 # Seconds. CI runs it in `validate-browser`; `just test` runs it locally.
 lpa-link-js-test:
     node --test lp-app/lpa-link/tests/js/*.test.mjs
 
 # The Web Serial JS layer in a real Chrome — the harness
-# `docs/debt/web-serial-js-untestable.md` has been asking for since
+# `docs/debt/web-serial-js-untestable.ai.md` has been asking for since
 # 2026-07-10 (emulator plan two, M2).
 #
 # It drives the SHIPPED `browser_serial.js` (and, through its own dynamic
@@ -300,7 +300,7 @@ lpa-link-js-test:
 # To run it locally in Chrome or Brave (the desk's stock chromedriver usually
 # drifts a version behind system Chrome), point the runner at a matched driver
 # with `CHROMEDRIVER=… LP_WEBDRIVER_JSON=…`. The recipe, verbatim, is in
-# AGENTS.md, "Running the conformance suite in Chrome or Brave"; the
+# AGENTS.ai.md, "Running the conformance suite in Chrome or Brave"; the
 # `LP_WEBDRIVER_JSON` hook's own comment is in `scripts/wasm-serial-test-runner.sh`.
 lpa-link-browser-test: install-wasm32-target
     #!/usr/bin/env bash
@@ -519,7 +519,7 @@ studio-story-pngs *filters: studio-web-story-build
 # Write a LOCAL story set under story-images/ (gitignored — baselines are
 # never committed; they live in the companion stories repo, one snapshot per
 # captured main commit, and merging a PR is what accepts its visual changes.
-# See docs/adr/2026-08-17-story-baselines-companion-repo.md). macOS rendering
+# See docs/adr/2026-08-17-story-baselines-companion-repo.ai.md). macOS rendering
 # differs from the pinned CI environment, so a local set is for iteration
 # only, never authoritative.
 studio-story-baselines: studio-web-story-build
@@ -550,7 +550,7 @@ studio-story-check *filters: studio-web-story-build
 # service). The file is per-worktree and gitignored — never commit it, and
 # never hand-edit a fixed port into it; a stale pinned port sends the
 # harness browser pane to another worktree's server (see
-# docs/defects/2026-07-27-launch-json-pinned-port.md). Run this before
+# docs/defects/2026-07-27-launch-json-pinned-port.ai.md). Run this before
 # opening a harness preview; it is idempotent.
 #
 # `just claude-launch-json bench` predicts the bench-block port instead
@@ -599,7 +599,7 @@ claude-launch-json mode="":
 # while it is open, so close it when the walk ends. HARDWARE WALKS ONLY — the block is tiny and deliberately
 # exclusive (Yona: bench sessions shouldn't share); everyday dev uses
 # plain `just studio-dev` and hashed ports. The printed URL is the source
-# of truth, as always (docs/defects/2026-07-27-launch-json-pinned-port.md).
+# of truth, as always (docs/defects/2026-07-27-launch-json-pinned-port.ai.md).
 studio-dev-bench:
     STUDIO_BENCH=1 just studio-dev
 
@@ -1112,7 +1112,7 @@ build-rv32-release: build-rv32
 #
 # A plain, MONOLITHIC build (no loader, no boot records) — the dev image. The
 # product image is the split one: `just fw-esp32c6-split`, or the packaged
-# `lp-cli firmware package esp32c6-4mb` (docs/adr/2026-10-04-c6-split-link-firmware-loader-and-boot-records.md).
+# `lp-cli firmware package esp32c6-4mb` (docs/adr/2026-10-04-c6-split-link-firmware-loader-and-boot-records.ai.md).
 build-fw-esp32c6 features="": install-rv32-target
     #!/usr/bin/env bash
     set -euo pipefail
@@ -1606,7 +1606,7 @@ flash-fw-esp32v3 port="" features="" monitor="monitor": (build-fw-esp32v3 featur
       no-monitor) ;;
       *) echo "monitor must be 'monitor' or 'no-monitor', not '{{ monitor }}'" >&2; exit 2 ;;
     esac
-    # Through the one resolver, so the desk's board leases are asked (AGENTS.md).
+    # Through the one resolver, so the desk's board leases are asked (AGENTS.ai.md).
     resolved_port="$(cargo run -q -p lp-cli -- fwcheck port --port "{{ port }}" --chip esp32)"
     args+=(--port "$resolved_port")
     espflash flash "${args[@]}" {{ fw_esp32v3_elf }}
@@ -1671,7 +1671,7 @@ flash-fw-esp32s3 port="" features="" monitor="monitor": (build-fw-esp32s3 featur
       no-monitor) ;;
       *) echo "monitor must be 'monitor' or 'no-monitor', not '{{ monitor }}'" >&2; exit 2 ;;
     esac
-    # Through the one resolver, so the desk's board leases are asked (AGENTS.md).
+    # Through the one resolver, so the desk's board leases are asked (AGENTS.ai.md).
     resolved_port="$(cargo run -q -p lp-cli -- fwcheck port --port "{{ port }}" --chip esp32s3)"
     args+=(--port "$resolved_port")
     espflash flash "${args[@]}" {{ fw_esp32s3_elf }}
@@ -1709,7 +1709,7 @@ flash-fw-esp32c6 port="" features="" monitor="monitor" migrate="" discard="": (b
       no-monitor) ;;
       *) echo "monitor must be 'monitor' or 'no-monitor', not '{{ monitor }}'" >&2; exit 2 ;;
     esac
-    # The layout preflight (C6 repartition, docs/adr/2026-10-02-c6-repartition-and-layout-migration.md):
+    # The layout preflight (C6 repartition, docs/adr/2026-10-02-c6-repartition-and-layout-migration.ai.md):
     # a board whose partition table differs from this image's — either way;
     # a downgrade formats over a migrated board's files — is refused unless
     # migrate=1 (move the files, writing this image) or discard=1 (erase them,
@@ -1758,7 +1758,7 @@ fwtest-xt-jit-esp32s3 port="":
     cd lp-fw/fw-esp32s3 && cargo build --profile release-esp32s3 --features test_xt_jit_corpus
     cd - >/dev/null
     args=(--chip esp32s3 --partition-table lp-fw/fw-esp32s3/partitions.csv --flash-size {{ s3_flash_size }} --monitor --after hard-reset)
-    # Through the one resolver, so the desk's board leases are asked (AGENTS.md).
+    # Through the one resolver, so the desk's board leases are asked (AGENTS.ai.md).
     resolved_port="$(cargo run -q -p lp-cli -- fwcheck port --port "{{ port }}" --chip esp32s3)"
     args+=(--port "$resolved_port")
     espflash flash "${args[@]}" {{ fw_esp32s3_elf }}
@@ -1787,7 +1787,7 @@ fwtest-backtrace-esp32s3 port="":
     cd lp-fw/fw-esp32s3 && cargo build --profile release-esp32s3 --features test_backtrace_oracle
     cd - >/dev/null
     args=(--chip esp32s3 --partition-table lp-fw/fw-esp32s3/partitions.csv --flash-size {{ s3_flash_size }} --monitor --after hard-reset)
-    # Through the one resolver, so the desk's board leases are asked (AGENTS.md).
+    # Through the one resolver, so the desk's board leases are asked (AGENTS.ai.md).
     resolved_port="$(cargo run -q -p lp-cli -- fwcheck port --port "{{ port }}" --chip esp32s3)"
     args+=(--port "$resolved_port")
     espflash flash "${args[@]}" {{ fw_esp32s3_elf }}
@@ -1831,7 +1831,7 @@ fwtest-loopback-esp32s3 port="":
     cd lp-fw/fw-esp32s3 && cargo build --profile release-esp32s3 --features test_loopback
     cd - >/dev/null
     args=(--chip esp32s3 --partition-table lp-fw/fw-esp32s3/partitions.csv --flash-size {{ s3_flash_size }} --monitor --after hard-reset)
-    # Through the one resolver, so the desk's board leases are asked (AGENTS.md).
+    # Through the one resolver, so the desk's board leases are asked (AGENTS.ai.md).
     resolved_port="$(cargo run -q -p lp-cli -- fwcheck port --port "{{ port }}" --chip esp32s3)"
     args+=(--port "$resolved_port")
     espflash flash "${args[@]}" {{ fw_esp32s3_elf }}
@@ -1887,7 +1887,7 @@ fwtest-xt-fp-esp32s3 port="" family="" limit="0":
       LP_FP_MODE="$mode" LP_FP_FAMILY="$family" LP_FP_LIMIT="{{ limit }}" \
       cargo build --profile release-esp32s3 --features test_xt_fp_conformance)
     args=(--chip esp32s3 --partition-table lp-fw/fw-esp32s3/partitions.csv --flash-size {{ s3_flash_size }} --monitor --after hard-reset)
-    # Through the one resolver, so the desk's board leases are asked (AGENTS.md).
+    # Through the one resolver, so the desk's board leases are asked (AGENTS.ai.md).
     resolved_port="$(cargo run -q -p lp-cli -- fwcheck port --port "{{ port }}" --chip esp32s3)"
     args+=(--port "$resolved_port")
     echo "capturing to $out"
@@ -1970,7 +1970,7 @@ fwtest-iexec-esp32v3 port="":
     (cd {{ fw_esp32v3_dir }} && \
       cargo build --profile release-esp32v3 --features test_interrupt_executor)
     args=(--chip esp32 --partition-table {{ fw_esp32v3_dir }}/partitions.csv --flash-size {{ v3_flash_size }} --monitor --monitor-baud 921600 --after hard-reset)
-    # Through the one resolver, so the desk's board leases are asked (AGENTS.md).
+    # Through the one resolver, so the desk's board leases are asked (AGENTS.ai.md).
     resolved_port="$(cargo run -q -p lp-cli -- fwcheck port --port "{{ port }}" --chip esp32)"
     args+=(--port "$resolved_port")
     echo "capturing to $out"
@@ -2006,7 +2006,7 @@ fwtest-sram0-esp32v3 port="":
     (cd {{ fw_esp32v3_dir }} && touch src/main.rs && \
       cargo build --profile release-esp32v3 --no-default-features --features esp32,test_sram0_exec)
     args=(--chip esp32 --partition-table {{ fw_esp32v3_dir }}/partitions.csv --flash-size {{ v3_flash_size }} --monitor --monitor-baud 921600 --after hard-reset)
-    # Through the one resolver, so the desk's board leases are asked (AGENTS.md).
+    # Through the one resolver, so the desk's board leases are asked (AGENTS.ai.md).
     resolved_port="$(cargo run -q -p lp-cli -- fwcheck port --port "{{ port }}" --chip esp32)"
     args+=(--port "$resolved_port")
     echo "capturing to $out"
@@ -2065,7 +2065,7 @@ fwtest-appcore-rom-path-esp32v3 port="":
     (cd {{ fw_esp32v3_dir }} && touch src/main.rs && \
       cargo build --profile release-esp32v3 --features test_appcore_rom_path)
     args=(--chip esp32 --partition-table {{ fw_esp32v3_dir }}/partitions.csv --flash-size {{ v3_flash_size }} --monitor --monitor-baud 921600 --after hard-reset)
-    # Through the one resolver, so the desk's board leases are asked (AGENTS.md).
+    # Through the one resolver, so the desk's board leases are asked (AGENTS.ai.md).
     resolved_port="$(cargo run -q -p lp-cli -- fwcheck port --port "{{ port }}" --chip esp32)"
     args+=(--port "$resolved_port")
     echo "capturing to $out"
@@ -2129,7 +2129,7 @@ fwtest-rmt-esp32v3 port="":
     (cd {{ fw_esp32v3_dir }} && touch src/main.rs && \
       cargo build --profile release-esp32v3 --features esp32,test_rmt)
     args=(--chip esp32 --partition-table {{ fw_esp32v3_dir }}/partitions.csv --flash-size {{ v3_flash_size }} --monitor --monitor-baud 921600 --after hard-reset)
-    # Through the one resolver, so the desk's board leases are asked (AGENTS.md).
+    # Through the one resolver, so the desk's board leases are asked (AGENTS.ai.md).
     resolved_port="$(cargo run -q -p lp-cli -- fwcheck port --port "{{ port }}" --chip esp32)"
     args+=(--port "$resolved_port")
     echo "capturing to $out"
@@ -2173,7 +2173,7 @@ fwtest-xt-fp-esp32v3 port="" family="" limit="0":
       LP_FP_MODE="$mode" LP_FP_FAMILY="$family" LP_FP_LIMIT="{{ limit }}" \
       cargo build --profile release-esp32v3 --features test_xt_fp_conformance)
     args=(--chip esp32 --partition-table {{ fw_esp32v3_dir }}/partitions.csv --flash-size {{ v3_flash_size }} --monitor --monitor-baud 921600 --after hard-reset)
-    # Through the one resolver, so the desk's board leases are asked (AGENTS.md).
+    # Through the one resolver, so the desk's board leases are asked (AGENTS.ai.md).
     resolved_port="$(cargo run -q -p lp-cli -- fwcheck port --port "{{ port }}" --chip esp32)"
     args+=(--port "$resolved_port")
     echo "capturing to $out"
@@ -2250,7 +2250,7 @@ fwtest-button-esp32s3 port="":
     cd lp-fw/fw-esp32s3 && cargo build --profile release-esp32s3 --features test_button
     cd - >/dev/null
     args=(--chip esp32s3 --partition-table lp-fw/fw-esp32s3/partitions.csv --flash-size {{ s3_flash_size }} --monitor --after hard-reset)
-    # Through the one resolver, so the desk's board leases are asked (AGENTS.md).
+    # Through the one resolver, so the desk's board leases are asked (AGENTS.ai.md).
     resolved_port="$(cargo run -q -p lp-cli -- fwcheck port --port "{{ port }}" --chip esp32s3)"
     args+=(--port "$resolved_port")
     espflash flash "${args[@]}" {{ fw_esp32s3_elf }}
@@ -2295,7 +2295,7 @@ fw-esp32c6-split features="": install-rv32-target
 # overran the partition twice in 2026 and both times it surfaced as a red
 # post-merge deploy, because nothing pre-merge built the firmware. This always
 # prints the headroom, so size is a trended number and not a cliff. See
-# docs/adr/2026-07-28-esp32c6-flash-budget.md.
+# docs/adr/2026-07-28-esp32c6-flash-budget.ai.md.
 #
 # It builds the SPLIT image (the product's), runs the verifier — 0 core nodes
 # in the engine region, or the build fails — and reports, each saying which it
@@ -2356,7 +2356,7 @@ fw-esp32c6-size-check margin="65536" unsplit="" features="": install-rv32-target
 # into extra ROM-mapped image segments and the ESP32 bootloader asserts
 # `rom_index < 2`. Until 2026-09-08 that patch could silently miss on a cold
 # target dir and the stock layout would link instead
-# (docs/defects/2026-09-08-cold-target-dir-links-esp-hals-stock-rodata.md).
+# (docs/defects/2026-09-08-cold-target-dir-links-esp-hals-stock-rodata.ai.md).
 # `build.rs` now fails the build rather than skip, so this is the second line
 # of defence — it reads the artefact instead of trusting the recipe, which is
 # what the defect turned out to need.
@@ -2389,7 +2389,7 @@ fw-esp32c6-rodata-layout-check elf=fw_esp32c6_elf:
         echo "  lp-fw/fw-esp32c6/build.rs's rodata.x patch did not reach this link." >&2
         echo "  espflash will emit >2 ROM segments and the bootloader will assert" >&2
         echo "  'unpack_load_app, bootloader_utility.c:762 (rom_index < 2)'." >&2
-        echo "  See docs/defects/2026-09-08-cold-target-dir-links-esp-hals-stock-rodata.md." >&2
+        echo "  See docs/defects/2026-09-08-cold-target-dir-links-esp-hals-stock-rodata.ai.md." >&2
         echo "$rows" | grep -E "rodata|appdesc" >&2
         exit 1
     fi
@@ -2424,7 +2424,7 @@ fw-manifest-check-emu: build-fw-emu
 # Fail when the esp32s3 app image gets too close to its 6 MB partition.
 #
 # Unlike the C6, this number is a TREND, not a budget gate. The S3 moved to an
-# 8 MB partition floor (docs/adr/2026-07-30-esp32s3-partition-floor.md), which
+# 8 MB partition floor (docs/adr/2026-07-30-esp32s3-partition-floor.ai.md), which
 # removed the pressure the C6 still lives under — the check exists so Xtensa
 # code density stays a tracked number, not so anyone has to fight for space.
 # Do not tighten the margin to manufacture pressure.
@@ -2642,7 +2642,7 @@ _fw-size-check name chip flash_size elf csv margin doc:
 # growth beyond the margin; an intentional increase re-baselines explicitly
 # with `just heap-budget-baseline` so the growth lands in the PR diff.
 # The emulator is deterministic, so the default margin is 0%. Never widen the
-# margin to make the gate pass. Fidelity limits: docs/heap-budget-gate.md.
+# margin to make the gate pass. Fidelity limits: docs/heap-budget-gate.ai.md.
 heap-budget-check margin_pct="0": install-rv32-target
     scripts/heap-budget-check.sh check {{ margin_pct }}
 
@@ -2667,7 +2667,7 @@ heap-budget-baseline project="": install-rv32-target
 #   just ram-ledger target/ci-images/<sha>/esp32c6/tree/ESP32C6_SERVER_RADIO_SPLIT/p2.elf
 #   just ram-ledger <elf> --chip esp32s3 --json out.json
 #
-# Flags: scripts/ram-ledger.py --help; method and limits: docs/heap-budget-gate.md
+# Flags: scripts/ram-ledger.py --help; method and limits: docs/heap-budget-gate.ai.md
 # ("The whole-RAM ledger"). `just test-ram-ledger` is its self-test.
 ram-ledger *args:
     python3 scripts/ram-ledger.py {{ args }}
@@ -2699,7 +2699,7 @@ test-ram-ledger:
 # run these, where a skip would be a failure.
 #
 # Under `LP_CI_IMAGES` each arm boots CI's image for its chip instead of
-# building one (docs/ci-images.md); a bare invocation then wants all three.
+# building one (docs/ci-images.ai.md); a bare invocation then wants all three.
 heap-budget-check-chips margin_pct="0" chip="": install-rv32-target
     LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with "{{ chip }}" -- scripts/heap-budget-check.sh chips {{ margin_pct }} {{ chip }}
 
@@ -2768,14 +2768,14 @@ heap-budget-baseline-chips-s3:
 # A bless rewrites FIGURES only — never silicon-matched values, transcripts,
 # pinned reference images or structural constants, which stay literals in
 # the tests. If only the emulator changed, a moved figure is a finding: do not
-# bless it. docs/chip-figures.md.
+# bless it. docs/chip-figures.ai.md.
 bless-chips *args:
     scripts/bless-chips.sh {{ args }}
 
 # Accept the figure moves CI already measured, without building anything: the
 # `figures-patch-*` artifacts of the PR's latest CI run, applied to this
 # checkout together. CI produces them only when a figure check failed on
-# figures and nothing else (docs/chip-figures.md, "When CI hands back the
+# figures and nothing else (docs/chip-figures.ai.md, "When CI hands back the
 # patch"); the PR's sticky "Pinned firmware figures moved" comment lists what
 # moved. Commit the result with the change that moved it, then push.
 #
@@ -2796,7 +2796,7 @@ apply-ci-figures pr="":
 #   just fetch-ci-images 830 esp32s3     # a PR's newest run, one chip
 #   just fetch-ci-images <sha>|<run-id>
 #
-# docs/ci-images.md.
+# docs/ci-images.ai.md.
 fetch-ci-images *args:
     scripts/ci/ci-images.py fetch {{ args }}
 
@@ -2889,7 +2889,7 @@ build-rv32-builtins: install-rv32-target
 # genuinely changes this writes the very path `lps-builtins-xt-image/build.rs`
 # declares `rerun-if-changed` on — the shape of the rv32 race. It belongs on the
 # ordered gates instead. See
-# docs/defects/2026-08-01-xt-builtins-image-strands-just-test.md.
+# docs/defects/2026-08-01-xt-builtins-image-strands-just-test.ai.md.
 build-xt-builtins:
     ./scripts/build-builtins-xt.sh --if-toolchain
 
@@ -3100,7 +3100,7 @@ clippy-fw-esp32c6-harnesses: install-rv32-target
 # harnesses above, and the reason M2 added this alongside them. A gate-off
 # build is what M3's ESP32-S3 app layer actually ships, so it has to keep
 # compiling warning-free, and `disabled_node_kind_still_loads_project` (the
-# missing-node contract, `docs/debt/firmware-capability-reporting.md`) only
+# missing-node contract, `docs/debt/firmware-capability-reporting.ai.md`) only
 # exists in a gate-off build and is only run here.
 #
 # Wired into `check-lint` (and so CI's Lint job): the recipe sat unwired for
@@ -3203,7 +3203,7 @@ clippy-glsl-fix:
 # nothing serializes a host `cargo test` against an rv32 `cargo build`.
 # Building the builtins *before* the parallel half leaves it with no writer:
 # 0.5s when fresh, and when stale it is work `test-filetests` would have done
-# anyway. See docs/defects/2026-07-29-builtins-elf-uplift-race.md.
+# anyway. See docs/defects/2026-07-29-builtins-elf-uplift-race.ai.md.
 #
 # `build-xt-builtins` is here for the second half of the same story: the Xtensa
 # image is the rv32 one's gitignored twin, and building it before the parallel
@@ -3341,9 +3341,9 @@ test-ser-write:
     rm -f third_party/ser-write/Cargo.lock third_party/ser-write-json/Cargo.lock
 
 # The lps-probe wall-clock perf sanity: the number behind the probe
-# worker-offload follow-up (docs/adr/2026-07-25-shader-probe-experiment-api.md).
+# worker-offload follow-up (docs/adr/2026-07-25-shader-probe-experiment-api.ai.md).
 # `#[ignore]`d in the default suite because it measures machine load as much as
-# code — see docs/debt/lps-probe-perf-test-load-sensitive.md. Trust the result
+# code — see docs/debt/lps-probe-perf-test-load-sensitive.ai.md. Trust the result
 # only when the printed load average shows no competing work.
 perf-probe:
     uptime
@@ -3466,7 +3466,7 @@ test-filetests:
 # `cargo test` selection, not `-p`, so it reuses the build `test-rust-core`
 # just made instead of re-unifying features. Needs the rv32 builtins image
 # (`build-rv32-builtins`); without the Xtensa image the xt targets run codegen
-# only. See docs/debt/example-shaders-not-compile-gated.md.
+# only. See docs/debt/example-shaders-not-compile-gated.ai.md.
 test-example-shaders:
     cargo test --test example_shaders_compile -- --ignored --nocapture
 
@@ -3516,7 +3516,7 @@ test-glsl-filetests:
 # it moved here CI compiled that combination only inside the stories job's
 # dx build, whose `studio` path gate does not include lpa-cloud-client.
 # Warm ~1s, cold ~47s locally; it runs beside clippy, the Lint job's long
-# pole. See docs/debt/wasm-cloud-check-not-in-just-check.md.
+# pole. See docs/debt/wasm-cloud-check-not-in-just-check.ai.md.
 [parallel]
 check-lint: fmt-check clippy check-wasm-cloud check-lp-link-targets check-lpc-engine-gates check-studio-core-minimal lint-serde-content lint-browser-test-harness lint-classic-capture lint-pcb-export lint-flash-tears-analyze lint-schemars-fw lint-upgrade-fw lint-emu-fence lint-nested-patches lint-emu-regnames lint-torture-corpus lint-vec-corpus lint-tw-utilities lint-red-main-needs lint-firmware-closure lint-ci-durations lint-defects lint-power-cut-verdict lint-tag-next-version lint-release-version-cmp lint-web-actions lint-core-action-fields lint-core-test-ops
 
@@ -3524,7 +3524,7 @@ check-lint: fmt-check clippy check-wasm-cloud check-lp-link-targets check-lpc-en
 check: check-lint schema-check fw-manifest-check-emu
 
 # Guard against serde Content-machinery reintroduction (tag/untagged/flatten).
-# See docs/adr/2026-07-04-json-only-artifacts.md and the script's allowlist.
+# See docs/adr/2026-07-04-json-only-artifacts.ai.md and the script's allowlist.
 lint-serde-content:
     ./scripts/check-serde-content.sh
 
@@ -3556,7 +3556,7 @@ lint-pcb-export:
 
 # The C6/S3 power-cut runner's verdict (scripts/ota/hw-power-cut.py) must be
 # able to fail: a cut that cannot show the board lost power is NO-CUT-PROOF,
-# never a PASS (docs/defects/2026-10-23-board-power-cut-one-usb-twin-and-every-check-passed.md).
+# never a PASS (docs/defects/2026-10-23-board-power-cut-one-usb-twin-and-every-check-passed.ai.md).
 # This replays the verdict against captured C6 logs, a real update with no cut
 # among them. It opens no port.
 lint-power-cut-verdict:
@@ -3598,20 +3598,20 @@ lint-tw-utilities:
 # The web-built actions ratchet: every verb the user can press is meant to be
 # built in core and published on the view (the app agent must see it). The
 # web layer may only build FEWER actions than recorded per file; `--bless`
-# locks a drop in. docs/adr/2026-10-01-agentic-control-offers-in-core.md.
+# locks a drop in. docs/adr/2026-10-01-agentic-control-offers-in-core.ai.md.
 lint-web-actions *args:
     python3 scripts/check-web-actions.py {{ args }}
 
 # The core action-fields ratchet: action-carrying pub fields on Studio core
 # view types may only go down — a verb belongs in the offer tree, at a path
-# (docs/adr/2026-10-01-agentic-control-offers-in-core.md). `--bless` records a drop.
+# (docs/adr/2026-10-01-agentic-control-offers-in-core.ai.md). `--bless` records a drop.
 lint-core-action-fields *args:
     python3 scripts/check-core-action-fields.py {{ args }}
 
 # The core test-ops ratchet: Studio core tests that build a user-verb action
 # directly (instead of pressing its offer by path through
 # `offer_press_test_api.rs`) may only go down per file
-# (docs/adr/2026-10-01-agentic-control-offers-in-core.md). `--bless` records a drop.
+# (docs/adr/2026-10-01-agentic-control-offers-in-core.ai.md). `--bless` records a drop.
 lint-core-test-ops *args:
     python3 scripts/check-core-test-ops.py {{ args }}
 
@@ -3634,7 +3634,7 @@ lint-emu-fence:
 # (lp-xt/fixtures) that reaches a crate the root patches must repeat the entry
 # or it silently builds against crates.io. Reads manifests and lockfiles only
 # (no network, no esp toolchain); exclusions and their reasons live in the
-# script. docs/debt/nested-workspaces-miss-root-patches.md.
+# script. docs/debt/nested-workspaces-miss-root-patches.ai.md.
 lint-nested-patches:
     ./scripts/check-nested-patches.sh
 
@@ -3650,7 +3650,7 @@ lint-red-main-needs:
 # chip's shipped image changes: `cargo tree` per firmware, default features,
 # its real target. Rewrite after adding or dropping a path dependency of
 # anything a firmware links; the lint below fails until you do. ~4 s.
-# docs/debt/firmware-figures-skip-on-shared-crate-prs.md.
+# docs/debt/firmware-figures-skip-on-shared-crate-prs.ai.md.
 firmware-closure:
     python3 scripts/ci/firmware-closure.py
 
@@ -3660,13 +3660,13 @@ lint-firmware-closure:
 # job-durations.py's own fixture-based self-test: percentiles, the
 # timeout-minutes parse and the verdicts, no network. Offline, stdlib
 # python, ~0.1 s — keeps the parser honest when pre-merge.yml's layout
-# changes. docs/debt/ci-runner-time-over-the-concurrency-cap.md.
+# changes. docs/debt/ci-runner-time-over-the-concurrency-cap.ai.md.
 lint-ci-durations:
     python3 scripts/ci/job-durations.py --self-test
 
 # The defect registry's index, built from each entry's frontmatter when it is
 # read: there is no hand-written table, so two PRs that each file a defect
-# never touch a shared line (docs/debt/hand-written-defects-index.md).
+# never touch a shared line (docs/debt/hand-written-defects-index.ai.md).
 # Markdown on stdout, newest first. `--by-class` (classes by count, then each
 # one's entries; † marks a class missing from the vocabulary), `--open`,
 # `--class <name>`; they combine.
@@ -3756,10 +3756,10 @@ test-emu-c6: test-emu-c6-boot test-emu-c6-cli
 # With `LP_CI_IMAGES` set (`just fetch-ci-images`), every image is CI's own and
 # nothing is built: `scripts/ci/ci-images.py with esp32c6` points
 # `LP_EMU_C6_IMAGE_DIR` at the fetched set, after refusing it if its firmware
-# sources are not this checkout's (docs/ci-images.md). Unset, it is a no-op.
+# sources are not this checkout's (docs/ci-images.ai.md). Unset, it is a no-op.
 test-emu-c6-boot:
     LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-emu-esp32c6 --no-fail-fast -- --include-ignored --nocapture
-    # The emulator seam gates (docs/adr/2026-10-05-emulator-seams.md): the
+    # The emulator seam gates (docs/adr/2026-10-05-emulator-seams.ai.md): the
     # synthetic-guest tests and the `test_seam_abi` harness image need the
     # dev-only `test-seams` implementations, which no shipped binary has.
     LP_EMU_BUILD_FW=1 scripts/ci/ci-images.py with esp32c6 -- cargo test -p lp-emu-esp32c6 --features test-seams --test 'seam_*' -- --include-ignored --nocapture
@@ -3819,7 +3819,7 @@ test-emu-c6-split-boot scenarios="": install-rv32-target
     fi
     # Through both front doors: our own second stage (`merged.bin`) and the
     # ESP-IDF one (`merged-idf.bin`, LP_BOOT_DOOR=idf) — every core must boot
-    # through both (docs/adr/2026-10-17-the-c6-boots-through-our-own-bootloader.md).
+    # through both (docs/adr/2026-10-17-the-c6-boots-through-our-own-bootloader.ai.md).
     for door in lp idf; do
         echo "== split scenarios through the $door door"
         LP_BOOT_DOOR=$door LP_SPLIT_SCENARIOS="$(cd "$out" && pwd)" cargo test -p lp-cli --release --test emu_split_scenarios -- --include-ignored --nocapture --test-threads=1
@@ -3965,7 +3965,7 @@ test-emu-c6-cli-boards: install-rv32-target
 report-first-light-emu grade="t2" dir="": install-rv32-target
     LP_FIRST_LIGHT_GRADE={{ grade }} LP_FIRST_LIGHT_DIR={{ dir }} LP_EMU_BUILD_FW=1 cargo test -p lp-cli --release --test emu_first_light -- --include-ignored --nocapture
 
-# The first-light ratchet's measurement (docs/first-light-ratchet.md): the
+# The first-light ratchet's measurement (docs/first-light-ratchet.ai.md): the
 # split image ROM-up through our bootloader on lp-emu:esp32c6:t4, power-on,
 # `projects/test/basic` (gated) and a c40-sized project (reported), each with
 # a saved Wi-Fi network on the emulated LAN. Writes
@@ -3983,7 +3983,7 @@ first-light-measure dir="target/first-light": install-rv32-target
 first-light-check dir="target/first-light": (first-light-measure dir)
     scripts/ci/first-light-ratchet.py check --json {{ dir }}/emu-first-light-t4.json
 
-# YONA'S bless of a first-light rise (docs/first-light-ratchet.md): writes
+# YONA'S bless of a first-light rise (docs/first-light-ratchet.ai.md): writes
 # the record at `ms` — CI's reading, from the PR comment or the job summary,
 # never a desk measurement — with `recorded_by: yona`. CI accepts a raised
 # record only with that field AND the PR label `first-light-blessed`.
@@ -3993,7 +3993,7 @@ bless-first-light ms:
     scripts/ci/first-light-ratchet.py bless {{ ms }}
 
 # The first-light ratchet's periodic silicon cross-check (a DESK recipe,
-# never CI; docs/first-light-ratchet.md): flash this tree's split image whole
+# never CI; docs/first-light-ratchet.ai.md): flash this tree's split image whole
 # onto CX1 (the sacrificial board — it ERASES its filesystem) and take 10
 # power-on boots per case off `[perf] first light`
 # (`lp-cli/tests/board_first_light.rs`). Lease CX1 first and pass your
@@ -4229,7 +4229,7 @@ test-emu-esp32v3-reference:
 # With `LP_CI_IMAGES` set (`just fetch-ci-images`), all five images are CI's
 # own — the shipped, rmt-chase and frame-dump ELFs, the merged chip and the
 # pinned reference pair — and nothing is built; the fetched set is refused if
-# its firmware sources are not this checkout's (docs/ci-images.md).
+# its firmware sources are not this checkout's (docs/ci-images.ai.md).
 #
 # The recipe writes `target/lp-emu-esp32v3/images.env` (the variables it set)
 # so CI can pack exactly those files as the `ci-images-esp32v3` artifact.
@@ -4462,7 +4462,7 @@ test-emu-esp32s3-boot:
     cargo test -p lp-cli --release --lib run_s3 -- --include-ignored --nocapture || status=$?
     exit "$status"
 
-# The S3's emulator seams (S3 radio M5; docs/adr/2026-10-05-emulator-seams.md
+# The S3's emulator seams (S3 radio M5; docs/adr/2026-10-05-emulator-seams.ai.md
 # §13): `fw-esp32s3 --features test_seam_abi` — a harness image that never
 # ships — built, copied out of the shared target path, and run by
 # `lp-emu-esp32s3`'s `tests/seam_*` with the dev-only `test-seams`
@@ -4939,7 +4939,7 @@ test-emu-serve:
 # What it proves per-tick lives in `lp-cli/tests/emu_usb_link_gates.rs` (G4-1,
 # moved from lp-emu-esp32c6's shader_oracle_pin.rs when the image went onto
 # lp-link), which runs in `test-emu-c6-cli`. See
-# docs/reports/2026-09-08-esp32c6-emulator-walk.md.
+# docs/reports/2026-09-08-esp32c6-emulator-walk.ai.md.
 # `build-rv32-builtins` and not the whole `ci-prereqs`: the host oracle's
 # second engine is `lpvm-native`'s rv32 code generator, which renders black
 # without its builtins image — and a black host frame is not an oracle. The
@@ -4964,7 +4964,7 @@ walk-esp32c6-emu *args: install-rv32-target build-rv32-builtins
 # (lp2025/2026-09-28-s3-walk-host-link):
 #
 #   the image   8 MiB, not 4: this chip's partition table does not fit a 4 MB
-#               part (docs/adr/2026-07-30-esp32s3-partition-floor.md).
+#               part (docs/adr/2026-07-30-esp32s3-partition-floor.ai.md).
 #   the cable   a scripted `--usb-script` detach/attach/open, since the
 #               hosted-run door has no live control channel to unplug the
 #               cable and query its state the way the retired binary did —
@@ -5065,7 +5065,7 @@ emu-c6 elf *args:
 #   scripts/emu/bench-c6.sh --bin <saved> --no-build --no-promote   # the A/B half
 #
 # It is an ORACLE, not a gate — no CI job runs it and no number it prints
-# gates anything (AGENTS.md "never gate on emulated microseconds"). A
+# gates anything (AGENTS.ai.md "never gate on emulated microseconds"). A
 # before/after belongs in a PR body as a same-window A/B with the load
 # average quoted; see the script's header.
 bench-emu-c6 *args:
@@ -5081,7 +5081,7 @@ flash-tears-analyze *args:
     #!/usr/bin/env bash
     set -euo pipefail
     if [ -z "{{ args }}" ]; then
-        scripts/emu/flash-tears-analyze.py --write-report docs/reports/2026-10-08-c6-nor-tear-calibration.md
+        scripts/emu/flash-tears-analyze.py --write-report docs/reports/2026-10-08-c6-nor-tear-calibration.ai.md
     else
         scripts/emu/flash-tears-analyze.py {{ args }}
     fi
@@ -5133,7 +5133,7 @@ flash-tears-sim-unaligned cuts="300" seed="1":
 # compile-stress harness and neither is what the product does.
 #
 # It is an ORACLE, not a gate — no CI job runs it and no number it prints
-# gates anything (AGENTS.md "never gate on emulated microseconds"). Where the
+# gates anything (AGENTS.ai.md "never gate on emulated microseconds"). Where the
 # seconds GO is a different pair of instruments; see the script's header.
 bench-emu-esp32v3 *args:
     scripts/emu/bench-esp32v3.sh {{ args }}
@@ -5317,7 +5317,7 @@ watch-pr *args:
     scripts/watch-pr.sh {{ args }}
 
 # Measure pre-merge.yml's job durations against their timeout-minutes
-# budgets (docs/debt/ci-runner-time-over-the-concurrency-cap.md). Default
+# budgets (docs/debt/ci-runner-time-over-the-concurrency-cap.ai.md). Default
 # window is the last 200 runs; pass `--since <ISO date>` for a wider one.
 # Exits 2 when a job is over or tight on its budget, so the weekly
 # scheduled run (.github/workflows/ci-durations.yml) goes red on its own.
@@ -5350,7 +5350,7 @@ hardware-list *args:
 # driver's first pick), which no person uses day to day. A Chrome tab on a
 # bench port still holds EVERY board while it is open: close it when the
 # sitting ends. The profile keeps its PayloadIdentifier, so installing this
-# one REPLACES a standing Brave grant. See AGENTS.md, "A real board in a
+# one REPLACES a standing Brave grant. See AGENTS.ai.md, "A real board in a
 # browser".
 #
 # Remove the WebSerial chooser dialog for local dev servers by granting Chrome
@@ -5535,7 +5535,7 @@ fixture-fw variant port="":
     cd lp-fw/fw-esp32c6 && cargo build --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} --features esp32c6,server,"$feature"
     cd - >/dev/null
     args=(--chip esp32c6 --bootloader {{ c6_bootloader }} --partition-table lp-fw/fw-esp32c6/partitions.csv --flash-size {{ c6_flash_size }} --after hard-reset)
-    # Through the one resolver, so the desk's board leases are asked (AGENTS.md).
+    # Through the one resolver, so the desk's board leases are asked (AGENTS.ai.md).
     resolved_port="$(cargo run -q -p lp-cli -- fwcheck port --port "{{ port }}" --chip esp32c6)"
     args+=(--port "$resolved_port")
     espflash flash "${args[@]}" {{ fw_esp32c6_elf }}
@@ -5565,7 +5565,7 @@ device-scenario *args:
 # NEEDS a dev server already up on this worktree's canonical port — start
 # `just studio-dev-emu` (or `just studio-dev`) first. It deliberately does not
 # start one: a walk that starts servers can adopt a sibling worktree's
-# listener (docs/defects/2026-07-27-launch-json-pinned-port.md).
+# listener (docs/defects/2026-07-27-launch-json-pinned-port.ai.md).
 #
 # NOT a CI job and it must not become one (plan two PD9, pre-ruled E-cost):
 # Chrome + chromedriver + the emulator + a packaged firmware is far over the
@@ -5680,7 +5680,7 @@ walk-two-tabs-emu *args:
 # never Studio's. Needs `just studio-firmware-package-served` (the merged
 # image) instead; `just walk-wifi-emu lan --dry-run` checks the arguments and
 # prerequisites and starts nothing. Report:
-# docs/reports/2026-10-06-wifi-emulator-walk.md. Not CI. `--skip W10` leaves
+# docs/reports/2026-10-06-wifi-emulator-walk.ai.md. Not CI. `--skip W10` leaves
 # out W10's `link rtt`, which alone outlives a 10-minute command cap. `lan
 # --s3` walks the same steps on two emulated S3s booting `fw-esp32s3
 # --features wifi` (after `just test-emu-esp32s3-wifi`, which writes its
@@ -5709,7 +5709,7 @@ walk-two-tabs-emu *args:
 # board added by address, a second browser told the board is busy, a wrong
 # address said in words. Stand-in (DD193): the remembered lease is rewritten
 # to the board's loopback forward before it is dialled. Report:
-# docs/reports/2026-10-07-studio-lan-boards-emulator-walk.md. Not CI.
+# docs/reports/2026-10-07-studio-lan-boards-emulator-walk.ai.md. Not CI.
 #
 # `studio-lan-reset` (scripts/emu/walk-wifi-emu-studio-lan-reset.mjs): one
 # board on the same LAN, Studio with no flag connected to it by address, the
@@ -5799,7 +5799,7 @@ walk-drop-emu *args:
 # and `cut-upgrade` board the last PUBLISHED format-11 release (fetched by
 # scripts/ota/fetch-release-image.sh, `LP_OTA_CROSS_RELEASE`) holding
 # format-11 projects; `found-older` and `cut-older` a board already on this
-# build holding them. docs/reports/2026-10-28-ota-project-upgrade-walk.md.
+# build holding them. docs/reports/2026-10-28-ota-project-upgrade-walk.ai.md.
 walk-ota-emu *args: install-rv32-target
     #!/usr/bin/env bash
     set -euo pipefail

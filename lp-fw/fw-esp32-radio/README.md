@@ -43,7 +43,7 @@ directly. What a chip decides, the chip crate passes in:
 | The radio's C heap region | not here at all | `fw-esp32c6/src/c_heap.rs` (`HEAP_RADIO`) |
 
 The hooks are plain `fn` pointers, not generics: an image has one chip, and
-a generic over a chip would be one more thing to monomorphise (AGENTS.md,
+a generic over a chip would be one more thing to monomorphise (AGENTS.ai.md,
 "How to Handle Binary Size Issues", item 6).
 
 The network seam (`net=lan`) is RISC-V only, like its calls in

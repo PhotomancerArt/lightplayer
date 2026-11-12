@@ -87,7 +87,7 @@ where
         // whose f32 emit path exists but is incomplete — produce a module that
         // fails later. Never a quiet downgrade to Fixed: a board given the
         // wrong numerics silently is the failure this refuses
-        // (`docs/adr/2026-07-09-preview-fidelity-tiers.md` §4).
+        // (`docs/adr/2026-07-09-preview-fidelity-tiers.ai.md` §4).
         if !self.shared.engine.inner().supports_float_mode(float_mode) {
             return Err(GfxError::Backend(format!(
                 "this build's {} backend does not compile {} shaders; \
@@ -348,7 +348,7 @@ where
 /// synthesised point loop) — a few hundred cycles, under 1% of the shader
 /// work in a batch — while the window it bounds replaces 16 B per lamp of
 /// resident sample buffers with 3 KB per consumer
-/// (`docs/adr/2026-09-06-direct-sampling-bounded-batches.md`).
+/// (`docs/adr/2026-09-06-direct-sampling-bounded-batches.ai.md`).
 pub const CPU_SAMPLE_BATCH_POINTS: u32 = 128;
 
 /// The LPIR numeric mode a requested [`ShaderSemantics`] tier means for this

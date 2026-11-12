@@ -2,12 +2,12 @@
 //!
 //! `"#000 #f80@.5 (0.211,-0.017,-0.039)"` — each whitespace-separated token
 //! is one stop, `color[@position]`. This is the storage, wire, and authored
-//! form of a gradient's bulk (`docs/design/color.md` §5; ADR
+//! form of a gradient's bulk (`docs/design/color.ai.md` §5; ADR
 //! 2026-08-05-gradient-stops-string-storage): metadata (`space`, `method`)
 //! stays structural JSON, the part that scales with content is one literal.
 //!
 //! Colors are **raw coordinates in the gradient's own space** — never
-//! converted here (space conversions live engine-side, `color.md` §7):
+//! converted here (space conversions live engine-side, `color.ai.md` §7):
 //!
 //! - `(a,b,c)` — decimal triplet, the general form; the only way to spell
 //!   negative axes (Oklab `a`/`b`) and full `f32` precision.

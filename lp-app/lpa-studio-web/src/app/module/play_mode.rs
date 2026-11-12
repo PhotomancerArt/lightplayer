@@ -1,6 +1,6 @@
 //! **Play mode**: the root module's panel, and nothing else.
 //!
-//! `docs/design/panel.md` P12 — play mode renders panels only, never
+//! `docs/design/panel.ai.md` P12 — play mode renders panels only, never
 //! faces: no preview drawers, no children, no wiring, no authoring
 //! surfaces. It speaks the two runtime ops plus reads, and "anything play
 //! mode can do, an end user is allowed to do".

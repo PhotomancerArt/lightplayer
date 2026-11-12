@@ -78,7 +78,7 @@ binds every core it will ever boot (ruling L4):
   espflash's image builder fills a gap before a flash segment with an
   address-0 segment, which the IDF bootloader skips; the C6 loader once
   copied one to address 0 and faulted
-  (`docs/defects/2026-10-14-the-c6-loader-copies-an-address-zero-padding-segment-to-address-zero.md`).
+  (`docs/defects/2026-10-14-the-c6-loader-copies-an-address-zero-padding-segment-to-address-zero.ai.md`).
 
 ## The two placeholder segments
 

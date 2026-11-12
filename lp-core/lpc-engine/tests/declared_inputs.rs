@@ -1,6 +1,6 @@
 //! A module's declared inputs list in its host scope — through a playlist
 //! entry's sink — with no demand on dormant entries (playlists-on-the-bus
-//! D5, modules.md R2's 2026-10-20 amendment).
+//! D5, modules.ai.md R2's 2026-10-20 amendment).
 //!
 //! ```bash
 //! cargo test -p lpc-engine --test declared_inputs

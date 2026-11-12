@@ -24,7 +24,7 @@ provider, the tree-store mount) lives in `fw-esp32-common` and is consumed here;
 this crate keeps only what is genuinely ESP32-C6: board init, RMT register
 code, USB-Serial-JTAG, the recovery backend and abort-tier panic path, and
 the hardware test harnesses (see
-`docs/adr/2026-07-29-per-chip-fw-toolchains.md` for the seam rules).
+`docs/adr/2026-07-29-per-chip-fw-toolchains.ai.md` for the seam rules).
 The radio glue — the ESP-NOW driver and the radio's bring-up, the BLE link,
 and the network on `lp-net` (station, IP stack, LAN endpoint, mDNS, relay) —
 lives in `fw-esp32-radio` since plan `lp2025/2026-10-20-2335-s3-radio-and-ota`
@@ -67,7 +67,7 @@ used installs. that's mostly an editing concern, unless we start streaming
 opc or e131." **Reopen trigger**: OPC/E1.31-over-WiFi streaming lands (that
 is also the unmeasured S4 scenario — sustained UDP while associated — so S4
 measurement precedes any config revisit).
-`docs/debt/c6-scan-truncation-accepted.md` carries the 2-channel tradeoff.
+`docs/debt/c6-scan-truncation-accepted.ai.md` carries the 2-channel tradeoff.
 
 A 1-channel board self-serves the wide window — 96-word halves more than
 double the margin of the 0.49 % config above — with no build flag: declaring
@@ -115,7 +115,7 @@ land in the core (`lp-fw-split build` prints both placements). The
 `test_seam_abi` harness adds two TEST ONLY seams to prove the generated call
 shims keep their arguments and result through this profile's LTO. The ABI
 and its rules are `lp-base/lp-seam/README.md`; why seams exist is
-`docs/adr/2026-10-05-emulator-seams.md`.
+`docs/adr/2026-10-05-emulator-seams.ai.md`.
 
 ## Wi-Fi (the LAN link and the cloud relay)
 
@@ -128,7 +128,7 @@ thread, `lp-net` (`fw-esp32-radio`'s `net`; its 8 KB stack and priority are
 this chip's, `src/net/net_chip.rs`), all started from `core_boot`, so a
 core-only board has them too. The radio's C heap stays in `HEAP_RADIO`.
 ESP-NOW (the Radio node) is off while the board uses Wi-Fi. Decisions and
-measured costs: `docs/adr/2026-10-07-c6-wifi-link.md`.
+measured costs: `docs/adr/2026-10-07-c6-wifi-link.ai.md`.
 
 **Updates over Wi-Fi.** Core-only serves the over-the-air update protocol
 on the LAN link too (`fw-esp32-common`'s `radio_link::core_only_links`): it
@@ -139,7 +139,7 @@ minutes gives the board back to its last good core
 (`fw-esp32-common/src/split_core/core_only.rs`).
 `lp-cli link capture lan:<board> --ota-offer <dir>` drives an update over
 it; `just test-emu-c6-ota-lan` walks it on the emulated LAN with no cable.
-See `docs/adr/2026-10-06-ota-update-protocol.md` (amendment of 2026-10-07).
+See `docs/adr/2026-10-06-ota-update-protocol.ai.md` (amendment of 2026-10-07).
 
 **The relay task** (`fw-esp32-radio/src/net/relay_task.rs`; the loop is
 `fw-esp32-common/src/net/relay/`) dials `lightplayer.app:80` when the station
@@ -157,7 +157,7 @@ a flash page, see the budget ADR's ledger). The board speaks relay protocol
 2: its hello carries the build's version, and it sends the relay its
 project's name and, when asked, a picture of its lamps (the frame hook
 makes it, `fw-esp32-radio/src/net/relay_probes.rs`). Costs and what is not yet measured on silicon:
-`docs/adr/2026-10-06-cloud-relay.md` ("Device side").
+`docs/adr/2026-10-06-cloud-relay.ai.md` ("Device side").
 
 `LP_RELAY_HOST=<host>[:port]` at build time (`build.rs`, read by
 `src/net/relay_config.rs`) makes a **desk
@@ -206,8 +206,8 @@ cutover — before it `factory` was `0x340000` and `lpfs` a 704 KB littlefs at
 held for Wi-Fi, and the cutover gave the app the 192 KB the smaller store
 frees: a board still on an old layout keeps its files through Studio's
 Update firmware or `lp-cli hardware lpfs migrate`, which move them; see
-`docs/adr/2026-10-02-c6-repartition-and-layout-migration.md` and
-`docs/adr/2026-10-16-c6-tree-store-cutover-migration.md`. The firmware reads
+`docs/adr/2026-10-02-c6-repartition-and-layout-migration.ai.md` and
+`docs/adr/2026-10-16-c6-tree-store-cutover-migration.ai.md`. The firmware reads
 its `lpfs` partition from the flashed table at boot, and never formats over a
 littlefs it finds instead (it boots on a memory filesystem and says `fs:
 legacy_held` in its hello).
@@ -239,16 +239,16 @@ just fw-esp32c6-size-check
 ```
 
 Background and the decisions behind the budget (including why the ~500 KB WiFi
-blob is kept) are in `docs/adr/2026-07-28-esp32c6-flash-budget.md`; the
+blob is kept) are in `docs/adr/2026-07-28-esp32c6-flash-budget.ai.md`; the
 repartition that spent its lpfs reservation is
-`docs/adr/2026-10-02-c6-repartition-and-layout-migration.md`.
+`docs/adr/2026-10-02-c6-repartition-and-layout-migration.ai.md`.
 
 ## Moving a Board's Files (the repartition, then the tree store)
 
 Studio's Update firmware migrates an old-layout board itself — a
 pre-2026-10 board (littlefs at `0x310000`) or a fielded littlefs board
 (`0x350000`, the 176-sector table) — straight into the tree store at
-`0x380000` (`docs/adr/2026-10-16-c6-tree-store-cutover-migration.md`).
+`0x380000` (`docs/adr/2026-10-16-c6-tree-store-cutover-migration.ai.md`).
 From a terminal, with the board in its bootloader on `<port>`:
 
 ```bash
@@ -319,7 +319,7 @@ the store, because they all go through `base_fs`. The table is
   lists `fs.tree` without it) — a littlefs core would format the store
   (`fw_esp32_common::fs_tree_core_guard`). It used to read the manifest
   blob, which the split link puts in the engine, and so refused every
-  core (docs/defects/2026-10-16-the-fs-tree-update-guard-reads-a-manifest-the-core-does-not-carry.md).
+  core (docs/defects/2026-10-16-the-fs-tree-update-guard-reads-a-manifest-the-core-does-not-carry.ai.md).
 - **The littlefs release's half** (adoption A5, released before the
   cutover): that image, finding a partition littlefs will not mount, looks
   for the tree store's sector magic `"LTS1"` before it formats, and holds a
@@ -333,9 +333,9 @@ peak of requested bytes since the line before — and `[perf] fs mount <us>
 us` at boot; not with `heap_map_diag`). Size it with `just
 fw-esp32c6-size-check 65536 "" esp32c6,server,heap_peak_diag`. The
 emulator walks are `lp-cli/tests/emu_tree_store_{boot,cuts,ram,perf}.rs`;
-the reports are `docs/reports/2026-10-10-tree-store-emulator-walk.md` and
+the reports are `docs/reports/2026-10-10-tree-store-emulator-walk.ai.md` and
 the cutover's. See
-`docs/adr/2026-10-10-fs-tree-refused-state-and-update-guard.md`.
+`docs/adr/2026-10-10-fs-tree-refused-state-and-update-guard.ai.md`.
 
 ## Feature Notes
 
@@ -347,7 +347,7 @@ runtime shader compilation on device.
 
 `spike_uart0_link` (off by default) moves the host link to UART0 so the wire
 protocol can run under Espressif's binary emulator, whose USB-Serial-JTAG
-model has no real host behind it (`docs/reports/2026-09-07-esp-emu-c6-spike.md`).
+model has no real host behind it (`docs/reports/2026-09-07-esp-emu-c6-spike.ai.md`).
 It costs the shipped image nothing — every hunk is `cfg`'d out, verified by
 `just fw-esp32c6-size-check`.
 
@@ -380,4 +380,4 @@ it does so deliberately: the shipping image runs Fixed-mode shaders and must not
 carry an f32 backend it never enters. That is what keeps
 `just fw-esp32c6-size-check` measuring an unchanged product image — check both
 sides of the gate when you touch it. See
-`docs/adr/2026-07-31-soft-float-via-compiler-builtins.md`.
+`docs/adr/2026-07-31-soft-float-via-compiler-builtins.ai.md`.

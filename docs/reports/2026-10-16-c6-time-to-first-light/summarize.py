@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Reproduce the tables in docs/reports/2026-10-16-c6-time-to-first-light.md.
+"""Reproduce the tables in docs/reports/2026-10-16-c6-time-to-first-light.ai.md.
 
     python3 summarize.py <records dir>
 

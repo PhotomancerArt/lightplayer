@@ -32,7 +32,7 @@ use core::fmt::Display;
 /// zombie: every later request panics on the poison while `/healthz`
 /// (which never takes the lock) keeps answering ok — production served
 /// exactly that on 2026-08-08 (`docs/defects/
-/// 2026-08-08-fatal-store-panic-poisons-not-restarts.md`). The module
+/// 2026-08-08-fatal-store-panic-poisons-not-restarts.ai.md`). The module
 /// doc's recovery story is "the supervisor restarts us onto a Litestream
 /// restore", and only an abort actually invokes the supervisor.
 pub(crate) fn fatal<T, E: Display>(operation: &str, result: Result<T, E>) -> T {

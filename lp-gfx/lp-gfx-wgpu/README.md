@@ -10,7 +10,7 @@ non-embedded lp-server engine). Productionizes the M3 spike
 ## Compile pipeline
 
 The GPU path forks from the CPU path **at the GLSL source**
-(`docs/adr/2026-07-09-gpu-path-forks-at-glsl.md`):
+(`docs/adr/2026-07-09-gpu-path-forks-at-glsl.ai.md`):
 
 ```
 authored GLSL (byte-identical to what the device compiles)
@@ -49,7 +49,7 @@ milestone).
 
 ## Semantics contract
 
-Per `docs/adr/2026-07-09-preview-fidelity-tiers.md`, the requested
+Per `docs/adr/2026-07-09-preview-fidelity-tiers.ai.md`, the requested
 `ShaderSemantics` tier is honored exactly or compilation fails: this backend
 implements `F32Gpu` only and rejects `Q32` with `GfxError::Backend`. It
 never silently substitutes float arithmetic for an explicit Q32 request.
@@ -60,8 +60,8 @@ hold-or-beat divergence bounds vs the authoritative `wasm.q32` path (see
 ## Loop bounds and the fault flag
 
 The GPU has no fuel meter, and content in this repo is authored against
-one (`docs/adr/2026-09-06-gpu-tier-loop-bounds.md`,
-`docs/adr/2026-09-07-gpu-tier-spent-budget-faults.md`). `loop_bound_pass`
+one (`docs/adr/2026-09-06-gpu-tier-loop-bounds.ai.md`,
+`docs/adr/2026-09-07-gpu-tier-spent-budget-faults.ai.md`). `loop_bound_pass`
 closes the gap in the naga IR:
 
 1. A loop with no `break`/`return`/`discard` on any path is a

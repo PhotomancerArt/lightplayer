@@ -9,7 +9,7 @@ use crate::node::ScopeRef;
 
 /// Demand/cache key for one resolved value in the engine resolver.
 ///
-/// Bus demand carries the READING scope (modules.md R5): the resolver
+/// Bus demand carries the READING scope (modules.ai.md R5): the resolver
 /// stays scope-dumb — the host answers "which providers win for a read
 /// from this scope" — but the scope is part of the cache and
 /// cycle-detection identity, so same-named channels in different scopes

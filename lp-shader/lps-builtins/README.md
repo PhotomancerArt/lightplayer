@@ -22,7 +22,7 @@ can resolve the same names).
 ## Canonical GLSL sources
 
 GLSL is the canonical source of truth for lpfn builtin **float** semantics
-(`docs/adr/2026-07-08-glsl-canonical-builtins.md`). Each lpfn builtin has one
+(`docs/adr/2026-07-08-glsl-canonical-builtins.ai.md`). Each lpfn builtin has one
 `.glsl` file under `glsl/lpfn/` mirroring the Rust layout; the files are
 float+integer GLSL ports of the algorithms the Q32 Rust files implement
 (same integer hashes and structure, ideal-precision constants), and they use
@@ -56,7 +56,7 @@ and which serve both. The f32 half covers the `glsl` transcendentals, the
 `lpir` library ops, the `lpfn` generative/color library, and the `texture`
 samplers.
 
-**Semantics are governed by [`docs/design/float.md`](../../docs/design/float.md).**
+**Semantics are governed by [`docs/design/float.ai.md`](../../docs/design/float.ai.md).**
 Its §3 Guaranteed rows (`+ - * /`, `sqrt`, comparisons, conversions,
 `floor`/`ceil`/`trunc`) are implemented as the native operation, exactly — the
 f32 builtins do **not** inherit the Q32 approximations. §6 governs the rest:
@@ -95,7 +95,7 @@ the compiler always links, and its generated name/lookup tables grow with every
 ## Cycle census and bit-identity proofs
 
 Two instruments exist for the hot Q32 math builtins
-(`docs/reports/2026-09-02-q32-builtins-cycles.md`):
+(`docs/reports/2026-09-02-q32-builtins-cycles.ai.md`):
 
 - **Cycle census** — cycles per call on the RV32 emulator (`CycleModel::Esp32C6`)
   for `exp`, `sqrt`, `inversesqrt`, `sin`, `cos`, `/`, `mod`, wrapper overhead
@@ -122,7 +122,7 @@ Two instruments exist for the hot Q32 math builtins
 
   A Q32 builtin rewrite that is not bit-identical is an accuracy decision:
   ADR + re-blessed expectations on every Q32 filetest target
-  (`docs/design/q32.md`).
+  (`docs/design/q32.ai.md`).
 
 ## Wiring into the compiler
 

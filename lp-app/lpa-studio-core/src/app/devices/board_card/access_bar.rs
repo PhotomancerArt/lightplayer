@@ -1,5 +1,5 @@
 //! The Access row: what you can do on this board
-//! (`docs/ux/anatomy/board-card.md`, "Access ○"). **Access · name ·
+//! (`docs/ux/anatomy/board-card.ai.md`, "Access ○"). **Access · name ·
 //! state · action**, the lock icon in every state; the name is the tier and
 //! how you hold it.
 //!

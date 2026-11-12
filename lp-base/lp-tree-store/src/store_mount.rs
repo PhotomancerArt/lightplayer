@@ -13,7 +13,7 @@
 //!
 //! **Fast, then whole.** Mount's cost was every byte ever written: pass 1
 //! read and CRC-checked every record in every trusted sector, though only
-//! the last program in the newest sector of each kind can be torn (FORMAT.md
+//! the last program in the newest sector of each kind can be torn (FORMAT.ai.md
 //! "Finding the committed state"). So it first reads the sectors no cut can
 //! have reached by their header chains (roots read whole), checks only the
 //! newest sector of each kind (and any a newer writer closed), and lets the
@@ -84,7 +84,7 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
         });
         // Fast first: cold sectors by their header chains, then the closure
         // read whole (blobs too). Only when that adopts no root is every
-        // record read and checked, as FORMAT.md's mount steps say, and the
+        // record read and checked, as FORMAT.ai.md's mount steps say, and the
         // verdict taken from that (`mount_verdict.rs`).
         //
         // "The newest sector of each kind" is the largest sector seq only

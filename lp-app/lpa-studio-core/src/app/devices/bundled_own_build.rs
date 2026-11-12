@@ -13,7 +13,7 @@
 //! `/firmware/<target>/<release>/<file>` path is lp-cloud-server's firmware
 //! lookup, which answers before the static bundle is consulted, so the
 //! bundle stays two segments deep under `firmware/`
-//! (`docs/defects/2026-10-06-the-bundles-ota-files-are-shadowed-by-the-firmware-lookup.md`).
+//! (`docs/defects/2026-10-06-the-bundles-ota-files-are-shadowed-by-the-firmware-lookup.ai.md`).
 //!
 //! **Update-capable, checked twice, before a fact is believed.** A Studio
 //! build carries an update-capable firmware build only when

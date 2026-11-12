@@ -12,7 +12,7 @@ in `lp-emu/` with the rest of the emulation family, under its MIT fence.
 Crate names did not change. Everything below stayed: it is
 compiler-backend and hardware-validation infrastructure, not emulation
 (vision Q3). See `lp-emu/README.md` and
-`docs/adr/2026-09-06-lp-emu-home-and-mit-fence.md`.
+`docs/adr/2026-09-06-lp-emu-home-and-mit-fence.ai.md`.
 
 - **`lp-xt-inst`** — Xtensa instruction model, encoder, variable-length
   decoder, and objdump-style disassembler: the integer core plus, since M6,
@@ -62,4 +62,4 @@ derived from `espressif/llvm-project` TableGen sources
 (Apache-2.0 WITH LLVM-exception — text vendored at
 `licenses/LLVM-Apache-2.0-with-LLVM-exception.txt`); each derived file carries
 a provenance header. No GPL source was copied or transliterated; see
-`docs/adr/2026-07-29-license-provenance-discipline.md`.
+`docs/adr/2026-07-29-license-provenance-discipline.ai.md`.

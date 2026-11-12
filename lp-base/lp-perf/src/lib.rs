@@ -28,7 +28,7 @@ pub const EVENT_SERVER_BOOT: &str = "server-boot";
 /// until its event stream has finished or failed. The read's cost is
 /// hundreds of small transient allocations, which is exactly the shape a
 /// largest-free-block gate cannot see; this window is what makes it
-/// measurable (`docs/heap-budget-gate.md`).
+/// measurable (`docs/heap-budget-gate.ai.md`).
 pub const EVENT_PROJECT_READ: &str = "project-read";
 /// One playlist entry's subtree leaving the engine at the pre-tick
 /// residency step (`Engine::apply_residency`): registry re-derive, runtime

@@ -3,7 +3,7 @@
 # and print the table the desk session pastes into the experiment repo's runner
 # test. Run ./build.sh first.
 #
-# Payload bytes are assembler-derived, never hand-written (AGENTS.md).
+# Payload bytes are assembler-derived, never hand-written (AGENTS.ai.md).
 set -euo pipefail
 cd "$(dirname "$0")"
 

@@ -2,7 +2,7 @@
 //! pattern templates are (`support/`): the checked-in schemas, the real
 //! `ProjectLoader`, a library round trip that keeps `kind`/`exports`, and
 //! an export lint that is clean from the installed copy. Adopting the
-//! pattern shape is what makes an entry importable (modules.md §6); this
+//! pattern shape is what makes an entry importable (modules.ai.md §6); this
 //! is the gate that says the adoption is real.
 
 mod support;

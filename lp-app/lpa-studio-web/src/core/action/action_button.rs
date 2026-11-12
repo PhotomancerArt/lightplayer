@@ -26,7 +26,7 @@ pub enum ActionButtonVariant {
     /// title (and its hidden text), never a line under it.
     RowEnd,
     /// The row's one primary as a flush section (the board card's name
-    /// bar, `docs/style/ui.md` "The board card"): [`Self::RowEnd`]'s
+    /// bar, `docs/style/ui.ai.md` "The board card"): [`Self::RowEnd`]'s
     /// geometry, bolder, and the iridescent ring answering hover.
     RowPrimary,
 }

@@ -38,7 +38,7 @@ use super::power_gate::{PowerGateController, is_all_black};
 /// ⚠️ Historical note worth keeping: this used to matter enormously.
 /// `PortState` carried a 3,084-byte inline white-point LUT, so the same
 /// growth asked for 12,864 contiguous bytes and OOM'd the classic ESP32 with
-/// 11,228 free — `docs/defects/2026-08-01-classic-rmt-open-fault.md`. The LUT
+/// 11,228 free — `docs/defects/2026-08-01-classic-rmt-open-fault.ai.md`. The LUT
 /// is gone; this guard remains because the growth pattern is what turned a
 /// tight heap into a hard fault, and it will do so again for whatever the next
 /// large per-port field is.
@@ -87,7 +87,7 @@ struct PortState {
 /// two frames to interpolate at. Opened anyway, the pipeline put the PREVIOUS
 /// frame on the wire every frame — `write_frame` twice and `tick` at mid-frame
 /// left its blend factor at 0 — and paid two copies and 12 B/lamp for it
-/// (`docs/defects/2026-10-23-esp-output-shows-the-previous-frame-with-interpolation-on.md`).
+/// (`docs/defects/2026-10-23-esp-output-shows-the-previous-frame-with-interpolation-on.ai.md`).
 /// So `HwSoftLimits::interpolation_leds` has nothing to shed on these boards.
 ///
 /// A function of the OPEN SET, not of open order: every open and close
@@ -931,7 +931,7 @@ mod tests {
     /// The frame on the wire is the frame just written, with interpolation
     /// authored on (the default). It used to be the previous one: two
     /// `write_frame`s and a mid-frame `tick` left the blend at 0
-    /// (`docs/defects/2026-10-23-esp-output-shows-the-previous-frame-with-interpolation-on.md`).
+    /// (`docs/defects/2026-10-23-esp-output-shows-the-previous-frame-with-interpolation-on.ai.md`).
     #[test]
     fn the_wire_carries_the_frame_just_written() {
         let provider = provider();

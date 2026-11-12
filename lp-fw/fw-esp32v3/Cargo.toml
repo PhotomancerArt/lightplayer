@@ -255,7 +255,7 @@ fixture-no-hello = ["lpa-server/fixture-no-hello", "fw-core?/fixture-no-hello"]
 
 # The FP conformance rig on THIS chip's FPU — the classic's LX6, where the
 # committed predictions were all measured on the S3's LX7. Answers the question
-# `docs/adr/2026-07-31-xtensa-fp-behavior-contract.md` left open at its "LX6
+# `docs/adr/2026-07-31-xtensa-fp-behavior-contract.ai.md` left open at its "LX6
 # (classic ESP32) FPU — untouched" line.
 #
 # The rig itself is `lp-xt-fp-harness`, shared with fw-esp32s3; this crate
@@ -317,7 +317,7 @@ test_appcore_rom_path = []
 # cites. The C6's sixteen `test_*` features are what vision Q12's retirement
 # ledger was written about; this crate starts clean and stays that way — every
 # payload lands as `fw-checks` plus a thin chip harness from its first commit
-# (M5 notes.md §3.4).
+# (M5 notes.ai.md §3.4).
 #
 # Each of the three below is the CHIP HALF of a payload whose portable logic
 # lives in `fw-checks`: the classic MIRRORS that crate, and never imports a
@@ -392,7 +392,7 @@ test_rmt = ["dep:fw-checks", "fw-checks/check-rmt"]
 
 [dependencies]
 # Pins below come from the experiment repo's `fw/xt-runner-esp32/Cargo.toml`
-# (proven on classic ESP32 silicon 2026-07-28, FINDINGS.md C1 PASS) — the
+# (proven on classic ESP32 silicon 2026-07-28, FINDINGS.ai.md C1 PASS) — the
 # working classic-ESP32 dependency cohort under the `esp` toolchain, not a
 # guess. `esp-hal` 1.1.1 (not fw-esp32s3's 1.1.0): fw-esp32s3 pins `"1.1.0"`
 # with a caret range, and 1.1.1 is what actually resolves and is cached
@@ -416,7 +416,7 @@ critical-section = "1"
 # UART variant, not `jtag-serial`: classic ESP32 has no USB-Serial-JTAG
 # peripheral. `esp-println`'s `uart` feature only writes UART0's FIFO — it
 # never programs the baud divisor itself (esp-rs/esp-hal; confirmed on this
-# exact chip, experiment repo FINDINGS.md "C1"). After `esp_hal::init()`
+# exact chip, experiment repo FINDINGS.ai.md "C1"). After `esp_hal::init()`
 # reclocks to `CpuClock::max()`, the ROM's divisor no longer matches, and
 # output goes to garbage at every standard baud. The divisor is programmed by
 # the `esp_hal::uart::Uart` this crate constructs on UART0 at boot — which as
@@ -438,7 +438,7 @@ esp-backtrace = { version = "0.19.0", features = ["println"] }
 log = { workspace = true, default-features = false }
 
 # The RTC-RAM crash ledger, pulled forward from M7 into M4 because it stopped
-# being a nicety: `docs/defects/2026-08-01-classic-rmt-open-fault.md` records a
+# being a nicety: `docs/defects/2026-08-01-classic-rmt-open-fault.ai.md` records a
 # fault in the WS281x open path that resets this chip after ~5 characters of
 # panic output, so the serial channel cannot name it and the ledger is the only
 # instrument that can. `src/recovery/` holds the classic-specific half (RTC fast
@@ -537,7 +537,7 @@ lpc-model = { path = "../../lp-core/lpc-model", default-features = false, option
 # 110 KB arena is ~90 LEDs of capacity, in exchange for 13 ms of frame time.
 # Off, the route and intern caches still run — 58 ms/frame here against 69 ms
 # before any of it existed, so most of the speed survives.
-# `docs/defects/2026-08-01-classic-heap-regression-after-f32-merge.md`.
+# `docs/defects/2026-08-01-classic-heap-regression-after-f32-merge.ai.md`.
 lpa-server = { path = "../../lp-app/lpa-server", default-features = false, features = [
     "node-shader",
     "node-fixture",

@@ -9,7 +9,7 @@
 //       → card-edit → card-back → card-edit-again
 //       → detach → re-attach
 //
-// The first four and the last two are `plan.md`'s acceptance criterion 6
+// The first four and the last two are `plan.ai.md`'s acceptance criterion 6
 // verbatim, and this is the artefact G2 looks at. It is deliberately NOT six
 // scenarios in a row: the point is that one board, one page and one grant
 // carry all the way through, because that is where the defects this
@@ -73,7 +73,7 @@ const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../.
 /// preference: on an emulated board `fyeah-sign`'s graphics stage overruns
 /// the firmware's own 8 s RTC watchdog and the chip resets mid-push, then
 /// reboot-loops on the startup project the failed push set —
-/// docs/defects/2026-09-10-the-emulated-c6-builds-a-graphics-stage-40x-slower-than-silicon.md,
+/// docs/defects/2026-09-10-the-emulated-c6-builds-a-graphics-stage-40x-slower-than-silicon.ai.md,
 /// which is Yona's F1 and which this walk reproduces on purpose in the
 /// scenario lane (`s3`, `s7`). A real board does the same step in 0.199 s.
 /// `WALK_PROJECT="Fyeah Sign" just walk-no-board` is the control: same walk,
@@ -243,7 +243,7 @@ async function lastLoadedProjects(consoleFile) {
 }
 
 /// The worktree's own canonical dev server — never a substitute (the scenario
-/// runner's standing rule, docs/defects/2026-07-27-launch-json-pinned-port.md).
+/// runner's standing rule, docs/defects/2026-07-27-launch-json-pinned-port.ai.md).
 function studioPort() {
   return execSync('bash scripts/dev-port.sh --query studio-dev "${STUDIO_WEB_PORT:-}"', {
     cwd: ROOT,
@@ -499,7 +499,7 @@ async function main() {
       // all: its graphics stage overruns the firmware's own 8 s RTC watchdog
       // on an emulated chip, the board resets, and the door's `reboots` count
       // climbs — 9 against this run's 3. That is F1, and it is filed:
-      // docs/defects/2026-09-10-the-emulated-c6-builds-a-graphics-stage-40x-slower-than-silicon.md
+      // docs/defects/2026-09-10-the-emulated-c6-builds-a-graphics-stage-40x-slower-than-silicon.ai.md
       const ended = await sink
         .awaitRecord(
           (record) => (record.entry ?? "").includes("ActivityEnded { kind: Push"),
@@ -760,7 +760,7 @@ async function main() {
       // M3's G1 packet flagged "replug → Attached, not listening" as a
       // product question. It was a shim bug instead: the unplug left the dead
       // port's byte channel open, so the replugged port's open() was refused
-      // (docs/defects/2026-09-24-emulated-replug-leaves-the-old-byte-channel-open.md).
+      // (docs/defects/2026-09-24-emulated-replug-leaves-the-old-byte-channel-open.ai.md).
       // Since that fix the card's USB row should read the port open ("USB
       // connected") once its work is over; "USB not connected" here is a
       // regression worth chasing, not the expected answer.
@@ -782,7 +782,7 @@ async function main() {
   // passed: the panicking code is by definition somewhere no step looks. The
   // first one found was a popover measuring itself from a `setTimeout` that
   // outlived the component
-  // (docs/defects/2026-09-13-a-stabilization-timer-outlived-the-popover.md),
+  // (docs/defects/2026-09-13-a-stabilization-timer-outlived-the-popover.ai.md),
   // twelve times over, under a green 6/6. Matched narrowly on the panic
   // preamble so ordinary console noise — a 404, a warning — still only
   // reports.

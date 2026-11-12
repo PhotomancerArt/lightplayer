@@ -59,7 +59,7 @@ const siblings = Promise.all([
 /// ⚠️ Since the translator-quality plan's P1 the preset is **eight** rows, not
 /// four: `harness` and `boot-idle-memfs` join it in both legs. Those two images
 /// had never been run on a phone at all — the desk numbers everything is ranked
-/// against (`docs/adr/2026-09-11-emulator-wasm-translator.md` §"Per image, and
+/// against (`docs/adr/2026-09-11-emulator-wasm-translator.ai.md` §"Per image, and
 /// where the translated core is SLOWER") have no device counterpart, and
 /// `boot-idle-memfs` is the image where the translated core LOSES to its own
 /// interpreter, which is a fixed translation cost no loop lever reaches. Their

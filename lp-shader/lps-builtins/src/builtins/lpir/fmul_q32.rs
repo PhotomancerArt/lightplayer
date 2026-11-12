@@ -2,7 +2,7 @@
 //!
 //! Reference saturating implementation. **The shipped Q32 lowering does not
 //! call this**: `lpvm-native` and `lpvm-wasm` inline a 5-VInst (native) /
-//! 6-op (wasm) wrapping multiply for `LpirOp::Fmul` (`docs/design/q32.md`).
+//! 6-op (wasm) wrapping multiply for `LpirOp::Fmul` (`docs/design/q32.ai.md`).
 //! It survives as `lpvm-cranelift`'s Q32 `Fmul` target and as the arithmetic
 //! used inside the Q32 transcendental builtins (`exp`, `log`, `pow`, …).
 

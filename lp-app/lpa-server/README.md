@@ -16,7 +16,7 @@ transports are supplied by the embedding app.
 Every fs request is stateless (`file_sync`'s pull-model rule) with one
 exception: a **batch** (`FsRequest::BeginBatch` … `CommitBatch`), the
 server's one piece of fs state between requests (`batch_state.rs`; ADR
-`docs/adr/2026-10-10-fs-push-boundary-and-deflated-writes.md`).
+`docs/adr/2026-10-10-fs-push-boundary-and-deflated-writes.ai.md`).
 
 - At most one is open, owned by the link that began it. `BeginBatch` answers
   `atomic` from `LpFs::batches_are_atomic`; on a backend without

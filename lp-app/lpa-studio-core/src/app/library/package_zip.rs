@@ -193,7 +193,7 @@ pub fn import_zip(
 /// on the provenance — and the same format gate, for the same reason: the
 /// envelope's own `format` field versions the ENVELOPE, and says nothing
 /// about the project format of the `project.json` inside it.
-/// See `docs/adr/2026-07-28-share-envelopes.md`.
+/// See `docs/adr/2026-07-28-share-envelopes.ai.md`.
 pub fn import_json(
     store: &LibraryStore,
     text: &str,

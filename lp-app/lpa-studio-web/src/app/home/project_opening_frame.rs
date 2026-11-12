@@ -107,7 +107,7 @@ pub enum OpeningState {
 }
 
 /// A phase of bringing the engine up, in the boot protocol's own
-/// vocabulary (`docs/adr/2026-08-14-browser-worker-boot-protocol-v2.md`).
+/// vocabulary (`docs/adr/2026-08-14-browser-worker-boot-protocol-v2.ai.md`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EnginePhase {
     /// The downloaded binary is being compiled page-side.

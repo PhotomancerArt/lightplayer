@@ -2,7 +2,7 @@
 # The lp-emu MIT fence.
 #
 # Everything under `lp-emu/` is MIT as a unit (vision D2, plan PD2,
-# docs/adr/2026-09-06-lp-emu-home-and-mit-fence.md). The rest of the repo is
+# docs/adr/2026-09-06-lp-emu-home-and-mit-fence.ai.md). The rest of the repo is
 # AGPL-3.0-or-later. This lint is what keeps the boundary real rather than
 # aspirational, and it checks two things:
 #
@@ -152,7 +152,7 @@ if fail:
     print("AGPL product crates. If a dependency is genuinely needed, delete it")
     print("first; if it cannot be deleted, add it to ALLOWED_OUTSIDE in")
     print("scripts/check-emu-fence.sh with the reason, and say so in the PR.")
-    print("See docs/adr/2026-09-06-lp-emu-home-and-mit-fence.md.")
+    print("See docs/adr/2026-09-06-lp-emu-home-and-mit-fence.ai.md.")
     sys.exit(1)
 
 print("lp-emu MIT fence: OK (%d crates in the fence, %d crates allowlisted "

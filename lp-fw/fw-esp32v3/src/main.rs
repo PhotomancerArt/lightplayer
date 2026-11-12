@@ -27,7 +27,7 @@
 //! `lp-recovery` RTC-RAM ledger, so a fault stages a breadcrumb that survives
 //! the reset and is reported on the next boot. It was pulled forward from M7
 //! because the WS281x open path faults faster than this chip can print
-//! (`docs/defects/2026-08-01-classic-rmt-open-fault.md`) — the ledger is the
+//! (`docs/defects/2026-08-01-classic-rmt-open-fault.ai.md`) — the ledger is the
 //! only channel that can name it. There is still **no RWDT**; see
 //! `recovery::mod`'s docs for why arming one belongs to M7.
 //!
@@ -384,7 +384,7 @@ fn on_alloc_error(layout: core::alloc::Layout) -> ! {
 /// `Layout` before touching anything — **succeeded** (`retry_ok=true`), yet
 /// the null return had already been escalated to a device reset and, two
 /// boots later, a quarantined project. Whatever releases memory between the
-/// null and the handler (see `docs/defects/2026-08-02-classic-oom-retry-succeeds.md`
+/// null and the handler (see `docs/defects/2026-08-02-classic-oom-retry-succeeds.ai.md`
 /// — the window is real, its occupant still unidentified), the caller's
 /// request was servable and the device died anyway. Retrying at the site
 /// converts those deaths into successful allocations; a genuine exhaustion
@@ -495,7 +495,7 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
     // this channel at all. These images have no ledger and no RMT driver, so
     // the limitation is recorded rather than fixed: print-and-reset is the
     // whole diagnostic budget of a hello image, and it is adequate for one.
-    // `docs/defects/2026-08-01-classic-rmt-open-fault.md`.
+    // `docs/defects/2026-08-01-classic-rmt-open-fault.ai.md`.
     drain();
     esp_println::println!("\n\n====================== PANIC ======================");
     drain();
@@ -590,7 +590,7 @@ fn esp32_memory_stats() -> Option<(u32, u32)> {
     // Through `log`, never `esp_println`: since wire proto 32 UART0 carries
     // lp-link frames, and a raw line written from here, between the link's
     // frames or inside one, was the interleaving defect's own trigger
-    // (`docs/defects/2026-08-02-serial-line-interleaving.md`). The S3 made the
+    // (`docs/defects/2026-08-02-serial-line-interleaving.ai.md`). The S3 made the
     // same move when its link went onto lp-link (its stack probe's comment).
     log::info!("[MEM] free={free} used={used} largest_free={largest} retry_saves={retry_saves}");
     // The JIT code region is NOT part of the heap above — it is a separate
@@ -863,7 +863,7 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     // `[INIT]` line is collected as a frame body and torn at `max_frame`
     // instead of arriving as text. Writing lp-link's text mark first resets
     // every host deframer (`0xFF` never occurs inside a COBS-FF frame). See
-    // `docs/defects/2026-10-03-the-classic-loses-its-boot-text-when-a-host-holds-the-link.md`.
+    // `docs/defects/2026-10-03-the-classic-loses-its-boot-text-when-a-host-holds-the-link.ai.md`.
     recovery::panic_path::write_link_text_mark();
     esp_println::println!("[INIT] fw-esp32v3 boot");
     esp_println::println!(
@@ -931,7 +931,7 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
             // in UART servicing — the 128 B RX FIFO (~1.4 ms of line time at
             // 921600) overflowed, and TX chunks hit their 250 ms timeout
             // without the wire being the problem. See
-            // docs/debt/shared-uart-io-task-starvation.md.
+            // docs/debt/shared-uart-io-task-starvation.ai.md.
             //
             // Priority2 is deliberate: strictly below the RMT ISR's
             // Priority3, which binds on THIS core in the single-core
@@ -1254,7 +1254,7 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     //
     // On this chip that branch is not a formality. `quad-strips-v3` currently
     // reset-loops the board from inside the WS281x open path
-    // (`docs/defects/2026-08-01-classic-rmt-open-fault.md`), and before the
+    // (`docs/defects/2026-08-01-classic-rmt-open-fault.ai.md`), and before the
     // ledger landed the loop was unbreakable from the host: the board never
     // stayed up long enough to accept a delete, and clearing it meant erasing
     // the lpfs partition with espflash. Safe mode is what turns that into a

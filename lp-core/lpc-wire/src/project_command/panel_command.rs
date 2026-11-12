@@ -1,11 +1,11 @@
 //! Panel commands: the `(scope, channel)` write surface for panel
-//! controls (panel.md P8).
+//! controls (panel.ai.md P8).
 //!
 //! Panel writes are runtime state, never authoring: like the node command
-//! channel (`docs/adr/2026-07-27-runtime-node-command-channel.md`) they
+//! channel (`docs/adr/2026-07-27-runtime-node-command-channel.ai.md`) they
 //! touch no overlay, no pending edit, and no dirty flag — which is also
 //! what sidesteps `PendingEdit` value-shadowing and lets multiple clients
-//! converge through ordinary probe pulls (last writer wins, panel.md P9).
+//! converge through ordinary probe pulls (last writer wins, panel.ai.md P9).
 //! Unlike node commands they address a SCOPE, not a node, so they are
 //! project-level arms.
 
@@ -24,7 +24,7 @@ pub struct WirePanelWriteRequest {
     pub channel: String,
     /// The value to hold.
     pub value: LpValue,
-    /// Momentary liveness (panel.md P14): when present, the writer
+    /// Momentary liveness (panel.ai.md P14): when present, the writer
     /// DESPAWNS unless renewed within this many milliseconds — renewal is
     /// simply another write. Absent = latching writer (holds until an
     /// explicit clear). The TTL/renewal shape follows the design reference
@@ -32,7 +32,7 @@ pub struct WirePanelWriteRequest {
     pub ttl_ms: Option<u32>,
 }
 
-/// Clear engaged panel writers (panel.md P3).
+/// Clear engaged panel writers (panel.ai.md P3).
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum WirePanelClearRequest {
@@ -48,7 +48,7 @@ pub enum WirePanelClearRequest {
     All,
 }
 
-/// Turn panel-state auto-save on or off (panel.md P11 — on by default).
+/// Turn panel-state auto-save on or off (panel.ai.md P11 — on by default).
 ///
 /// Project-level, not scoped: panel state persists per project folder
 /// (`.lp/state.json`), so the switch belongs to the project as a whole and

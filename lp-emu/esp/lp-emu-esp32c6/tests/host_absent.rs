@@ -101,7 +101,7 @@ fn with_no_host_the_printer_times_out_once_and_the_link_task_discards_its_frames
     // committed (host absent)`) — esp-hal 1.1.1's `write_async` reads no free
     // bit. The TX half is behind the IN-endpoint gate
     // (`fw_esp32_common::serial::in_endpoint`, PR #805, ported to the C6 for
-    // docs/defects/2026-09-24-the-real-c6-link-loses-bytes-inside-a-packed-frame.md),
+    // docs/defects/2026-09-24-the-real-c6-link-loses-bytes-inside-a-packed-frame.ai.md),
     // and since proto 30 the link task does not even reach it with no SOF:
     // it discards the frame (below). This is not a transcript comparison — the
     // `usb-host-absent` transcripts are text a host would see, and with no

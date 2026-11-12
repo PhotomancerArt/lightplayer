@@ -13,7 +13,7 @@
 //! the engine, which an update writes only after this core has booted on
 //! trial — reading it here refused every tree-store core, its own kind
 //! included
-//! (docs/defects/2026-10-16-the-fs-tree-update-guard-reads-a-manifest-the-core-does-not-carry.md).
+//! (docs/defects/2026-10-16-the-fs-tree-update-guard-reads-a-manifest-the-core-does-not-carry.ai.md).
 //! A core without the mark is refused: every littlefs core, and every
 //! tree-store dev core built before the mark existed.
 //!

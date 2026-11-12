@@ -30,7 +30,7 @@
 //!   placement from the 2026-07-28 bring-up until 2026-09-05, and it is kept
 //!   as [`CodeRegion::ESP32_SRAM1_LEGACY`] so the mirrored path stays tested
 //!   — it spends byte-addressable heap-grade memory, which is the reason it
-//!   is no longer the default (`docs/reports/2026-09-04-classic-ram-budget.md`,
+//!   is no longer the default (`docs/reports/2026-09-04-classic-ram-budget.ai.md`,
 //!   lever 1).
 //!
 //! Everything here is keyed on the I-bus layout — byte `4*i` of an installed
@@ -204,7 +204,7 @@ impl CodeRegion {
     /// no heap can live there. A JIT code installer is the one consumer that
     /// wants exactly that. Moving the region here returns the 24 KiB it used
     /// to occupy in SRAM1 to the heap, where
-    /// `docs/reports/2026-09-04-classic-ram-budget.md` measured every byte
+    /// `docs/reports/2026-09-04-classic-ram-budget.ai.md` measured every byte
     /// mattering (lever 1). Facts measured on the dig2go by `fw-esp32v3`'s
     /// `test_sram0_exec`: word stores across the whole `0x4008_8000..
     /// 0x400A_0000` land and read back; a byte access faults (EXCCAUSE 3);

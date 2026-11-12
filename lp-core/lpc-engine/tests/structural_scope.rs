@@ -1,4 +1,4 @@
-//! Structural scope (engine C1, modules.md R1/R2): scope identity lives on
+//! Structural scope (engine C1, modules.ai.md R1/R2): scope identity lives on
 //! `RuntimeNodeEntry`, is queryable after load AND after apply, survives
 //! reattach and broken defs, and models playlist-entry sink scopes as a
 //! property — never a probe filter.
@@ -323,7 +323,7 @@ fn scope_persist_paths_are_tree_path_stable() {
 
 #[test]
 fn e5_depth_2_consumer_resolves_the_sibling_modules_publish() {
-    // modules.md E5, the exact shape that must be pinned: H contains
+    // modules.ai.md E5, the exact shape that must be pinned: H contains
     // M_outer; M_outer contains M_inner (which has a visual writer) and a
     // consumer C beside it. C's `visual.out` read finds M_inner's R7
     // publish IN Scope(M_outer) — module publishes count as writers like

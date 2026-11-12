@@ -51,7 +51,7 @@ them, so the walk would report "nothing rendered".
 The test prints two transcripts. `[ORACLE]` is wasmtime; `[ORACLE-RV32]` is
 `lpvm-native`'s rv32 emulation — the same code generator firmware JITs, one ISA
 over. Which of the two a device agrees with is the diagnosis, not a detail:
-see `docs/defects/2026-07-30-q32-native-vs-wasmtime-last-bit.md`, where the
+see `docs/defects/2026-07-30-q32-native-vs-wasmtime-last-bit.ai.md`, where the
 distinction was the difference between "the Xtensa backend is broken" and "the
 native and WASM engines have always differed in the last bit".
 

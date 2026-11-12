@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # The esp-emu RMT loopback recipe, as it actually is.
 #
-# `docs/reports/2026-09-08-esp-emu-rmt-loopback-differential.md` is the run
+# `docs/reports/2026-09-08-esp-emu-rmt-loopback-differential.ai.md` is the run
 # this encodes. Two things the older recipe got wrong are fixed here:
 #
 #   * `--rmt-loopback` takes CHANNEL indices, not pins. `18:19` is refused

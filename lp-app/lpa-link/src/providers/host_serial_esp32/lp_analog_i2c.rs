@@ -22,7 +22,7 @@
 //! `host_esp32_flash::restore_lp_analog_i2c_clock`, and its browser twin is
 //! `restoreLpAnalogI2cClock` in `browser_esp32_flash.js` (which has no
 //! tests — keep the two in step by hand). See
-//! `docs/defects/2026-09-06-c6-first-flash-bootloader-hang-lp-analog-i2c-clock.md`.
+//! `docs/defects/2026-09-06-c6-first-flash-bootloader-hang-lp-analog-i2c-clock.ai.md`.
 
 /// `LPPERI_CLK_EN`: LP peripheral clock gates. Bit 29 = `LP_ANA_I2C_CK_EN`
 /// (power-on 1).

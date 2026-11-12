@@ -1,4 +1,4 @@
-//! Spike golden vectors GV1–GV3b (FINDINGS.md / fw/spike-esp32s3/src/e4.rs).
+//! Spike golden vectors GV1–GV3b (FINDINGS.ai.md / fw/spike-esp32s3/src/e4.rs).
 //!
 //! All bytes are objdump-derived from toolchain-assembled or hardware-verified
 //! references — never hand-recalled (spike lesson: recalls were wrong 2/3).

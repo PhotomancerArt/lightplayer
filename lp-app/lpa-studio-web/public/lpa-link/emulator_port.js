@@ -369,7 +369,7 @@ export class EmulatorPort {
     // awaiting the byte socket's close handshake first (it used to) left the
     // control socket — the door's one-client claim — open behind a page that
     // was already gone
-    // (docs/defects/2026-09-24-a-departed-page-kept-the-doors-boards.md).
+    // (docs/defects/2026-09-24-a-departed-page-kept-the-doors-boards.ai.md).
     await Promise.all([bytes, control].filter(Boolean).map(closeSocket));
   }
 

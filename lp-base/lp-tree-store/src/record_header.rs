@@ -1,4 +1,4 @@
-//! The record header (FORMAT.md "Record").
+//! The record header (FORMAT.ai.md "Record").
 //!
 //! Layout (16 bytes, little-endian): kind u8 | codec u8 | payload length u16 |
 //! id u64 | CRC-32 over the first 12 header bytes and the payload. A header
@@ -34,7 +34,7 @@ pub enum HeaderRead {
     Bad,
     /// A record of a kind (or a kind/codec pair) this version does not
     /// define, `len` payload bytes: garbage once its CRC checks, never
-    /// indexed (FORMAT.md "Unknown records").
+    /// indexed (FORMAT.ai.md "Unknown records").
     Unknown {
         len: u16,
     },

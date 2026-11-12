@@ -65,7 +65,7 @@ use crate::machine::{AppSource, BootMode, Esp32C6Builder, Outcome, TimeGrade, Ua
 /// The ABI revision. Mirrored by `emulator_wasi.js`'s `EMU_ABI`.
 ///
 /// 2: the `seams=` / `seams_prefer=` config keys, [`emu_seams_info`] and the
-/// `SEAM` outcome (docs/adr/2026-10-05-emulator-seams.md).
+/// `SEAM` outcome (docs/adr/2026-10-05-emulator-seams.ai.md).
 pub const ABI_VERSION: i32 = 2;
 
 /// Every control reply this protocol produces fits here — `pins` with all

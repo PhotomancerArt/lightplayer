@@ -11,7 +11,7 @@
     },
     "interpolationLeds": {
       "value": 500,
-      "measured": "2026-09-06: DERIVED, not soaked. Slope measured in docs/reports/2026-09-02-per-lamp-memory-table.md: frame interpolation holds prev+next = 12 B/LED per port on the classic (the largest remaining per-LED line, and the only one that is a quality feature). At 500 LEDs that is 6,000 B (3.2% of the 186,368 B arena the table was measured against); at zook's 1,500 it would be 18,000 B. Yona 2026-09-02: 'it's fine at 100 LEDs' - keep smoothing on small fixtures, degrade at scale. Replace this provenance with a [mem] bracket at the limit when the classic is next on the bench."
+      "measured": "2026-09-06: DERIVED, not soaked. Slope measured in docs/reports/2026-09-02-per-lamp-memory-table.ai.md: frame interpolation holds prev+next = 12 B/LED per port on the classic (the largest remaining per-LED line, and the only one that is a quality feature). At 500 LEDs that is 6,000 B (3.2% of the 186,368 B arena the table was measured against); at zook's 1,500 it would be 18,000 B. Yona 2026-09-02: 'it's fine at 100 LEDs' - keep smoothing on small fixtures, degrade at scale. Replace this provenance with a [mem] bracket at the limit when the classic is next on the bench."
     },
     "ditheringLeds": {
       "value": 1000,

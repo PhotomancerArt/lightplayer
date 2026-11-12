@@ -1,4 +1,4 @@
-//! Record types and chunk codecs, as their on-flash bytes (FORMAT.md).
+//! Record types and chunk codecs, as their on-flash bytes (FORMAT.ai.md).
 
 /// What a record holds.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]

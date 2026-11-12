@@ -16,7 +16,7 @@
 //! by several KB from one cycle cycle to the next with shader-compile and
 //! graphics activity (measured while writing this), which would drown a
 //! phasor's few dozen bytes. The retained-heap proof is P6's fw-emu cycle
-//! (`docs/reports/2026-09-25-dormant-playlist-entries-proof.md`), and the
+//! (`docs/reports/2026-09-25-dormant-playlist-entries-proof.ai.md`), and the
 //! engine's bookkeeping of a switch is pinned by `entry_residency_memory`.
 //!
 //! ```bash

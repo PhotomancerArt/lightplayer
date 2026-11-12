@@ -33,11 +33,11 @@ This is not hypothetical. Two shipped Q16.16 codegen bugs hid behind it:
 
 - **`abs()` leaked a wasm operand-stack value on every call**, corrupting any
   shader that called it inside a loop branch. `abs` had *no* file here at all.
-  See [`wasm-q32-fabs-stack-leak`](../../../../docs/defects/2026-07-27-wasm-q32-fabs-stack-leak.md).
+  See [`wasm-q32-fabs-stack-leak`](../../../../docs/defects/2026-07-27-wasm-q32-fabs-stack-leak.ai.md).
 - **`floor()`/`ceil()` returned wrong values for negative runtime inputs on
   `rv32c.q32`** (`floor(-0.6875)` → `-2.0`). `common-floor.glsl` was green the
   whole time — every case is a literal. See
-  [`cranelift-q32-floor-ceil`](../../../../docs/defects/2026-07-27-cranelift-q32-floor-ceil.md).
+  [`cranelift-q32-floor-ceil`](../../../../docs/defects/2026-07-27-cranelift-q32-floor-ceil.ai.md).
 
 ## Do this instead
 

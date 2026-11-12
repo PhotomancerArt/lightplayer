@@ -5,7 +5,7 @@
 // random values at the eight cell corners, trilinear interpolation with
 // quintic-smoothstep weights, remapped from [0, 1] to [-1, 1].
 // Standard lattice value noise (see
-// docs/reports/2026-03-31-lpfx-license-audit.md).
+// docs/reports/2026-03-31-lpfx-license-audit.ai.md).
 //
 // The Q32 device implementation approximates the quintic smoothstep with a
 // 256-entry LUT; the canonical uses the exact polynomial

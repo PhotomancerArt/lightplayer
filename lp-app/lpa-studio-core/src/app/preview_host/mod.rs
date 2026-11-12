@@ -1,7 +1,7 @@
 //! `PreviewHost`: leased, pooled, budgeted live project previews.
 //!
 //! One service owns "a project, rendered live, in a box" end to end
-//! (`docs/adr/2026-07-16-preview-host.md`): it boots a small pool of
+//! (`docs/adr/2026-07-16-preview-host.ai.md`): it boots a small pool of
 //! explicit-tick browser workers separate from the Studio session worker,
 //! hands out **slot leases** (`lease(PreviewSlotRequest)` →
 //! [`PreviewSlotHandle`]), deploys the requested content into a per-slot

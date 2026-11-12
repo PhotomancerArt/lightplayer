@@ -20,7 +20,7 @@
 //! **This is a test configuration, never product firmware.** `float-f32` is off
 //! by default on `lpvm-native` and `lps-builtins` precisely so the shipping C6
 //! image does not carry an f32 backend it never enters; see
-//! `docs/adr/2026-07-28-esp32c6-flash-budget.md` and roadmap decision D2. Report
+//! `docs/adr/2026-07-28-esp32c6-flash-budget.ai.md` and roadmap decision D2. Report
 //! this harness's image size separately from the shipping one.
 //!
 //! Run with: `just fwtest-f32-softfloat-esp32c6`

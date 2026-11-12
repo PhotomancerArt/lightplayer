@@ -855,12 +855,12 @@ impl DeviceEffects {
     /// Execute one coarse effect: borrow the wire exclusively, run the
     /// operation through the transport, stream progress and the end marker
     /// back through the sink — the round-2 seam
-    /// (`docs/adr/2026-08-25-event-fold-device-model.md`).
+    /// (`docs/adr/2026-08-25-event-fold-device-model.ai.md`).
     ///
     /// ⚠️ Every marker goes through `self.sink` and nothing else — progress
     /// that is merely written somewhere a rebuild would read is exactly how
     /// a flash once ran for a minute with nothing on screen
-    /// (`docs/defects/2026-07-28-flash-progress-never-reached-the-ui.md`).
+    /// (`docs/defects/2026-07-28-flash-progress-never-reached-the-ui.ai.md`).
     fn run_effect(
         &mut self,
         device: DeviceId,
@@ -1521,7 +1521,7 @@ impl DeviceEffects {
 /// Detaching at once (as before) took a board whose open port
 /// re-enumerated offline for that moment: its card left Online boards for
 /// Offline boards and came back, remounted, its open details closed
-/// (`docs/defects/2026-10-19-a-re-enumerating-board-remounts-its-card.md`).
+/// (`docs/defects/2026-10-19-a-re-enumerating-board-remounts-its-card.ai.md`).
 struct Departure {
     link: LinkId,
     /// Set once the port died, and never cleared: the pump stops reading

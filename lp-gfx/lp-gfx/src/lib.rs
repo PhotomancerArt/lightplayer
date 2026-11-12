@@ -29,7 +29,7 @@
 //!   [`ShaderSemantics`] tier in [`ShaderCompileOptions`] — instead of
 //!   silently substituting different semantics. Which tier/backend is active
 //!   is user-visible state; see
-//!   `docs/adr/2026-07-09-preview-fidelity-tiers.md`.
+//!   `docs/adr/2026-07-09-preview-fidelity-tiers.ai.md`.
 //!
 //! # Handle lifetime rules
 //!

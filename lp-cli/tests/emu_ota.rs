@@ -730,7 +730,7 @@ fn u12_a_build_that_dies_on_trial_rolls_back_and_is_refused() {
 
 // --- U19: a power cycle after a failed trial and its heal ----------------------------------
 
-/// `docs/defects/2026-10-17-a-power-cycle-after-a-failed-trial-and-its-heal-leaves-the-c6-core-only.md`:
+/// `docs/defects/2026-10-17-a-power-cycle-after-a-failed-trial-and-its-heal-leaves-the-c6-core-only.ai.md`:
 /// X → Y puts Y's core high and its engine low; Y → Y-dies puts the dying
 /// core low, over Y's engine; the rollback to Y and the heal put Y's engine
 /// back low — over the dead core the newer record still names. Every power
@@ -890,7 +890,7 @@ fn u15_a_corrupted_raw_chunk_fails_its_piece_which_is_sent_again() {
 // update ends with the project stage (`finish_board_projects`, what
 // `emu run --ota-offer` and `firmware install` run), and the frames decoded
 // off the eaves' two pads after it equal the frames before it.
-// `docs/adr/2026-10-28-firmware-updates-upgrade-the-boards-projects.md`.
+// `docs/adr/2026-10-28-firmware-updates-upgrade-the-boards-projects.ai.md`.
 
 #[test]
 #[ignore = "needs the OTA images; `just test-emu-c6-ota`"]

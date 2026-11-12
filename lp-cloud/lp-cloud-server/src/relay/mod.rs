@@ -31,7 +31,7 @@
 //! frame it does not have** (the hub's one send path checks); protocol 2
 //! adds the board's firmware, its project and its pictures.
 //!
-//! Decision record: `docs/adr/2026-10-06-cloud-relay.md`.
+//! Decision record: `docs/adr/2026-10-06-cloud-relay.ai.md`.
 
 pub mod browser_leg;
 pub mod client_address;

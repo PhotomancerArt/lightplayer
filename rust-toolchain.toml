@@ -1,7 +1,7 @@
 # Pinned nightly: this is a build-std project. An unpinned `nightly` drifts CI
 # onto a newer toolchain than local dev, so a green local run stops meaning
 # anything. Bump deliberately with `just bump-nightly`; see
-# docs/toolchain-notes.md. (Until 2026-08-02 this pin was also ABI-coupled to
+# docs/toolchain-notes.ai.md. (Until 2026-08-02 this pin was also ABI-coupled to
 # the `unwinding` crate — that coupling is gone.)
 [toolchain]
 channel = "nightly-2026-04-27"

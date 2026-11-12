@@ -370,7 +370,7 @@ fn s9_the_loader_skips_a_core_that_will_not_load_and_boots_the_other() {
     );
 }
 
-/// `docs/defects/2026-10-17-a-power-cycle-after-a-failed-trial-and-its-heal-leaves-the-c6-core-only.md`:
+/// `docs/defects/2026-10-17-a-power-cycle-after-a-failed-trial-and-its-heal-leaves-the-c6-core-only.ai.md`:
 /// a trial that died warm was rolled back, and the heal wrote the running
 /// core's engine over the dead core's bytes. The newer record still names
 /// that trial (attempted, never started, no cold retries counted), so a

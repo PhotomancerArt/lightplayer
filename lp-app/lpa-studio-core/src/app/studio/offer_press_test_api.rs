@@ -10,7 +10,7 @@
 //!
 //! `just lint-core-test-ops` is the ratchet on the tests that still build a
 //! user-verb action directly (`scripts/check-core-test-ops.py`). See
-//! `docs/adr/2026-10-01-agentic-control-offers-in-core.md`.
+//! `docs/adr/2026-10-01-agentic-control-offers-in-core.ai.md`.
 
 use core::fmt::Display;
 

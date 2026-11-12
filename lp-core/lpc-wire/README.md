@@ -31,4 +31,4 @@ error }`), which the server holds for the link that began it. Chunked writes
 come plain (`writeChunk`) or as raw deflate at logical offsets
 (`writeChunkDeflated`, answered like a `writeChunk`); `budget.rs` holds the
 chunk sizes, the deflated chunk's logical cap and the record hint a push
-plans for. See `docs/adr/2026-10-10-fs-push-boundary-and-deflated-writes.md`.
+plans for. See `docs/adr/2026-10-10-fs-push-boundary-and-deflated-writes.ai.md`.

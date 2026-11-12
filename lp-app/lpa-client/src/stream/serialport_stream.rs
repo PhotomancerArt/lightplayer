@@ -138,7 +138,7 @@ impl DeviceByteStream for SerialPortByteStream {
     /// framing thread that owns this stream then never reaches its shutdown
     /// check, `ClientTransport::close` gives up at its join budget, and the
     /// OS port stays open for the life of the process
-    /// (`docs/defects/2026-09-08-serial-close-leaks-the-port-on-a-wedged-device.md`).
+    /// (`docs/defects/2026-09-08-serial-close-leaks-the-port-on-a-wedged-device.ai.md`).
     ///
     /// Nothing is lost by skipping it: `write` has already handed the bytes
     /// to the driver, which transmits them on its own schedule, and no

@@ -1,4 +1,4 @@
-//! A file and a directory never share a name (FORMAT.md "Files and
+//! A file and a directory never share a name (FORMAT.ai.md "Files and
 //! paths"). The format can hold both — directory entries sort by (name,
 //! kind) — but no host filesystem, archive or littlefs can, so a writer
 //! that made one would leave every tool that reads the store (extract,

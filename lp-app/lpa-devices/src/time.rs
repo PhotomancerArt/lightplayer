@@ -2,7 +2,7 @@
 //! from a clock.
 //!
 //! The repo's sans-IO convention is "timestamps are caller-supplied" (see
-//! `docs/adr/2026-07-06-sans-io-core.md`); core crates that measure wall
+//! `docs/adr/2026-07-06-sans-io-core.ai.md`); core crates that measure wall
 //! clock generally take f64 epoch seconds. This crate uses integer epoch
 //! millis instead, because every value it stores is compared, subtracted,
 //! and asserted on in replay fixtures — integers make fixtures exact and

@@ -36,7 +36,7 @@ pub struct CorpusPalette {
     pub space: &'static str,
     /// `method` token (`lpc_model::InterpMethod::parse`).
     pub method: &'static str,
-    /// The stops literal (`docs/design/color.md` §5).
+    /// The stops literal (`docs/design/color.ai.md` §5).
     pub stops: &'static str,
 }
 

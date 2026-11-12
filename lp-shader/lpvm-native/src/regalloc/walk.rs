@@ -1931,7 +1931,7 @@ mod tests {
 
     /// Pins the **return** direction's move set, which `process_call` began
     /// routing through this function on 2026-07-30
-    /// (`docs/defects/2026-07-30-xtensa-two-value-return-clobber.md`).
+    /// (`docs/defects/2026-07-30-xtensa-two-value-return-clobber.ai.md`).
     ///
     /// This is a characterization test, not the regression test: the sequencer
     /// was always correct, and the defect was that the return path never called

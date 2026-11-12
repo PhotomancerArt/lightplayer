@@ -109,7 +109,7 @@ const PROJECT_READ_RUNTIME_CHUNK_ASSERT: () = assert!(
 /// tryout's 25-entry playlist is a ~16 KB root whose every revision stamp
 /// grows a digit as the board's revision does, so on a board that had run
 /// a while every read that carried it failed
-/// (`docs/defects/2026-10-31-a-big-playlist-loses-the-panel-after-its-first-step.md`).
+/// (`docs/defects/2026-10-31-a-big-playlist-loses-the-panel-after-its-first-step.ai.md`).
 pub const PROJECT_READ_SLOT_ROOT_FRAME_RESERVE_BYTES: usize = 256;
 
 /// The smallest piece a slot root is cut into, whatever the frame: below

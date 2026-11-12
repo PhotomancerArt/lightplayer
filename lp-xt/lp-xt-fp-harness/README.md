@@ -77,7 +77,7 @@ fifteen instead of 5,630 and means the campaign needs no FP emitter.
 
 The `<div-sequence>` and `<sqrt-sequence>` pseudo-ops run the toolchain's real
 `__divsf3` and `sqrtf` sequences, transcribed from objdump output under the
-AGENTS.md license rule (disassembly is fact; no library source was read). Both
+AGENTS.ai.md license rule (disassembly is fact; no library source was read). Both
 are byte-identical across the `esp32` and `esp32s3` multilibs of esp-14.2.0,
 verified 2026-08-06 — that equality is what makes one transcription valid for
 both boards, and it should be re-checked before a third chip is added.

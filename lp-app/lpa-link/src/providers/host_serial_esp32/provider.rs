@@ -560,7 +560,7 @@ impl LinkProvider for HostSerialEsp32Provider {
         // recorded on the session before it propagates: swallowed by a
         // best-effort caller, it used to resurface a whole operation later
         // as an unexplained "Device or resource busy"
-        // (`docs/defects/2026-09-08-serial-close-leaks-the-port-on-a-wedged-device.md`).
+        // (`docs/defects/2026-09-08-serial-close-leaks-the-port-on-a-wedged-device.ai.md`).
         if let Some(server_connection) = server_connection {
             let mut transport = server_connection.lock().await;
             let closed = lpa_client::ClientTransport::close(&mut **transport).await;

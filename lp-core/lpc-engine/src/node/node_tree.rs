@@ -30,7 +30,7 @@ pub struct RuntimeNodeTree<N> {
     /// this replaced left a `None` tombstone per removed id forever, and
     /// dormant playlist entries remove and re-attach a subtree on every
     /// pattern switch — a cycle grew slot storage without bound
-    /// (`docs/defects/2026-09-25-node-tree-tombstones-grow-per-reload.md`).
+    /// (`docs/defects/2026-09-25-node-tree-tombstones-grow-per-reload.ai.md`).
     /// Ids stay monotonic and are never reused ([`Self::next_id`]), so a new
     /// node appends at the end, iteration stays in id order, and lookup is
     /// O(1) until a removal shifts later entries (see `NodeEntrySlots`).
@@ -40,7 +40,7 @@ pub struct RuntimeNodeTree<N> {
     binding_index: NodeBindingIndex,
     /// The channels each module node declares it takes from its host
     /// (`ModuleDef::inputs`): they list in the host scope — through a
-    /// playlist entry's sink — though nothing there names them (modules.md
+    /// playlist entry's sink — though nothing there names them (modules.ai.md
     /// R2, playlists-on-the-bus D5). A side map, so only a module that
     /// declares something pays for it. Set with the module's bindings.
     declared_inputs: VecMap<NodeId, Vec<ChannelName>>,
@@ -318,7 +318,7 @@ impl<N> RuntimeNodeTree<N> {
         self.binding_index.channels()
     }
 
-    /// The bus scope `node` inhabits (modules.md R1). `None` for the root
+    /// The bus scope `node` inhabits (modules.ai.md R1). `None` for the root
     /// module — no scope contains it — and for unknown nodes. Answered
     /// from structural entry state, so it holds for `Pending`/`Failed`
     /// nodes and across payload reattach.

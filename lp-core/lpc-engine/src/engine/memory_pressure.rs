@@ -27,7 +27,7 @@
 //!   must be bit-identical to never having dropped on the core
 //!   mapping/sample/render path (gravy features — dither, interpolation —
 //!   are exempt per
-//!   `docs/adr/2026-08-03-gravy-features-out-of-core-correctness-tests.md`).
+//!   `docs/adr/2026-08-03-gravy-features-out-of-core-correctness-tests.ai.md`).
 //! - [`Critical`](PressureLevel::Critical) — survival: the device is about
 //!   to OOM. A node may additionally drop **resettable** state whose loss is
 //!   a visible discontinuity but not a correctness failure (the fluid
@@ -56,7 +56,7 @@
 //! `produce`/render prep. Net freed at the compile instant was ~0 B, and
 //! clearing the staleness keys made the peak worse by forcing the
 //! mapping-point walk to re-run inside the window frame. Details:
-//! `docs/defects/2026-08-04-compile-window-drops-rebuilt-before-compile.md`.
+//! `docs/defects/2026-08-04-compile-window-drops-rebuilt-before-compile.ai.md`.
 //!
 //! **The ordering rule this leaves behind:** before adding a droppable, name
 //! the tick position of the transient you are making room for and the tick
@@ -76,11 +76,11 @@
 //! the engine schedules nothing. A node that drops state and then renders
 //! stale or wrong output has broken the contract; silent invalidation is the
 //! recurring failure class in this subsystem
-//! (`docs/debt/s3-frame-cost-scales-per-fixture.md`), so rebuild seams must
+//! (`docs/debt/s3-frame-cost-scales-per-fixture.ai.md`), so rebuild seams must
 //! fail loudly, not fall back quietly.
 //!
 //! Full decision record:
-//! `docs/adr/2026-08-03-memory-pressure-at-compile-safe-points.md`.
+//! `docs/adr/2026-08-03-memory-pressure-at-compile-safe-points.ai.md`.
 
 /// Coarse memory pressure tier for runtime shedding decisions.
 ///

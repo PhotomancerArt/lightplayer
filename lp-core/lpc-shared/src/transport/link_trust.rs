@@ -21,7 +21,7 @@
 ///   board's relay id is not a secret. Its tier is only what its handshake's
 ///   key grants; the anonymous key completes a handshake (so a visitor can
 ///   read the login offers and come back with a password's key) but holds
-///   nothing. Decision record: `docs/adr/2026-10-06-cloud-relay.md`.
+///   nothing. Decision record: `docs/adr/2026-10-06-cloud-relay.ai.md`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum LinkTrust {
     Trusted,

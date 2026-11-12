@@ -9,7 +9,7 @@
 //! Payload bytes are built with `lp_xt_inst::encode` — the objdiff-verified
 //! encoder (10,969 instructions, 0 mismatches against objdump), not hand
 //! assembly. The other suites in this directory use golden vectors from
-//! FINDINGS.md; those are fixed programs, while these need specific register and
+//! FINDINGS.ai.md; those are fixed programs, while these need specific register and
 //! stack-offset shapes, so they are assembled from the encoder instead of
 //! transcribed by hand.
 

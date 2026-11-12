@@ -138,7 +138,7 @@ pending buffer. The io_task gate (`fw-esp32-common/src/serial/in_endpoint.rs`,
 shared with the C6) now waits for a free buffer and clears that bit before
 every io_task packet, and the tests assert
 the mechanism on every host path: `Machine::usb_sj_refused() == Some(0)` (see
-`docs/defects/2026-09-13-the-s3-link-drops-the-io-tasks-next-chunk-on-a-stale-serial-in-empty.md`).
+`docs/defects/2026-09-13-the-s3-link-drops-the-io-tasks-next-chunk-on-a-stale-serial-in-empty.ai.md`).
 A blank chip (no `--flash`) boots too: no partition table, `using memory FS`, and the same server
 loop — `tests/boot.rs` pins that reading.
 
@@ -435,7 +435,7 @@ already met them:
 
 ### ⚠️ Neither sibling is the parent of this chip's `GPIO`
 
-`notes.md` §3.5 measured the S3's fixed registers against the C6's and found
+`notes.ai.md` §3.5 measured the S3's fixed registers against the C6's and found
 every one at the same offset. That is true, and it is why the offsets are the
 C6's. But the **bitfields and the banks are the classic's**, and a view that
 took either parent whole would be wrong:
@@ -615,7 +615,7 @@ And two things it carries rather than hides:
   `tests/pin_frames.rs::the_walk_is_the_c6s_captured_bytes`, which checks
   its payload against the C6's copy as text.
 - The workarounds this walk used to carry for
-  `docs/defects/2026-09-13-the-s3-link-drops-the-io-tasks-next-chunk-on-a-stale-serial-in-empty.md`
+  `docs/defects/2026-09-13-the-s3-link-drops-the-io-tasks-next-chunk-on-a-stale-serial-in-empty.ai.md`
   (DD103) are gone: the firmware's IN-endpoint gate fixed the drop on
   2026-09-24, and `just walk-esp32s3-emu` now hosts the link and uploads in
   one call (`lp-cli emu run --host-link --upload`, `scripts/emu/m4-walk.sh`),
@@ -642,7 +642,7 @@ cross-check (`walks/README.md`). The measurement is on a **direct load with
 no flash chip**, so the firmware runs on its memory FS — the record's
 `boot_shape` says what that costs against the ROM-up figures, and the two
 must never be compared as if they were the same boot. The band is one
-host's until the CI job reports a second (`docs/heap-budget-gate.md`).
+host's until the CI job reports a second (`docs/heap-budget-gate.ai.md`).
 
 ### Two things the accept blocks needed that a PAC reset does not give
 
@@ -929,7 +929,7 @@ sends `Reboot` and reads the second boot's recovery line.
   seam to this chip; Bluetooth's air is not emulated on any chip.
 - **A TX completion.** Nothing in the probe transmits, so whether this
   chip's MAC can be made to complete a send is unasked — the C6's open
-  question (`docs/debt/emu-c6-radio-tx-never-completes.md`) is M5's here.
+  question (`docs/debt/emu-c6-radio-tx-never-completes.ai.md`) is M5's here.
 - **The other resets' causes.** A watchdog's or a host `chip_rst`'s reboot
   still comes back reading power-on with RTC memory cleared; silicon reads
   `SysRtcWdt`/`CoreUsbUart` and keeps RTC memory. The per-core
@@ -978,11 +978,11 @@ the wall-clock net. And `then=power-cycle` gives the flash its supply back
 (`FlashImage::restore_power`, as the C6's restart does): until M7 P9 it did
 not, every write after the cycle was dropped, and the next boot looked like
 a filesystem that refuses writes
-(`docs/defects/2026-10-21-s3-littlefs-torn-first-format-mounts-full.md`).
+(`docs/defects/2026-10-21-s3-littlefs-torn-first-format-mounts-full.ai.md`).
 
 ## Emulator seams, the wake and `net=lan` (S3 radio M5)
 
-The C6's seams (`docs/adr/2026-10-05-emulator-seams.md`, its §13 for
+The C6's seams (`docs/adr/2026-10-05-emulator-seams.ai.md`, its §13 for
 Xtensa), on this chip: `src/seams/` is the C6's `src/seams/` file for file,
 over the same chip-neutral `lp_emu_esp_common::seam`.
 
@@ -1039,9 +1039,9 @@ link, then both on one runner-driven LAN (two leases, each board's
 `lp-xxxx.local` answered, the same frame log twice). `emu serve --chip
 esp32s3` holds S3 boards on a served LAN (`lan=<name>`, a forward each), and
 `just walk-wifi-emu lan --s3` walks Studio over `?lan=` against two of them
-(docs/reports/2026-10-22-s3-wifi-emulator-walk.md). Before PSRAM held the
+(docs/reports/2026-10-22-s3-wifi-emulator-walk.ai.md). Before PSRAM held the
 heap, a project the size of Peach (1D) ran it short
-(docs/defects/2026-10-22-the-s3-wifi-image-runs-out-of-heap-with-a-project-loaded.md,
+(docs/defects/2026-10-22-the-s3-wifi-image-runs-out-of-heap-with-a-project-loaded.ai.md,
 fixed); the relay cell's S3 arm now loads `projects/test/basic` like the C6's.
 
 ⚠️ **A harness that takes an interrupt must arm `CPENABLE` first.** esp-hal's
@@ -1197,7 +1197,7 @@ evidence.
 
 Generated from the `esp32s3` PAC's svd2rust offset comments by
 `scripts/emu/pac-regnames.py --pac esp32s3`, with the provenance header
-`docs/adr/2026-07-29-license-provenance-discipline.md` requires, and checked by
+`docs/adr/2026-07-29-license-provenance-discipline.ai.md` requires, and checked by
 `just lint-emu-regnames` — which checks all three chips, so a hand edit here
 fails the same lint a hand edit in the C6's tables does. **Never hand-edit a
 file under `src/regs/` except `mod.rs`**, which is hand-written and carries the
@@ -1219,7 +1219,7 @@ matrix has 99 map entries and the table 94 rows.
 ## Licence
 
 MIT, as a unit with the rest of `lp-emu/` — not the workspace's AGPL. See
-`lp-emu/LICENSE-MIT`, `docs/adr/2026-09-06-lp-emu-home-and-mit-fence.md` and
+`lp-emu/LICENSE-MIT`, `docs/adr/2026-09-06-lp-emu-home-and-mit-fence.ai.md` and
 `just lint-emu-fence`.
 
 ## Core 1 and the flash-busy model

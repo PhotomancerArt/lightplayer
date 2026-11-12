@@ -4,7 +4,7 @@
 // Yona's C6 over USB, 2026-10-19: Factory reset was in the Firmware row's
 // details, and after it the card read "This board stopped responding over
 // USB." with a Retry that timed out; only a replug reached the blank board
-// (docs/defects/2026-10-19-a-board-erased-over-webusb-reads-not-responding-until-a-reload.md).
+// (docs/defects/2026-10-19-a-board-erased-over-webusb-reads-not-responding-until-a-reload.ai.md).
 // This walks the fixed flow on an emulated C6, in headless Chrome, through
 // Studio's real device stack (`?emu=`: esptool-js over the emulated
 // USB-Serial-JTAG, the ROM and the stub the board ships with):

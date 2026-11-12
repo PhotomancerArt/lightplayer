@@ -21,7 +21,7 @@
 use crate::record_kind::RecordKind;
 use crate::store_error::StoreError;
 
-/// The empty directory's payload: zero entries (FORMAT.md "Dir"). `format`
+/// The empty directory's payload: zero entries (FORMAT.ai.md "Dir"). `format`
 /// writes it, and it is the only record besides the root `format` writes.
 pub(crate) const EMPTY_DIR: [u8; 2] = [0, 0];
 

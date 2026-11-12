@@ -2,7 +2,7 @@
 //! routing between them — read from the files alone.
 //!
 //! Frozen from the engine at origin/main b9f862fb2 (the project loader and
-//! the scoped bus, `docs/design/modules.md` R1–R7):
+//! the scoped bus, `docs/design/modules.ai.md` R1–R7):
 //!
 //! - **Load order** is `NodeId` order: the loader sorts every node use by
 //!   its depth, then by its use path (module node keys, compared as

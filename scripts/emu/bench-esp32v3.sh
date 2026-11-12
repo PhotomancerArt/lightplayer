@@ -90,7 +90,7 @@
 # construction, so their seconds mean nothing and only their shares do. Keep
 # the two apart.
 #
-# Emulated microseconds never gate anything (AGENTS.md): transcripts decide,
+# Emulated microseconds never gate anything (AGENTS.ai.md): transcripts decide,
 # probes report.
 set -euo pipefail
 
@@ -288,7 +288,7 @@ for line in "${lines[@]}"; do echo "$line"; done
 echo
 echo "binary: $bin ($(wc -c <"$bin" | tr -d ' ') bytes), best of $runs runs per row, both cores at the default quantum"
 echo "rt(*) is against 240 MHz — the machine's emulated us ARE its cycles / 240."
-echo "These numbers are ORACLES, not gates — never gate on emulated microseconds (AGENTS.md)."
+echo "These numbers are ORACLES, not gates — never gate on emulated microseconds (AGENTS.ai.md)."
 
 if [[ -n "$json_out" ]]; then
     mkdir -p "$(dirname "$json_out")"

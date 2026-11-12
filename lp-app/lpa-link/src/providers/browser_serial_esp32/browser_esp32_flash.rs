@@ -28,7 +28,7 @@ pub struct BrowserEsp32FlashResult {
     pub chip_name: Option<String>,
     /// The base MAC the preflight read from efuse, exactly as esptool-js
     /// spelled it. Unvalidated on purpose — the JS side is untestable
-    /// (`docs/debt/web-serial-js-untestable.md`), so the check runs in Rust,
+    /// (`docs/debt/web-serial-js-untestable.ai.md`), so the check runs in Rust,
     /// on the way into the device session.
     pub base_mac: Option<String>,
     pub logs: Vec<String>,

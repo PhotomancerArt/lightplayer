@@ -2,7 +2,7 @@
 //! readback one frame late.
 //!
 //! The same shape as the sample pass's pipeline (`crate::sample_pass`, ADR
-//! `2026-08-05-browser-sample-readback-is-async.md`), applied to a whole
+//! `2026-08-05-browser-sample-readback-is-async.ai.md`), applied to a whole
 //! texture for the wire probe's byte previews: a persistent `MAP_READ`
 //! buffer per read site, held in the caller's [`LatentReadBack`]. Each call
 //!

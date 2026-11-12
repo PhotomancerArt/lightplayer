@@ -441,7 +441,7 @@ impl ProjectLoader {
                 );
             }
 
-            // Structural scope (modules.md R1/R2), recomputed identically on
+            // Structural scope (modules.ai.md R1/R2), recomputed identically on
             // BOTH entry points — fresh load and apply both run this spine
             // pass, so an edited project can never wear different scopes
             // than a reloaded one. Ownership already carries the answer:
@@ -1763,7 +1763,7 @@ fn register_node_bindings(
     // BOTH shader kinds — a compute shader's `time` slot is default-bound by
     // the starter itself, and registering only the render-shader arm made
     // that silently unwired
-    // (docs/defects/2026-08-04-compute-shader-default-bind-ignored.md).
+    // (docs/defects/2026-08-04-compute-shader-default-bind-ignored.ai.md).
     // Produced slots are deliberately excluded: publishing a produced slot
     // still takes an authored `target` entry, so a `default_bind` there is
     // inert.
@@ -1819,7 +1819,7 @@ fn register_node_bindings(
     };
     // Every authored binding entry registers or errs — an entry naming a slot
     // nobody resolves was the silent-drop defect
-    // (docs/defects/2026-08-02-authored-source-bindings-silently-dropped.md).
+    // (docs/defects/2026-08-02-authored-source-bindings-silently-dropped.ai.md).
     let bindings = node_def_bindings(&config);
     for (key, entry) in bindings.entries().iter() {
         let name = key.as_str();
@@ -1911,7 +1911,7 @@ fn node_def_bindings(config: &NodeDef) -> &BindingDefs {
 /// statically declared; segments past an opaque leaf (value, custom codec,
 /// shape ref) pass through unchanged. A key that names no declared slot is
 /// an error — the loud replacement for the silent drop recorded in
-/// `docs/defects/2026-08-02-authored-source-bindings-silently-dropped.md`.
+/// `docs/defects/2026-08-02-authored-source-bindings-silently-dropped.ai.md`.
 fn resolve_declared_binding_path(kind: NodeKind, name: &str) -> Result<SlotPath, String> {
     let path =
         SlotPath::parse(name).map_err(|e| format!("invalid binding slot `{name}`: {e:?}"))?;
@@ -3272,7 +3272,7 @@ mod tests {
     /// the top of the tick, after the frame revision is stamped and before
     /// any render, so bumping the ambient counter there reproduces the
     /// desync deterministically. See
-    /// `docs/defects/2026-08-03-render-context-revision-read-from-ambient-counter.md`.
+    /// `docs/defects/2026-08-03-render-context-revision-read-from-ambient-counter.ai.md`.
     #[test]
     fn compile_window_survives_an_ambient_revision_bump_inside_the_tick() {
         struct RevisionBumper;
@@ -3330,7 +3330,7 @@ mod tests {
     /// published output bytes are bit-identical to an engine that never got
     /// the broadcast. Core path only — display-pipeline temporal state
     /// (dither, interpolation) is firmware-side and exempt anyway; see
-    /// docs/adr/2026-08-03-gravy-features-out-of-core-correctness-tests.md.
+    /// docs/adr/2026-08-03-gravy-features-out-of-core-correctness-tests.ai.md.
     ///
     /// This started life (#303) as the drop→rebuild differential: the fixture
     /// and output nodes dropped their per-LED buffers at `High`, and this
@@ -3338,7 +3338,7 @@ mod tests {
     /// M6 P4 removed those drops — they freed nothing at the compile instant,
     /// because the compile runs at RENDER time and every dropped buffer was
     /// rebuilt earlier in the same tick
-    /// (`docs/defects/2026-08-04-compile-window-drops-rebuilt-before-compile.md`).
+    /// (`docs/defects/2026-08-04-compile-window-drops-rebuilt-before-compile.ai.md`).
     /// The assertion is unchanged and now pins the stronger, simpler property:
     /// a pressure broadcast is **inert** on the core path. Per-node no-drop
     /// coverage lives next to each handler
@@ -5809,7 +5809,7 @@ mod tests {
     }
 
     /// Fix for
-    /// `docs/defects/2026-08-02-authored-source-bindings-silently-dropped.md`:
+    /// `docs/defects/2026-08-02-authored-source-bindings-silently-dropped.ai.md`:
     /// registration is driven by the declared slot shape, so an authored
     /// source binding on ANY declared slot registers. Fixture `brightness`
     /// is the defect's own example — and its target lands on
@@ -6079,7 +6079,7 @@ mod tests {
         );
     }
 
-    /// The scarf path at the engine (panel.md P10): every fixture's
+    /// The scarf path at the engine (panel.ai.md P10): every fixture's
     /// brightness is default-bound to `bus:brightness` (with
     /// `panel = "show"`), so a panel writer on the fixture's scope dims the
     /// value the render path reads — and with no writer, the authored
@@ -6281,7 +6281,7 @@ mod tests {
     }
 
     /// Fix for
-    /// `docs/defects/2026-08-04-compute-shader-default-bind-ignored.md`: the
+    /// `docs/defects/2026-08-04-compute-shader-default-bind-ignored.ai.md`: the
     /// loader registered slot-declared `default_bind` for render shaders
     /// only, so `starter_compute_shader_def`'s own default-bound `time` slot
     /// came up unwired and every compute author had to restate it under
@@ -6457,7 +6457,7 @@ mod tests {
 
     /// A project referencing a gated-off node kind must still **load**. The
     /// missing-node contract is deliberately minimal (M2 scope decision,
-    /// `docs/debt/firmware-capability-reporting.md`): the attach loop for a
+    /// `docs/debt/firmware-capability-reporting.ai.md`): the attach loop for a
     /// disabled kind falls back to `CorePlaceholderNode` and the load
     /// succeeds silently. This asserts only that — never anything about
     /// status/reporting, which is deliberately absent by design.

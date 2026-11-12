@@ -4,7 +4,7 @@
 //! `glsl/lpfn/generative/gnoise/gnoise2.glsl` (normative): random values at the
 //! four cell corners, bilinear interpolation with cubic-smoothstep weights.
 //! Standard lattice value noise (see
-//! docs/reports/2026-03-31-lpfx-license-audit.md; originally written with
+//! docs/reports/2026-03-31-lpfx-license-audit.ai.md; originally written with
 //! reference to LYGIA's gnoise.glsl).
 //!
 //! **Follows the canonical, not the Q32 implementation:** the Q32 device code

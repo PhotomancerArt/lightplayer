@@ -1,4 +1,4 @@
-//! Structural bus-scope identity (modules.md R1/R2).
+//! Structural bus-scope identity (modules.ai.md R1/R2).
 //!
 //! A scope is introduced either by a module node (one scope enclosing its
 //! project children) or by an isolating invocation site — today exactly a

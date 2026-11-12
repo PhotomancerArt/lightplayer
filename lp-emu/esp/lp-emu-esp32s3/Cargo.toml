@@ -35,7 +35,7 @@ env_logger = { workspace = true }
 
 [features]
 # The TEST ONLY seam implementations (`test=echo`, `test=take`; ADR
-# docs/adr/2026-10-05-emulator-seams.md). Dev-only and off by default: the
+# docs/adr/2026-10-05-emulator-seams.ai.md). Dev-only and off by default: the
 # seam tests turn it on (`cargo test --features test-seams`), no shipped
 # command line ever does. The C6's feature, the same way.
 test-seams = ["lp-emu-esp-common/test-seams"]
@@ -54,5 +54,5 @@ lp-xt-inst = { path = "../../../lp-xt/lp-xt-inst" }
 sha2 = "0.10"
 # The tests' firmware-derived figures (cycle counts, the main stack's size,
 # boot chains that print it) are read from lp-emu/esp/figures/<chip>.json, not
-# pinned as literals; `just bless-chips` rewrites them. docs/chip-figures.md.
+# pinned as literals; `just bless-chips` rewrites them. docs/chip-figures.ai.md.
 lp-emu-esp-figures = { path = "../lp-emu-esp-figures" }

@@ -63,7 +63,7 @@ pub(crate) const Q_FRACTION_BITS: u32 = 16;
 ///   byte-identical to what this synth produced before f32 existed.
 /// - [`FloatMode::F32`] — the lane is IEEE binary32, so the word is converted
 ///   numerically: `ItofS` then a multiply by `2^-16`. Both steps are
-///   Guaranteed-class per `docs/design/float.md` §3 (int→float is correctly
+///   Guaranteed-class per `docs/design/float.ai.md` §3 (int→float is correctly
 ///   rounded; `2^-16` is exactly representable, so the multiply is exact for
 ///   every coordinate below 2^24 in Q16.16 units), which makes the decode
 ///   bit-identical across every f32 target rather than target-defined.

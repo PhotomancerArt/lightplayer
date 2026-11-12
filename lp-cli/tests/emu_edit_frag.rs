@@ -1,7 +1,7 @@
 //! Shader edits, the way Studio sends them, against an emulated C6 over its
 //! USB link and over its Wi-Fi (LAN) link: the free heap and the largest
 //! block after each edit, and the edit at which a request is refused
-//! (`docs/defects/2026-10-08-shader-edits-over-wi-fi-are-refused-board-memory-busy.md`).
+//! (`docs/defects/2026-10-08-shader-edits-over-wi-fi-are-refused-board-memory-busy.ai.md`).
 //!
 //! Studio applies an edited shader as one `SetArtifactBody`/`ReplaceBody`
 //! overlay mutation (`ProjectController::apply_asset_body`): since wire 41

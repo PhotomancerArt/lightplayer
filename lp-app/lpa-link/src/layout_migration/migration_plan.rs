@@ -255,7 +255,7 @@ pub enum LayoutDecision {
     },
 }
 
-/// The decision for `inspection` (plan `notes.md`, "Migration flow" and the
+/// The decision for `inspection` (plan `notes.ai.md`, "Migration flow" and the
 /// resume rule).
 ///
 /// - A legacy filesystem on the board (`Legacy`, `CurrentLegacyPresent`)

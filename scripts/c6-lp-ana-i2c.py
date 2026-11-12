@@ -34,7 +34,7 @@ Facts that bite (all bench, 2026-09-06):
   the bootloader's code segments (0x4086e610..0x40871378 for espflash
   3.3.0's bootloader and its quiet rebuild alike).
 
-See docs/defects/2026-09-06-c6-first-flash-bootloader-hang-lp-analog-i2c-clock.md.
+See docs/defects/2026-09-06-c6-first-flash-bootloader-hang-lp-analog-i2c-clock.ai.md.
 """
 
 import argparse

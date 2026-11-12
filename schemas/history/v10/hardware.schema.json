@@ -184,7 +184,7 @@
       ]
     },
     "HwGateLevel": {
-      "description": "Which logic level asserts a [`HwPowerGate`]. Polarity varies by install —\nthe Dig-Quad's Q1R drives a user-supplied external relay board, which may\ninvert relative to a solid-state gate — so it lives in metadata, never in\ncode. See docs/future/2026-08-06-quinled-board-metadata-prep.md.",
+      "description": "Which logic level asserts a [`HwPowerGate`]. Polarity varies by install —\nthe Dig-Quad's Q1R drives a user-supplied external relay board, which may\ninvert relative to a solid-state gate — so it lives in metadata, never in\ncode. See docs/future/2026-08-06-quinled-board-metadata-prep.ai.md.",
       "enum": [
         "high",
         "low"

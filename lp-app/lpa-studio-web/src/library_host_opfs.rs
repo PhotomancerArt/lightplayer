@@ -28,7 +28,7 @@
 //!   released before the trip goes anywhere near the network; whatever the
 //!   trip wrote is banked afterwards under a second, equally short hold
 //!   ([`SyncMount::finish`]). **No lock is ever held across network IO** —
-//!   `docs/adr/2026-07-08-per-project-library-locking.md`, amended.
+//!   `docs/adr/2026-07-08-per-project-library-locking.ai.md`, amended.
 //!
 //! Browsers without Web Locks (non-secure contexts) proceed unguarded
 //! rather than losing persistence — M2's behavior, kept deliberately.

@@ -291,7 +291,7 @@ fn pcrel_pair_object(addend: i64) -> (Vec<u8>, String) {
     // handlers do the right thing for a static link, so the mislabel is
     // currently harmless, but a `-C relocation-model=static` object would hit
     // the hard error. Filed as
-    // `docs/defects/2026-07-31-elf-loader-riscv-reloc-numbering.md`; this
+    // `docs/defects/2026-07-31-elf-loader-riscv-reloc-numbering.ai.md`; this
     // fixture uses the number the loader actually dispatches on.
     const LOADER_PCREL_HI20: u32 = 20;
     obj.add_relocation(

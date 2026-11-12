@@ -2,7 +2,7 @@
 
 // ============================================================================
 // Unsigned division/remainder edge cases. LPIR follows RISC-V (RV32M)
-// semantics on all targets — never traps (docs/design/lpir/02-core-ops.md):
+// semantics on all targets — never traps (docs/design/lpir/02-core-ops.ai.md):
 //   x / 0u == 0xFFFFFFFFu (all ones)
 //   x % 0u == x
 // ============================================================================

@@ -23,7 +23,7 @@ pub struct UiPlaylistEntry {
     /// non-active chip presses the playlist's `play` offer
     /// (`project/<playlist>/play`, `entry` = [`Self::key`]): a pick, the
     /// panel write of the entry's key on `playlist.entry`
-    /// (`docs/adr/2026-10-20-the-picked-pattern-is-a-bus-setting.md`),
+    /// (`docs/adr/2026-10-20-the-picked-pattern-is-a-bus-setting.ai.md`),
     /// nothing staged in the overlay.
     ///
     /// Still a core-built action on a DTO field: focus is a view gesture,

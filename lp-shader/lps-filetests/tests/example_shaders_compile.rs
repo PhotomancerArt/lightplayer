@@ -2,11 +2,11 @@
 //! `catalog/` and `projects/test/` must compile on **every** filetest target
 //! in [`ALL_TARGETS`], or the gate fails.
 //!
-//! Why this exists (`docs/debt/example-shaders-not-compile-gated.md`): the
+//! Why this exists (`docs/debt/example-shaders-not-compile-gated.ai.md`): the
 //! engine-level gates (`lp-cli/tests/examples_valid.rs`, the render tests in
 //! `lpc-engine`) run the HOST backend only, whose lowering accepted a
 //! construct that failed on four of five device/browser targets
-//! (`docs/defects/2026-07-29-uniform-struct-array-runtime-index.md`). The
+//! (`docs/defects/2026-07-29-uniform-struct-array-runtime-index.ai.md`). The
 //! filetest suite covers `lp-shader/lps-filetests/filetests/**`, never the
 //! example content. So an example could ship a shader that compiles on the
 //! host and fails on the board and in the browser sim.
@@ -80,12 +80,12 @@ const ALLOWED_FAILURES: &[(&str, &str, &str)] = &[
     (
         "projects/test/button/shader.glsl",
         "wgpu.f32",
-        "docs/defects/2026-09-24-gpu-tier-refuses-the-control-message-array-idiom.md",
+        "docs/defects/2026-09-24-gpu-tier-refuses-the-control-message-array-idiom.ai.md",
     ),
     (
         "projects/test/events/shader.glsl",
         "wgpu.f32",
-        "docs/defects/2026-09-24-gpu-tier-refuses-the-control-message-array-idiom.md",
+        "docs/defects/2026-09-24-gpu-tier-refuses-the-control-message-array-idiom.ai.md",
     ),
     // Not a gap: the GPU tier's refusal of a loop that can never exit IS the
     // fix for this defect (ADR 2026-09-06-gpu-tier-loop-bounds names
@@ -94,7 +94,7 @@ const ALLOWED_FAILURES: &[(&str, &str, &str)] = &[
     (
         "projects/test/fault-demo/effect/shader.glsl",
         "wgpu.f32",
-        "docs/defects/2026-09-06-gpu-tier-executes-unbounded-shaders.md",
+        "docs/defects/2026-09-06-gpu-tier-executes-unbounded-shaders.ai.md",
     ),
 ];
 

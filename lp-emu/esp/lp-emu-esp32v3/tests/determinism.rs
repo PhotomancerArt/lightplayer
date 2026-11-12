@@ -462,7 +462,7 @@ fn stop_all_script() -> lp_emu_esp_common::ScriptedSource {
 /// crash are still one run — and say so in `outcome`. That was not idle
 /// wording: this test was written while the shipped image ended on a strict
 /// stop in `LpFs::read_file` ~30k cycles after the release
-/// (`docs/defects/2026-09-10-the-emulator-ran-the-rom-reset-path-on-the-app-core.md`,
+/// (`docs/defects/2026-09-10-the-emulator-ran-the-rom-reset-path-on-the-app-core.ai.md`,
 /// the release modelled as a reset through the mask ROM), and it held the
 /// determinism claim across the crash without widening anything. It now
 /// reaches the heartbeat reply.

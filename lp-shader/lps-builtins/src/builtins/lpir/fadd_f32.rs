@@ -4,7 +4,7 @@
 //! shipped lowering inlines a native `f32.add`; this exists as the semantic
 //! reference and for callers that reach the builtin through an import.
 //!
-//! `+` is a `docs/design/float.md` §3 **Guaranteed** row: correctly rounded
+//! `+` is a `docs/design/float.ai.md` §3 **Guaranteed** row: correctly rounded
 //! (round-to-nearest-even), NaN propagates, `inf - inf` is NaN, signed zero is
 //! preserved. So the body is the operator — there is nothing to approximate,
 //! and saturation (the Q32 sibling's whole job) would be a spec violation.

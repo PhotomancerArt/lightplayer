@@ -1158,7 +1158,7 @@ largest function.
 > The living record of what has been tried against that bar, with the menu of
 > what is left and each lever's cost in both the correctness lane and the
 > user-facing numbers, is
-> [`docs/emulator-perf-ledger.md`](../../docs/emulator-perf-ledger.md).
+> [`docs/emulator-perf-ledger.ai.md`](../../docs/emulator-perf-ledger.ai.md).
 > Its §3 also supersedes DD27's ruling on the fidelity tier: the 3.4 % that
 > retired the tier was the peripheral models' *self* time, and the tier's
 > actual prize is the **96 % of slices** the RMT's per-word event creates.
@@ -1508,7 +1508,7 @@ a live top **is** the earliest live deadline, and epochs only rise, so a dead
 entry can never come back. `peek_deadline` is the `&self` form for a caller
 that only has a shared borrow.
 
-### The counter that cost a lookup per exit (plan.md BD5)
+### The counter that cost a lookup per exit (plan.ai.md BD5)
 
 `JitCore::run`'s second `index.contains_key` fed nothing but `exit_known_pc` /
 `exit_unknown_pc`. It is now behind the `LP_EMU_JIT_EXITS` gate `exit_sites`
@@ -1590,7 +1590,7 @@ allows. The five items above the floor are the ones that reproduce the bracket.
    **Taken, 2026-09-13 (P1c):** the C6 loop now reads that clock every 64th
    slice (`WALL_TIMEOUT_SLICE_STRIDE`), so the net can fire up to 63 ×
    `MAX_SLICE_CYCLES` emulated cycles late and costs a sixty-fourth of the
-   above. The measured rows are in `docs/emulator-perf-ledger.md` §3. The
+   above. The measured rows are in `docs/emulator-perf-ledger.ai.md` §3. The
    figures in these two tables are the pre-P1c decomposition and stand as
    taken.
 2. **The boundary is 531 ns a slice in both engines** — the same wasm doing the
@@ -1643,7 +1643,7 @@ does four things at the word's own cycle, and three of them are transcript:
 1. it pushes the word's two pulses onto the fabric, and the machine hands that
    stream to `Gpio::observe_edges` and `Rmt::observe_edges` at the next slice
    boundary — so a pad edge delivered early raises a **GPIO interrupt** early
-   (plan.md **BD4**: an interrupt's cycle may not move);
+   (plan.ai.md **BD4**: an interrupt's cycle may not move);
 2. it raises `INT_TX_THR_SHIFT` when the read pointer reaches `ch_tx_lim`.
    That bit is a **line**, not a timestamp: it becomes visible to the hart at
    the boundary that polls it, so raising it N words early delivers the
@@ -1802,7 +1802,7 @@ once running it never skips.
 
 Everything under `lp-emu/` is **MIT** (`../LICENSE-MIT`) while the rest of the
 repository is AGPL-3.0-or-later, and `just lint-emu-fence` is what keeps the
-boundary real. See `docs/adr/2026-09-06-lp-emu-home-and-mit-fence.md`.
+boundary real. See `docs/adr/2026-09-06-lp-emu-home-and-mit-fence.ai.md`.
 
 - **`js/jit-host.js` is MIT too, and its own header says so.**
   `just lint-emu-fence` polices the *crate graph* — what a `Cargo.toml` inside

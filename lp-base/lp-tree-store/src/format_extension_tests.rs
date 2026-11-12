@@ -1,4 +1,4 @@
-//! The format's extension room (FORMAT.md "Sector", "Root tail", "Unknown
+//! The format's extension room (FORMAT.ai.md "Sector", "Root tail", "Unknown
 //! records"): what this version does with flash a newer writer could have
 //! produced — compat and incompat flags, another sector size, a root TLV
 //! tag, a record kind it does not define.
@@ -260,7 +260,7 @@ fn an_unknown_record_kind_is_skipped() {
     assert_eq!(st.list("/").unwrap(), ["/churn.json"]);
 }
 
-/// An index checkpoint in the reserved layout (FORMAT.md "Reserved: the
+/// An index checkpoint in the reserved layout (FORMAT.ai.md "Reserved: the
 /// index checkpoint") — a kind-6 chunk of the live records, a kind-7 top
 /// with watermarks and one run, and a root naming the top by tag 1 — is
 /// invisible to version 3: the root is adopted as if its tail were empty,

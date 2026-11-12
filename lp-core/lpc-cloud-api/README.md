@@ -66,7 +66,7 @@ the client instead.
 Every `CloudCall` and `CloudReply` carries `version: u32`, checked against
 this crate's `CLOUD_API_VERSION`. This is deliberately **not** `lpc-wire`'s
 no-compat policy (see the wire/protocol compatibility section of the repo's
-`AGENTS.md`): the wire protocol has no long-lived peers because firmware,
+`AGENTS.ai.md`): the wire protocol has no long-lived peers because firmware,
 server, and client deploy together, so old wire forms are simply deleted.
 The cloud API has no such lockstep guarantee — a browser tab can sit open
 across a service redeploy — so a version mismatch must be a named,
@@ -96,4 +96,4 @@ account's list, online or not, `online` carrying its `BoardPresence`),
 `ReportBoard` and `ForgetBoard` (both answered by `Ack`), and
 `CloudError::BoardListFull { max }`; `MAX_ACCOUNT_BOARDS` (64) is the list's
 cap, the answer's size and the relay's online cap
-(`docs/adr/2026-10-20-the-account-board-list.md`).
+(`docs/adr/2026-10-20-the-account-board-list.ai.md`).

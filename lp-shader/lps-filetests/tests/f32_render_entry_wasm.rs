@@ -8,7 +8,7 @@
 //! the frame path this engine renders through.
 //!
 //! It enters through the product's door on purpose
-//! (`docs/defects/2026-08-02-f32-shader-cannot-render-a-frame.md`):
+//! (`docs/defects/2026-08-02-f32-shader-cannot-render-a-frame.ai.md`):
 //! `LpsEngine::compile_px_desc` with `float_mode`, then
 //! `sample_points_rgba16` / `render_frame` — the two calls the app makes per
 //! frame, reaching the synthesised `__render_samples_rgba16` /
@@ -20,7 +20,7 @@
 //!
 //! **The expectations are shared with the rv32 table and asserted exactly.**
 //! The frame boundary's Float channel-out conversion is `floor(v * 65536)`
-//! clamped, Guaranteed-class in `docs/design/float.md` §3/§7 — so a tolerance
+//! clamped, Guaranteed-class in `docs/design/float.ai.md` §3/§7 — so a tolerance
 //! here would hide exactly the class of bug this file was written to catch.
 
 use lp_shader::{CompilePxDesc, LpsEngine, LpsPxShader, ShaderFrontend, TextureBuffer};

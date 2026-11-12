@@ -15,7 +15,7 @@
 //!   connected through a port forward or an uplink, or attached on the
 //!   board's USB byte socket (a page or tool reading its frames on wall
 //!   time), otherwise as fast as it goes
-//!   (`docs/defects/2026-10-06-an-emulated-boards-clock-outran-its-lan-host.md`).
+//!   (`docs/defects/2026-10-06-an-emulated-boards-clock-outran-its-lan-host.ai.md`).
 //!
 //! The mechanism is the LAN's ([`super::lan_host_pace`], [`super::SharedLan`]):
 //! a board is held to wall time at its LAN pump, so a pace needs the board on

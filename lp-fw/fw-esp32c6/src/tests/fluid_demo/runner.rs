@@ -2,7 +2,7 @@
 //! ring fixture, GPIO18. Solver + emitters + sampler + readout +
 //! `lpc_shared::DisplayPipeline` + RMT, all in `no_std` Rust.
 //!
-//! See `docs/plans/2026-04-20-fluid-demo/00-design.md` for the
+//! See `docs/plans/2026-04-20-fluid-demo/00-design.ai.md` for the
 //! architecture and tunables.
 
 extern crate alloc;

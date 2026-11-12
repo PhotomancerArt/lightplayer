@@ -19,7 +19,7 @@
 //!   fly's proxy (fly's own health checks reach the machine directly; local
 //!   runs and tests have no proxy at all).
 //!
-//! Decision record: `docs/adr/2026-10-06-cloud-relay.md` (the plain-HTTP
+//! Decision record: `docs/adr/2026-10-06-cloud-relay.ai.md` (the plain-HTTP
 //! exception).
 
 use axum::extract::Request;

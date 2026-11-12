@@ -266,7 +266,7 @@ fn a_core_segment_at_address_0_faults_the_loader_as_on_silicon() {
     // The shipped chip, with the core's first segment (a RAM one) re-aimed
     // at address 0: what espflash's padding segment is, and what the loader
     // copied to address 0 on a board, where the store faulted
-    // (docs/defects/2026-10-14-the-c6-loader-copies-an-address-zero-padding-segment-to-address-zero.md).
+    // (docs/defects/2026-10-14-the-c6-loader-copies-an-address-zero-padding-segment-to-address-zero.ai.md).
     // Not strict: the fault is the chip's, not the checker's.
     let mut chip = std::fs::read(split.merged()).unwrap();
     let first_segment = CORE_OFFSET + 24;

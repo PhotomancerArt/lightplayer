@@ -387,7 +387,7 @@ fn highlight_text(spans: &[PulseSpan]) -> String {
 ///
 /// The grammar is the engine's, not ours: `parse_highlight` in
 /// `lp-core/lpc-engine/src/nodes/output/output_node.rs`, specified in
-/// `docs/adr/2026-08-10-patch-selection-pulse.md` (Amendment 2026-08-20 —
+/// `docs/adr/2026-08-10-patch-selection-pulse.ai.md` (Amendment 2026-08-20 —
 /// microformat v2). The exact bytes are asserted in this module's tests;
 /// the parse side is covered by the engine's.
 fn chase_text(spans: &[PulseSpan]) -> String {

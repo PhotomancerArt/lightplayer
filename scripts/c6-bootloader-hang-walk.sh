@@ -2,7 +2,7 @@
 # c6-bootloader-hang-walk.sh <board-MAC> [manifest.json]
 #
 # The regression walk for the first-flash bootloader hang on a fresh
-# ESP32-C6 (docs/defects/2026-09-06-c6-first-flash-bootloader-hang-lp-analog-i2c-clock.md):
+# ESP32-C6 (docs/defects/2026-09-06-c6-first-flash-bootloader-hang-lp-analog-i2c-clock.ai.md):
 #
 #   1. induce the factory state — LPPERI_CLK_EN bit 29 (LP analog I2C clock)
 #      gated — over the ROM downloader, and PROVE it: the next boot must show

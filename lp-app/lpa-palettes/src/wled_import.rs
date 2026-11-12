@@ -236,7 +236,7 @@ mod tests {
 
     #[test]
     fn rejects_more_than_max_gradient_stops_rather_than_truncating() {
-        // 25 stops in RGB form: never silently truncate (color.md rule).
+        // 25 stops in RGB form: never silently truncate (color.ai.md rule).
         let mut values = Vec::new();
         for index in 0..25 {
             values.push((index * 10).to_string());

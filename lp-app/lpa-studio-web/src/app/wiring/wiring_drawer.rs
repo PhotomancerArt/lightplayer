@@ -11,7 +11,7 @@
 //! resolution: the winning writer solid violet, shadowed writers dim and
 //! dashed (R5/R11), E3 contention turns the writer side attention-orange
 //! with a "2× fallback" badge (display only — the pick gesture is future
-//! work, modules.md §5). Child-scope readers list as dotted chips with
+//! work, modules.ai.md §5). Child-scope readers list as dotted chips with
 //! their scope path (R5 inheritance; spike gate 3).
 //!
 //! **Narrow containers stack vertically** (`@container` query on the

@@ -10,7 +10,7 @@
 //! `with_reset` in this file is a **deviation from the PAC**, and the test
 //! `the_only_deviations_from_the_pacs_resets_are_the_listed_ones` is the
 //! list. The sweep that produced the rule is
-//! `docs/defects/2026-09-07-accept-blocks-carry-only-the-reset-values-a-boot-needed.md`:
+//! `docs/defects/2026-09-07-accept-blocks-carry-only-the-reset-values-a-boot-needed.ai.md`:
 //! an accept block seeded with the value a spin happened to want looks
 //! exactly like one seeded from the PAC, right up to the moment a different
 //! image spins on a different value.
@@ -25,7 +25,7 @@
 //!
 //! Every block here is a probe. The phase that gives it behaviour is named
 //! on the block, and the order the strict run needed them in is the ledger
-//! in `docs/reports/2026-09-10-esp32v3-strict-boot-inventory.md`.
+//! in `docs/reports/2026-09-10-esp32v3-strict-boot-inventory.ai.md`.
 
 use lp_emu_esp_common::RegFile;
 
@@ -331,7 +331,7 @@ pub const SPI_LEN: u32 = 0x400;
 /// Every reset is the PAC's — notably `user` (`+0x1c`) = `0x8000_0040`
 /// with `usr_command` set, the value whose absence was the C6's
 /// accept-block defect
-/// (`docs/defects/2026-09-07-accept-blocks-carry-only-the-reset-values-a-boot-needed.md`).
+/// (`docs/defects/2026-09-07-accept-blocks-carry-only-the-reset-values-a-boot-needed.ai.md`).
 /// No exception is carried, and none could be: a flash read sets `cmd.
 /// usr` (`+0x00`, bit 18) and spins until hardware clears it when the
 /// transfer is done, and a block that remembers holds it set forever. That

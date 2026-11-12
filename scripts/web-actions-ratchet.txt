@@ -1,6 +1,6 @@
 # Web-built UiActions per file — a ratchet: counts may only go down.
 # Written by `scripts/check-web-actions.py --bless`; see that script and
-# docs/adr/2026-10-01-agentic-control-offers-in-core.md.
+# docs/adr/2026-10-01-agentic-control-offers-in-core.ai.md.
 1 lp-app/lpa-studio-web/src/app/docs/embeds/open_in_studio.rs
 1 lp-app/lpa-studio-web/src/app/docs/embeds/panel_embed.rs
 2 lp-app/lpa-studio-web/src/app/home/gallery_paste.rs

@@ -56,7 +56,7 @@ const KEEP_REASSEMBLY: usize = 512;
 /// `Link` runs on the thread executor beside the server transport (ruling
 /// DD20 — `super::uart_link_pipes`), so its timers and ACKs are serviced only
 /// between engine ticks, 41–114 ms on a dome-scale project
-/// (`docs/adr/2026-08-25-classic-uart-io-task-executor-isolation.md`'s bench)
+/// (`docs/adr/2026-08-25-classic-uart-io-task-executor-isolation.ai.md`'s bench)
 /// — longer than the ~80 ms tick that made the C6 raise its own floor to
 /// 200 ms (`crate::usb_link::UsbLinkShared::config`: every frame sent twice
 /// through a palette cross-fade at 40 ms, rehearsal `silicon:esp32c6`,

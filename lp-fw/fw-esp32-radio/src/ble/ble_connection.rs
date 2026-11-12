@@ -373,7 +373,7 @@ async fn open_link(
 /// response) is the only write a central makes. A long write (`Prepare
 /// Write` … `Execute Write`), which trouble-host reports as an "other" event
 /// and would otherwise answer with success while dropping the bytes
-/// (docs/defects/2026-09-25-a-long-bluetooth-write-is-acknowledged-and-lost.md),
+/// (docs/defects/2026-09-25-a-long-bluetooth-write-is-acknowledged-and-lost.ai.md),
 /// is refused at its first segment, so a central that tries one fails loudly
 /// instead of losing it.
 fn rx_write(

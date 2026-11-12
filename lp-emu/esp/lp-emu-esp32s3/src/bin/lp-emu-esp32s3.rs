@@ -220,7 +220,7 @@ OPTIONS:
                             the atoms, and each chip start prints `SEAM <atom>
                             engaged (…)`. With neither flag the capability
                             defaults (`net=lan`) are asked for SOFTLY. ADR
-                            docs/adr/2026-10-05-emulator-seams.md
+                            docs/adr/2026-10-05-emulator-seams.ai.md
     --seams-prefer <atoms>  the same, SOFT: engage what the image allows,
                             else print `SEAM none engaged: <why>` and run on
     --seams-info <image>    print a flash image's seam tables and exit

@@ -1,6 +1,6 @@
 //! Native f32 → int with saturation — the f32 sibling of [`super::ftoi_sat_q32`].
 //!
-//! `docs/design/float.md` §3: float→int **truncates toward zero**, and finite
+//! `docs/design/float.ai.md` §3: float→int **truncates toward zero**, and finite
 //! out-of-range values **saturate** to `i32::MIN`/`i32::MAX`. §5: the result of
 //! converting NaN is Unspecified (targets natively produce `0`, `i32::MAX`, or
 //! `i32::MIN`).

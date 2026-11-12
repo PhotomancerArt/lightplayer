@@ -26,7 +26,7 @@ by hand. Every lamp sits where the 8 × 8 grid put it, bit for bit, and lands
 on the same wire and channel, so the table above is unchanged.
 
 The board manifest declares exactly four `/rmt/ws281xK` resources — never a
-fifth (the 40 µs refill foot-gun, `docs/adr/2026-08-02-classic-hli-refill.md`).
+fifth (the 40 µs refill foot-gun, `docs/adr/2026-08-02-classic-hli-refill.ai.md`).
 
 Everything the oracle project's README says still binds here: no clock, the
 neutral output pipeline, and exactly 64 LEDs so the four one-shot dumps

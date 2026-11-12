@@ -54,7 +54,7 @@ fn committed_traces_replay_through_the_classifier() {
         }
         let name = path.file_name().unwrap().to_string_lossy().to_string();
         // `<id>.failed.jsonl` traces are FINDINGS (runs that did not do
-        // what their spec expects, kept as evidence — see FINDINGS.md),
+        // what their spec expects, kept as evidence — see FINDINGS.ai.md),
         // never golden fixtures; `.partial` never has the .jsonl extension.
         if name.ends_with(".failed.jsonl") {
             continue;

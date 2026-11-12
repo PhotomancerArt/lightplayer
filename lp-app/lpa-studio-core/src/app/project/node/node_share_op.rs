@@ -3,7 +3,7 @@
 //! There is no cloud provider, so the clipboard is the only way to hand
 //! someone a node — and a shader is the node people most want to share.
 //! Both ops move `lp.node` envelopes
-//! (`docs/adr/2026-07-28-share-envelopes.md`).
+//! (`docs/adr/2026-07-28-share-envelopes.ai.md`).
 //!
 //! Copy is asynchronous because the def and asset bytes live on the
 //! runtime's filesystem, not in the view DTOs: the controller reads them

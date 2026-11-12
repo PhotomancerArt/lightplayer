@@ -29,7 +29,7 @@ embedded-hal-async = "1.0"
 embedded-io-async = "0.6"
 log = { workspace = true, default-features = false }
 # `usb_link` (feature `usb-link`): the USB-Serial-JTAG host link runs lp-link
-# (plan `lp-link-usb-cutover`; docs/adr/2026-09-27-lp-link-one-comms-layer.md).
+# (plan `lp-link-usb-cutover`; docs/adr/2026-09-27-lp-link-one-comms-layer.ai.md).
 # no_std + alloc, time and nonce injected; `log` for the log ring's adapter.
 lp-link = { path = "../../lp-base/lp-link", default-features = false, features = ["log"], optional = true }
 # The log ring's lock (`log_ring_logger`): a short critical section around one
@@ -93,7 +93,7 @@ ser-write-json = { version = "0.3", optional = true, default-features = false, f
 # graphics backend a harness board runs when its test passes none.
 lp-gfx = { path = "../../lp-gfx/lp-gfx", optional = true, features = ["null-backend"] }
 
-# Emulator seams (`src/seams/`; ADR docs/adr/2026-10-05-emulator-seams.md):
+# Emulator seams (`src/seams/`; ADR docs/adr/2026-10-05-emulator-seams.ai.md):
 # the seam ABI, MIT, no_std, no deps. RISC-V and, since S3 radio M5, Xtensa:
 # the targets whose seam functions an emulator can answer.
 [target.'cfg(any(target_arch = "riscv32", target_arch = "xtensa"))'.dependencies]

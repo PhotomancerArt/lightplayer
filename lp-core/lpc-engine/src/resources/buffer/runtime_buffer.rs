@@ -7,7 +7,7 @@
 //! output samples as `u16` is what lets the output node render straight into
 //! its channel buffer and the flush path borrow them — one home per lamp
 //! colour instead of a render target, an LE byte copy, and a decode back
-//! (`docs/reports/2026-09-02-per-lamp-memory-table.md`).
+//! (`docs/reports/2026-09-02-per-lamp-memory-table.ai.md`).
 
 use alloc::borrow::Cow;
 use alloc::vec::Vec;

@@ -1,6 +1,6 @@
 // The flash that survives a lossy link: what a C6 does to its own output over
 // a phone's WebUSB, where it drops what the phone did not read in time
-// (`docs/defects/2026-10-18-a-flash-over-webusb-on-a-phone-loses-the-boards-replies.md`).
+// (`docs/defects/2026-10-18-a-flash-over-webusb-on-a-phone-loses-the-boards-replies.ai.md`).
 //
 // `node --test lp-app/lpa-link/tests/js/` — `just lpa-link-js-test`. The
 // fake esptool stub is `fake_esp_stub.js`.

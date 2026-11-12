@@ -1,7 +1,7 @@
 //! The home page (`/`): one page for everything the user's light lives in.
 //!
 //! It replaces the landing hero, the Devices page and the Projects page
-//! (`docs/adr/2026-10-08-the-board-card-and-one-home-page.md`, section 1).
+//! (`docs/adr/2026-10-08-the-board-card-and-one-home-page.ai.md`, section 1).
 //! Top to bottom:
 //!
 //! 1. quiet lines — a `/p/` link's fate, a failed open, a library problem,

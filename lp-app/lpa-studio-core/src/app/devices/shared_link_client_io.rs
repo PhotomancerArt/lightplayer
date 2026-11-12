@@ -245,7 +245,7 @@ mod tests {
     use super::*;
 
     /// Regression for
-    /// `docs/defects/2026-09-25-turn-on-bluetooth-reports-a-timeout-the-board-answered.md`:
+    /// `docs/defects/2026-09-25-turn-on-bluetooth-reports-a-timeout-the-board-answered.ai.md`:
     /// the card's frame feed and an access write are two conversations on
     /// one link, with one inbox. The board answers the write at once; the
     /// feed, which polls far more often, must not eat that reply, and the

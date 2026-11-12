@@ -4,7 +4,7 @@
 //! signal drives `page`, so article switches and section switches are both
 //! plain re-renders — the actor and every open runtime session survive
 //! them. That is also what makes the live examples inside articles work
-//! (see `docs/adr/2026-08-06-interactive-docs-architecture.md`).
+//! (see `docs/adr/2026-08-06-interactive-docs-architecture.ai.md`).
 
 use dioxus::prelude::*;
 use lpa_studio_core::UiAction;
@@ -77,6 +77,11 @@ pub fn DocsPage(
                 }
             }
             article { class: "tw:min-w-0 tw:flex-1",
+                if page.agent_written {
+                    p { class: "tw:mb-4 tw:text-xs tw:italic tw:text-subtle-foreground",
+                        "An AI agent wrote this page. A person will rewrite it."
+                    }
+                }
                 // NOT keyed by slug: a component `key` does not force a
                 // remount here, so the provider handles article switches
                 // itself — it watches the `sims` slice, retires the old

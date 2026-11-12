@@ -5,7 +5,7 @@
 //! the unsolicited boot hello or the answer to the session's own
 //! `ClientRequest::Hello` (sent during readiness, because only a boot emits
 //! the unsolicited one and a connect cannot assume the power to cause a
-//! boot — `docs/defects/2026-08-21-hello-gate-assumes-fresh-boot.md`).
+//! boot — `docs/defects/2026-08-21-hello-gate-assumes-fresh-boot.ai.md`).
 //! Everything else in this file is DIAGNOSIS: the
 //! [`BootLineClassifier`] watches non-protocol serial lines to explain why a
 //! device is not ready (blank flash, ROM bootloader, known foreign firmware,
@@ -15,7 +15,7 @@
 //! in `lpa-studio-core` as a readiness-granting string grep; the device
 //! session work moved it here and demoted it to diagnosis, and the studio
 //! copy (and the client-io adapters that consumed it) were deleted. See
-//! `docs/adr/2026-07-15-device-session-model.md`.
+//! `docs/adr/2026-07-15-device-session-model.ai.md`.
 
 use lpc_wire::{ServerHello, ServerMsgBody, WIRE_PROTO_VERSION, WireServerMessage};
 
@@ -43,7 +43,7 @@ pub(crate) enum HelloGate {
     /// expiry with only these seen classifies as
     /// [`IncompatibleReason::FrameBeforeHello`] — the same pre-hello-firmware
     /// verdict as before, just decided at the deadline instead of on first
-    /// sight (`docs/defects/2026-08-21-hello-gate-assumes-fresh-boot.md`).
+    /// sight (`docs/defects/2026-08-21-hello-gate-assumes-fresh-boot.ai.md`).
     NotHello,
 }
 

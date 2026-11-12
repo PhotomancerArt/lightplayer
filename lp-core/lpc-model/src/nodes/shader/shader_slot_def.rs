@@ -20,8 +20,8 @@ use super::ShaderSlotMappingDef;
 /// A palette slot's `value` names what GLSL sees, exactly as a
 /// [`ShaderSlotKind::Phasor`] slot's stays `"f32"`: the palette itself is a
 /// [`GradientConfig`] on the def, and the engine bakes it to the height-one
-/// texture this sampler reads (`docs/design/color.md` §5,
-/// `docs/design/lp-shader-texture-access.md`).
+/// texture this sampler reads (`docs/design/color.ai.md` §5,
+/// `docs/design/lp-shader-texture-access.ai.md`).
 pub const SAMPLER_2D_SHAPE: &str = "sampler2D";
 
 /// Authored definition for one shader consumed or produced slot.
@@ -42,7 +42,7 @@ pub struct ShaderSlotDef {
     /// `lpc_engine::nodes::shader::resolve_gradient_config`.
     ///
     /// In authored node-def JSON this option spells the same shape every
-    /// other surface carries (`docs/design/color.md` §5): token metadata
+    /// other surface carries (`docs/design/color.ai.md` §5): token metadata
     /// plus one stops literal per gradient — genuinely hand-authorable.
     /// Author inline, through Studio's chooser, or omit the option and let
     /// `gradient_config()` fall back.
@@ -140,7 +140,7 @@ impl ShaderSlotDef {
     }
 
     /// A `palette` slot: a `sampler2D` uniform fed by a height-one texture the
-    /// engine bakes from `config` (`docs/design/color.md` §5).
+    /// engine bakes from `config` (`docs/design/color.ai.md` §5).
     ///
     /// Declares `default_bind: "bus:palette"` + `panel: "show"` (D5): an
     /// unbound palette slot still surfaces its picker on the module panel —
@@ -260,7 +260,7 @@ impl Default for ShaderSlotDef {
 /// `Palette` is the **texture** kind: it declares a `sampler2D` uniform
 /// (`value` is [`SAMPLER_2D_SHAPE`]) whose contents the engine bakes from a
 /// [`GradientConfig`] — the palette is a value, never a node
-/// (`docs/adr/2026-08-04-palettes-are-values.md`). Like a `Phasor` it reads
+/// (`docs/adr/2026-08-04-palettes-are-values.ai.md`). Like a `Phasor` it reads
 /// the scope's timebase when its config is a cycle, but unlike one it is
 /// never a `float`, so [`ShaderSlotKind::is_timebase`] deliberately stays
 /// false for it: that predicate answers "is this a float uniform the time
@@ -274,7 +274,7 @@ pub enum ShaderSlotKind {
     /// value ([`crate::LpValue::Buffer`]): whole-buffer revision, `Latest`
     /// merge, no per-element identity. The map/buffer split is exactly the
     /// keyed-entries vs per-cell-state split — see
-    /// `docs/adr/2026-08-08-typed-shader-buffers.md`.
+    /// `docs/adr/2026-08-08-typed-shader-buffers.ai.md`.
     Buffer,
     Phasor,
     Seconds,
@@ -314,7 +314,7 @@ impl ShaderSlotKind {
 
     /// Whether this kind's uniform is a texture the engine must supply a
     /// compile-time `TextureBindingSpec` for
-    /// (`docs/design/lp-shader-texture-access.md`) — today exactly
+    /// (`docs/design/lp-shader-texture-access.ai.md`) — today exactly
     /// [`ShaderSlotKind::Palette`].
     ///
     /// Separate from [`Self::is_timebase`] on purpose: a texture uniform is
@@ -711,7 +711,7 @@ mod tests {
 
     /// The `gradient` field survives the [`crate::LpValue`] round trip the
     /// project loader reads slot defs through — the fixed-shape recipe
-    /// (`docs/design/color.md` §5), not the authored-JSON serde surface.
+    /// (`docs/design/color.ai.md` §5), not the authored-JSON serde surface.
     #[test]
     fn a_palette_config_round_trips_through_slot_storage() {
         let config = crate::GradientConfig::Cycle {

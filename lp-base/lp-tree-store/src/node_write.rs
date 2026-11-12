@@ -298,7 +298,7 @@ impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
     /// Whether the record indexed as `id` is a `kind` record whose logical
     /// bytes are `parts` (decoded when it is a deflated chunk: a stored and
     /// a deflated copy of one chunk share an id). A dedup hit asks this
-    /// before it reuses a record (FORMAT.md "Ids": ids are 64 bits and not
+    /// before it reuses a record (FORMAT.ai.md "Ids": ids are 64 bits and not
     /// cryptographic, so a crafted collision must not alias two files): one
     /// read of the record per hit.
     fn holds(&mut self, id: ObjectId, kind: RecordKind, parts: &[&[u8]]) -> Res<bool, F> {

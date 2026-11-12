@@ -11,7 +11,7 @@
 //! stopped, and the next project was refused on contiguity with 200 KB free
 //! (desk, 2026-09-24: live `r_ble_ll_mem_alloc` blocks of 296 and 80 B at
 //! main-region offsets +187,663 and +127,621, largest free block 59,952 B;
-//! docs/defects/2026-09-24-ble-enabled-c6-refuses-a-project-switch-after-the-heap-cut.md).
+//! docs/defects/2026-09-24-ble-enabled-c6-refuses-a-project-switch-after-the-heap-cut.ai.md).
 //!
 //! So the radio's blocks get a region of their own. Until 2026-10-05 that
 //! region was the reclaimed bootloader segment (`dram2_seg`). It cannot be:
@@ -20,7 +20,7 @@
 //! reboot), and `dram2_seg` is where the second-stage bootloader then loads
 //! its code. On silicon the stray writes landed on the bootloader's
 //! image-hash check and crashed it on 11 of 22 warm resets
-//! (docs/defects/2026-10-05-a-requested-reboot-crashed-the-c6-bootloader.md).
+//! (docs/defects/2026-10-05-a-requested-reboot-crashed-the-c6-bootloader.ai.md).
 //! The region is now `HEAP_RADIO` in main RAM's `.bss`, which no bootloader
 //! loads into; when it is full a block falls back to the main region below
 //! the split loader's RAM — never to `dram2_seg`, nor to the loader's RAM.
@@ -40,7 +40,7 @@
 //! main array where the split image's loader runs after a warm reset
 //! (`lp_bootctl::BOOT_STAGE_RAM`, 0x40850000..0x40860000): on 2026-10-14 the
 //! fallback carried 1,852 B Wi-Fi blocks there, up to 50 KB of them, on CX1
-//! (docs/defects/2026-10-17-radio-heap-overflow-reached-the-split-loaders-ram.md).
+//! (docs/defects/2026-10-17-radio-heap-overflow-reached-the-split-loaders-ram.ai.md).
 //! Rust's global allocator asks for nothing and tries the regions in
 //! registration order: main below the loader, main from it up, `dram2_seg`,
 //! radio.

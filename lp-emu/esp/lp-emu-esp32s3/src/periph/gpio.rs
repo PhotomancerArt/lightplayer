@@ -17,7 +17,7 @@
 //!
 //! # ⚠️ Neither sibling is the parent of this file, and that is the finding
 //!
-//! `notes.md` §3.5 measured the S3's fixed registers against the C6's and
+//! `notes.ai.md` §3.5 measured the S3's fixed registers against the C6's and
 //! found every one at the same offset, which is true and is why the offsets
 //! below are the C6's — `out 0x04`, `enable 0x20`, `strap 0x38`, `in_ 0x3c`,
 //! `status 0x44`, `pcpu_int 0x5c`, `pin 0x074`, `func_in_sel_cfg 0x154`,

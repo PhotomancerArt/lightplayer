@@ -204,7 +204,7 @@ into SRAM0; the descending mirrored walk for the legacy SRAM1 region), sync.
 The region constants are pinned against `lp-xt-emu`'s `BoardProfile::esp32()`
 / `esp32_sram1_legacy()` and the whole install-then-execute path runs on the
 host in `tests/xt_classic_profile.rs` for both placements. See
-`docs/adr/2026-09-05-classic-jit-code-lives-in-sram0.md`.
+`docs/adr/2026-09-05-classic-jit-code-lives-in-sram0.ai.md`.
 
 **3. Each backend is a Cargo feature, and firmware pays only for its own.**
 `isa-rv32` and `isa-xt` gate the modules, the `IsaTarget` variants, and every
@@ -244,7 +244,7 @@ is the neutral `rt_emu::GuestImage`; each ISA's loader converts into it.
 The consequence worth knowing: `LpvmEngine`/`LpvmModule`/`LpvmInstance` stay
 ISA-agnostic **types**, so consumers (`lps-filetests`, `lp-shader`) never grow
 per-ISA match arms. See
-`docs/adr/2026-07-30-isa-parameterized-host-emu-engine.md`, which also records
+`docs/adr/2026-07-30-isa-parameterized-host-emu-engine.ai.md`, which also records
 why there is no `EmuCore` trait.
 
 Host Xtensa execution is the **additive `emu-xt` feature** (`emu` + `isa-xt` +
@@ -269,12 +269,12 @@ SRAM code region — 128 KiB on the S3 — with nothing resident in front of it.
 Overflowing that is an explicit error naming the budget, never a silent write
 past the region, and the budget is now the shader's own size rather than
 whatever the builtins left over. (It was the latter until 2026-08-01; see
-`docs/defects/2026-08-01-xt-f32-builtins-exhaust-the-emulator-code-region.md`
+`docs/defects/2026-08-01-xt-f32-builtins-exhaust-the-emulator-code-region.ai.md`
 for why that was a modeling bug and not a capacity one.)
 
 `isa/xt/` and the `lp-xt-*` crates it builds on contain material derived from
 LLVM under Apache-2.0-WITH-LLVM-exception and carry per-file provenance
-headers — see `docs/adr/2026-07-29-license-provenance-discipline.md` before
+headers — see `docs/adr/2026-07-29-license-provenance-discipline.ai.md` before
 touching them. `isa/xt/imm.rs` is such a file: its per-opcode immediate table
 is derived data, and **the encoder silently truncates**, so every immediate
 must be gated through `is_legal` before it reaches `lp_xt_inst::encode`.
@@ -313,7 +313,7 @@ same mechanism Q32 uses for its helpers. The symbols already exist in every rv32
 image: on the C6 the linker resolves them to the chip's **ROM** `rvfplib`
 (`esp-rom-sys`'s `esp32c6.rom.rvfp.ld`), costing zero app flash, and in the host
 emulator's builtins image to Rust's `compiler_builtins`. See
-`docs/adr/2026-07-31-soft-float-via-compiler-builtins.md` for why there is no
+`docs/adr/2026-07-31-soft-float-via-compiler-builtins.ai.md` for why there is no
 LightPlayer layer in between, what the comparison routines' return convention
 means for NaN, and why float→int is the one deliberate exception.
 
@@ -327,8 +327,8 @@ wrapper; it is the only implementation.
 The ESP32-S3's LX7 has a real FPU — 16 float registers, `add.s`/`sub.s`/`mul.s`,
 `madd.s`, FSR flags, and **no** flush-to-zero (denormals are full IEEE). Its
 measured behaviour, including the implementation-defined estimate ROMs, is
-`docs/adr/2026-07-31-xtensa-fp-behavior-contract.md`. The architecture decision
-is `docs/adr/2026-08-01-float-mode-as-a-compiler-parameter.md`.
+`docs/adr/2026-07-31-xtensa-fp-behavior-contract.ai.md`. The architecture decision
+is `docs/adr/2026-08-01-float-mode-as-a-compiler-parameter.ai.md`.
 
 **The ABI in one paragraph.** Floats live in **FRs inside a function** and cross
 **every** boundary — parameter, call argument, call return, function return — in
@@ -412,7 +412,7 @@ float, against 4.4 MB of headroom.
 That control covers **this gate only**. Code outside `float-f32` — the
 per-compile mode threading, the capability query, the refusal message — is
 linked on every board and moves the C6 legitimately; it cost +416 B when it
-landed (`docs/adr/2026-08-01-float-mode-reaches-the-device.md`). Read a nonzero
+landed (`docs/adr/2026-08-01-float-mode-reaches-the-device.ai.md`). Read a nonzero
 C6 delta as "did the gate leak, or did always-on code grow?", and answer it by
 building once with the always-on part removed rather than by guessing.
 
@@ -459,7 +459,7 @@ named "unknown builtin symbol" relocation failure instead.
 
 Emitted code is fuel-metered so an infinite loop in shader code aborts
 cleanly instead of hanging the device (see
-`docs/adr/2026-07-20-lpvm-native-fuel.md` for the full contract):
+`docs/adr/2026-07-20-lpvm-native-fuel.ai.md` for the full contract):
 
 - Lowering inserts a `FuelCheck` VInst at every loop back-edge
   (check-then-decrement of the u32 counter at vmctx+0) and at every
@@ -476,7 +476,7 @@ cleanly instead of hanging the device (see
   tank (`lpvm::DEFAULT_INVOCATION_FUEL`) and write the linear invocation
   index to the fuel high word, so a trap names the offending pixel.
 - The wasm backends implement the same contract in their own emission —
-  see `lpvm-wasm`'s README and `docs/adr/2026-07-23-sim-wasm-fuel.md`.
+  see `lpvm-wasm`'s README and `docs/adr/2026-07-23-sim-wasm-fuel.ai.md`.
 
 ## Usage
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Starvation bench: drive serial-lab to prove (or falsify) the exit criteria
-of docs/debt/shared-uart-io-task-starvation.md on a real board.
+of docs/debt/shared-uart-io-task-starvation.ai.md on a real board.
 
 Prereqs: `python3 spikes/serial-lab/server.py` running, the lab page open in a
 real browser with the port granted (the human clicks Grant once), firmware

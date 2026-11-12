@@ -718,7 +718,7 @@ The page so far uses the lean for every question below; the questions are letter
 
 <section class="vsec" id="grammar">
   <h2><span class="sn">6</span>Visual grammar: one form per kind of fact</h2>
-  <p class="ask">Each kind of fact always takes the same form, so its form tells you what it is before you read it. Colours stay inside the frozen status families (<code>docs/style/ui.md</code>): blue is live, orange is a board needing attention, stripes are an error, and nothing on a card wears violet (bindings) or amber (unsaved edits).</p>
+  <p class="ask">Each kind of fact always takes the same form, so its form tells you what it is before you read it. Colours stay inside the frozen status families (<code>docs/style/ui.ai.md</code>): blue is live, orange is a board needing attention, stripes are an error, and nothing on a card wears violet (bindings) or amber (unsaved edits).</p>
   <table class="v"><thead><tr><th>Kind of fact</th><th>Form</th><th>Colour</th><th>Looks like</th></tr></thead><tbody id="gram"></tbody></table>
 </section>
 
@@ -809,7 +809,7 @@ The page so far uses the lean for every question below; the questions are letter
       <li><b>Round 1, Q1 → A:</b> picture first (“I generally like Q1-A”), but the words must be legible to a newcomer — hence this round.</li>
       <li><b>Information order</b> (Yona): what it plays / what it is → where it is and how we’re connected → notices when something’s wrong. Low-level detail when asked, or when relevant.</li>
       <li><b>The stack</b> (project / firmware / board) is kept as the organising idea, even where the card shows only its top.</li>
-      <li><b>Durable home, once ruled:</b> the glossary in <code>docs/style/language.md</code>, the grammar in <code>docs/style/ui.md</code>, the idioms on the design-language story page, an ADR for the decisions, and the card as stories.</li>
+      <li><b>Durable home, once ruled:</b> the glossary in <code>docs/style/language.ai.md</code>, the grammar in <code>docs/style/ui.ai.md</code>, the idioms on the design-language story page, an ADR for the decisions, and the card as stories.</li>
     </ul></div>
 </section>
 
@@ -1047,7 +1047,7 @@ function questions(){
   ].join('');
   document.getElementById('q9o').innerHTML = [
     option('q9','A',{ name:'Its own page', lean:true, what:'The board’s page at <code>/device/porch-dev…</code>, as in section 4.', pro:'an address you can share (vision R4); room for every layer.', con:'leaves the home page.' }, ''),
-    option('q9','B',{ name:'The card grows in place', what:'The card expands into the stack where it sits, like today’s device card.', pro:'no navigation.', con:'a big card pushes the page around (ui.md’s stable-layout rule), and there’s no address to share.' }, ''),
+    option('q9','B',{ name:'The card grows in place', what:'The card expands into the stack where it sits, like today’s device card.', pro:'no navigation.', con:'a big card pushes the page around (ui.ai.md’s stable-layout rule), and there’s no address to share.' }, ''),
   ].join('');
 }
 function tables(){

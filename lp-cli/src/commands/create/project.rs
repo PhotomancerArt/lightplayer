@@ -167,7 +167,7 @@ mod tests {
         assert_eq!(texture_config.height(), 64);
         // A texture declares no `input` slot, so the starter binds none: a
         // binding to it made the whole project refuse to load
-        // (docs/defects/2026-10-28-lp-cli-create-project-did-not-load.md).
+        // (docs/defects/2026-10-28-lp-cli-create-project-did-not-load.ai.md).
         assert!(texture_config.bindings.entries().is_empty());
 
         // Verify shader node content

@@ -9,7 +9,7 @@
 //! for a fraction of the cost. `inversesqrt` is also the hottest of the family:
 //! it is in the middle of every `normalize`.
 //!
-//! **Tolerance (`docs/design/float.md` §6):** `2e-3` relative. One Newton step
+//! **Tolerance (`docs/design/float.ai.md` §6):** `2e-3` relative. One Newton step
 //! from the magic-constant seed converges to about 0.17% worst case; the band
 //! is that, rounded out. This is a *declared* deviation from the canonical
 //! GLSL, per roadmap D6 — not an accident, and the test below is what holds it
@@ -19,7 +19,7 @@
 //! `1.0 / sqrt(x)`, which lowers to the §3 Guaranteed `sqrt` and `/`.
 //!
 //! **Domain:** GLSL leaves `inversesqrt(x)` undefined for `x <= 0`
-//! (float.md §5). The Q32 sibling returns `0` there; this returns `inf` for
+//! (float.ai.md §5). The Q32 sibling returns `0` there; this returns `inf` for
 //! `+0` and NaN for negatives, which is what the arithmetic produces. Neither
 //! is asserted anywhere.
 //!
@@ -85,7 +85,7 @@ mod tests {
 
     #[test]
     fn out_of_domain_does_not_trap_or_produce_garbage() {
-        // float.md §5: values are Unspecified, so only the "no garbage bit
+        // float.ai.md §5: values are Unspecified, so only the "no garbage bit
         // pattern, no trap" property is checked.
         assert!(__lps_inversesqrt_f32(-1.0).is_nan());
         assert!(__lps_inversesqrt_f32(f32::NAN).is_nan());

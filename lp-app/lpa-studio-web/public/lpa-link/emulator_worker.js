@@ -64,7 +64,7 @@
 // the guest 2.6 cycles and asked again, 62 500 times a second, and an idle
 // flashed board — the normal state of a board that has been flashed — burnt
 // 100 % of a core to advance its guest in microseconds
-// (`docs/defects/2026-09-13-the-dilation-window-drains-one-shift-at-a-time.md`).
+// (`docs/defects/2026-09-13-the-dilation-window-drains-one-shift-at-a-time.ai.md`).
 // A `sleep` and not a tick, because a tick is a yield that comes back
 // immediately and that is the opposite of waiting; the inbox lands during
 // either, which is what `tick()` was there for.
@@ -540,7 +540,7 @@ async function step() {
     // points. The rest was the turn — the tick, two `emu_*` reads, the
     // sample — paid 62 500 times a second to advance the guest by a
     // microsecond at a time. An idle flashed board does this all day
-    // (`docs/defects/2026-09-13-the-dilation-window-drains-one-shift-at-a-time.md`).
+    // (`docs/defects/2026-09-13-the-dilation-window-drains-one-shift-at-a-time.ai.md`).
     //
     // So the wait is not "when the guest is ahead" but "until the guest is
     // owed something worth running": `MIN_BUDGET_US`. Being AHEAD is the same
@@ -651,7 +651,7 @@ function flushConsole(final = false) {
  * control line a flasher was waiting on — for up to 21 s in a single call,
  * which is how a Flash pressed on a board that had been up a minute waited
  * out `emulator_tab.js`'s 30 s request deadline
- * (`docs/defects/2026-09-13-the-dilation-window-drains-one-shift-at-a-time.md`).
+ * (`docs/defects/2026-09-13-the-dilation-window-drains-one-shift-at-a-time.ai.md`).
  *
  * Which samples are kept is unchanged: the same predicate, applied to the
  * same entries, in the same order.

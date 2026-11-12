@@ -26,7 +26,7 @@
 //!
 //! With `LP_EMU_BLESS=1` in the environment, [`Figures::verify`] rewrites the
 //! record instead of failing. `just bless-chips` is what sets it; see
-//! `docs/chip-figures.md`.
+//! `docs/chip-figures.ai.md`.
 
 mod figures;
 mod record;

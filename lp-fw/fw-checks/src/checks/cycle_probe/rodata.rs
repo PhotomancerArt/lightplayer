@@ -10,7 +10,7 @@
 //!
 //! The array is [`RODATA_BYTES`] = 256 KiB, sized to exceed a **32 KiB** L1
 //! cache by 8×. As with `code_walk`, the 32 KiB is a hypothesis and not a
-//! citation: the C6's cache geometry is not in this repository (`notes.md`
+//! citation: the C6's cache geometry is not in this repository (`notes.ai.md`
 //! F7, esp-hal and esp-metadata carry no cache constant for the part), and
 //! **establishing it is P3's job (OQ3)** from the TRM's Cache chapter and the
 //! ROM's `Cache_*` writes into EXTMEM. Nothing here hardcodes a line length,

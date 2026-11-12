@@ -5,7 +5,7 @@ sync `LpFs` trait, plus the Web-Locks single-writer guard. This is where
 the library — package directories and their `lpc-history` areas — durably
 lives on the web platform.
 
-A **platform edge** crate per `docs/adr/2026-07-06-sans-io-core.md`: the
+A **platform edge** crate per `docs/adr/2026-07-06-sans-io-core.ai.md`: the
 executor coupling (`wasm-bindgen-futures`, timers, `spawn_local`) lives
 here so `lpfs` and the core stay executor-free. wasm-only — registered in
 workspace `members` but not `default-members`.
@@ -47,7 +47,7 @@ Two sharing subtleties encoded here:
 
 Two typed Web Locks, not one page-wide lock (that was M2, and it blocked
 project Y in a second tab because project X was open in the first). See
-`docs/adr/2026-07-08-per-project-library-locking.md`.
+`docs/adr/2026-07-08-per-project-library-locking.ai.md`.
 
 - **`lp-project:<uid>`** — exclusive, taken when a project opens and held
   while it stays open. Guards that project's `/packages/<slug>/**` and

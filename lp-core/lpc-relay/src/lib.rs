@@ -35,7 +35,7 @@
 //! Sans-IO throughout: time is a caller-supplied millisecond count, random
 //! bytes come from a caller-supplied `fn(&mut [u8])`, and nothing here opens
 //! a socket, resolves a name or reads a file. Decision record:
-//! `docs/adr/2026-10-06-cloud-relay.md`.
+//! `docs/adr/2026-10-06-cloud-relay.ai.md`.
 
 #![no_std]
 extern crate alloc;

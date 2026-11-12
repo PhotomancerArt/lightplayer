@@ -20,7 +20,7 @@
 //! picked — the model does not change again. (The pre-cloud linear
 //! invariant — "no DAG, no merge, ever" — was retired deliberately for
 //! multi-user collaboration; see
-//! `docs/adr/2026-08-05-project-history-dag-joins.md`.)
+//! `docs/adr/2026-08-05-project-history-dag-joins.ai.md`.)
 //!
 //! **Forks are still new projects.** Forks mint a *new project uid* whose
 //! history begins with a

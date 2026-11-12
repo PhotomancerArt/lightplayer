@@ -8,7 +8,7 @@
 // `LAB_CLOCK=manual` and gets `createManualClock`: time stands still until
 // the test says how far it moved, so "the press waited the 600 ms floor" is
 // an equality the test checks, not a wall-clock gap it measures on a busy
-// runner (docs/defects/2026-09-25-emu-lab-cooldown-tests-measured-wall-clock.md).
+// runner (docs/defects/2026-09-25-emu-lab-cooldown-tests-measured-wall-clock.ai.md).
 //
 // Dependency-free like the rest of the lab (D11, D13).
 'use strict';

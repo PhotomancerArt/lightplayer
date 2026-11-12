@@ -40,7 +40,7 @@ roadmap); only decoding is needed today.
 ## Provenance
 
 Written independently from RFC 1951, the Internet Standards Document —
-never adapted from zlib, miniz, or puff source (see `AGENTS.md`'s
+never adapted from zlib, miniz, or puff source (see `AGENTS.ai.md`'s
 license-discipline rule). `miniz_oxide` (MIT) is a dev-dependency only,
 used as an oracle in tests: this crate's tests check that it decodes what
 `miniz_oxide` encodes, never the reverse.

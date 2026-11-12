@@ -149,7 +149,7 @@ fn the_recorded_boot_chain_is_the_whole_chain() {
 /// `error: pll_cal exceeds 2ms!!!` when it gives up. Silicon never prints
 /// it; this machine printed it three times for as long as `I2C_ANA_MST` was
 /// an accept block with one shared `data` byte
-/// (`docs/defects/2026-09-08-regi2c-is-one-data-register-not-a-register-file.md`,
+/// (`docs/defects/2026-09-08-regi2c-is-one-data-register-not-a-register-file.ai.md`,
 /// fixed 2026-09-08). `tests/rom_up_boot.rs` gates it on a live run; this
 /// gates the committed record, so a re-capture cannot quietly bring the
 /// lines back.
@@ -214,7 +214,7 @@ fn rom_up_and_direct_load_report_the_same_ledger() {
 /// silicon capture is the board's tenth boot (`bootCount 10`) against our
 /// first, so its allocator has a different history. Naming the eight bytes
 /// needs a POWER-ON capture, which needs a hand on a cable
-/// (`docs/debt/emulator-heap-ledger-differs-from-silicon-by-eight-bytes.md`).
+/// (`docs/debt/emulator-heap-ledger-differs-from-silicon-by-eight-bytes.ai.md`).
 ///
 /// **Never tuned toward silicon's figure.**
 #[test]
@@ -322,7 +322,7 @@ const EMU_CHASE: &str = "lp-emu-esp32c6-t1-2026-09-07-c0d62e360.txt";
 /// say. `records_pins` on `[[configuration]]` is where that is stated, and a
 /// replay across a side that records none reports the class as *not
 /// compared, and why* rather than passing over it in silence
-/// (`docs/defects/2026-09-08-a-pin-capture-is-a-property-of-the-configuration-not-the-payload.md`).
+/// (`docs/defects/2026-09-08-a-pin-capture-is-a-property-of-the-configuration-not-the-payload.ai.md`).
 #[test]
 fn the_silicon_chase_agrees_frame_for_frame() {
     let silicon = load("rmt-chase", SILICON_CHASE);

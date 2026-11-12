@@ -2,7 +2,7 @@
 //! uniform reads.
 //!
 //! `lp-shader` deliberately does **not** bake palettes
-//! (`docs/design/lp-shader-texture-access.md`, "Palette stop baking is out of
+//! (`docs/design/lp-shader-texture-access.ai.md`, "Palette stop baking is out of
 //! scope"): it defines sampling primitives, and higher layers turn authored
 //! stops into texels. This is that higher layer.
 //!
@@ -19,7 +19,7 @@
 //!
 //! # Where range is lost
 //!
-//! Interpolation and conversion keep out-of-gamut coordinates (`color.md`
+//! Interpolation and conversion keep out-of-gamut coordinates (`color.ai.md`
 //! §10 rule 6), and this is the boundary that cannot: `Rgba16Unorm` stores
 //! `[0,1]`. Clamping happens here, once, at the texture-write boundary
 //! §7 names — never earlier, where it would silently change what an Oklch
@@ -349,7 +349,7 @@ mod tests {
     fn interpolation_happens_in_the_authored_space() {
         // The midpoint of an sRGB black→white ramp is sRGB 0.5, whose linear
         // value is ~0.214 — NOT the 0.5 a LinearSrgb ramp would give. That
-        // difference is the whole reason `color.md` §6 interpolates in the
+        // difference is the whole reason `color.ai.md` §6 interpolates in the
         // authored space.
         let srgb = Gradient {
             space: Colorspace::Srgb,

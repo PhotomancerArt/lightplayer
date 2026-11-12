@@ -16,7 +16,7 @@
 //! # One representation everywhere
 //!
 //! Every surface — [`crate::LpValue`] storage, wire, serde JSON, and the
-//! def codec — carries the SAME shape (`docs/design/color.md` §5; ADR
+//! def codec — carries the SAME shape (`docs/design/color.ai.md` §5; ADR
 //! 2026-08-05-gradient-stops-string-storage): snake-case token strings for
 //! `space`/`method`, and the stop list as one compact
 //! [stops literal](stops_string) (`"#000 #f80@.5 (0.211,-0.017,-0.039)"`).
@@ -31,7 +31,7 @@
 //! printing the literal is space-dependent (hex is confined to the
 //! sRGB-shaped spaces).
 //!
-//! See `docs/design/color.md` §4 (authoring spaces), §5 (storage recipe +
+//! See `docs/design/color.ai.md` §4 (authoring spaces), §5 (storage recipe +
 //! literal grammar), §6 (interpolation), and §7 (where conversion happens).
 
 pub mod gradient;

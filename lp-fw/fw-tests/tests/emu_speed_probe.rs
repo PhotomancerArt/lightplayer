@@ -1,12 +1,12 @@
 //! M0 speed probe (ignored, manual): instructions/s of `lp-riscv-emu` running
 //! `fw-emu`, next to esp-emu's report numbers
-//! (`docs/reports/2026-09-07-esp-emu-c6-spike.md` §7: 68.6 M insns/s idle,
+//! (`docs/reports/2026-09-07-esp-emu-c6-spike.ai.md` §7: 68.6 M insns/s idle,
 //! 0.14× real time rendering meteor).
 //!
 //! This is a report-only probe (M0 of the ESP32-C6 emulator plan;
 //! `~/.photomancer/planning/lp2025/2026-09-06-1001-esp-emulator/`), not a CI
 //! gate — it prints timing and instruction-count windows for
-//! `docs/reports/2026-09-06-lp-riscv-emu-speed-probe.md`. Run with:
+//! `docs/reports/2026-09-06-lp-riscv-emu-speed-probe.ai.md`. Run with:
 //!
 //! ```text
 //! cargo test --release -p fw-tests --test emu_speed_probe -- --ignored --nocapture --test-threads=1

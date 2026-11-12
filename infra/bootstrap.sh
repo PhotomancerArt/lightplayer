@@ -9,7 +9,7 @@
 # also how you re-read the values without hunting through fly's dashboard.
 #
 # What it does NOT do: deploy (that is CI or `flyctl deploy`), touch DNS
-# (that is docs/runbooks/godaddy-dns-cutover.md, Yona's hands, his GoDaddy
+# (that is docs/runbooks/godaddy-dns-cutover.ai.md, Yona's hands, his GoDaddy
 # account), or print a secret. Secrets are read from the environment or a
 # silent prompt and piped straight into `fly secrets import` — never passed
 # as arguments, because argv is world-readable in `ps`.
@@ -245,7 +245,7 @@ cat <<BLOCK
      CNAME www  light-player.github.io
 
   Full procedure, verification commands, and rollback:
-     docs/runbooks/godaddy-dns-cutover.md
+     docs/runbooks/godaddy-dns-cutover.ai.md
 
   Before touching DNS, finish the fly.dev smoke checklist (P11):
      fly certs show ${DOMAIN} --app ${APP}     # expect: Awaiting configuration

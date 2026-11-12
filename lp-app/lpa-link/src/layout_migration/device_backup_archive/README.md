@@ -6,7 +6,7 @@ and directory in its `lpfs`, read raw over the bootloader and mounted in Rust
 the firmware uses. It works on a board that **cannot boot**.
 
 Format 2 exists for the 2026-10 C6 repartition
-(`docs/adr/2026-10-02-c6-repartition-and-layout-migration.md`): every layout
+(`docs/adr/2026-10-02-c6-repartition-and-layout-migration.ai.md`): every layout
 migration stores one of these in the browser — and offers it as a download —
 **before** it writes anything to the board, because for a few seconds of the
 write it is the only copy of the board's files. `lp-cli hardware lpfs save`
@@ -14,7 +14,7 @@ writes the same archive, and `lp-cli hardware lpfs restore` puts one back.
 
 Format 1 (July 2026) was Studio's danger-zone backup, deleted with that UI on
 2026-08-25 and revived here, in `lpa-link`, so Studio and `lp-cli` share one
-implementation (`docs/adr/2026-07-31-device-backup-archive-format.md`).
+implementation (`docs/adr/2026-07-31-device-backup-archive-format.ai.md`).
 
 ## Posture
 
@@ -24,7 +24,7 @@ these archives and a layout invented for convenience today is a layout
 somebody has to reverse tomorrow.
 
 Alpha versioning rule, same as share envelopes
-(`docs/adr/2026-07-28-share-envelopes.md`): **version and refuse, never
+(`docs/adr/2026-07-28-share-envelopes.ai.md`): **version and refuse, never
 migrate.** A reader that meets any `formatVersion` but 2 says so, by number.
 
 ## Layout
@@ -89,7 +89,7 @@ Every file in `lpfs` rides, so an archive carries the device store
 (`/.lp/network.json`: the Wi‑Fi password, in plaintext). A restore must
 bring both back, so neither is filtered out. **Treat an archive like the
 board itself**: keep it on your machine, don't share it. See
-`docs/adr/2026-10-04-device-wifi-settings.md`.
+`docs/adr/2026-10-04-device-wifi-settings.ai.md`.
 
 ## Where the code lives
 

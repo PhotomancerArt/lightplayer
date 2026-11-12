@@ -38,7 +38,7 @@ pub enum WireProjectCommand {
     PanelClear {
         request: crate::WirePanelClearRequest,
     },
-    /// Turn panel-state auto-save on or off (panel.md P11). Project-level,
+    /// Turn panel-state auto-save on or off (panel.ai.md P11). Project-level,
     /// like the `.lp/state.json` file it governs — see
     /// [`crate::WirePanelAutoSaveRequest`].
     PanelAutoSave {

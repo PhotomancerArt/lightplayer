@@ -9,7 +9,7 @@
 // stegu/LYGIA original. The skew/unskew simplex geometry and radial falloff
 // follow Stefan Gustavson & Ian McEwan's simplex noise (MIT,
 // https://github.com/stegu/webgl-noise) via the noise-rs library.
-// See docs/reports/2026-03-31-lpfx-license-audit.md.
+// See docs/reports/2026-03-31-lpfx-license-audit.ai.md.
 //
 // Depends on: hash.glsl
 

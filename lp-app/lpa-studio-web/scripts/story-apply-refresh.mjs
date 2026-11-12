@@ -8,7 +8,7 @@
 // differs run to run on identical input). A wholesale copy commits those
 // tolerated files anyway, so a story that renders one hairline differently
 // this run gets its baseline rewritten — and rewritten back the next run.
-// That ping-pong is the churner class in docs/debt/story-capture-pipeline.md.
+// That ping-pong is the churner class in docs/debt/story-capture-pipeline.ai.md.
 // Replacing only manifest-listed files makes the tolerance mean what it says.
 //
 // Usage: story-apply-refresh.mjs <fresh-capture-dir> [baseline-dir]

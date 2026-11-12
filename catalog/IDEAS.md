@@ -21,7 +21,7 @@ in.
    assume a grid, a path, or a fixed layout) — useful ideas, out of scope
    for the library today.
 
-## Licence rules (from `AGENTS.md` — read it in full before touching any source)
+## Licence rules (from `AGENTS.ai.md` — read it in full before touching any source)
 
 1. **No code from here goes into the repo.** This file holds names,
    one-sentence descriptions, and links — never quotes, never pasted
@@ -38,7 +38,7 @@ in.
    states the licence and keeps provenance, per the ADR.
 4. **AGPL projects are never a source here.** None turned up in this sweep;
    if one ever does, it's `idea-only` at most, same as GPL tooling in
-   `AGENTS.md`.
+   `AGENTS.ai.md`.
 5. **If unsure whether a source is safe to look at: ask, don't copy.**
 6. An entry is a *starting point*. LightPlayer's pattern-space rule, Q32
    fixed-point, and the shared-knob bus (`vision.md` D14) mean every

@@ -155,7 +155,7 @@ pub enum HomeOp {
     /// the gesture: the user lands in the editor with something to do next.
     /// Deviates from D17 (the examples place is unbuilt and node authoring
     /// makes an empty project genuinely useful; see
-    /// `docs/adr/2026-07-27-node-authoring-operations.md`). No name
+    /// `docs/adr/2026-07-27-node-authoring-operations.ai.md`). No name
     /// PROMPT — `name` is the menu's optional field: `None` (or blank)
     /// falls back to the template's default label, slugged/dated/deduped
     /// by the library, and rename lives on the card kebab and in the

@@ -5,7 +5,7 @@
 //! the firmware's `[perf] fs mount` line.
 //!
 //! **What the number is:** `lp-emu:esp32c6:t1+net=lan`'s emulated time,
-//! where a flash command takes none (`docs/debt/emulated-flash-commands-take-no-time.md`):
+//! where a flash command takes none (`docs/debt/emulated-flash-commands-take-no-time.ai.md`):
 //! the mount's CPU, at one cycle an instruction. Report-only, never a gate;
 //! silicon's figure is the board's. Env: `LP_MOUNT_ELFS` (`label=path,…`,
 //! built with `heap_peak_diag`), `LP_MOUNT_IMAGES` (a directory of

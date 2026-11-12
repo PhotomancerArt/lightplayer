@@ -51,7 +51,7 @@ pub fn init_board() -> (
     // ~35.5 KB high-water. The 24,000 B come out of the heap instead, one
     // image for every device (Yona's ruling: "a stack overflow crashes; a
     // smaller heap only narrows the compile margin"). See
-    // docs/adr/2026-09-02-esp32c6-ram-split.md, "Amendment".
+    // docs/adr/2026-09-02-esp32c6-ram-split.ai.md, "Amendment".
     // SAFETY: each array is handed to the allocator exactly once, here, and
     // nothing else ever names it except to read its address.
     //
@@ -64,7 +64,7 @@ pub fn init_board() -> (
     // the part from the range up carries no tag, like `dram2_seg`, so only
     // Rust's global allocator lands there. Rust tries them in this order, so
     // it fills main RAM bottom-up as before
-    // (docs/defects/2026-10-17-radio-heap-overflow-reached-the-split-loaders-ram.md).
+    // (docs/defects/2026-10-17-radio-heap-overflow-reached-the-split-loaders-ram.ai.md).
     let (main_dma, main_fenced) = main_region_split();
     // SAFETY: the two parts are disjoint and together the array.
     unsafe {
@@ -96,7 +96,7 @@ pub fn init_board() -> (
     // resets, while the radio does not reset with it: a warm reset (the
     // host's RTS or a requested reboot) leaves the Bluetooth controller
     // running, and its DMA wrote two words into the bootloader's code
-    // (docs/defects/2026-10-05-a-requested-reboot-crashed-the-c6-bootloader.md).
+    // (docs/defects/2026-10-05-a-requested-reboot-crashed-the-c6-bootloader.ai.md).
     // So nothing the radio can DMA into may live here: the segment carries
     // NO capability tag, so only capability-free requests (Rust's global
     // allocator) can land in it, and the radio blobs' C heap has its own
@@ -171,7 +171,7 @@ pub fn init_board() -> (
 /// that peak + 12 KiB, rounded up to 4 KiB: 49,152 B, and the other 70,808 B
 /// are heap. `emu_stack_peak` fails CI the day the statics or this constant
 /// eat into the 12 KiB, so the next static that grows has to take its bytes
-/// back from here. See docs/adr/2026-09-02-esp32c6-ram-split.md.
+/// back from here. See docs/adr/2026-09-02-esp32c6-ram-split.ai.md.
 const HEAP_MAIN_SIZE: usize = 306_808 - HEAP_RADIO_SIZE;
 /// The radio blobs' C heap (`c_heap`), in main RAM where no bootloader
 /// loads. Sized from silicon: 44,584 B of radio allocations with Bluetooth

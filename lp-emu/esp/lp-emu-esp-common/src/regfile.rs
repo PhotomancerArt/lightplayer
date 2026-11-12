@@ -118,7 +118,7 @@ impl RegFile {
     /// `usr_command` already set, the mask ROM's read path never sets it,
     /// and a block that read 0 there moved no bytes while looking exactly
     /// like a blank chip
-    /// (`docs/defects/2026-09-07-accept-blocks-carry-only-the-reset-values-a-boot-needed.md`).
+    /// (`docs/defects/2026-09-07-accept-blocks-carry-only-the-reset-values-a-boot-needed.ai.md`).
     /// The PAC states every one of those values, so this takes them all
     /// rather than the ones a boot was observed to need.
     ///

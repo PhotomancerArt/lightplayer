@@ -174,7 +174,7 @@ node scripts/emu/trace-diff.mjs \
 It aligns the state/flow/pool/mgmt/sync sequences, counts anomalies per side,
 and compares the *set* of normalised boot-line shapes. It never compares wall
 clock, session id, endpoint id or line counts, and it prints that list every
-run. `docs/reports/2026-09-10-studio-walk-with-no-board.md` is the worked
+run. `docs/reports/2026-09-10-studio-walk-with-no-board.ai.md` is the worked
 example, with every difference in all six scenarios named and classified.
 
 ## ⚠️ Read this before running either lane today
@@ -184,6 +184,6 @@ Eight of the ten device-event record kinds lost their producer in `0a1b51d13`
 `anomaly` are emitted by nothing in the repository, and every committed
 fixture predates that by three weeks. **Five of the six scenarios with a
 fixture name matchers nothing can satisfy, on a board or off one.** Filed as
-`docs/defects/2026-09-10-eight-of-ten-device-event-kinds-lost-their-producer.md`.
+`docs/defects/2026-09-10-eight-of-ten-device-event-kinds-lost-their-producer.ai.md`.
 Until it is fixed, a capture sitting of any kind produces findings rather than
 fixtures, and that is the instrument's fault rather than the sitting's.

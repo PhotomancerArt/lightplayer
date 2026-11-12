@@ -8,7 +8,7 @@
 # the "Filter changed paths (firmware closure)" step of pre-merge.yml's
 # `detect-changes` job, which ORs each into that chip's `figures_*` output, so
 # a change to any of these crates runs that chip's pinned-figure jobs.
-# docs/debt/firmware-figures-skip-on-shared-crate-prs.md has the why.
+# docs/debt/firmware-figures-skip-on-shared-crate-prs.ai.md has the why.
 
 # fw-esp32c6 on riscv32imac-unknown-none-elf: 52 directories.
 fw_closure_esp32c6:

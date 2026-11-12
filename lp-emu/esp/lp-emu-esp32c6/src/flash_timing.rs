@@ -27,7 +27,7 @@
 //! one division) in both controllers — **an 80 MHz SCK**, for a 40, 80 or
 //! 20 MHz header alike (only the ROM's own load of the bootloader runs at the
 //! header's divider). That is the configuration the `t3` calibration could not
-//! name (`docs/reports/2026-09-08-esp32c6-t3-calibration.md`, "The fill's
+//! name (`docs/reports/2026-09-08-esp32c6-t3-calibration.ai.md`, "The fill's
 //! arithmetic, and what refuted it"): a DIO 32-byte line fill is
 //! 8 + 14 + 2 + 128 = 152 SCK, which at 80 MHz is 304 CPU cycles, and the
 //! silicon fill measured 338. The 34 left over is [`TRANSFER_OVERHEAD_CYCLES`]

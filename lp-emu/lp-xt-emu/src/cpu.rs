@@ -33,7 +33,7 @@ pub const CPENABLE_FPU: u32 = 1 << 0;
 // both layouts in §4.3.11.3 "Floating-Point State" — Table 4-47 "FCR fields"
 // (p. 69-70) and Table 4-48 "FSR fields" (p. 70). Transcribed as field
 // positions from those tables; no text is reproduced here and no binutils,
-// GCC, or QEMU source was consulted (AGENTS.md license rule).
+// GCC, or QEMU source was consulted (AGENTS.ai.md license rule).
 //
 // The two registers are laid out so an implementation may back them with one
 // physical 32-bit register, which is why the FSR flags sit *above* the FCR
@@ -43,7 +43,7 @@ pub const CPENABLE_FPU: u32 = 1 << 0;
 /// `FCR.RM`, bits 1:0 — the rounding mode (RM ISA RM §4.3.11.3, Table 4-47).
 pub const FCR_RM_MASK: u32 = 0b11;
 /// `FCR.RM = 0` — round to nearest. The reset value on the desk S3 (M6 P1) and
-/// the only mode `docs/design/float.md` §2 lets shader code run under.
+/// the only mode `docs/design/float.ai.md` §2 lets shader code run under.
 pub const FCR_RM_NEAREST: u32 = 0;
 /// `FCR.RM = 1` — round toward zero (the `TRUNC` direction).
 pub const FCR_RM_TOWARD_ZERO: u32 = 1;
@@ -165,7 +165,7 @@ pub struct Cpu {
     ///
     /// Reset value **0** = round to nearest with every exception disabled,
     /// measured on an ESP32-S3 (M6 P1 silicon session, 2026-07-31) and matching
-    /// `docs/design/float.md` §2, which makes RNE the only mode shader code ever
+    /// `docs/design/float.ai.md` §2, which makes RNE the only mode shader code ever
     /// runs under.
     pub fcr: u32,
     /// `FSR` (user register 233) — FP status: the sticky exception flags.
@@ -174,7 +174,7 @@ pub struct Cpu {
     /// read `FSR = 0` on a fresh boot and `FSR = 0x400` after a 24-instruction FP
     /// sweep with no intervening write. So this is a sticky register on this
     /// chip, and the emulator models accumulation via [`Cpu::or_fsr`] — even
-    /// though `float.md` §2 puts FSR out of reach of shader code.
+    /// though `float.ai.md` §2 puts FSR out of reach of shader code.
     ///
     /// Which flag occupies which bit **is** now architectural — see
     /// [`FSR_INEXACT`]…[`FSR_INVALID`], and note that `0x400` is exactly

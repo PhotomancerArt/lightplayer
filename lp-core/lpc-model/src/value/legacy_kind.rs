@@ -16,14 +16,14 @@
 //! to a **fixed** [`Kind::storage`] recipe for GPU and serialization, while
 //! still carrying a distinct *meaning* (e.g. [`Kind::Amplitude`] vs
 //! [`Kind::Ratio`] both use `LpType::F32` in v0 but differ in default
-//! constraint, presentation, and intent — see the §3 table in `quantity.md`).
+//! constraint, presentation, and intent — see the §3 table in `quantity.ai.md`).
 
 use crate::value::constraint::{Constraint, ConstraintFree, ConstraintRange};
 use crate::value::lp_type::{LpType, ModelStructMember};
 use alloc::string::String;
 
 /// The color-family vocabulary now lives in [`crate::color`], which owns both
-/// the authored serde surface and the `color.md` §5 storage recipe. Re-exported
+/// the authored serde surface and the `color.ai.md` §5 storage recipe. Re-exported
 /// here so the historical `kind::` paths keep resolving.
 pub use crate::color::{Colorspace, InterpMethod, MAX_GRADIENT_STOPS};
 
@@ -38,26 +38,26 @@ pub const AUDIO_LEVEL_BANDS: usize = 3;
 /// the framework does **not** do quantity algebra — math stays in user shaders
 /// (`docs/design/lightplayer/quantity.md` §4, “No quantity arithmetic in the
 /// framework”). [`Kind::Phase`] and [`Kind::Angle`] are intentionally *different*
-/// [`Kind`]s even though both are “dimensionless” in the SI sense (`quantity.md` §4).
+/// [`Kind`]s even though both are “dimensionless” in the SI sense (`quantity.ai.md` §4).
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 pub enum Dimension {
     /// Kinds with no physical dimension: [`Kind::Amplitude`], [`Kind::Ratio`], [`Kind::Phase`], [`Kind::Count`], [`Kind::Bool`], [`Kind::Choice`], color-family and spatial-struct Kinds, and [`Kind::Texture`].
     Dimensionless,
-    /// [`Kind::Instant`] and [`Kind::Duration`] (stored in seconds as F32, `quantity.md` §4).
+    /// [`Kind::Instant`] and [`Kind::Duration`] (stored in seconds as F32, `quantity.ai.md` §4).
     Time,
-    /// [`Kind::Frequency`] (stored in hertz, `quantity.md` §4).
+    /// [`Kind::Frequency`] (stored in hertz, `quantity.ai.md` §4).
     Frequency,
-    /// [`Kind::Angle`] (stored in radians, `quantity.md` §4).
+    /// [`Kind::Angle`] (stored in radians, `quantity.ai.md` §4).
     Angle,
 }
 
 /// **Base storage unit** implied by a [`Kind`] for display and v0 TOML (no
-/// per-value `unit` field — the [`Kind`] implies it, `quantity.md` §4).
+/// per-value `unit` field — the [`Kind`] implies it, `quantity.ai.md` §4).
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 pub enum Unit {
-    /// Used for [`Dimension::Dimensionless`] (and in v0, [`Kind::Phase`], which is *not* [`Dimension::Angle`], `quantity.md` §4).
+    /// Used for [`Dimension::Dimensionless`] (and in v0, [`Kind::Phase`], which is *not* [`Dimension::Angle`], `quantity.ai.md` §4).
     None,
     /// Time base unit (seconds) for the [`Dimension::Time`] dimension.
     Seconds,
@@ -69,12 +69,12 @@ pub enum Unit {
 
 /// **Semantic** identity of a value in the LightPlayer domain: what it *means*
 /// for tooling, the bus, and defaults — independent of whether it is a scalar
-/// or a structured *value-type* vs an opaque *handle-type* (`quantity.md` §3, open
+/// or a structured *value-type* vs an opaque *handle-type* (`quantity.ai.md` §3, open
 /// enumeration).
 ///
 /// The set is open for new examples; M2 ships the v0 row used across documentation.
 ///
-/// Grouping (per `quantity.md` §3 sketch):
+/// Grouping (per `quantity.ai.md` §3 sketch):
 ///
 /// - **Dimensionless value scalars:** `Kind::Amplitude`, `Kind::Ratio`, `Kind::Phase`, `Kind::Count`, `Kind::Bool`, `Kind::Choice`
 /// - **Scalars with a [`Dimension`]:** `Kind::Instant`, `Kind::Duration`, `Kind::Frequency`, `Kind::Angle`
@@ -84,29 +84,29 @@ pub enum Unit {
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum Kind {
-    /// [0, 1] strength of a signal (`quantity.md` §3 table).
+    /// [0, 1] strength of a signal (`quantity.ai.md` §3 table).
     Amplitude,
-    /// [0, 1] fraction or proportion (`quantity.md` §3).
+    /// [0, 1] fraction or proportion (`quantity.ai.md` §3).
     Ratio,
-    /// [0, 1) **wrapping** cycle position; distinct from [`Kind::Angle`] and [`Kind::Ratio`] by intent (`quantity.md` §3; see also `docs/roadmaps/2026-04-22-lp-domain/notes-quantity.md` Q3 for `Phase` vs `Angle`).
+    /// [0, 1) **wrapping** cycle position; distinct from [`Kind::Angle`] and [`Kind::Ratio`] by intent (`quantity.ai.md` §3; see also `docs/roadmaps/2026-04-22-lp-domain/notes-quantity.md` Q3 for `Phase` vs `Angle`).
     Phase,
-    /// Non-negative integer count; storage `LpType::I32` (`quantity.md` §3, storage table).
+    /// Non-negative integer count; storage `LpType::I32` (`quantity.ai.md` §3, storage table).
     Count,
     /// Boolean.
     Bool,
-    /// Discrete choice; storage `LpType::I32` in v0 (`quantity.md` §3).
+    /// Discrete choice; storage `LpType::I32` in v0 (`quantity.ai.md` §3).
     Choice,
 
-    /// Time **instant** as F32 seconds since an epoch; [`Dimension::Time`] (`quantity.md` §3). Default bus is [`Binding::Bus`] with channel `"time"` when no explicit bind (`quantity.md` §8).
+    /// Time **instant** as F32 seconds since an epoch; [`Dimension::Time`] (`quantity.ai.md` §3). Default bus is [`Binding::Bus`] with channel `"time"` when no explicit bind (`quantity.ai.md` §8).
     Instant,
-    /// Non-negative F32 **duration** in seconds; [`Dimension::Time`] (`quantity.md` §3).
+    /// Non-negative F32 **duration** in seconds; [`Dimension::Time`] (`quantity.ai.md` §3).
     Duration,
-    /// F32 **frequency** in hertz; [`Dimension::Frequency`] (`quantity.md` §3).
+    /// F32 **frequency** in hertz; [`Dimension::Frequency`] (`quantity.ai.md` §3).
     Frequency,
-    /// F32 **angle** in radians, may exceed 2π; [`Dimension::Angle`] (`quantity.md` §3).
+    /// F32 **angle** in radians, may exceed 2π; [`Dimension::Angle`] (`quantity.ai.md` §3).
     Angle,
 
-    /// Full color in an author-selected space; see `docs/design/color.md` and the struct recipe in `quantity.md` §3.
+    /// Full color in an author-selected space; see `docs/design/color.ai.md` and the struct recipe in `quantity.ai.md` §3.
     Color,
     /// Palette: stops in one space, read one way — [`MAX_GRADIENT_STOPS`] and
     /// [`InterpMethod`], defined by [`crate::Gradient`].
@@ -118,9 +118,9 @@ pub enum Kind {
     /// Note: This is the **authoring/storage** recipe. At runtime the engine bakes the
     /// gradient to a height-one texture and binds it as a shader field like `params.gradient`.
     Gradient,
-    /// 2D position as `LpType::Vec2` (`quantity.md` §3).
+    /// 2D position as `LpType::Vec2` (`quantity.ai.md` §3).
     Position2d,
-    /// 3D position as `LpType::Vec3` (`quantity.md` §3).
+    /// 3D position as `LpType::Vec3` (`quantity.ai.md` §3).
     Position3d,
 
     /// Opaque **texture** semantic kind: portable struct storage (`width` /
@@ -129,7 +129,7 @@ pub enum Kind {
     Texture,
 
     /// Audio frequency-band levels (low / mid / high) as F32 RMS values.
-    /// Default-binds to `audio/in/0/level` (`quantity.md` §8). Storage is a
+    /// Default-binds to `audio/in/0/level` (`quantity.ai.md` §8). Storage is a
     /// fixed `{ low: f32, mid: f32, high: f32 }` struct (no project-wide
     /// constant beyond [`AUDIO_LEVEL_BANDS`]). Default constraint is
     /// [`Constraint::Free`] — RMS may exceed 1.0 with boost; clamping is
@@ -168,7 +168,7 @@ impl Kind {
     /// Returns the **dimensional** class used for commensurability
     /// (`docs/design/lightplayer/quantity.md` §4, [`Dimension`] / [`Unit`]). Kinds
     /// not listed in that section map to [`Dimension::Dimensionless`], including
-    /// [`Kind::Phase`] (explicitly *not* [`Dimension::Angle`], `quantity.md` §4).
+    /// [`Kind::Phase`] (explicitly *not* [`Dimension::Angle`], `quantity.ai.md` §4).
     pub fn dimension(self) -> Dimension {
         match self {
             Self::Instant | Self::Duration => Dimension::Time,
@@ -180,7 +180,7 @@ impl Kind {
 
     /// A **sensible default** [`Constraint::Range`] (or [`Constraint::Free`])
     /// for this [`Kind`] when a slot does not override legality. This is the
-    /// *natural* domain of the kind before slot-specific tuning (`quantity.md` §3
+    /// *natural* domain of the kind before slot-specific tuning (`quantity.ai.md` §3
     /// per-`Kind` contract and §5: constraints **refine** the kind, they don’t
     /// replace it).
     ///

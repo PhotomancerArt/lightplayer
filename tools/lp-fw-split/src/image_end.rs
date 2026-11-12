@@ -7,7 +7,7 @@
 //! the image's raw length, and the stub dropped the last 254 bytes of a
 //! packaged split image whose length (`0x2F55FE`) was not a multiple of 4:
 //! the engine's last functions read back `0xFF` and the engine faulted on
-//! every boot (`docs/defects/2026-10-05-the-host-flasher-dropped-the-split-images-last-bytes.md`).
+//! every boot (`docs/defects/2026-10-05-the-host-flasher-dropped-the-split-images-last-bytes.ai.md`).
 //! A sector is a multiple of every unit a flasher works in (a word, the ESP
 //! image's 16 bytes, a 256-byte program page, a 1 KiB write block, the
 //! erase), so an image that ends on one leaves no partial unit anywhere.

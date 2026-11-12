@@ -9,7 +9,7 @@
 //!
 //! # Semantics contract
 //!
-//! Per `docs/adr/2026-07-09-preview-fidelity-tiers.md` the requested
+//! Per `docs/adr/2026-07-09-preview-fidelity-tiers.ai.md` the requested
 //! [`lp_gfx::ShaderSemantics`] tier is honored exactly or compilation fails:
 //! this backend implements `F32Gpu` only and rejects `Q32` with
 //! [`lp_gfx::GfxError::Backend`] — never a silent substitution.

@@ -578,7 +578,7 @@ fn internal_alloc(layout: Layout) -> Option<NonNull<u8>> {
         esp_alloc::HEAP.alloc_caps(MemoryCapability::Internal.into(), layout)
     })?;
     // A `psram` image tags PSRAM's region `External` only, so an `Internal`
-    // request never lands there (docs/adr/2026-10-22-s3-psram.md, point 6).
+    // request never lands there (docs/adr/2026-10-22-s3-psram.ai.md, point 6).
     // Checked, not assumed: GDMA reading a buffer in PSRAM would fail exactly
     // during the flash writes this backend exists to survive.
     #[cfg(all(feature = "psram", not(fw_harness)))]

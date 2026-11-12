@@ -60,13 +60,13 @@ would have caught the problem regardless of who was driving.
 For a team of agents the rule sharpens into something operational:
 **agent "carelessness" is never a cause, because agents don't carry
 lessons — standing instructions do.** An agent session ends; what
-persists is AGENTS.md, CI gates, corpus fixtures, skills, ADR deferred
+persists is AGENTS.ai.md, CI gates, corpus fixtures, skills, ADR deferred
 rows, and memory. So every contributing cause must be phrased as the
 *missing standing thing* ("no rule distinguished persisted bytes from
 wire bytes"), and every action item must name its **enforcement
 surface** — the standing thing that now exists. An action item whose
 only artifact is a paragraph in the incident doc is a smell: future
-agents load AGENTS.md and the gates; they do not re-read old
+agents load AGENTS.ai.md and the gates; they do not re-read old
 post-mortems.
 
 ## Running a post-mortem
@@ -116,4 +116,4 @@ surface; done-during-response items stay listed, checked.
 
 | Date | Incident | Severity | Status |
 |---|---|---|---|
-| 2026-08-08 | [Uid format change broke every deployed project](2026-08-08-uid-format-broke-prod-projects.md) | severe | closed |
+| 2026-08-08 | [Uid format change broke every deployed project](2026-08-08-uid-format-broke-prod-projects.ai.md) | severe | closed |

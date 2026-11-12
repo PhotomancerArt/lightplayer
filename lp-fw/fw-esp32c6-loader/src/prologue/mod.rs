@@ -2,7 +2,7 @@
 //! stage left behind that a core relies on, and nothing else.
 //!
 //! The core entry contract (C1–C8) is in
-//! `docs/adr/2026-10-17-the-c6-boots-through-our-own-bootloader.md`. Every
+//! `docs/adr/2026-10-17-the-c6-boots-through-our-own-bootloader.ai.md`. Every
 //! value written here was **measured**: the stock IDF bootloader (espflash
 //! 3.3.0's bundled ESP-IDF v5.1-beta1 build) run ROM-up on the emulated C6
 //! (`lp-emu-esp32c6 --merged … --trace`, the real mask ROM and the real

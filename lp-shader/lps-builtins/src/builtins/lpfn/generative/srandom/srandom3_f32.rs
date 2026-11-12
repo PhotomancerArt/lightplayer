@@ -4,7 +4,7 @@
 //! `glsl/lpfn/generative/srandom/srandom3.glsl` (normative): a trivial
 //! transform of `lpfn_random`, `-1 + 2 * random(p, seed)` — basic arithmetic
 //! applied to our MIT-licensed random
-//! (see docs/reports/2026-03-31-lpfx-license-audit.md).
+//! (see docs/reports/2026-03-31-lpfx-license-audit.ai.md).
 //!
 //! **Tolerance:** inherits `lpfn_random`'s chaotic sin-hash, so conformance is
 //! statistical, not pointwise. See `random1_f32`.

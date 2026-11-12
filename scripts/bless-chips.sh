@@ -19,7 +19,7 @@
 # them — this script adds no measurement of its own:
 #
 #   1. `heap-budget-check.sh chips-baseline <chip>`: the chip's heap record,
-#      rewritten only if its gated figures moved (docs/heap-budget-gate.md).
+#      rewritten only if its gated figures moved (docs/heap-budget-gate.ai.md).
 #   2. the chip's boot suite with LP_EMU_BLESS=1: every test that observes a
 #      figure through `lp-emu-esp-figures` writes the value it saw into the
 #      chip's record instead of failing. Everything else in those tests still
@@ -41,9 +41,9 @@
 # below go through `scripts/ci/ci-images.py`, which refuses images whose
 # firmware sources are not this checkout's. POSITIONAL figures are still
 # written only under GITHUB_ACTIONS=true, even though these ARE CI's bytes —
-# CI stays the one writer of those (docs/ci-images.md).
+# CI stays the one writer of those (docs/ci-images.ai.md).
 #
-# See docs/chip-figures.md.
+# See docs/chip-figures.ai.md.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -166,6 +166,6 @@ change that moved it."
     if [ "${GITHUB_ACTIONS:-}" != "true" ]; then
         echo "bless-chips: POSITIONAL figures (a stack high-water, say) were not written: the \
 record holds CI's value for those, and a desk build can read another. If CI then fails on one, \
-its message carries the new value (docs/chip-figures.md)."
+its message carries the new value (docs/chip-figures.ai.md)."
     fi
 fi

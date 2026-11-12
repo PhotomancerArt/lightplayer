@@ -4,7 +4,7 @@
 //!   torn program can leave a good header over a short payload — README
 //!   defect 1), stopping at the end or at the first record that does not
 //!   check; a record of an unknown kind is checked the same way and skipped.
-//!   What FORMAT.md's mount step 2 says, and what mount does for the newest
+//!   What FORMAT.ai.md's mount step 2 says, and what mount does for the newest
 //!   sector of each kind (the only place a cut can have torn a program), for
 //!   a sector a newer writer closed, and for every sector when its fast pass
 //!   adopts no root.
@@ -38,7 +38,7 @@
 //! so it fails on every read; a sector holding no record (its last program
 //! was its header's magic) is not resumed. Either way a later mount reads
 //! what this one read
-//! (`docs/defects/2026-10-14-tree-store-trusts-a-torn-record-that-reads-whole-once.md`).
+//! (`docs/defects/2026-10-14-tree-store-trusts-a-torn-record-that-reads-whole-once.ai.md`).
 
 use alloc::vec::Vec;
 
@@ -72,7 +72,7 @@ pub struct RootCandidates {
 
 impl RootCandidates {
     /// Offered in sector-sequence order: a second copy of a root (a GC
-    /// copy) moves it to the later sector, the copy FORMAT.md says to keep.
+    /// copy) moves it to the later sector, the copy FORMAT.ai.md says to keep.
     fn offer(&mut self, c: RootCandidate) {
         self.max_seq = self.max_seq.max(c.seq);
         if let Some(b) = self.best.iter_mut().flatten().find(|b| b.id == c.id) {
@@ -142,7 +142,7 @@ pub fn scan_sector<F: Flash>(
                 (out.closed, torn) = (true, true);
                 break;
             }
-            // Checked like any record, then skipped: garbage (FORMAT.md
+            // Checked like any record, then skipped: garbage (FORMAT.ai.md
             // "Unknown records").
             HeaderRead::Unknown { len } => (len, None),
             HeaderRead::Record(r) => (r.len, Some(r)),

@@ -392,7 +392,7 @@ const PARTITION_TABLE_LEN = 0xc00;
  * lp2025/2026-10-28-0025-install-without-board-pick, the install's
  * identification).
  *
- * A dumb executor (`docs/debt/web-serial-js-untestable.md`): WHICH package
+ * A dumb executor (`docs/debt/web-serial-js-untestable.ai.md`): WHICH package
  * and WHAT to read are decided in Rust. `manifestFor(chipName)` answers the
  * package's manifest path for the chip the SYNC named, or null when
  * LightPlayer has no firmware for it — the package is chosen here, after
@@ -636,10 +636,10 @@ export async function executePlan(
 /// a Mac, Chromium's Web Serial opens the port with `PARMRK` set, so the
 /// kernel's tty queue stores each `0xFF` byte TWICE in its 1,024 slots, and
 /// once doubling pushes the queue past 1,020 it drops bytes silently
-/// (`docs/defects/2026-09-26-web-serial-on-macos-drops-bytes-of-packed-frames.md`).
+/// (`docs/defects/2026-09-26-web-serial-on-macos-drops-bytes-of-packed-frames.ai.md`).
 /// Flash is mostly `0xFF`, so a 4 KB packet of it is 8 KB of tty slots, and
 /// the read lost a run of bytes the first time the page read late (G1-F2,
-/// `docs/defects/2026-10-02-studio-reading-a-boards-files-stalls-on-a-mac.md`).
+/// `docs/defects/2026-10-02-studio-reading-a-boards-files-stalls-on-a-mac.ai.md`).
 /// One packet in flight of at most 384 bytes is at most 770 slots, under what
 /// the tty holds with no reader at all; the stub sends the next packet only
 /// after the ack. 960 KB took 14.2 s that way over a desk C6 in headless
@@ -651,7 +651,7 @@ export async function executePlan(
 /// JSON files is 25 or more USB packets back to back. The desk's Pixel 8a
 /// reads about one a millisecond and falls behind: at 384 bytes a packet was
 /// lost every few kilobytes, at 64 none in 512 KB (2026-10-19,
-/// `docs/defects/2026-10-18-a-flash-over-webusb-on-a-phone-loses-the-boards-replies.md`).
+/// `docs/defects/2026-10-18-a-flash-over-webusb-on-a-phone-loses-the-boards-replies.ai.md`).
 /// So a read there starts at 128, halves on a loss and doubles again after a
 /// run of clean segments, and waits a quarter of a second, not three, before
 /// calling a packet lost.
@@ -832,7 +832,7 @@ export async function drainQuietly(transport, quietMs = DRAIN_QUIET_MS) {
 /// RELEASES RTS, and the connect's reset sequence already left both lines
 /// low, so it changes no line and the board stays in the stub, silent. An
 /// erase that ended that way left its card "not responding" until a reload
-/// (2026-10-19, `docs/defects/2026-10-19-a-board-erased-over-webusb-reads-not-responding-until-a-reload.md`;
+/// (2026-10-19, `docs/defects/2026-10-19-a-board-erased-over-webusb-reads-not-responding-until-a-reload.ai.md`;
 /// a Mac's tty open and close leave a parked C6 in the stub as well). A
 /// flash, a boot-control write and a probe ended that way too, and the
 /// flashed board answered only when the Flash activity's reconnect ladder
@@ -1267,7 +1267,7 @@ const LP_I2C_ANA_MST_BUSY = 0x02000000; // bit 25
 /// C6 only; silent when the clock is on and the master idle. Best-effort: a
 /// failed register call is logged and the flash still ends in a reset — the
 /// board may then need the replug it always needed. See
-/// `docs/defects/2026-09-06-c6-first-flash-bootloader-hang-lp-analog-i2c-clock.md`.
+/// `docs/defects/2026-09-06-c6-first-flash-bootloader-hang-lp-analog-i2c-clock.ai.md`.
 async function restoreLpAnalogI2cClock(loader, chipName, knownChipIds, terminal) {
   if (chipIdFrom(chipName, knownChipIds) !== "esp32c6") {
     return;

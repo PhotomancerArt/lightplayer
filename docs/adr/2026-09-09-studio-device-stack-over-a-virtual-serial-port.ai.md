@@ -1,0 +1,432 @@
+# ADR: Studio's device stack over a virtual serial port
+
+- **Status:** Accepted
+- **Date:** 2026-09-09
+- **Deciders:** Photomancer
+- **Supersedes:** None
+- **Superseded by:** None
+- **Amends:** [2026-08-03-studio-runs-n-device-sessions.ai.md](2026-08-03-studio-runs-n-device-sessions.ai.md)
+  (its M9 item: what a device session is attached to can be an emulated board,
+  and the pool does not learn a new kind) and
+  [2026-06-22-browser-esp32-device-controller.ai.md](2026-06-22-browser-esp32-device-controller.ai.md)
+  (the controller's boundary is the seam the shim installs under, unchanged)
+
+Not to be confused with [2026-06-18-browser-serial-shim.ai.md](2026-06-18-browser-serial-shim.ai.md),
+which is superseded and names the Rust-JS boundary. This ADR is about a virtual
+*port*, not a boundary.
+
+## Context
+
+Studio's browser device stack — the chooser, the grant model, the readiness
+engine, `esptool-js` flashing, the hotplug edges — could only be exercised with
+an ESP32 board on a USB cable and a person to plug it in. That has cost the
+project real time: nine of the ten committed device scenarios
+(`scripts/device-scenarios/`) carry a `manual:` list of browser steps a human
+performs, the JS layer carried a debt file
+(`docs/debt/web-serial-js-untestable.ai.md`) from 2026-07-10 saying it could not be
+tested at all, and two registry defects live in that layer with coverage "none".
+
+The ESP32-C6 emulator (`lp-emu/`) runs the shipped firmware, and plan one gave
+it a host-side seam: two sockets per link, bytes on one and a line-oriented
+control channel on the other, with `attach`/`detach`/`open`/`close`/`reset`
+spelled the way the fake device already spelled them. A browser cannot open a
+TCP socket, so plan two put a WebSocket door in front of it
+(`lp-cli emu serve`) — and then asked the question this ADR answers: **at which
+layer does Studio meet an emulated board?**
+
+Three layers were available:
+
+1. **A new Link provider** (`ByteStreamLink<EmulatorByteStream>`, a third
+   provider kind). Studio would know the board is emulated and dress it
+   honestly.
+2. **A `navigator.serial` polyfill** — a virtual serial port, installed in the
+   page, that Studio's existing `browser-serial-esp32` provider drives without
+   knowing.
+3. A protocol-level fake, which the repo already has
+   (`providers/fake_device/`) and which never executes one instruction of the
+   product image.
+
+Level 1 is the sibling effort's **mode A**, and it has shipped: an emulated
+device the *user* sees, honest dress and all. It answers a different question —
+"can a user try LightPlayer with no hardware?" — and it deliberately does not
+exercise the browser device stack, because it replaces it.
+
+## Decision
+
+**Studio's device stack runs unchanged over a virtual serial port.** Under
+`?emu=<url>` the page replaces `navigator.serial` with a bus whose ports are
+emulated boards; every layer above it — `browser_serial.js`,
+`browser_esp32_device_controller.js`, `browser_esp32_flash.js`, the Rust
+provider, the session pool, the readiness engine — is the shipped code, running
+the shipped path, and cannot tell.
+
+Five rules follow, and they are the decision.
+
+### 1. The Studio JS/Rust device layer does not change to accommodate it
+
+`lp-app/lpa-link/src/providers/browser_serial_esp32/**` (the Rust provider,
+`browser_serial.js`, `browser_esp32_flash.js`) and
+`lp-app/lpa-studio-web/public/lpa-link/browser_esp32_device_controller.js` are
+**frozen against this work**. A change there would mean the claim ("the same
+code runs") had quietly become "nearly the same code runs", and the value of
+every gate under it would drop to nothing.
+
+While the plan was live this was mechanical, not a promise: a content-hash lint
+(`scripts/check-browser-serial-js-frozen.sh`, `just lint-browser-serial-js-frozen`)
+pinned the three JS files and ran in CI, so a change to one had to move the hash
+deliberately, in the same commit, with the reason in the PR — which is exactly
+the conversation the invariant exists to force. **The lint was retired when
+plan two closed** (M7): it was the claim's mechanical form *while the claim was
+being made*, and across seven milestones the three files stayed byte-identical
+to their pre-plan state. A milestone that needed one to change would have found
+something the premise did not survive, and its job at that moment was to stop
+and report, not to make the change small.
+
+The rule outlives the plan and the lint that once enforced it, which is why it
+is here: **the Studio JS/Rust device layer does not change to accommodate the
+shim**, and this ADR is now its only home.
+
+### 2. The polyfill implements exactly eleven calls, and reproduces two scars
+
+The entire contract the Studio layer has with Web Serial is
+`navigator.serial.{requestPort, getPorts, addEventListener}` and `port.{open,
+close, readable, writable, setSignals, getSignals, getInfo, forget}`.
+`lp-app/lpa-studio-web/public/lpa-link/virtual_serial.js` implements those and
+nothing else: more of the spec would be untested surface pretending to be a
+browser.
+
+Two behaviours of the real API are reproduced deliberately, each because Studio
+carries a defect scar from it:
+
+- **A re-enumerating device mints a NEW `SerialPort` object.** A USB-Serial-JTAG
+  chip resetting looks exactly like a replug, and it is what the emulator does
+  on `reset` / `download-mode`. A polyfill with one immortal port object would
+  be *less* faithful than a board, and would hide the class of defect
+  `adoptReenumeratedPorts` exists for (2026-08-31: a replugged C6 wallpapered
+  the gallery).
+- **A closed port is still a granted port.** `close()` releases the streams;
+  only `forget()` revokes the grant (2026-07-22: deleting the grant handle on
+  close broke flashing).
+
+`getInfo()` reports **303a:1001** — Espressif native USB. An emulated C6 *is*
+native USB, so this is not a disguise: the existing vid:pid paths (grant-aware
+picking, a board's `usb_bridge`, re-enumeration pairing, `labelForPort`'s label)
+run unchanged because the answer is true.
+
+### 3. What it deliberately does NOT model: Chromium's own USB stack
+
+The polyfill is a virtual *port*, not a virtual *browser*. Everything below is
+out of scope by decision, and stays on hardware:
+
+- **Loss reporting.** Chromium takes minutes to report some kinds of device
+  loss; the shim's byte channel closes when it closes.
+- **Grant revocation on reload**, and Brave's differences from Chrome's.
+- **The real chooser** — its permission prompt, its "no devices found" state,
+  its interaction with enterprise policy (`SerialAllowAllPortsForUrls`).
+- **The USB layer's own timing**: enumeration delay, bus resets, hub behaviour.
+  No assertion anywhere in this work is about a duration.
+
+A shim walk is therefore **not** a substitute for a hardware walk of those
+things. It is a substitute for everything above the port, which is where the
+product's own logic lives.
+
+A quieter consequence worth writing down: a polyfilled `navigator.serial`
+**grants itself**. The Chromium policy profile, the standing WebSerial grant
+(`just serial-grant`) and the reserved bench port block exist to remove the
+chooser for an agent driving real hardware. Under the shim none of them are
+needed, and none of them should be wired back in.
+
+*Amendment, 2026-10-26.* The standing grant moved from Brave to Google
+Chrome. It covers every port, and Studio opens every port it is granted on
+load, so a Brave tab on a bench port — Brave being Yona's daily browser —
+held every board on the desk and locked `lp-cli` and the other sessions out.
+Chrome is the agents' browser and nobody's daily one. A Chrome tab on a
+bench port still holds every board while it is open; AGENTS.ai.md, "A real
+board in a browser", says how to keep that short.
+
+### 4. `EmulatorPort` is the shared object, and it has two backings
+
+`lp-app/lpa-studio-web/public/lpa-link/emulator_port.js` is one emulated board
+as an in-page object — bytes in/out, the control vocabulary as one method per
+verb, flash get/put, reset, snapshot, probes. It is deliberately **not** a Web
+Serial thing: the polyfill turns it into a `SerialPort`, and a `ByteStreamLink`
+could turn the same object into mode A's device card, without either side
+learning about the other. Its shape is the sibling effort's eight-point contract
+(`_archive/2026-09-07-0118-studio-emulated-boards/notes.md` section 4); changing
+that shape later is the sibling's call, not a breach of this ADR.
+
+This work ships the **native** backing only — `lp-cli emu serve`'s WebSocket
+door (`GET /boards`, `ws /board/<id>/bytes`, `ws /board/<id>/control`). Against
+the eight points, as shipped:
+
+| point | native backing |
+|---|---|
+| 3 — bytes both ways | `onBytes` / `write`, over the byte socket |
+| 4 — control channel as methods | `attach`, `detach`, `open`, `close`, `signals`, `reset`, `downloadMode`, `state`, `pins`, `command` |
+| 5 — flash `get()`/`put()`, snapshot | **refused**: `getFlash`, `putFlash`, `snapshot` reject with `NotSupportedError`. The door persists flash server-side (`--state-dir`) and reports a state word in `GET /boards`, but exposes no route for the bytes. `flashState()` answers what the registry said, and nothing pretends. |
+| 6 — probe getters | **refused**: the door answers `state` and `pins`; a heap ledger is the wasm backing's |
+| 1, 2, 7, 8 | wasm-build concerns (a byte-driven builder, `Instant` out of `run_until`, feature-gated codegen, deterministic default) — they are about a machine in the page, and the native backing has none |
+
+**Where a backing cannot answer, it says so.** A lie inside the contract is
+worse than a gap, and the two refusals above are the shape the wasm backing will
+fill.
+
+### 5. Dev mode is a URL flag, and the page is honest about it
+
+`?emu=<ws url>` is read by an inline script in `index.html`, before the wasm
+bundle boots. **Absent the flag the polyfill module is never fetched** — no
+network request for it at all, which makes "this is a dev-mode capability"
+checkable in the network panel rather than a claim.
+
+The flag installs a **synchronous facade**: `navigator.serial` is defined
+synchronously, and its methods await the dynamic `import()` behind it. A dynamic
+import cannot promise to resolve before the bundle boots, and
+`installSerialEvents` installs its hotplug listeners at most once per page, so
+the object they land on has to be there from the first tick and has to stay. The
+alternative — park the promise and have the Rust side await it, the way
+`resolved_engine_urls()` awaits `__lpEngineAssets` — was rejected because it
+puts the shim's existence on Studio's boot path, and Studio not knowing is the
+whole premise.
+
+Two consequences of the page owning the seam:
+
+- **The picker is page chrome.** Under the shim `requestPort()` has no browser
+  chooser to show, so the page draws one at the same seam, and
+  `browser_esp32_device_controller.js:41` — the single call site — is unchanged.
+  Studio's own Devices picker means something else (the device roster); giving
+  it a second meaning would be exactly the change rule 1 forbids.
+- **Honesty is page-level.** A device card under `?emu=` is deliberately
+  indistinguishable from a real board's — that is the claim being tested — so
+  the page carries a dev banner naming the shim and the backing URL. A
+  card-level dress would be a behaviour difference, and mode A already owns
+  honest dress. (Reversible: it is OQ2, and G1 asks Yona directly.)
+
+`?emu=` and `?on=` (which device this tab is looking at) are **orthogonal
+axes**. A page may carry both, and neither reads the other.
+
+## Consequences
+
+- A Studio device walk needs a browser and nothing else. What was a `manual:`
+  list of steps for a human at a desk becomes something an agent can drive.
+- The `web-serial-js-untestable` debt has a harness: the real-Chrome conformance
+  suite (`lp-app/lpa-link/tests/browser_serial_conformance.rs`) runs the shipped
+  JS over the polyfill over a scripted door, hermetically, in CI — and the same
+  assertions run against a live `emu serve`.
+- The three JS files were load-bearing for a CI content-hash lint while plan
+  two ran, so that legitimate future work on them had to move the hash
+  deliberately with the reason in the commit. That lint was retired at plan
+  close (M7); rule 1 above is now the standing constraint, and future work on
+  those files is ordinary review against it.
+- Anything Chromium's USB stack owns is now *explicitly* hardware-only rather
+  than accidentally untested. The list is in rule 3, and it is the honest
+  residue of the debt file.
+- Studio gained no code for any of this. The install seam is in `index.html` and
+  `public/lpa-link/`; `lp-app/lpa-studio-web/src/` has no line that knows the
+  shim exists.
+
+## Alternatives Considered
+
+- **A third Link provider (mode A's shape) for dev too.** Rejected for this
+  purpose: it replaces the browser device stack instead of exercising it, so
+  every defect that lives in `browser_serial.js` or the readiness engine would
+  stay invisible. Mode A ships beside this one and answers the user-facing
+  question.
+- **Level 3 — an `esptool-js`-level fake.** Would test the flash flow and
+  nothing under it, and would need its own protocol model that could drift from
+  the ROM's. The emulator already runs the real ROM.
+- **Installing the polyfill from Rust, on the boot path.** Cheaper to write, and
+  it makes the install visible to Studio — precisely what the design is trying
+  to avoid. See rule 5.
+- **Making the emulated card visibly emulated (a card-level mark).** Deferred to
+  G1 as OQ2, with the page banner as the current answer. Under mode B the card
+  being indistinguishable is not a UX oversight — it is the assertion.
+
+## Amendment 2026-09-09 — flashing is real, and a reset is not a replug (plan two M5)
+
+The write path ran. Studio's own **Flash firmware** verb, through the frozen
+`browser_esp32_flash.js`, through esptool-js 0.6.0 fetched from jsDelivr, wrote
+the packaged `esp32c6-4mb` image into an emulated board with nothing on its
+chip; the board then booted it from the reset vector, through the real mask ROM
+and the real ESP-IDF second-stage bootloader, and said hello with its own eFuse
+MAC. **The "runs unchanged" claim survived**: the three frozen files are
+byte-identical and `lp-app/lpa-studio-web/src/**` has no diff.
+
+**What esptool-js needed, and it was not what the plan feared.** The flasher
+stub was never the problem — it uploads, runs and writes (the native half was
+pinned by #638). Three things had to be true that were not:
+
+1. **A chip reset must not re-enumerate the port.** This is the ruling, and it
+   amends rule 2 above. `EmulatorPort` learns of a reboot from a control reply's
+   guest cycle going backwards; it used to answer that by minting a new
+   `SerialPort`, on the model that a resetting USB-Serial-JTAG chip looks like a
+   replug. It does not on this part: the USB-Serial-JTAG controller is in the
+   same silicon block as the CPU it resets, which is exactly why Studio can
+   flash a real C6 over Web Serial without the port vanishing. Measured: the
+   shim killed the port object esptool-js was holding, mid-`Connecting…`, every
+   run — and `browser_esp32_flash.js` holds one port for the whole call and is
+   frozen, so "tolerate it" was never available. **The cable (`detach`/`attach`)
+   is now the only thing that mints a port.** A reboot is still *noticed* — the
+   `reboot` event, and the dev banner re-renders — it simply is not a replug.
+   M2's conformance suite carries the amendment: one test's claim is reversed
+   and says so, three drive their re-enumeration from a replug instead, and
+   `a_chip_reset_does_not_re_enumerate` pins the new rule on both halves.
+
+2. **A rebooted board must answer its host again.** `next_host_poll` and
+   `next_pin_poll` are absolute guest cycles outside the machine's snapshot, so
+   a reboot put the clock back to zero and left both deadlines in the guest's
+   future — the board went deaf for as long as it had been up (~6 s of wall for
+   a 33-second-old board, ~3.5 minutes for a 120-second-old one). Its twin: the
+   port's open/closed state IS in the snapshot and the byte client's
+   connectedness is not, and the coupling fires only on an edge, so a board
+   could come back with its port closed and nothing to re-open it. Both are
+   fixed in `Esp32C6Machine::reboot`.
+
+   The second fix needed a second pass, and the lesson is worth the two lines.
+   Re-deriving the coupling's memory of the byte client **from the restored
+   port alone** is too coarse: `--usb-host attached` — `emu serve`'s own
+   default — powers on with the port OPEN and no byte client at all, so a
+   reboot then claimed a client that did not exist and the very next poll (due
+   immediately, by the fix above) issued the matching `close` — shutting the
+   port the restore had just opened, on a board nobody had touched. It is a
+   race with the guest's own boot for the hello, and it read as an
+   intermittent `emu serve` door test rather than as a wrong answer. The
+   memory is derived from **both** sides now: the port the restore produced
+   AND the socket that outlived it. "The port is open BECAUSE a client has it
+   open" is the only state the coupling may assume it already applied.
+
+3. **`SPI_CMD` must self-clear on SPI0 as well as SPI1.** `ESPLoader.main()`
+   ends with a mandatory `readFlashId()` whose failure it re-throws, and
+   esptool-js 0.6.0 puts the C6's `SPI_REG_BASE` at `0x6000_2000` — **SPI0**,
+   the cache controller, not SPI1 at `0x6000_3000`. SPI0's `cmd` was a plain
+   `RegFile`, so the `usr` trigger read back set forever and the host's poll
+   wedged with `SPI command did not complete in time`. SPI0's `cmd` now reads
+   idle and clears; nothing is executed there, because the desk C6's own answer
+   to this probe is a flash id of **0** and esptool's "Failed to communicate
+   with the flash chip" warning while the stub's reads and writes work fine.
+
+**What the ROM download console needed: nothing.** #620's work stood up
+untouched under a real flasher driven from a browser — SYNC, chip detect
+(`ESP32-C6 (revision 2)`), the eFuse MAC, `MEM_*` stub upload, deflate
+`FLASH_DEFL_*`, `Leaving...`, `Hard resetting via RTS pin...`.
+
+**One more thing the shim must own, recorded for mode A:** `emu serve` grew a
+third `--board` kind, `kind=rom-up` — the reset vector out of the board's own
+writable flash file. It is the only shape that can be flashed and then boot
+what was written, and `GET /boards`'s `flash` word became live (an image magic
+at the reset vector, recomputed on every flush) so `blank → flash → loaded` is
+a sequence a page can watch.
+
+That live word has a consequence worth naming, because it retired an
+assertion. The word is about the **chip**, and a `kind=elf` board's firmware
+was loaded straight into memory and never went through its chip — so such a
+board reports `blank` for as long as it lives, however much its data
+partitions hold. M1's walk gate had asserted `loaded` there and passed only
+because the word was then "the flash FILE is non-empty", which a 4 MiB chip of
+`0xff` also satisfies. `emu_serve_walk.rs` now pins the new word and moves the
+survival claim onto the two things that can carry it: the written bytes are
+not an erased chip, and the guest's own second boot mounts the project.
+
+## The contract a wasm backing (mode A) inherits
+
+This is a handoff, not a build: **mode A is the sibling effort's** (plan.ai.md
+Scope, out; archived at `_archive/2026-09-07-0118-studio-emulated-boards/`).
+Plan two shipped only the native backing, and the two "refused" rows in the
+eight-point table above are exactly the gaps mode A's wasm backing fills. What
+that backing — or a door that wanted to fill them in for the native case —
+would have to add, stated against the door as it actually is:
+
+- **The routes that do not exist.** The door's route table is exactly three
+  (`lp-cli/src/commands/emu/serve/door.rs`, `fn route`): `GET /boards`,
+  `ws /board/<id>/bytes`, `ws /board/<id>/control`. Points 5 and 6 need routes
+  that are **not** there: a `GET`/`PUT` of a board's flash bytes, and a
+  snapshot route. `getFlash` / `putFlash` / `snapshot` reject with
+  `NotSupportedError` precisely because there is nowhere to send them. Adding
+  any of these is a deliberate route addition, and it changes what a second
+  consumer of the door can assume.
+- **The door admits one client per endpoint** and answers a second with **409**
+  (`door.rs`, `fn busy`; a `compare_exchange` on an `AtomicBool` held for the
+  connection's life). There is no last-wins takeover and no reaping of a
+  half-open socket — a design constraint any second consumer inherits. Plan
+  two's flash walk never hit it (the control channel is page-held and only the
+  byte endpoint cycles), but a client that dies without closing is unmeasured,
+  not ruled out.
+- **`flashState()` is independent of the running image, and now answers the
+  chip's question.** As of M5 (DD34) `GET /boards`'s `flash` word is recomputed
+  per flush and answers "does an image magic sit at the reset vector" — so a
+  `kind=elf` board, whose firmware is loaded straight into memory and never
+  went through its chip, truthfully reports `blank` for as long as it lives.
+  A backing must never treat `flash` as "is this board running something"; the
+  board's own hello, or its console transcript, is the survival evidence.
+
+**Where a backing cannot answer, it says so** (as the native one does). The
+wasm backing carries a machine in the page and can answer points 5 and 6 from
+it; a lie inside the contract is worse than a `NotSupportedError`.
+
+## Amendment 2026-09-11 — the wasm backing lands; points 5 and 6 close
+
+The handoff two sections up is fulfilled. `TabEmulatorPort extends
+EmulatorPort` (`lp-app/lpa-studio-web/public/lpa-link/emulator_tab.js`) is
+the wasm backing the table above called for, and rule 4's "not forked"
+sentence held exactly as written: it overrides only the four refused
+methods, nothing else in `emulator_port.js` changed shape.
+
+Against the eight-point table:
+
+- **Point 5 (flash get/put) answers.** `getFlash` / `putFlash` reach the
+  in-page machine's own chip through the `emu_flash_*` ABI — bytes a real
+  machine holds, not a door's persisted file. `snapshot()` **stays
+  refused**, on both backings: there is still no bytes format for a
+  `Snapshot` (its own module says in-memory only, on purpose), and this
+  amendment does not create one.
+- **Point 6 (probe getters) answers.** `probes()` reads the machine's own
+  heap ledger and pin state directly, in-process — the native backing's gap
+  was the door having no route for it, not the concept being unavailable.
+
+This is **mode A only** — the sibling plan's user-facing device, reached from
+the Devices picker or `?on=emu`. The **native backing this ADR describes is
+unchanged**: `?emu=tab` is `?emu=<url>`'s sibling flag, not a replacement —
+it installs the same `navigator.serial` polyfill, over the wasm-hosted board
+instead of a WebSocket door, for the emulator-first walk's server-less form
+(`just walk-no-board --tab`). `?emu=` and `?on=` remain orthogonal axes: a
+tab can run the dev-mode polyfill (`?emu=tab`) over a project opened on
+either kind of runtime.
+
+The wasm backing's own decisions — the Worker, the pacing contract, the
+flash image's home, the `emu_*` ABI — are their own ADR:
+[2026-09-10-the-c6-emulator-runs-in-the-tab.ai.md](2026-09-10-the-c6-emulator-runs-in-the-tab.ai.md).
+
+## Amendment 2026-10-09 — a second page may hold a board's bytes (one tab holds a board, M5)
+
+Rule 1 stands: nothing under `lpa-link/src/providers/browser_serial_esp32/**`
+or `browser_esp32_device_controller.js` changed. The door stands too: it
+still admits one client per endpoint, and a second `/control` client is
+still refused with 409.
+
+Rule 2's eleven calls stand: the polyfill adds behaviour, not calls. A page
+opened with `?emu-second-tab=1` may install although another page holds a
+board's cable. Real Chrome lists a granted port in both tabs of a browser and
+refuses only the second `open()`; the door's one-client rule used to fail the
+second page at install, which made "two tabs, one board" impossible to walk.
+With the flag, a refused `/control` makes a **cable-less** port
+(`EmulatorPort.hasCable` false): it can list, grant, `open()` and `close()`
+the board's bytes, every cable verb (`detach`, `attach`, signals, reset,
+download mode, `state`, `pins`) rejects with `NetworkError` naming whose
+cable it is, and the page's default D0 switches are left to the page that
+holds the cable. The banner marks such a board `data-cable="other-page"`.
+Without the flag nothing changes, the loud 409 at install included: it is
+what stops a reloading page from installing without its cable. The bus also
+counts every `port.open()` per board (`openAttempts`), which a walk reads.
+
+This is the door's way of being a second tab, and no more: a taker tab has
+the bytes and not the cable, so it cannot reset, flash or switch the board.
+`just walk-two-tabs-emu` is its walk
+(`docs/adr/2026-10-08-the-board-card-and-one-home-page.ai.md`, the amendment of
+the same date).
+
+## Follow-ups
+- **The golden-trace question** (plan two OQ3) was answered at G2 and is its own
+  ADR: [2026-09-10-an-emulator-captured-trace-is-evidence-not-a-fixture.ai.md](2026-09-10-an-emulator-captured-trace-is-evidence-not-a-fixture.ai.md).
+  An emulator-captured trace is named `<id>.emu.jsonl`, a code guard makes
+  overwriting a silicon fixture impossible, and — the rule that made it an ADR —
+  an emulator-captured trace may never be the sole evidence for a claim about
+  hardware (plan two M6, PR #658).

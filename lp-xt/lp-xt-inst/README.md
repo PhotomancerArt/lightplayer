@@ -25,7 +25,7 @@ Measured with this crate's own `objdiff` rig against
 | IDF 2nd-stage bootloader (segments 1 + 3) | 7,041 | 6,638 | **94.28 %** | 0 | 403 |
 
 M0's inventory measured the same three artefacts before this widening at
-98.21 %, 95.69 % and 93.58 % (`docs/reports/2026-09-10-xtensa-firmware-isa-inventory.md`).
+98.21 %, 95.69 % and 93.58 % (`docs/reports/2026-09-10-xtensa-firmware-isa-inventory.ai.md`).
 
 ### What the residue is, by name — and why a percentage is not the deliverable
 
@@ -173,7 +173,7 @@ the espup toolchain path and can be overridden with `$XT_OBJDUMP` or a second
 CLI argument; use the **LX6** binary (`xtensa-esp32-elf-objdump`) on an LX6
 artefact.
 
-Golden vectors GV1–GV3b (from the spike, `FINDINGS.md`) are decode/encode unit
+Golden vectors GV1–GV3b (from the spike, `FINDINGS.ai.md`) are decode/encode unit
 tests in `tests/golden_vectors.rs`; the FP/Boolean/SR goldens are in
 `tests/fp_golden_vectors.rs`; the machine-mode families M1 P1 added are in
 `tests/machine_golden_vectors.rs`, all derived by the procedure written down in
@@ -204,7 +204,7 @@ cross-checked against `xtensa-esp32s3-elf-objdump`.
 
 No GPL source was copied, transliterated, or line-by-line adapted. binutils
 (`xtensa-modules.c`) and QEMU were **not** used — they are behavioral references
-only per `docs/adr/2026-07-29-license-provenance-discipline.md`. Per-file
+only per `docs/adr/2026-07-29-license-provenance-discipline.ai.md`. Per-file
 provenance headers appear at the top of `src/lib.rs`, `src/decode.rs`,
 `src/encode.rs` and `src/sr.rs`.
 

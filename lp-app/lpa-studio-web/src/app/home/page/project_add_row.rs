@@ -34,7 +34,7 @@ pub(crate) fn ProjectAddRow(
         div { class: "tw:flex tw:flex-wrap tw:items-center tw:gap-2",
             // "New": pick a template, then create-and-open (2026-07-27
             // deviation from D17 — see
-            // docs/adr/2026-07-27-node-authoring-operations.md).
+            // docs/adr/2026-07-27-node-authoring-operations.ai.md).
             NewProjectMenu { busy, initially_open: menu_open, on_action }
             button {
                 class: quiet_action_class(),

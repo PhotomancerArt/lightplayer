@@ -27,13 +27,13 @@ writability — it only removes pending overlay state.
 
 The singular `mutate` path applies unconditionally (no validation); it has no
 wire-facing caller and any new caller must route through the same validation
-(see the follow-ups in `docs/adr/2026-07-04-studio-editing-model.md`).
+(see the follow-ups in `docs/adr/2026-07-04-studio-editing-model.ai.md`).
 
 ## Node Authoring Operations
 
 `create_node` / `remove_node` (`registry/node_authoring.rs`) are the
 dedicated node-lifecycle operations behind the `CreateNode` / `RemoveNode`
-wire commands (`docs/adr/2026-07-27-node-authoring-operations.md`). They are
+wire commands (`docs/adr/2026-07-27-node-authoring-operations.ai.md`). They are
 the sanctioned path around the `nodes` map's `Fixed` role: generic slot
 gestures on the map stay rejected, while the ops validate everything up
 front and then act atomically, staging through the crate-private
@@ -103,7 +103,7 @@ does not bump the overlay revision.
 
 The editing model (why dirty state derives from the overlay, revision gating,
 the client edit buffer) is recorded in
-`docs/adr/2026-07-04-studio-editing-model.md`.
+`docs/adr/2026-07-04-studio-editing-model.ai.md`.
 
 ## Validation
 

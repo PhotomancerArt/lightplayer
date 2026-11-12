@@ -5,7 +5,7 @@
 //! per-element enum boxing, no padding. Target-specific layout padding
 //! (std430 vec3 stride, std140 uniform strides) belongs to the ABI
 //! marshal layer and is never stored. See
-//! `docs/adr/2026-08-08-typed-shader-buffers.md`.
+//! `docs/adr/2026-08-08-typed-shader-buffers.ai.md`.
 
 use alloc::vec;
 use alloc::vec::Vec;

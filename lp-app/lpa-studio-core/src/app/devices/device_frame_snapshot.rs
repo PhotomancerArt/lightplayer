@@ -12,7 +12,7 @@
 //!
 //! # Posture: a cache, not user data
 //!
-//! The AGENTS.md persisted-format rule is honoured the additive way.
+//! The AGENTS.ai.md persisted-format rule is honoured the additive way.
 //! Nothing that already exists changes shape: the registry row is
 //! untouched, and this file is NEW, keyed by uid, with its own
 //! [`DEVICE_FRAME_SNAPSHOT_VERSION`]. Absence is the default — a board

@@ -606,7 +606,7 @@ fn logs_keep_flowing_beside_a_busy_proto_stream() {
 /// `datagram_room` is what `send` would take: a caller that pops each log
 /// record out of its own ring asks it first, so a record the link would
 /// refuse is never taken (the classic's `[OUT] dump` lost parts that way —
-/// docs/defects/2026-09-29-the-classics-log-ring-drops-records-under-a-project-load-burst.md).
+/// docs/defects/2026-09-29-the-classics-log-ring-drops-records-under-a-project-load-burst.ai.md).
 #[test]
 fn datagram_room_counts_the_slots_send_would_fill() {
     let cfg = LinkConfig {

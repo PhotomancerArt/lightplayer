@@ -35,7 +35,7 @@
 //! This port reproduces the behavior deliberately: the canonical GLSL is
 //! normative, the Q32 sibling agrees with it, and "improving" the f32 version
 //! would make the two float modes disagree while leaving the actual bug in
-//! place. Recorded in `docs/defects/2026-07-31-psrdnoise3-period-does-not-tile.md`;
+//! place. Recorded in `docs/defects/2026-07-31-psrdnoise3-period-does-not-tile.ai.md`;
 //! fixing it is a canonical-plus-Q32 change, out of scope for the f32 family.
 
 use crate::f32_math::{floor, fract, glsl_mod, sqrt};

@@ -744,7 +744,7 @@ fn user_guide_dir(manifest_dir: &Path) -> PathBuf {
 }
 
 /// Every `.md` file in the guide directory, sorted. Files that are not
-/// registered in `PAGES` (the contributor-facing `STYLE.md`, for one) are
+/// registered in `PAGES` (the contributor-facing `STYLE.ai.md`, for one) are
 /// still watched — adding an article should rebuild the checks — but only
 /// registered pages are scanned, since only they render.
 fn markdown_files(docs_dir: &Path) -> Vec<PathBuf> {
@@ -798,6 +798,7 @@ fn parse_doc_page_entry(expr: &Expr, mod_path: &Path) -> DocPageDecl {
 
     let mut slug = None;
     let mut file = None;
+    let mut agent_written = None;
     let mut sims = Vec::new();
     for field in &entry.fields {
         let syn::Member::Named(name) = &field.member else {
@@ -806,6 +807,7 @@ fn parse_doc_page_entry(expr: &Expr, mod_path: &Path) -> DocPageDecl {
         match name.to_string().as_str() {
             "slug" => slug = string_literal(&field.expr),
             "markdown" => file = include_str_file_name(&field.expr),
+            "agent_written" => agent_written = bool_literal(&field.expr),
             "sims" => sims = parse_sim_specs(&field.expr, mod_path),
             _ => {}
         }
@@ -823,7 +825,32 @@ fn parse_doc_page_entry(expr: &Expr, mod_path: &Path) -> DocPageDecl {
             mod_path.display()
         )
     });
+    let agent_written = agent_written.unwrap_or_else(|| {
+        panic!(
+            "docs page `{slug}` in {} must set `agent_written` to `true` or `false`",
+            mod_path.display()
+        )
+    });
+    // `.ai.md` is the repo's mark for agent-written markdown; the page's
+    // "an agent wrote this" note follows the file name, never a hand flag.
+    assert_eq!(
+        agent_written,
+        file.ends_with(".ai.md"),
+        "docs page `{slug}` in {}: `agent_written` must be {} for `{file}`",
+        mod_path.display(),
+        file.ends_with(".ai.md"),
+    );
     DocPageDecl { slug, file, sims }
+}
+
+fn bool_literal(expr: &Expr) -> Option<bool> {
+    match expr {
+        Expr::Lit(lit) => match &lit.lit {
+            Lit::Bool(value) => Some(value.value),
+            _ => None,
+        },
+        _ => None,
+    }
 }
 
 fn parse_sim_specs(expr: &Expr, mod_path: &Path) -> Vec<(String, String)> {

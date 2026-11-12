@@ -107,7 +107,7 @@ buckets stay disjoint). Cache pricing convention: write = 1.25× input
 rate, read = 0.1×. Known caveat (measured): the system prompt embeds the
 current shader source and is rebuilt per turn, so a staged edit
 invalidates the cached prefix for the following request — see the
-2026-07-27 addendum to `docs/adr/2026-07-25-studio-shader-agent-architecture.md`.
+2026-07-27 addendum to `docs/adr/2026-07-25-studio-shader-agent-architecture.ai.md`.
 
 ## Extended thinking
 

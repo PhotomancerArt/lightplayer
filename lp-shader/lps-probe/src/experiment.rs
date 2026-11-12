@@ -1120,15 +1120,15 @@ mod tests {
     /// Perf sanity: ~100-line shader, 4096 `render` evals through one grid
     /// probe. Prints the duration — this number decides whether probe
     /// evaluation needs a worker offload (the follow-up in
-    /// `docs/adr/2026-07-25-shader-probe-experiment-api.md`).
+    /// `docs/adr/2026-07-25-shader-probe-experiment-api.ai.md`).
     ///
     /// Wall-clock, so it measures the machine as much as the code: six
-    /// incidents in `docs/debt/lps-probe-perf-test-load-sensitive.md`, one of
+    /// incidents in `docs/debt/lps-probe-perf-test-load-sensitive.ai.md`, one of
     /// which hid a real compile break by aborting `test-rust-core` before the
     /// later recipes ran. Out of the default suite — run it with
     /// `just perf-probe` on a quiet machine (the recipe prints `uptime`).
     #[test]
-    #[ignore = "wall-clock and load-sensitive; run via `just perf-probe` (docs/debt/lps-probe-perf-test-load-sensitive.md)"]
+    #[ignore = "wall-clock and load-sensitive; run via `just perf-probe` (docs/debt/lps-probe-perf-test-load-sensitive.ai.md)"]
     fn perf_4096_render_evals_under_10s_debug() {
         let src = perf_shader_100_lines();
         let spec = perf_grid_spec(64);

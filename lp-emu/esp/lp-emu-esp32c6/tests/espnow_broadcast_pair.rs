@@ -82,7 +82,7 @@ const STAGGER_MS: u64 = 250;
 /// receiving guest reporting **every other** frame, and "is that a phase
 /// artefact of two machines a fixed distance apart, or is it structural?" is a
 /// question one environment variable answers in a second. It was structural
-/// (`docs/debt/emu-c6-air-delivers-every-other-frame.md`, retired 2026-09-09),
+/// (`docs/debt/emu-c6-air-delivers-every-other-frame.ai.md`, retired 2026-09-09),
 /// and the knob is kept because the *next* question of that shape deserves the
 /// same one-second answer. It is not a knob a committed transcript ever uses:
 /// the recorded pair is [`STAGGER_MS`].
@@ -307,7 +307,7 @@ fn the_pair_hears_the_other_boards_events() {
 /// `gap` is the receiving guest's own arithmetic — the distance between this
 /// frame's peer event number and the previous one's — so **1 means nothing was
 /// missed**, and 1 is what two real XIAO C6s record on every one of their
-/// records (`docs/reports/2026-09-09-espnow-broadcast-two-board-silicon-replay.md`).
+/// records (`docs/reports/2026-09-09-espnow-broadcast-two-board-silicon-replay.ai.md`).
 /// Nothing here was tuned toward that figure: the delivery was made correct
 /// and the figure followed.
 #[test]

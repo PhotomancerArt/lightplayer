@@ -3,7 +3,7 @@
 use lpc_model::{Slotted, VisualProductSlot};
 
 /// Runtime state exposed by a module node: the scope's `visual.out`
-/// mirrored as a produced `output` (modules.md R7). The row carries the
+/// mirrored as a produced `output` (modules.ai.md R7). The row carries the
 /// module node's own product handle (playlist parity); render dispatch
 /// forwards to the scope's actual producer, and a scope with no visual
 /// writer renders cleared (a module without a visual is a legitimate

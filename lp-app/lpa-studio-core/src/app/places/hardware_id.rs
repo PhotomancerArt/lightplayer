@@ -1,7 +1,7 @@
 //! `HardwareId`: where a unit's durable identity comes from.
 //!
 //! Design: `~/.photomancer/planning/lp2025/2026-08-04-1748-hardware-anchored-device-identity/design.md`
-//! §2/§4 (graduates to `docs/design/device-identity.md` at P5). The point
+//! §2/§4 (graduates to `docs/design/device-identity.ai.md` at P5). The point
 //! of this type is erase-proofness: a `dev…` uid stamped into the
 //! device's filesystem dies with `EraseDevice`, but the factory efuse MAC
 //! survives it by construction, so deriving the uid FROM the MAC instead

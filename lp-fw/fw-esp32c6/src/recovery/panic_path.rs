@@ -38,7 +38,7 @@
 //! Adopted from `fw-esp32v3`, whose ordering was forced by measurement: on the
 //! classic, a fault raised while WS281x channels are opening resets the chip
 //! after roughly five characters of output
-//! (`docs/defects/2026-08-01-classic-rmt-open-fault.md`). No equivalent
+//! (`docs/defects/2026-08-01-classic-rmt-open-fault.ai.md`). No equivalent
 //! measurement exists for this chip — its USB-Serial-JTAG path is a different
 //! peripheral with different drain behaviour — so this ordering is adopted as
 //! the safer default rather than because the C6 was seen to truncate. The cost
@@ -231,7 +231,7 @@ pub fn stage_oom_and_reset(layout: core::alloc::Layout) -> ! {
     // no amount of reading `free`/`largest` here will explain it — the report
     // has to say so rather than let the next reader infer fragmentation from
     // numbers that do not support it. See
-    // `docs/defects/2026-08-02-classic-oom-retry-succeeds.md`.
+    // `docs/defects/2026-08-02-classic-oom-retry-succeeds.ai.md`.
     //
     // SAFETY: `layout` came from a real allocation request, so its size is
     // non-zero, and the block is released immediately with the same layout.

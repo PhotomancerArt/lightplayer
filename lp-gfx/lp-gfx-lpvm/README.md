@@ -22,7 +22,7 @@ name the type as `TargetLpvmGraphics`. `riscv32` is the on-device JIT — the
 product path; it is never optional.
 
 Per the lp-gfx doctrine (see
-`docs/adr/2026-07-09-preview-fidelity-tiers.md`), this backend is always
+`docs/adr/2026-07-09-preview-fidelity-tiers.ai.md`), this backend is always
 present; optional GPU backends are additional and runtime-selected, never a
 silent substitute. `LpvmGraphics` compiles the `Q32` semantics tier only and
 rejects an explicit `F32Gpu` request with an error.

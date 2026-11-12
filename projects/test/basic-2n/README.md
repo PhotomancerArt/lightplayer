@@ -55,7 +55,7 @@ emits sorted by name because that is the canonical writer's order and
 
 ## Who uses them
 
-`docs/reports/2026-09-06-classic-not-enough-heap.md` — the per-node cost
+`docs/reports/2026-09-06-classic-not-enough-heap.ai.md` — the per-node cost
 attribution section (bytes per fixture+output pair per owner, device width
 from `lp-cli profile --collect alloc` and host slopes from
 `lp-core/lpc-engine/tests/per_node_memory_table.rs`). That test regenerates its

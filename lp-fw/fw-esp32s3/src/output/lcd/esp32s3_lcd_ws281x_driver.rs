@@ -271,7 +271,7 @@ impl Ws281xDriver for Esp32S3LcdWs281xDriver {
             // `gpio_number` checked the pin exists, so `steal` cannot panic.
             // The i8080 builder keeps no guard for the pin (unlike the RMT
             // channel's), so a later rebind of the same pad cannot disconnect
-            // it (docs/defects/2026-09-02-same-gpio-rebind-disconnects-the-pad.md).
+            // it (docs/defects/2026-09-02-same-gpio-rebind-disconnects-the-pad.ai.md).
             bind_lane(lcd, lane, unsafe { AnyPin::steal(gpio) })
         });
         if let Err(error) = opened {

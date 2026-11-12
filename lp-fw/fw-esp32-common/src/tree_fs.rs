@@ -148,7 +148,7 @@ where
 /// The store as the board's filesystem. Its write-only files (access
 /// files, the network file: `lpc_access::is_write_only_file_path`) are
 /// secret to it: replaced or deleted, their old versions are erased from
-/// flash right after the commit, not left as garbage for GC (FORMAT.md
+/// flash right after the commit, not left as garbage for GC (FORMAT.ai.md
 /// "Secret files").
 fn served<F: Flash, H: ObjectHasher>(st: TreeStore<F, H>) -> LpFsTree<F, H> {
     LpFsTree::new(st).with_secret_paths(lpc_access::is_write_only_file_path)
@@ -156,7 +156,7 @@ fn served<F: Flash, H: ObjectHasher>(st: TreeStore<F, H>) -> LpFsTree<F, H> {
 
 /// Whether this boot may change the store's **format** on flash: set an
 /// incompat flag, write a sector of a newer format version, or start an
-/// in-place conversion (FORMAT.md "Versioning", the trial rule). Only on a
+/// in-place conversion (FORMAT.ai.md "Versioning", the trial rule). Only on a
 /// confirmed boot: a core on an unconfirmed over-the-air trial may yet roll
 /// back to the core before it, which must still boot and read the ordinary
 /// files — and a store flagged or converted by the trial core would be
@@ -274,7 +274,7 @@ mod tests {
         for s in 0..SECTORS {
             let mut h = [0u8; 24];
             f.peek(s * 4096, &mut h);
-            // A hot sector's header names head kind 1 (FORMAT.md "Sector").
+            // A hot sector's header names head kind 1 (FORMAT.ai.md "Sector").
             if h[..4] == 0x3153_544Cu32.to_le_bytes() && h[6] == 1 {
                 f.erase_sector(s).unwrap();
             }

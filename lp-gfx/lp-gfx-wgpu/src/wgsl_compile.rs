@@ -224,7 +224,7 @@ mod tests {
         );
     }
 
-    /// The defect's subject (`docs/defects/2026-09-06-gpu-tier-executes-unbounded-shaders.md`):
+    /// The defect's subject (`docs/defects/2026-09-06-gpu-tier-executes-unbounded-shaders.ai.md`):
     /// the fault-demo rig's `while (true)` is refused before anything reaches
     /// a device. Nothing here creates a wgpu device — the assertion is on the
     /// compile refusal alone, which is the only safe way to test it.
@@ -305,7 +305,7 @@ mod tests {
     fn validation_errors_are_reported_at_the_authored_line() {
         // A scalar uniform array fails naga's uniform-buffer layout
         // validation after parsing cleanly
-        // (`docs/debt/wgpu-refuses-scalar-uniform-arrays.md`).
+        // (`docs/debt/wgpu-refuses-scalar-uniform-arrays.ai.md`).
         let message = compile_error_message(
             "layout(binding = 0) uniform vec2 outputSize;\n\
              layout(binding = 1) uniform float weights[4];\n\

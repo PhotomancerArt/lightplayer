@@ -40,7 +40,7 @@ pub const OTA_MANIFEST_FORMAT: u32 = 1;
 ///   supported Studio reads it.
 /// - `version`, `commit` and `target` are never re-rendered: a different
 ///   spelling of the same value is a format change (the 2026-08-07 uid
-///   incident, AGENTS.md "Persisted-format compatibility").
+///   incident, AGENTS.ai.md "Persisted-format compatibility").
 ///
 /// # The board reports exactly this identity (doors #2)
 ///
@@ -125,7 +125,7 @@ pub struct Requires {
     /// The build mounts the tree store (its manifest core lists `fs.tree`):
     /// the board must already be on it — its hello's build lists `fs.tree` —
     /// or a littlefs board's files move over USB first (the tree-store
-    /// cutover, ADR `2026-10-16-c6-tree-store-cutover-migration.md`).
+    /// cutover, ADR `2026-10-16-c6-tree-store-cutover-migration.ai.md`).
     /// Additive (format 1): absent reads `false`, which every manifest
     /// written before the field is — none of those builds mounts the tree
     /// store — and a littlefs build writes nothing, so its bytes do not

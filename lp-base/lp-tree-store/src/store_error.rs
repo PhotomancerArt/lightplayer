@@ -26,7 +26,7 @@ pub enum StoreError<E> {
     Damaged(&'static str),
     /// Flash this code must not read: a sector header with an incompat flag
     /// or head kind a newer format added, or written for another sector
-    /// size (FORMAT.md "Sector"). Nothing was read past the headers; do not
+    /// size (FORMAT.ai.md "Sector"). Nothing was read past the headers; do not
     /// format over it without asking.
     Unsupported(&'static str),
     /// A path or file too large for the format.

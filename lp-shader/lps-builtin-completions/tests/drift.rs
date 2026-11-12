@@ -9,7 +9,7 @@
 //! **Modes are invisible to the user, so they are invisible to the manifest.**
 //! A q32/f32 twin pair shares one GLSL name and one signature — `acos` is
 //! `acos` whichever float mode the shader compiles in, and the compiler picks
-//! the variant (see `lps-builtin-ids`' mapping docs and `docs/design/float.md`).
+//! the variant (see `lps-builtin-ids`' mapping docs and `docs/design/float.ai.md`).
 //! Emitting an entry per mode would put a duplicate `acos` in the editor's
 //! completion list. So each entry is resolved through **both** the q32 and the
 //! f32 resolver, and the reachability sweeps below still range over every

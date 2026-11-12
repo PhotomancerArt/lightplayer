@@ -3,7 +3,7 @@
 // one-instruction `.S` file (see `lp-xt/fixtures/fp/README.md` for the exact
 // derivation procedure and its raw output). Tool *output* is fact and carries no
 // license obligation; no binutils, GCC, or QEMU source was read or adapted. See
-//   docs/adr/2026-07-29-license-provenance-discipline.md
+//   docs/adr/2026-07-29-license-provenance-discipline.ai.md
 // Format names (`FP0`, `FP1`, `RRR`, `RRI8`) and operand semantics come from the
 // Xtensa ISA Reference Manual.
 //
@@ -34,7 +34,7 @@
 //! | `mov.s` `abs.s` `neg.s` | `fr, fs` | OK | PRESENT | yes |
 //! | `div0.s` `recip0.s` `sqrt0.s` `rsqrt0.s` | `fr, fs` | OK | PRESENT | division / sqrt sequence |
 //! | `nexp01.s` `mkdadj.s` `addexp.s` `addexpm.s` | `fr, fs` | OK | PRESENT | division / sqrt sequence |
-//! | `mksadj.s` | `fr, fs` | OK | PRESENT (missed by P1's probe list, added and measured by P6 — the real `__ieee754_sqrtf` sequence executed it 272/272 end-to-end, `docs/defects/2026-07-31-mksadj-missing-from-fp-subset.md`) | sqrt sequence |
+//! | `mksadj.s` | `fr, fs` | OK | PRESENT (missed by P1's probe list, added and measured by P6 — the real `__ieee754_sqrtf` sequence executed it 272/272 end-to-end, `docs/defects/2026-07-31-mksadj-missing-from-fp-subset.ai.md`) | sqrt sequence |
 //! | `const.s` | `fr, imm0_15` | OK | PRESENT | division sequence |
 //! | `rfr` | `ar, fs` | OK | PRESENT | yes |
 //! | `wfr` | `fr, as` | OK | PRESENT | yes |
@@ -87,29 +87,29 @@
 //! - **`FCR` and `FSR` both reset to 0**, and **FSR accumulates**: 0 on a fresh
 //!   boot, `0x400` after a 24-instruction FP sweep with no intervening write. So
 //!   FSR is a sticky-flag register on this chip and `lp-xt-emu` models
-//!   accumulation — even though `float.md` §2 puts it out of shader reach.
+//!   accumulation — even though `float.ai.md` §2 puts it out of shader reach.
 //!
-//! ## What `docs/design/float.md` already constrains here
+//! ## What `docs/design/float.ai.md` already constrains here
 //!
 //! The product spec outranks both IEEE-where-adopted and silicon-as-data, so
 //! three of its rows bind M7's use of this subset before any measurement:
 //!
-//! - **`FCR` is not shader-reachable.** float.md §2: rounding is
+//! - **`FCR` is not shader-reachable.** float.ai.md §2: rounding is
 //!   round-to-nearest-even always, there is no dynamic rounding mode, and
 //!   "emitters never change the mode". `rur.fcr`/`wur.fcr` are modeled so M6 can
 //!   *measure* the reset value and so the conformance harness can prove the mode
 //!   never moves — not so compiled shader code can touch them.
-//! - **`FSR` is not observable either.** float.md §2: no floating-point
+//! - **`FSR` is not observable either.** float.ai.md §2: no floating-point
 //!   exceptions or observable status flags. Same reasoning: modeled to measure,
 //!   not to emit.
-//! - **`trunc.s` alone does not satisfy the conversion row.** float.md §3 makes
+//! - **`trunc.s` alone does not satisfy the conversion row.** float.ai.md §3 makes
 //!   float→int truncation toward zero with **saturation** of finite
 //!   out-of-range values a *Guaranteed* behavior, and §5 leaves NaN
 //!   unspecified. Whether the S3's `trunc.s` saturates or wraps is a P4/P6
 //!   measurement; if it does not saturate, M7 owes a clamp, not a spec
 //!   amendment.
 //!
-//! Denormal flush-to-zero is *target-defined by policy* (float.md §4, settled at
+//! Denormal flush-to-zero is *target-defined by policy* (float.ai.md §4, settled at
 //! G1): the S3 is expected to flush and M6's job is to supply the datum, not to
 //! decide the semantics.
 //!

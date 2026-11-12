@@ -32,13 +32,13 @@ use alloc::string::ToString;
 ///
 /// [`FloatMode::Float`] is the authored surface for native `f32`. It reaches
 /// the compiler as a per-shader parameter
-/// (`docs/adr/2026-08-01-float-mode-as-a-compiler-parameter.md`), and what it
+/// (`docs/adr/2026-08-01-float-mode-as-a-compiler-parameter.ai.md`), and what it
 /// becomes depends on the board: hardware FPU instructions on an ESP32-S3,
 /// soft-float calls on a target without one, and a **compile error** on a
 /// build that linked neither. It never silently falls back to
 /// [`FloatMode::Fixed`] — a board quietly given different numerics than the
 /// author asked for is the failure this refuses
-/// (`docs/adr/2026-07-09-preview-fidelity-tiers.md` §4).
+/// (`docs/adr/2026-07-09-preview-fidelity-tiers.ai.md` §4).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum FloatMode {
     /// Q16.16 fixed point stored in a signed 32-bit integer. Today's native

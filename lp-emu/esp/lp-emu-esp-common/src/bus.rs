@@ -1274,7 +1274,7 @@ impl SocBus {
     /// store access fault, strict mode or not. Silicon does: the C6 split
     /// loader's store to address 0 faulted on a board (`Store/AMO access
     /// fault`) while this bus took 26,452 of them and the core booted
-    /// (`docs/defects/2026-10-14-the-emulated-c6-ignores-stores-to-address-0.md`).
+    /// (`docs/defects/2026-10-14-the-emulated-c6-ignores-stores-to-address-0.ai.md`).
     /// An unmapped store inside a declared window (an unmodelled block) and
     /// every unmapped load keep the logged, permissive answer unless strict.
     /// Off by default; a chip that has declared its windows turns it on.
@@ -1290,7 +1290,7 @@ impl SocBus {
     /// A chip whose contract is the **store address** turns it off. On the
     /// classic ESP32 internal SRAM is fetched with no cache between, silicon
     /// ran freshly written SRAM0 code with no barrier at all (`test_sram0_exec`,
-    /// 2026-09-05, `docs/adr/2026-09-05-classic-jit-code-lives-in-sram0.md`),
+    /// 2026-09-05, `docs/adr/2026-09-05-classic-jit-code-lives-in-sram0.ai.md`),
     /// and the emulator's own invalidation keys off the store (M7 XD3). There
     /// a store into executable memory *is* the publish, and a checker waiting
     /// for a `fence.i` would call every one of them — the second-stage
@@ -2424,7 +2424,7 @@ impl SocBus {
     /// request slot rather than acting at once is what keeps one code path
     /// responsible for a restart — the machine's run loop, which also rebases
     /// the run's cycle budget onto the new clock
-    /// (`docs/defects/2026-09-11-a-reset-replays-the-boards-lifetime.md`).
+    /// (`docs/defects/2026-09-11-a-reset-replays-the-boards-lifetime.ai.md`).
     pub fn request_from_host(&mut self, request: MachineRequest) {
         if let Some(existing) = self.request {
             log::warn!("SocBus: {request:?} dropped, the bus already holds {existing:?}");
@@ -5182,7 +5182,7 @@ mod tests {
     /// a bench switch, a jumper — holds from outside the chip is wired to
     /// the board, not the chip, so it must still read driven after the
     /// restore, even though the snapshot was taken before anything drove it.
-    /// See `docs/defects/2026-10-04-emu-restart-drops-pad-drives.md`.
+    /// See `docs/defects/2026-10-04-emu-restart-drops-pad-drives.ai.md`.
     #[test]
     fn restoring_scalars_keeps_a_pad_an_outside_driver_holds() {
         use crate::pins::PadId;
@@ -5212,7 +5212,7 @@ mod tests {
     /// The reset-domain filter: an HP-only restore puts the HP block back and
     /// **leaves the LP block exactly as the guest left it**. This is the one
     /// property silicon has that the emulator lacked, and it is the whole of
-    /// `docs/defects/2026-09-06-c6-analog-master-wedges-the-bootloader.md`.
+    /// `docs/defects/2026-09-06-c6-analog-master-wedges-the-bootloader.ai.md`.
     #[test]
     fn an_hp_only_restore_leaves_an_lp_block_standing() {
         use crate::regfile::RegFile;

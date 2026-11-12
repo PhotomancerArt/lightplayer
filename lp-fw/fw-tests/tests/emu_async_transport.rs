@@ -6,7 +6,7 @@
 //! `tests/scene_render_emu.rs` proves the firmware server path with the
 //! *synchronous* test transport in `TimeMode::Simulated`; nothing else
 //! covers the async transport `lp-cli` actually uses. That gap hid a framing
-//! regression (`docs/reports/2026-09-06-lp-riscv-emu-speed-probe.md` §4):
+//! regression (`docs/reports/2026-09-06-lp-riscv-emu-speed-probe.ai.md` §4):
 //! the async transport wrote bare JSON lines while the firmware's
 //! `SerialTransport::receive` only accepts `M!`-prefixed lines, so every
 //! client request was silently dropped and the first round-trip timed out.

@@ -1,6 +1,6 @@
 //! Test-only checks of the two writer invariants a bounded reader (an index
 //! checkpoint's roll-forward, a root search that reads no record headers)
-//! stands on — FORMAT.md "What a writer guarantees", I4 and I5 — over raw
+//! stands on — FORMAT.ai.md "What a writer guarantees", I4 and I5 — over raw
 //! images, so the cut sweeps check them after every step and every cut:
 //!
 //! - **I4, log order** ([`check_log_order`]): between two images, every
@@ -29,14 +29,14 @@ use crate::root_record::RootRecord;
 use crate::sector_header::{HeadKind, SECTOR_HEADER_LEN, SectorHeader, SectorRead};
 
 /// Between `before` and `after` (the same flash, a step or a cut apart),
-/// only appends at heads' ends and header changes (FORMAT.md I4).
+/// only appends at heads' ends and header changes (FORMAT.ai.md I4).
 pub fn check_log_order(before: &NorFlashSim, after: &NorFlashSim, ctx: &str) {
     let size = before.geometry().sector_size;
     let read = read_sectors(before);
     let trusted: Vec<u32> = read.iter().flatten().map(|s| s.header.seq).collect();
     if wrapped(&trusted) {
         // Seqs spanning half the counter or more: "newest" is unknowable
-        // from seqs, and a reader reads the whole flash (FORMAT.md "A
+        // from seqs, and a reader reads the whole flash (FORMAT.ai.md "A
         // faster reading"); I4 is a claim about stores that have not.
         return;
     }
@@ -91,7 +91,7 @@ pub fn check_log_order(before: &NorFlashSim, after: &NorFlashSim, ctx: &str) {
 
 /// Every root is in a hot sector, root seqs never decrease in log order,
 /// and `adopted` (the seq a mount took) is one of the two greatest
-/// (FORMAT.md I5). `flash` is read as a mount left it (settled).
+/// (FORMAT.ai.md I5). `flash` is read as a mount left it (settled).
 pub fn check_roots(flash: &NorFlashSim, adopted: u64, ctx: &str) {
     let read = read_sectors(flash);
     let seqs: Vec<u32> = read.iter().flatten().map(|s| s.header.seq).collect();
@@ -134,7 +134,7 @@ pub fn check_roots(flash: &NorFlashSim, adopted: u64, ctx: &str) {
     );
 }
 
-/// A trusted sector of an image, read as FORMAT.md's step 2 reads it.
+/// A trusted sector of an image, read as FORMAT.ai.md's step 2 reads it.
 struct ImageSector {
     header: SectorHeader,
     /// (offset, header, payload) of every record that checks.

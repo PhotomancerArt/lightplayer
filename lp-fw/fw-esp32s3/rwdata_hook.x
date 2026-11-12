@@ -9,7 +9,7 @@
  * for every GPIO signal) and 5,720 B of merged constant pools, almost all of
  * it belonging to code that never runs from an interrupt. Same lever, same
  * shape as the classic's (`fw-esp32v3/rwdata_hook.x`, #521;
- * docs/reports/2026-09-04-classic-ram-budget.md, lever 3).
+ * docs/reports/2026-09-04-classic-ram-budget.ai.md, lever 3).
  *
  * Turning the flag off wholesale would send `lp_ws281x`'s refill tables to
  * flash, which the ISR-in-RAM rule forbids (nothing on the RMT refill path may
@@ -49,7 +49,7 @@
 
 /* Jump tables of `#[ram]` FUNCTIONS are emitted as `.rodata.<function>` (not
  * `.rodata..Lswitch.table.*`) and fall through to flash — the classic's debt
- * entry docs/debt/classic-iram-handlers-reach-flash.md names the two that sit
+ * entry docs/debt/classic-iram-handlers-reach-flash.ai.md names the two that sit
  * on an executed path there (`__level_*_interrupt`, `__pender`). They are not
  * touched by this hook either way: the flag only concerns `Lswitch` tables and
  * the pools. */

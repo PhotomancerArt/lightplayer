@@ -4,7 +4,7 @@
 //! the view (`UiStudioView::offers`). The web renders a surface's buttons
 //! from the tree, and the app agent reads and presses the same tree, so the
 //! two consumers can never disagree about what is offered. See
-//! `docs/adr/2026-10-01-agentic-control-offers-in-core.md`.
+//! `docs/adr/2026-10-01-agentic-control-offers-in-core.ai.md`.
 //!
 //! A verb that needs values first (flash *which board*) declares
 //! [`OfferParam`]s; a press carries [`OfferArgs`], and the offer's

@@ -12,7 +12,7 @@
 //! The two rewrites were once independent scanners and disagreed about *which*
 //! declarations to rewrite — the binding-only layout the engine's palette
 //! header generates was declined by one tier and died in naga
-//! (`docs/defects/2026-08-05-generated-palette-header-dies-on-naga.md`). This
+//! (`docs/defects/2026-08-05-generated-palette-header-dies-on-naga.ai.md`). This
 //! module is the single recognizer both tiers consume; emission stays
 //! tier-specific, recognition cannot diverge again.
 

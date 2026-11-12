@@ -25,7 +25,7 @@ leaves the bus, rejoins it and resumes the update exactly like one that lost
 it. The proof is the board's own word (`cut_proof`): a heartbeat reading
 `resetReason: power-on` after the cut, or the boot count restarted. A run
 with any such cut prints it loudly and exits 1
-(docs/defects/2026-10-23-board-power-cut-one-usb-twin-and-every-check-passed.md;
+(docs/defects/2026-10-23-board-power-cut-one-usb-twin-and-every-check-passed.ai.md;
 `just lint-power-cut-verdict` replays the verdict against captured logs).
 
 The board is resolved by MAC (scripts/emu/board-port.py), never by guessing a
@@ -39,7 +39,7 @@ replaces --hub/--hub-port (the command is split shell-style and run as is).
 `--chip esp32s3` (S3 updates plan, M7 P11): espflash talks to an S3, and the
 verdict is Y's hello after the recovery (a power-on capture to the hello
 naming Y, `running`), not the `[CORE]` line, which the S3 can lose after a
-reset (docs/defects/2026-10-22-the-s3-loses-its-core-line-after-an-updates-reset.md),
+reset (docs/defects/2026-10-22-the-s3-loses-its-core-line-after-an-updates-reset.ai.md),
 and its first heartbeat; the C6's verdict is the `[CORE]` line, as before.
 Both chips take a fresh capture to Y's first heartbeat after the recovery,
 which carries the boot count the cut's proof reads.

@@ -8,7 +8,7 @@ on logs and open no port. The logs under `testdata/power-cut/` are C6 captures
 from the over-the-air update's M7 P11 desk sitting (see the README there):
 real cuts that must PASS, and a real update with NO cut, which is exactly
 what a half cut (one USB twin switched) looks like to the board and must not.
-`docs/defects/2026-10-23-board-power-cut-one-usb-twin-and-every-check-passed.md`
+`docs/defects/2026-10-23-board-power-cut-one-usb-twin-and-every-check-passed.ai.md`
 is why: the C6's verdict could not fail.
 """
 

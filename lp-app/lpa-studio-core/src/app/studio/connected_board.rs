@@ -17,8 +17,8 @@
 //! (Done, an open elsewhere, a dropped link whose hold ran out) is not
 //! connected, whatever the record still says ([`ConnectedBoard::rides`]).
 //!
-//! See `docs/adr/2026-10-08-the-board-card-and-one-home-page.md` §4 and
-//! `docs/adr/2026-07-24-runtime-pool.md`.
+//! See `docs/adr/2026-10-08-the-board-card-and-one-home-page.ai.md` §4 and
+//! `docs/adr/2026-07-24-runtime-pool.ai.md`.
 
 use lpa_devices::{DeviceId, LinkId};
 
@@ -98,7 +98,7 @@ impl ConnectedBoard {
     /// anywhere else — Edit, then Home, shows home.
     ///
     /// It reads the place; it opens, closes and navigates nothing because
-    /// of it (AGENTS.md, "Place is a read-only fact in core").
+    /// of it (AGENTS.ai.md, "Place is a read-only fact in core").
     pub fn shows_editor(&self, place: Option<&UiPlace>, lens_project: Option<&str>) -> bool {
         self.editor_waiting
             || place.is_some_and(|place| self.is_its_page(&place.page, lens_project))

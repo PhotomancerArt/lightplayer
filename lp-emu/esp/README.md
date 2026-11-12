@@ -99,8 +99,8 @@ classic needed its own (DD69): its link is UART0 and its walk drives a
 CH340's auto-reset dance over a control socket, and pretending those were one
 script would have hidden the difference rather than shown it.
 
-Two of the three have a record: `docs/reports/2026-09-08-esp32c6-emulator-walk.md`
-and `docs/reports/2026-09-11-esp32v3-emulator-walk.md`. **The S3 has none
+Two of the three have a record: `docs/reports/2026-09-08-esp32c6-emulator-walk.ai.md`
+and `docs/reports/2026-09-11-esp32v3-emulator-walk.ai.md`. **The S3 has none
 yet** — M6 P11 writes it — so until it lands, what that walk does and does
 not cover is the script's own header and the crate README's "The walk".
 Read each record's "what this does not cover" before quoting a figure out of
@@ -197,7 +197,7 @@ it is not a placeholder:
 | class | why it is `modeled` |
 |---|---|
 | memory | byte-equal to silicon on the compile harness — 372/372 values — which is *evidence in the reason*, not a promotion. `measured` would want a transcript per class |
-| timing | `t1` counts instructions, `t2` uses a per-class model, `t3` adds the flash cache's fills and the APB's wait states on top of class costs the `cycle-probe` kernels measured. `t1` and `t2` stay `modeled`. **`t3` is `documented` inside a band** — the first use of a trust entry's `band` field, which is what a class that is never exact is graded against instead of equality: 85 of 92 like-for-like silicon slices inside [0.80, 1.25] with an aggregate of 1.154, on `shader-compile-stress` and `cycle-probe` and nowhere else, replayed by `--strict-timing`. Not `measured`: the compute residual is one-signed (the model is systematically cheap, with three named unmodelled causes), and `cycle-probe` is the payload the model was calibrated on, so the band rests on one independent workload. A second payload is what promotes it. Derivation: `docs/reports/2026-09-08-esp32c6-t3-calibration.md` §4; the rule: the hardware-validation ADR's 2026-09-08 amendment |
+| timing | `t1` counts instructions, `t2` uses a per-class model, `t3` adds the flash cache's fills and the APB's wait states on top of class costs the `cycle-probe` kernels measured. `t1` and `t2` stay `modeled`. **`t3` is `documented` inside a band** — the first use of a trust entry's `band` field, which is what a class that is never exact is graded against instead of equality: 85 of 92 like-for-like silicon slices inside [0.80, 1.25] with an aggregate of 1.154, on `shader-compile-stress` and `cycle-probe` and nowhere else, replayed by `--strict-timing`. Not `measured`: the compute residual is one-signed (the model is systematically cheap, with three named unmodelled causes), and `cycle-probe` is the payload the model was calibrated on, so the band rests on one independent workload. A second payload is what promotes it. Derivation: `docs/reports/2026-09-08-esp32c6-t3-calibration.ai.md` §4; the rule: the hardware-validation ADR's 2026-09-08 amendment |
 | boot-log | `modeled` on a direct load, which prints no banner at all; **`measured`** on a `--merged` ROM-up boot, whose log is diffed line for line against the committed silicon capture |
 | usb-serial-jtag | the host's three states and the transitions between them, with four committed transcripts behind them (M6) — `boot-idle` over the shipped link against silicon's capture of the *same image bytes*, the port held closed from boot, an unplug mid-session, and no cable at all. M6 P5 adds the working half: the shipped image from flash takes a real `lp-cli upload` over this link, and every filesystem write, heap gate and compiler output is identical to the same script run over UART0. The block's own data path is graded `measured` register by register in `periph/usb_sj.rs`; the **class** stays `modeled` by the rule below. The silicon transcript that would let anybody argue otherwise has landed (`usb-negative-control/silicon-…-b18360ea6.txt`); whether it promotes the class is the director's to rule |
 | pin | the waveform is a modelled peripheral's, decoded by our own decoder (M5 P2), and two pin captures are committed beside their transcripts: on `rmt-chase` the guest's per-frame checksums agree with the pad on all 768 frames (M5 P3), and on `shader-oracle-walk` the **shipped** image's first lit frame off gpio18 is byte-equal to the host oracle's `[ORACLE] rgb=` / `[ORACLE-RV32] rgb=` line, with every later frame the same (M5 P4). The oracle never touched the machine, which makes it the nearest independent check there is; it is still not a measurement, because both readings of the *pad* are ours. A silicon pin transcript — a logic analyser, or M8's C6 `frame-dump` port read beside the decoder — is the `measured` step |
@@ -670,7 +670,7 @@ fast a run goes in exactly one place, the **pace** of a board on a virtual
 LAN (`lp-emu-esp-common`'s `seam::net::lan_pace`): a board held to the
 host's clock waits at its LAN pump when its guest clock has run ahead. Left
 unset that happens only while a host is connected through a LAN forward
-(`docs/defects/2026-10-06-an-emulated-boards-clock-outran-its-lan-host.md`);
+(`docs/defects/2026-10-06-an-emulated-boards-clock-outran-its-lan-host.ai.md`);
 `--pace realtime` holds the board at 1× for the whole run and `--pace max`
 never does, and a set pace is in the run's label (`…@pace=realtime`). A wait
 only sleeps the host thread, so on its own it moves no guest cycle; what it
@@ -687,7 +687,7 @@ front of these two sockets, a `navigator.serial` polyfill
 (`lp-app/lpa-studio-web/public/lpa-link/virtual_serial.js` + `emulator_port.js`)
 in the page, and esptool-js 0.6.0 flashing the packaged image ROM-up — all
 under Studio's *unchanged* device stack. The design and its rules are
-`docs/adr/2026-09-09-studio-device-stack-over-a-virtual-serial-port.md`. The
+`docs/adr/2026-09-09-studio-device-stack-over-a-virtual-serial-port.ai.md`. The
 table below is that mapping.
 
 <!-- TODO(E2, open with Yona): the walk runs against `lp-cli emu serve`, the

@@ -29,7 +29,7 @@ different silicon.
 > A client on the wire gets the wire hello and an answer to its request.
 >
 > The stop ledger is
-> `docs/reports/2026-09-10-esp32v3-strict-boot-inventory.md`.
+> `docs/reports/2026-09-10-esp32v3-strict-boot-inventory.ai.md`.
 
 ## The machine
 
@@ -432,7 +432,7 @@ Three splits are decisions rather than transcription, and each is argued in
 unmapped.** The classic mirrors SRAM1 into the instruction bus, and M0's
 inventory measured **zero** in-symbol-bounds references to that window in the
 shipped `fw-esp32v3` image and in the classic mask ROM
-(`docs/reports/2026-09-10-xtensa-firmware-isa-inventory.md` §5). It is named
+(`docs/reports/2026-09-10-xtensa-firmware-isa-inventory.ai.md` §5). It is named
 anyway — `SRAM1_IBUS_ALIAS_BASE`, with no region behind it — so a strict-bus
 stop can say "the SRAM1 I-bus alias, which this machine deliberately does not
 map" instead of "unmapped". Director ruling DD24.
@@ -620,7 +620,7 @@ waiting:
   given to its allocator as heap region 0 — and the shipped image died ~30k
   cycles later in `LpFs::read_file`. The bench refused that model
   (`changed=0` on silicon, twice) and it was corrected; the entry is
-  `docs/defects/2026-09-10-the-emulator-ran-the-rom-reset-path-on-the-app-core.md`,
+  `docs/defects/2026-09-10-the-emulator-ran-the-rom-reset-path-on-the-app-core.ai.md`,
   **fixed**, and it is worth reading before touching the release path;
 - the ROM-up walk runs on through `Loaded app from partition`, `Disabling RNG
   early entropy source` and the `E boot: Image contains multiple DROM
@@ -1141,7 +1141,7 @@ not to be "fixed" to match**. What to do with any other difference:
 
 | the frame differs from | what it is |
 |---|---|
-| `[ORACLE]` alone (but equals `[ORACLE-RV32]`) | a **compiler** finding — native codegen vs wasmtime, `docs/defects/2026-07-30-q32-native-vs-wasmtime-last-bit.md`. Start at `lpvm-native`. |
+| `[ORACLE]` alone (but equals `[ORACLE-RV32]`) | a **compiler** finding — native codegen vs wasmtime, `docs/defects/2026-07-30-q32-native-vs-wasmtime-last-bit.ai.md`. Start at `lpvm-native`. |
 | **both** host engines | a **machine** finding — the JIT's install path, the cache, a peripheral. The two engines agree with each other on this project. |
 | reading (a) only (the pad disagrees with the firmware's own dump) | the RMT encode, the colour order, or the refill path — **the comparison a board cannot make, and the reason this walk exists**. |
 
@@ -2281,7 +2281,7 @@ replaced it with the view** (“RMT on the classic” above), and behind it both
 paths still idle — the shipped image configures its four slots and transmits
 nothing until a project's output opens. The full ledger, with every pin's citation and the order
 it fixed for P4–P8, is
-`docs/reports/2026-09-10-esp32v3-strict-boot-inventory.md`.
+`docs/reports/2026-09-10-esp32v3-strict-boot-inventory.ai.md`.
 
 ## Tests
 
@@ -2370,7 +2370,7 @@ are comparable only against an emulated run of the same bytes.
 - The register-name tables in `src/regs/` are **generated** from the `esp32`
   PAC's svd2rust offset comments by `scripts/emu/pac-regnames.py --pac esp32`
   and carry the provenance header
-  `docs/adr/2026-07-29-license-provenance-discipline.md` requires. Never
+  `docs/adr/2026-07-29-license-provenance-discipline.ai.md` requires. Never
   hand-edit one; `just lint-emu-regnames` catches it, for both chips.
 - `RNG` **is** generated, since P3. P1 had excluded it — `esp32-0.40.2/
   src/lib.rs:647` gives it base `0x6003_5000`, which is not in the DPORT

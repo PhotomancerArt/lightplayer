@@ -1,7 +1,7 @@
 //! An f32 shader must reach a frame through the **product's** door.
 //!
 //! Regression coverage for
-//! `docs/defects/2026-08-02-f32-shader-cannot-render-a-frame.md`: `float_mode`
+//! `docs/defects/2026-08-02-f32-shader-cannot-render-a-frame.ai.md`: `float_mode`
 //! reached the compiler in the f32 roadmap's M7, and a Float shader compiled on
 //! the ESP32-S3 to real hardware-FPU code — and then failed its first frame,
 //! because the two synthesised hot-path entries (`__render_texture_rgba16`,

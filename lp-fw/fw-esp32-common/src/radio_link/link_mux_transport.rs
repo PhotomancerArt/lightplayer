@@ -19,7 +19,7 @@
 //!
 //! 1. **One frame buffer, three holders.** Every reply is serialized into the
 //!    same static frame buffer (`serial::server_msg`) — the ADR's "no second
-//!    16 KiB buffer per link" (`docs/adr/2026-09-24-ble-transport.md`,
+//!    16 KiB buffer per link" (`docs/adr/2026-09-24-ble-transport.ai.md`,
 //!    decision 3). A long reply stays there as an lp-link *external* message
 //!    while its link cuts it into frames (`Link::send_external`), on USB and
 //!    on each radio link alike, so before anything is serialized into it
@@ -265,7 +265,7 @@ impl<U: ServerTransport + FrameBufHolder, D: DelayNs> LinkMuxTransport<U, D> {
     /// links ([`LINK_SLOTS`]), so none of them grows when a link opens: a
     /// growth then would land above whatever the link allocated and outlive
     /// it, splitting the hole the link leaves when it closes
-    /// (`docs/defects/2026-10-06-a-lan-link-strands-the-heap-below-the-load-floor.md`).
+    /// (`docs/defects/2026-10-06-a-lan-link-strands-the-heap-below-the-load-floor.ai.md`).
     pub fn new(primary: U, port: &'static RadioLinkPort, delay: D) -> Self {
         Self {
             primary,

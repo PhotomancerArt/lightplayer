@@ -5,7 +5,7 @@ can run on. A manifest describes the board metadata, known board-visible
 labels, and claimable resources such as GPIOs, RMT timing channels, and radios.
 (It is not the *firmware* manifest — that is the build's self-description,
 embedded in each image; see
-`docs/adr/2026-08-01-firmware-manifest-architecture.md`. The CLI subcommand is
+`docs/adr/2026-08-01-firmware-manifest-architecture.ai.md`. The CLI subcommand is
 still spelled `lp-cli hardware manifest`.)
 
 The default layout is:
@@ -126,7 +126,7 @@ whose pin was never listed comes back `not-found` however real it is. Before
 calibrating, list every GPIO the chip numbers (minus in-package flash), and
 check any `not-found` against the vendor pin list before trusting it. The
 XIAO C6's D4/D5 (GPIO22/23) sat at `not-found` for four months for exactly
-this reason (`docs/defects/2026-10-03-xiao-c6-d4-d5-unmapped.md`).
+this reason (`docs/defects/2026-10-03-xiao-c6-d4-d5-unmapped.ai.md`).
 
 GPIO resources are claimable hardware resources:
 
@@ -192,7 +192,7 @@ first lit frame, wait `settle_ms` before transmitting (clocking WS281x data
 into an unpowered strip phantom-powers the first pixel through its protection
 diode), and deassert only after `off_debounce_ms` of all-black frames with no
 transmission in flight. See
-`docs/adr/2026-08-08-switched-power-rail-mechanism.md`.
+`docs/adr/2026-08-08-switched-power-rail-mechanism.ai.md`.
 
 Authoring rules:
 
@@ -218,7 +218,7 @@ Authoring rules:
 
 `soft_limits` is the block of *measured* records a board×firmware pairing
 has actually run clean at — evidence, not policy
-(`docs/adr/2026-08-05-manifest-soft-limits-are-measured-records.md`). Every
+(`docs/adr/2026-08-05-manifest-soft-limits-are-measured-records.ai.md`). Every
 field is optional; a manifest states only what has been measured, and each
 record carries its provenance in `measured` (date, firmware, workload,
 observed margins). A record without provenance is a guess and does not
@@ -240,7 +240,7 @@ belong here.
   classic). The tier is a function of the lamps open on the board, never
   of the heap, and the output node's status badge says when it applied.
   Absent = the authored option holds at any scale
-  (`docs/adr/2026-09-06-smoothing-degrades-by-measured-lamp-limits.md`).
+  (`docs/adr/2026-09-06-smoothing-degrades-by-measured-lamp-limits.ai.md`).
   The ESP output provider never opens interpolation (it renders each frame
   once; the ADR's 2026-10-23 amendment), so on ESP boards
   `interpolationLeds` sheds nothing.
@@ -350,7 +350,7 @@ first**, using this board's own silkscreen labels:
 
 An entry is a label from the board's own pin/terminal tables, so the
 project endpoint is that label with the target prefix —
-`ws281x:local:IO18` (`docs/adr/2026-08-03-multi-endpoint-output-node.md`:
+`ws281x:local:IO18` (`docs/adr/2026-08-03-multi-endpoint-output-node.ai.md`:
 the middle segment names the device, the last one names the wire). The
 setup flow generates a board's first project onto the **head** of the list;
 multi-wire generation is future work, so the tail is documentation for now.

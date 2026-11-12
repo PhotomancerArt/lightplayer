@@ -6,7 +6,7 @@
 //! invisible and a failing one only lags. That rule survived until every
 //! failure in the path was a `log::warn!` nobody reads, and "my projects
 //! never published" had no first question to ask
-//! (`docs/defects/2026-08-28-auto-publish-outcomes-invisible.md`). This
+//! (`docs/defects/2026-08-28-auto-publish-outcomes-invisible.ai.md`). This
 //! module is the smallest correction: the driver records what each trip
 //! concluded — including the conclusions that produce **no network traffic
 //! at all** (nothing saved yet, skipped, refused local state) — and two

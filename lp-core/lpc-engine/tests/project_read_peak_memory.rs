@@ -1,5 +1,5 @@
 //! Peak-memory probe for streamed project reads (the classic's OOM shape,
-//! `docs/defects/2026-08-26-project-read-assembly-oom-resets-classic.md`).
+//! `docs/defects/2026-08-26-project-read-assembly-oom-resets-classic.ai.md`).
 //!
 //! The full `Detail + include_slots` read is streamed twice over the shipped
 //! small-dome example under a byte-tracking allocator:

@@ -79,7 +79,7 @@ Original code. ELF parsing is delegated to the permissively-licensed `object`
 crate (Apache-2.0/MIT), the same dependency `lp-xt-inst`'s objdiff uses; no
 ELF handling was hand-rolled beyond reading `object`'s public API, and no GPL
 source (binutils/GDB, QEMU) was consulted for code. See
-`docs/adr/2026-07-29-license-provenance-discipline.md`.
+`docs/adr/2026-07-29-license-provenance-discipline.ai.md`.
 
 For the `reloc` feature: relocation type numbers and `S + A` semantics are
 facts from the Xtensa ELF psABI relocation appendix; what `R_XTENSA_SLOT0_OP`

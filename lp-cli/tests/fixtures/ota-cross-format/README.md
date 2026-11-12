@@ -2,7 +2,7 @@
 
 What a board on the last format-11 release holds when an update brings it to
 format 12: the "before" of the over-the-air project upgrade
-(`docs/adr/2026-10-28-firmware-updates-upgrade-the-boards-projects.md`).
+(`docs/adr/2026-10-28-firmware-updates-upgrade-the-boards-projects.ai.md`).
 **Never migrated, never re-saved**: they are the old bytes the update's
 project stage must find on the board and upgrade.
 

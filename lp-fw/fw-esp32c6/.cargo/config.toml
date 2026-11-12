@@ -20,7 +20,7 @@ rustflags = [
   # `-C panic=abort` must be HERE and not only in the profile: the Cargo
   # profile's `panic` key is silently overridden by the target spec, which is
   # how the cost of unwinding stayed invisible for months (see
-  # docs/reports/2026-03-13-esp32-unwinding-implementation.md, Problem 6).
+  # docs/reports/2026-03-13-esp32-unwinding-implementation.ai.md, Problem 6).
   "-C", "panic=abort",
 
   # ⚠️ NOT part of the unwinding machinery, and deliberately kept when
@@ -34,7 +34,7 @@ rustflags = [
 
   # Flash-budget flags: the app image must fit a 3.25 MB partition, and these buy
   # ~155 KB by giving up on-device diagnostics. Measured 2026-07-28; see
-  # docs/adr/2026-07-28-esp32c6-flash-budget.md. When you need real panic
+  # docs/adr/2026-07-28-esp32c6-flash-budget.ai.md. When you need real panic
   # output while debugging, delete the fmt-debug line first (see README).
   "-Z", "location-detail=none",       # -58 KB: drop panic file:line strings
   "-Z", "fmt-debug=none",             # -93 KB: `{:?}` formats to nothing

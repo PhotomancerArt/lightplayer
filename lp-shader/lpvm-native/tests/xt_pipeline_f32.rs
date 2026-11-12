@@ -176,7 +176,7 @@ fn run_f32(ir: &LpirModule, sig: &LpsModuleSig, entry_name: &str, args: &[u32]) 
 ///   unconditional default. It is no longer opt-in: the capacity problem that
 ///   kept it so was the emulator modeling flash-resident firmware as if it
 ///   shared SRAM with the JIT, and the flash model closed it
-///   (`docs/defects/2026-08-01-xt-f32-builtins-exhaust-the-emulator-code-region.md`).
+///   (`docs/defects/2026-08-01-xt-f32-builtins-exhaust-the-emulator-code-region.ai.md`).
 ///   A stale artifact is still a rebuild rather than a red suite.
 fn builtins_image_with_f32() -> Option<Vec<u8>> {
     let p = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -444,7 +444,7 @@ fn fadd_fsub_fmul_through_the_pipeline() {
     assert_eq!(f32::from_bits(run_float_binop(add, 1.5, 2.25)), 3.75);
     assert_eq!(f32::from_bits(run_float_binop(sub, 1.5, 2.25)), -0.75);
     assert_eq!(f32::from_bits(run_float_binop(mul, 1.5, 2.25)), 3.375);
-    // Infinities and signed zero — float.md §3 Guaranteed rows.
+    // Infinities and signed zero — float.ai.md §3 Guaranteed rows.
     assert_eq!(
         f32::from_bits(run_float_binop(add, f32::INFINITY, 1.0)),
         f32::INFINITY
@@ -529,7 +529,7 @@ fn all_six_float_compares_through_the_pipeline() {
     }
 }
 
-/// float.md §3, a *Guaranteed* row: ordered comparisons are false when either
+/// float.ai.md §3, a *Guaranteed* row: ordered comparisons are false when either
 /// operand is NaN, and `!=` is true.
 ///
 /// This is the row that caught M7 D5's mapping table being wrong — it
@@ -703,7 +703,7 @@ fn floats_cross_a_guest_call_in_address_registers() {
 /// incoming AR keeps the caller's argument. Lowering used to shortcut a
 /// parameter at a call-argument or return boundary straight to that AR, so the
 /// write was silently discarded — the caller's value came back out. This is
-/// `docs/defects/2026-08-01-xtlpn-f32-loses-writes-to-value-parameters.md`, and
+/// `docs/defects/2026-08-01-xtlpn-f32-loses-writes-to-value-parameters.ai.md`, and
 /// it took the `lps-glsl` frontend (the only one that reuses the parameter
 /// vreg) plus Xtensa plus f32 to observe.
 ///
@@ -1283,10 +1283,10 @@ fn unarmed_float_code_faults_with_a_coprocessor_trap() {
 ///
 /// This was `#[ignore]`d while that build failed outright in the esp Rust
 /// backend, which cannot select a float constant pool
-/// (`docs/defects/2026-08-01-xtensa-backend-cannot-select-float-constant-pool.md`
+/// (`docs/defects/2026-08-01-xtensa-backend-cannot-select-float-constant-pool.ai.md`
 /// — still open upstream, worked around in our source), and then ran only
 /// against an opt-in image while the family did not *fit* alongside shader code
-/// (`docs/defects/2026-08-01-xt-f32-builtins-exhaust-the-emulator-code-region.md`).
+/// (`docs/defects/2026-08-01-xt-f32-builtins-exhaust-the-emulator-code-region.ai.md`).
 /// Both are closed: the family is unconditional, and the call it makes crosses
 /// SRAM → flash exactly as it does on silicon. It still skips rather than fails
 /// when the cross-target artifact is absent — see [`builtins_image_with_f32`].

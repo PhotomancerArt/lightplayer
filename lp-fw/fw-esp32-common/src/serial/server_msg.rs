@@ -13,7 +13,7 @@
 //! task: serialization recursion plus a frame-budget buffer must not ride an
 //! interrupt executor's borrowed stack — that exact mistake corrupted the
 //! classic ESP32 on the bench (see
-//! `docs/adr/2026-08-25-classic-uart-io-task-executor-isolation.md`).
+//! `docs/adr/2026-08-25-classic-uart-io-task-executor-isolation.ai.md`).
 
 use alloc::{format, string::String};
 

@@ -5,7 +5,7 @@
 //! [`crate::ClientRequest::Hello`] with the same payload at any time.
 //! Clients compare `proto` against [`WIRE_PROTO_VERSION`]; absence of a
 //! hello from the peer IS the mismatch signal (pre-hello firmware never
-//! sends one). See `docs/adr/2026-07-14-wire-hello-versioning.md`.
+//! sends one). See `docs/adr/2026-07-14-wire-hello-versioning.ai.md`.
 //!
 //! The payload separates two kinds of truth that used to be blurred:
 //! [`BuildFacts`] (what this *binary* is and can do — the runtime
@@ -13,7 +13,7 @@
 //! [`HardwareFacts`] (what this *unit* actually has wired). Capability
 //! reporting is orthogonal to protocol versioning: it describes runtime
 //! abilities, never a wire dialect, and is never negotiated. See
-//! `docs/adr/2026-08-01-capability-reporting-on-hello.md`.
+//! `docs/adr/2026-08-01-capability-reporting-on-hello.ai.md`.
 
 use alloc::borrow::Cow;
 use alloc::string::String;
@@ -33,7 +33,7 @@ use crate::server::startup_refusal::StartupRefusal;
 /// renamed/removed/retyped fields, changed enum variants, changed encoding,
 /// changed semantics of an existing message — anything that would make an
 /// old peer misread a new frame or vice versa. There is no negotiation and
-/// no compatibility shim (see AGENTS.md wire-compat policy): differing
+/// no compatibility shim (see AGENTS.ai.md wire-compat policy): differing
 /// versions mean "assume nothing works; upgrade the firmware".
 ///
 /// # History
@@ -66,7 +66,7 @@ use crate::server::startup_refusal::StartupRefusal;
 ///   variant) and `WireNodeCommandResponse`. A pick, next and previous are
 ///   `PanelWrite`s on `playlist.entry`, which hold and survive a reboot.
 ///   `PACK_FORMAT_VERSION` is unchanged. See
-///   `docs/adr/2026-10-20-the-picked-pattern-is-a-bus-setting.md`.
+///   `docs/adr/2026-10-20-the-picked-pattern-is-a-bus-setting.ai.md`.
 /// - 44: file bodies on the fs wire go as one unambiguous encoding — text as
 ///   a JSON string, any other bytes as `{"base64":"…"}`
 ///   (`lpc_model::body_bytes`, wire 41's rule) — in `FsRequest::Write`,
@@ -74,7 +74,7 @@ use crate::server::startup_refusal::StartupRefusal;
 ///   `FileChunk`. They had been a string that was text unless it decoded as
 ///   base64 of non-UTF-8 bytes, so a text file whose contents spell base64
 ///   (`abcd`, `1234`) was written to the board as binary
-///   (`docs/defects/2026-10-08-fs-write-text-read-as-base64.md`). A binary
+///   (`docs/defects/2026-10-08-fs-write-text-read-as-base64.ai.md`). A binary
 ///   body is now an object, which an old peer cannot decode; the old
 ///   decode path is deleted, not tolerated. `WriteChunkDeflated` is
 ///   unchanged (a bare base64 string, its own field). Text bodies are
@@ -96,7 +96,7 @@ use crate::server::startup_refusal::StartupRefusal;
 ///   existing `FsResponse::WriteChunk`). New variants on both fs enums: an
 ///   old board cannot decode a push that uses them, which is what earns the
 ///   bump. `Write` and `WriteChunk` are unchanged; `PACK_FORMAT_VERSION` is
-///   unchanged. See `docs/adr/2026-10-10-fs-push-boundary-and-deflated-writes.md`.
+///   unchanged. See `docs/adr/2026-10-10-fs-push-boundary-and-deflated-writes.ai.md`.
 /// - 41: file bodies on the edit path go as text — `AssetBodyOverlay::
 ///   ReplaceBody` (Studio's shader edit, `SetArtifactBody`, and the bodies an
 ///   overlay read returns) and `WireCreateNodeRequest`'s `body` and
@@ -105,7 +105,7 @@ use crate::server::startup_refusal::StartupRefusal;
 ///   numbers (~3.5 characters a byte: a 1,971 B shader was a ~7.1 KB
 ///   request, and past ~4.7 KB of source an edit outgrew the board's
 ///   message cap and was dropped unanswered,
-///   `docs/defects/2026-10-08-shader-edits-over-wi-fi-are-refused-board-memory-busy.md`).
+///   `docs/defects/2026-10-08-shader-edits-over-wi-fi-are-refused-board-memory-busy.ai.md`).
 ///   An old peer cannot decode either form. `PACK_FORMAT_VERSION` is
 ///   unchanged.
 /// - 40:the cloud relay's state (plan `lp2025/2026-10-06-0815-wifi-relay`,
@@ -139,7 +139,7 @@ use crate::server::startup_refusal::StartupRefusal;
 ///   by this number (ADR 2). `PACK_FORMAT_VERSION` is unchanged (the
 ///   learned dictionary needs nothing for a new field).
 /// - 37: BLE (the C6's radio links) moves onto lp-link too (plan
-///   `lp2025/2026-09-28-1445-ble-on-lp-link`; `docs/adr/2026-09-24-ble-transport.md`).
+///   `lp2025/2026-09-28-1445-ble-on-lp-link`; `docs/adr/2026-09-24-ble-transport.ai.md`).
 ///   Follows 32 (the classic's UART): the two cut-overs were built side by
 ///   side, the classic merged first, and this one sat open while 33–36
 ///   (access, the filesystem, the build version, Wi-Fi settings) landed, so
@@ -200,10 +200,10 @@ use crate::server::startup_refusal::StartupRefusal;
 ///   `"nobody" | "play" | "edit"` (`lpc_access::OpenTo`), in `AccessList`
 ///   and `AccessSetSwitches` — it was a bool that granted play only. A board
 ///   with no store is open at edit, for now
-///   (`docs/adr/2026-10-02-two-passwords-open-by-default.md`).
+///   (`docs/adr/2026-10-02-two-passwords-open-by-default.ai.md`).
 /// - 32: the classic ESP32's UART0 host link moves onto lp-link (plan
 ///   `lp2025/2026-09-28-2015-classic-uart-on-lp-link`, milestone M5 of
-///   `docs/adr/2026-09-27-lp-link-one-comms-layer.md`). On the classic
+///   `docs/adr/2026-09-27-lp-link-one-comms-layer.ai.md`). On the classic
 ///   (DOM-Z-102/dig2go silicon behind a CH340, and `lp-emu-esp32v3`) UART0
 ///   carries lp-link frames (`LinkConfig::uart()`: 30's stream framing,
 ///   four-frame windows) instead of `M!{json}` lines and `0x00 'L'` COBS
@@ -217,7 +217,7 @@ use crate::server::startup_refusal::StartupRefusal;
 ///   `M!` lines here. `PACK_FORMAT_VERSION` is unchanged.
 /// - 30: the USB device link moves onto lp-link (plan
 ///   `lp2025/2026-09-27-0215-lp-link-usb-cutover`;
-///   `docs/adr/2026-09-27-lp-link-one-comms-layer.md`). On USB-Serial-JTAG
+///   `docs/adr/2026-09-27-lp-link-one-comms-layer.ai.md`). On USB-Serial-JTAG
 ///   (C6/S3 silicon and their emulators) frames are lp-link's — COBS-FF
 ///   between `0x00` delimiters, CRC-32C, resent when lost, channels 0–2,
 ///   a nonce handshake — instead of `M!{json}` lines and `0x00 'L'` COBS
@@ -256,7 +256,7 @@ use crate::server::startup_refusal::StartupRefusal;
 ///   gains a required `kind` and an optional `addedAt`. New variants on
 ///   both enums: an old firmware cannot decode the requests and an old
 ///   client cannot decode the answer. See the 2026-09-24 amendment of
-///   `docs/adr/2026-09-23-ble-access-model.md`. Bumped again after
+///   `docs/adr/2026-09-23-ble-access-model.ai.md`. Bumped again after
 ///   #785 took 24, pattern space took 25 and JSON Pack took 26.
 /// - 26: JSON Pack (plan `lp-json-pack`; bumped again after the BLE M3
 ///   access core took 22, lean-wire follow-ups took 23, the gradient pin
@@ -270,7 +270,7 @@ use crate::server::startup_refusal::StartupRefusal;
 ///   check that tied it to this constant, went at 28.)
 /// - 25: pattern space (bumped again after lean-wire follow-ups took 23
 ///   and the gradient-cycle pin took 24;
-///   `docs/adr/2026-09-24-pattern-space.md`) — the
+///   `docs/adr/2026-09-24-pattern-space.ai.md`) — the
 ///   shader def gains an optional `coords` key (`"pixels"` | `"pattern"`).
 ///   Additive on disk, but NOT on the wire: an old peer refuses a shader def
 ///   carrying a field it does not know, so a project frame holding an
@@ -310,7 +310,7 @@ use crate::server::startup_refusal::StartupRefusal;
 ///   old firmware cannot decode a login. The heartbeat also changes MEANING
 ///   on an untrusted link that holds no tier — it carries nothing the hello
 ///   does not — though no such link exists until the BLE transport lands.
-///   See `docs/adr/2026-09-23-ble-access-model.md`.
+///   See `docs/adr/2026-09-23-ble-access-model.ai.md`.
 /// - 21: the revision gate (lean-wire) — what a probe answers unchanged on
 ///   every read rides behind a revision (`RevisionGateRead` →
 ///   `RevisionGateResult<T>`). First, everything static about a probed
@@ -463,7 +463,7 @@ use crate::server::startup_refusal::StartupRefusal;
 ///   `fw: FwProvenance` is gone: its four provenance fields moved onto
 ///   `build: BuildFacts` alongside the build's `LpFeature` list, and
 ///   `hardware: HardwareFacts` reports the services this unit has wired
-///   (`docs/adr/2026-08-01-capability-reporting-on-hello.md`).
+///   (`docs/adr/2026-08-01-capability-reporting-on-hello.ai.md`).
 /// - 4: `OutputDriverOptionsConfig.brightness` removed. Brightness is a
 ///   fixture-level control only; the output node no longer carries one.
 /// - 3: merge of the two independent "2" bumps below — one wire surface
@@ -471,10 +471,10 @@ use crate::server::startup_refusal::StartupRefusal;
 ///   command channel.
 /// - 2 (node authoring, PR #154): `WireProjectCommand::CreateNode` /
 ///   `RemoveNode` plus inventory node entries/origins
-///   (`docs/adr/2026-07-27-node-authoring-operations.md`).
+///   (`docs/adr/2026-07-27-node-authoring-operations.ai.md`).
 /// - 2 (runtime commands, PR #158): `WireProjectCommand::NodeCommand`
 ///   runtime command channel (playlist activate-entry;
-///   `docs/adr/2026-07-27-runtime-node-command-channel.md`).
+///   `docs/adr/2026-07-27-runtime-node-command-channel.ai.md`).
 /// - 1: hello handshake introduced.
 ///
 /// Every entry above is a BREAKING change — that is what earns a bump,
@@ -552,7 +552,7 @@ pub struct ServerHello {
 ///
 /// This is the runtime projection of the same truth the embedded firmware
 /// manifest core carries (`docs/adr/2026-08-01-firmware-manifest-\
-/// architecture.md`) — the server derives `features` from
+/// architecture.ai.md`) — the server derives `features` from
 /// `lpc_engine::supported_features()` and its own injected services rather
 /// than having them re-stated by each embedder.
 ///

@@ -857,7 +857,7 @@ fn embed_asset_editors_in_slots(
 /// Debug rows a derived face has CLAIMED as its own surface, keyed by what
 /// the face actually carries — the clock's tape transport owns the three
 /// `transport.*` rows (plan 2026-08-04-2355-clock-tape-hero P5, closing
-/// `docs/debt/clock-transport-has-no-transport-ui.md`). Declaration-driven
+/// `docs/debt/clock-transport-has-no-transport-ui.ai.md`). Declaration-driven
 /// on the face arm, NOT a global path-prefix rule: another kind may
 /// legitimately name a slot `transport` someday and its drawer must keep
 /// working.

@@ -41,7 +41,7 @@ pub struct ReachableOutputs {
 ///
 /// The structure epoch moves on every def edit (a slot edit included, live)
 /// and on every node attached or removed (frame-plan ADR,
-/// `docs/adr/2026-10-24-frame-plan-once-per-edit.md`); the output-identity
+/// `docs/adr/2026-10-24-frame-plan-once-per-edit.ai.md`); the output-identity
 /// revision moves when an output registers or changes its name, which a
 /// bound name can do without a structural edit.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

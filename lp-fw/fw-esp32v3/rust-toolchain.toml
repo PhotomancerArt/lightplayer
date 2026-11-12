@@ -1,6 +1,6 @@
 # fw-esp32v3, like fw-esp32s3, builds on Espressif's Rust fork (Xtensa has no
 # upstream Rust target) via the rustup `esp` channel. Quarantined per-crate per
-# `docs/adr/2026-07-29-per-chip-fw-toolchains.md`: the rv32 crates stay on the
+# `docs/adr/2026-07-29-per-chip-fw-toolchains.ai.md`: the rv32 crates stay on the
 # shared pinned nightly and are unaffected.
 #
 # `channel = "esp"` is unversioned and tracks whatever espup installed. Needs

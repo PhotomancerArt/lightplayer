@@ -5,7 +5,7 @@
 //! > side runs −1…1, with y up. In 1D, `pos` runs 0 → 1 from the strand's
 //! > first lamp to its last.
 //!
-//! (`docs/adr/2026-09-24-pattern-space.md`.) A shader opts in with
+//! (`docs/adr/2026-09-24-pattern-space.ai.md`.) A shader opts in with
 //! `"coords": "pattern"` ([`lpc_model::ShaderCoords`]); every other shader
 //! keeps the pixel frame, untouched.
 //!

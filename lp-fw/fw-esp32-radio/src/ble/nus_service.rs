@@ -23,7 +23,7 @@ use trouble_host::prelude::*;
 /// payload: ATT MTU 247 − 3. The host's ATT MTU is its packet size − 4, and
 /// the packet pool is 251 bytes — the controller's largest ACL packet — so
 /// no ATT PDU the board sends can outgrow what the controller takes
-/// (docs/defects/2026-09-25-a-long-bluetooth-write-is-acknowledged-and-lost.md:
+/// (docs/defects/2026-09-25-a-long-bluetooth-write-is-acknowledged-and-lost.ai.md:
 /// with a 255-byte pool the MTU was 251, and a 251-byte Prepare Write
 /// Response failed the host's send and restarted it).
 pub const NUS_VALUE_MAX: usize = 244;

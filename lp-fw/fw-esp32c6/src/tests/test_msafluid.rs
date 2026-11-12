@@ -5,11 +5,11 @@
 //! grid resolutions and prints per-step cycle counts via
 //! `esp_println`. No LEDs, no display — just numbers.
 //!
-//! See docs/plans/2026-04-20-fluid-perf-experiment/00-notes.md for
+//! See docs/plans/2026-04-20-fluid-perf-experiment/00-notes.ai.md for
 //! the full context (motivation: theoretical-upper-bound perf data
 //! point for fluid on esp32 before committing to the engine
 //! pipeline architecture in
-//! docs/future/2026-04-20-engine-pipeline-architecture.md).
+//! docs/future/2026-04-20-engine-pipeline-architecture.ai.md).
 
 extern crate alloc;
 
@@ -31,7 +31,7 @@ use crate::serial::Esp32UsbSerialIo;
 const RESOLUTIONS: &[usize] = &[16, 32, 48, 64];
 /// Jacobi iteration counts to sweep. lp2014 default is 10; lower values
 /// trade convergence for cycles roughly linearly (linear_solver dominates
-/// the update — see notes in 00-notes.md).
+/// the update — see notes in 00-notes.ai.md).
 const ITERATION_COUNTS: &[usize] = &[2, 4, 6, 8, 10];
 const STEPS_TOTAL: usize = 30;
 const STEPS_WARMUP: usize = 5;

@@ -1,11 +1,11 @@
-//! Panel write/clear operations (panel.md P8): the `(scope, channel)`
+//! Panel write/clear operations (panel.ai.md P8): the `(scope, channel)`
 //! command-channel path for panel controls.
 //!
 //! A runtime poke, not an edit: nothing is staged in the overlay, nothing
 //! shows in the Save panel, the project stays clean, and the effect lands
 //! on the engine's next frame — engaged state follows through ordinary
 //! probe pulls (which is also what makes multiple clients converge,
-//! panel.md P9).
+//! panel.ai.md P9).
 
 use core::any::Any;
 
@@ -27,7 +27,7 @@ pub struct PanelWriteOp {
     pub channel: String,
     /// The value to hold.
     pub value: lpc_model::LpValue,
-    /// Momentary renewal deadline (panel.md P14); `None` = latching.
+    /// Momentary renewal deadline (panel.ai.md P14); `None` = latching.
     pub ttl_ms: Option<u32>,
 }
 
@@ -102,7 +102,7 @@ impl ControllerOp for PanelClearOp {
     }
 }
 
-/// Flip panel-state auto-save for the whole project (panel.md P11).
+/// Flip panel-state auto-save for the whole project (panel.ai.md P11).
 ///
 /// Project-level, not scoped: panel state persists per project folder, so
 /// the switch has no `(scope, channel)` identity — which is also why the
