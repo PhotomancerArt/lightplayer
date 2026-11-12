@@ -1,7 +1,7 @@
 //! Experiment/probe evaluation for GLSL shaders on the LPIR f32 interpreter.
 //!
 //! Given user GLSL and an [`ExperimentSpec`], [`run_experiment`] compiles the
-//! shader (naga frontend → LPIR) plus per-probe wrapper functions, evaluates
+//! shader (`lps-glsl` → LPIR) plus per-probe wrapper functions, evaluates
 //! them on the f32 LPIR interpreter, and returns structured diagnostics, an
 //! always-on [`HealthReport`], and per-probe results. This is the pure core of
 //! the shader agent's `iterate` tool: sans-IO, `no_std` + `alloc`, and it also

@@ -5,7 +5,7 @@
 use std::cell::RefCell;
 
 use js_sys::{Array, Function, Reflect};
-use lps_frontend::{compile, lower};
+use lps_glsl::{CompileOptions, compile};
 use lpvm::{LpvmEngine, LpvmModule};
 use lpvm_wasm::rt_browser::{BrowserLpvmEngine, BrowserLpvmInstance, init_host_exports};
 use lpvm_wasm::{FloatMode, WasmOptions};
@@ -36,8 +36,9 @@ pub fn init_engine() {
 
 #[wasm_bindgen]
 pub fn compile_shader(source: &str) -> Result<(), String> {
-    let naga = compile(source).map_err(|e| format!("parse: {e}"))?;
-    let (ir, meta) = lower(&naga).map_err(|e| format!("lower: {e}"))?;
+    let output = compile(source, &CompileOptions::default())
+        .map_err(|diag| format!("compile: {}", diag.render(source)))?;
+    let (ir, meta) = (output.ir, output.meta);
 
     ENGINE.with(|eng| {
         let eng = eng.borrow();

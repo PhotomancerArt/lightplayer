@@ -11,8 +11,10 @@ pub fn handle_shader_lpir(args: ShaderLpirArgs) -> Result<()> {
     let src = std::fs::read_to_string(&args.path)
         .with_context(|| format!("read {}", args.path.display()))?;
 
-    let naga = lps_frontend::compile(&src).context("GLSL parse (Naga)")?;
-    let (ir, _meta) = lps_frontend::lower(&naga).context("lower to LPIR")?;
+    let output = lps_glsl::compile(&src, &lps_glsl::CompileOptions::default())
+        .map_err(|diag| anyhow::anyhow!("{}", diag.render(&src)))
+        .context("GLSL compile")?;
+    let ir = output.ir;
 
     if let Err(errs) = validate_module(&ir) {
         if args.skip_validate {

@@ -1,6 +1,6 @@
 //! Canonical-builtin compilation-unit assembly.
 //!
-//! `lps-frontend` reserves the `lpfn_` name prefix: every call to an `lpfn_*`
+//! `lps-glsl` reserves the `lpfn_` name prefix: every call to an `lpfn_*`
 //! function is lowered to an `@lpfn::` builtin import, which the LPIR
 //! interpreter cannot evaluate. When a source references `lpfn_*`, the
 //! canonical GLSL builtin sources ([`lps_builtins::canonical_glsl`]) are

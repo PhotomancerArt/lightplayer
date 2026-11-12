@@ -116,9 +116,9 @@ enum Cli {
     Lan(lan::LanCli),
     /// A board's Wi-Fi networks: `wifi status|scan|add|forget|set <host>` (a password never on argv).
     Wifi(wifi::WifiCli),
-    /// Compile a GLSL file to LPIR text (stdout). Uses the same Naga → LPIR path as the JIT.
+    /// Compile a GLSL file to LPIR text (stdout). Uses the same `lps-glsl` → LPIR path as the JIT.
     ShaderLpir {
-        /// Path to a `.glsl` file (filetest-style snippet; LPFX preamble is applied like `lps-frontend::compile`)
+        /// Path to a `.glsl` file (filetest-style snippet; LPFX preamble is applied like `lps_glsl::compile`)
         path: std::path::PathBuf,
         /// Print per-function op/vreg counts to stderr (stdout stays pure LPIR for piping)
         #[arg(long)]

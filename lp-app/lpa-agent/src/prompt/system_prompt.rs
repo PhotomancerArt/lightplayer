@@ -52,9 +52,9 @@ pub fn build_system_prompt(ctx: &ShaderContext, current_source: &str) -> String 
          rewriting the entry you did not intend.\n\
          - By convention the uniform `vec2 outputSize` exists when declared; \
          declare uniforms with `layout(binding = N) uniform ...`.\n\
-         - The dialect is GLSL compiled by naga's `glsl-in` frontend (the \
-         LightPlayer dialect): no textures unless declared, no derivatives, \
-         no `discard`.\n\
+         - The dialect is GLSL compiled by LightPlayer's `lps-glsl` frontend \
+         (the LightPlayer dialect): no textures unless declared, no \
+         derivatives, no `discard`.\n\
          - Time landmine (costs a wasted turn if hit): there is no raw \
          `float time` uniform — `bus:time` carries the time product and \
          cannot bind an f32. Periodic motion declares a phasor uniform \
@@ -64,20 +64,10 @@ pub fn build_system_prompt(ctx: &ShaderContext, current_source: &str) -> String 
          seconds value. Genuinely unbounded motion (noise-field advance, dt \
          integration) declares a seconds uniform instead (kind \
          `\"seconds\"`) — think twice; most motion is periodic.\n\
-         - Dialect landmine (costs a wasted turn if hit): do NOT assign \
-         through a swizzle of an indexed array element — `arr[i].x = v;` \
-         and `arr[i].x += v;` fail to lower; rebuild the vector instead \
-         (`arr[i] = vec2(v, arr[i].y);`).\n\
          - If a compile fails, the running device keeps the last good shader \
          (keep-last-good); nothing breaks, but your edit is not live until it \
          compiles.\n\n",
     );
-    // Scope note on the swizzle-store landmine (2026-07-27): it is the NAGA
-    // FRONTEND's limitation ("store to non-local pointer"), not dialect-wide
-    // — rv32lpn.q32 (lps-glsl frontend) compiles the same store fine. The
-    // advice is accurate for today's agent because the agent path is naga
-    // glsl-in; revisit if the shader path ever moves to the lps-glsl
-    // frontend.
 
     // 3. Injected context.
     p.push_str("## Current context\n\n");

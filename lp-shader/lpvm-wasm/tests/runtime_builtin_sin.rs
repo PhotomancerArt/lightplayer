@@ -2,7 +2,6 @@
 
 use std::f32::consts::FRAC_PI_2;
 
-use lps_frontend::{compile, lower};
 use lpvm::{LpsValueF32, LpvmEngine, LpvmInstance, LpvmModule};
 use lpvm_wasm::rt_wasmtime::WasmLpvmEngine;
 use lpvm_wasm::{FloatMode, WasmOptions};
@@ -10,8 +9,9 @@ use lpvm_wasm::{FloatMode, WasmOptions};
 #[test]
 fn call_sin_q32_linked_builtins() {
     let src = "float f(float x) { return sin(x); }";
-    let naga = compile(src).expect("parse");
-    let (ir, meta) = lower(&naga).expect("lower");
+    let output =
+        lps_glsl::compile(src, &lps_glsl::CompileOptions::default()).expect("compile glsl");
+    let (ir, meta) = (output.ir, output.meta);
     let opts = WasmOptions {
         float_mode: FloatMode::Q32,
         ..Default::default()

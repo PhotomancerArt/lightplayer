@@ -1,6 +1,6 @@
 # GLSL → WASM web demo
 
-In-browser pipeline: **GLSL** → `lps-frontend` (Naga) → LPIR → **`lpvm-wasm`** → WASM. Builtin implementations are **Rust from `lps-builtins`**, linked into the same `web_demo.wasm` as the compiler (no separate `builtins.wasm`).
+In-browser pipeline: **GLSL** → `lps-glsl` → LPIR → **`lpvm-wasm`** → WASM. Builtin implementations are **Rust from `lps-builtins`**, linked into the same `web_demo.wasm` as the compiler (no separate `builtins.wasm`).
 
 The page calls `lpvm_init_exports` / `init_engine`, then `compile_shader` / `render_frame` / `get_shader_memory` from the wasm-bindgen bundle (`www/pkg/`).
 

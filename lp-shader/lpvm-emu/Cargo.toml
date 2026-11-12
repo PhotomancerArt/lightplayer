@@ -27,4 +27,4 @@ cranelift-codegen = { workspace = true, default-features = false, features = ["r
 target-lexicon = { workspace = true }
 
 [dev-dependencies]
-lps-frontend = { path = "../lps-frontend" }
+lps-glsl = { path = "../lps-glsl" }

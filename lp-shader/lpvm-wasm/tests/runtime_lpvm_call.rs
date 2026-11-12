@@ -1,6 +1,5 @@
 //! `LpvmEngine` / `LpvmInstance` smoke test (no builtins required).
 
-use lps_frontend::{compile, lower};
 use lpvm::{LpsValueF32, LpvmEngine, LpvmInstance, LpvmModule};
 use lpvm_wasm::rt_wasmtime::WasmLpvmEngine;
 use lpvm_wasm::{FloatMode, WasmOptions};
@@ -8,8 +7,9 @@ use lpvm_wasm::{FloatMode, WasmOptions};
 #[test]
 fn call_float_add_q32_without_builtins() {
     let src = "float add(float a, float b) { return a + b; }";
-    let naga = compile(src).expect("parse");
-    let (ir, meta) = lower(&naga).expect("lower");
+    let output =
+        lps_glsl::compile(src, &lps_glsl::CompileOptions::default()).expect("compile glsl");
+    let (ir, meta) = (output.ir, output.meta);
     let opts = WasmOptions {
         float_mode: FloatMode::Q32,
         ..Default::default()
@@ -38,8 +38,9 @@ float[4] mul2(float[4] a) {
     return r;
 }
 "#;
-    let naga = compile(src).expect("parse");
-    let (ir, meta) = lower(&naga).expect("lower");
+    let output =
+        lps_glsl::compile(src, &lps_glsl::CompileOptions::default()).expect("compile glsl");
+    let (ir, meta) = (output.ir, output.meta);
     let opts = WasmOptions {
         float_mode: FloatMode::Q32,
         ..Default::default()

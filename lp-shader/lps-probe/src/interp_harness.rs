@@ -1,4 +1,4 @@
-//! GLSL → `lps-frontend` (naga) → LPIR → `lpir::interpret_entry` harness.
+//! GLSL → `lps-glsl` → LPIR → `lpir::interpret_entry` harness.
 //!
 //! Extracted and adapted from `lps-filetests/src/test_run/interp.rs`
 //! (`InterpShader`/`InterpInstance`). Differences from the filetests copy:
@@ -23,15 +23,14 @@ use alloc::vec;
 use alloc::vec::Vec;
 use core::fmt;
 
-use lpir::{FloatMode, InterpLimits, LpirModule, Value, interpret_entry};
-use lps_frontend::std_math_handler::StdMathHandler;
+use lpir::{FloatMode, InterpLimits, LpirModule, StdMathHandler, Value, interpret_entry};
 use lps_shared::layout::type_size;
 use lps_shared::{LayoutRules, LpsModuleSig, LpsType, LpsValueF32};
 use lpvm::{encode_uniform_write, glsl_component_count};
 
 use crate::canonical_unit::{execution_unit_source, references_lpfn};
 
-/// Synthesized by `lps-frontend` when globals/uniforms carry declaration
+/// Synthesized by `lps-glsl` when globals/uniforms carry declaration
 /// initializers; writes them into the VMContext.
 const SHADER_INIT_FN: &str = "__shader_init";
 
@@ -145,8 +144,11 @@ impl fmt::Debug for CompiledShader {
 
 /// Compile + lower one composed GLSL unit; errors become diagnostic strings.
 fn frontend_compile(unit: &str) -> Result<(LpirModule, LpsModuleSig), Vec<String>> {
-    let naga = lps_frontend::compile(unit).map_err(|e| vec![e.to_string()])?;
-    lps_frontend::lower(&naga).map_err(|e| vec![e.to_string()])
+    // `lps-glsl` labels positions `<shader>:L:C`; the probe diagnostics
+    // contract (and `probe_wrapper::remap_probe_diagnostics`) keys on `glsl:L:C`.
+    let output = lps_glsl::compile(unit, &lps_glsl::CompileOptions::default())
+        .map_err(|diag| vec![diag.render(unit).replace("--> <shader>:", "--> glsl:")])?;
+    Ok((output.ir, output.meta))
 }
 
 impl InterpInstance {

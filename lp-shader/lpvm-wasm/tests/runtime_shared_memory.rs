@@ -1,6 +1,5 @@
 //! One engine, shared linear memory: multiple instances and host bump allocations.
 
-use lps_frontend::{compile, lower};
 use lpvm::{AllocError, LpsValueF32, LpvmEngine, LpvmInstance, LpvmModule};
 use lpvm_wasm::rt_wasmtime::WasmLpvmEngine;
 use lpvm_wasm::{FloatMode, WasmOptions};
@@ -8,8 +7,9 @@ use lpvm_wasm::{FloatMode, WasmOptions};
 #[test]
 fn two_instances_same_engine_share_memory() {
     let src = "float add(float a, float b) { return a + b; }";
-    let naga = compile(src).expect("parse");
-    let (ir, meta) = lower(&naga).expect("lower");
+    let output =
+        lps_glsl::compile(src, &lps_glsl::CompileOptions::default()).expect("compile glsl");
+    let (ir, meta) = (output.ir, output.meta);
     let opts = WasmOptions {
         float_mode: FloatMode::Q32,
         ..Default::default()
@@ -40,8 +40,9 @@ fn two_instances_same_engine_share_memory() {
 #[test]
 fn engine_memory_alloc_smoke() {
     let src = "float add(float a, float b) { return a + b; }";
-    let naga = compile(src).expect("parse");
-    let (ir, meta) = lower(&naga).expect("lower");
+    let output =
+        lps_glsl::compile(src, &lps_glsl::CompileOptions::default()).expect("compile glsl");
+    let (ir, meta) = (output.ir, output.meta);
     let opts = WasmOptions {
         float_mode: FloatMode::Q32,
         ..Default::default()
