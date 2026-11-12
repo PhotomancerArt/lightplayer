@@ -134,6 +134,7 @@ src/
   parse.rs           text format → LpirModule
   validate.rs        structural validation
   interp.rs          tree-walking interpreter (ImportHandler trait)
+  std_math_handler.rs StdMathHandler: @glsl/@lpir imports in f32 via libm
   tests/             roundtrip, interpreter, validation tests
 ```
 
