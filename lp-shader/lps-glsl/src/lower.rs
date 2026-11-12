@@ -133,7 +133,10 @@ fn lower_function(
         texel_fetch_bounds: module.texel_fetch_bounds,
     };
     lower_statements(&mut ctx, &function.body.statements)?;
-    if *return_ty == LpsType::Void {
+    // A void body falls off its end into an implicit `return` — unless it
+    // already ended in one: a second `return` after the first is dead code
+    // the Cranelift backend refuses (its block is already terminated).
+    if *return_ty == LpsType::Void && !statements_terminate_block(&function.body.statements) {
         ctx.fb.push_return(&[]);
     }
     Ok(ctx.fb.finish())
