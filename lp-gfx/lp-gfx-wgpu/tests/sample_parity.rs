@@ -19,8 +19,8 @@ mod util;
 
 use lp_gfx::{LpGraphics, LpShader, ShaderCompileOptions, ShaderSemantics};
 use lp_gfx_lpvm::TargetLpvmGraphics;
-use lpir::{Value, interpret};
 use lpir::StdMathHandler;
+use lpir::{Value, interpret};
 use lps_shared::LpsValueF32;
 use util::corpus::{CORPUS, CorpusShader};
 use util::diff::diff_frames;

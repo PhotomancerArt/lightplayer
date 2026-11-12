@@ -11,8 +11,8 @@
 mod util;
 
 use lp_gfx::{LpGraphics, ShaderCompileOptions, ShaderSemantics};
-use lpir::{Value, interpret};
 use lpir::StdMathHandler;
+use lpir::{Value, interpret};
 use lps_shared::LpsValueF32;
 
 /// Number of probe evaluations per case (pixel x = 0..N-1).

@@ -26,9 +26,9 @@ use super::types::{
 use super::typing::builtin_has_out_args;
 use super::typing::{
     access_lanes, binary_op_token, builtin_kind, coerce_arithmetic_pair, coerce_comparison_pair,
-    coerce_constructor_args, coerce_expr, glsl_param_token, has_bool_lanes, is_bitwise, is_comparison,
-    is_glsl_import, is_logical, scalar_base_type, scalar_ir_types, scalar_lane_count,
-    type_builtin_args, type_glsl_import_args, vector_dominant_type, zero_expr,
+    coerce_constructor_args, coerce_expr, glsl_param_token, has_bool_lanes, is_bitwise,
+    is_comparison, is_glsl_import, is_logical, scalar_base_type, scalar_ir_types,
+    scalar_lane_count, type_builtin_args, type_glsl_import_args, vector_dominant_type, zero_expr,
 };
 use super::{
     fixed_array_from_base, infer_array_constructor_type, infer_array_decl_type,

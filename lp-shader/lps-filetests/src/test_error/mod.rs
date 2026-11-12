@@ -117,8 +117,11 @@ fn lps_glsl_diagnostic_to_glsl(d: &lps_glsl::Diagnostic, source: &str) -> GlslEr
     let before = &source[..start];
     let line = before.matches('\n').count() + 1;
     let column = start - before.rfind('\n').map_or(0, |i| i + 1) + 1;
-    GlslError::new(ErrorCode::E0001, d.message.clone())
-        .with_location(GlSourceLoc::new(GlFileId(0), line, column))
+    GlslError::new(ErrorCode::E0001, d.message.clone()).with_location(GlSourceLoc::new(
+        GlFileId(0),
+        line,
+        column,
+    ))
 }
 
 fn codegen_compiler_error_to_glsl(e: CompilerError) -> GlslError {

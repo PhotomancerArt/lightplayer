@@ -165,7 +165,10 @@ impl ImportRegistry {
 /// takes real floats, and an `i32` declaration made wasm reject the call.
 fn texture_import_params(argc: usize) -> Vec<lpir::IrType> {
     use lpir::IrType::{F32, I32, Pointer};
-    debug_assert!(argc == 7 || argc == 10, "texture builtins take 7 or 10 args");
+    debug_assert!(
+        argc == 7 || argc == 10,
+        "texture builtins take 7 or 10 args"
+    );
     if argc == 7 {
         // texture1d_*: sret, ptr, width, stride, u, filter, wrap_x
         alloc::vec![Pointer, I32, I32, I32, F32, I32, I32]
