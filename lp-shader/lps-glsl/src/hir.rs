@@ -69,7 +69,7 @@ enum HirBuildState<'src> {
     /// resident under every function's typing.
     Header {
         tokens: Vec<Token>,
-        bodies: Vec<(String, ParsedFunctionBody<'src>)>,
+        bodies: Vec<ParsedFunctionBody<'src>>,
     },
     Functions(Box<HirBuildFunctionState<'src>>),
     ShaderInit(Box<HirBuildFunctionState<'src>>),
@@ -113,7 +113,7 @@ impl<'src> HirBuildJob<'src> {
         source: &'src str,
         tokens: Vec<Token>,
         index: TopLevelIndex,
-        bodies: Vec<(String, ParsedFunctionBody<'src>)>,
+        bodies: Vec<ParsedFunctionBody<'src>>,
         options: CompileOptions,
     ) -> Self {
         Self {
@@ -318,14 +318,16 @@ fn module_function_sigs(sigs: Vec<FunctionSig>, has_shader_init: bool) -> Vec<Lp
 /// spelling the wasm backend once gave overloaded exports. A function whose
 /// name is unique keeps it, so entry points never change.
 fn name_overloads(sigs: &mut [FunctionSig], functions: &mut [HirFunction]) {
-    let overloaded: Vec<bool> = (0..sigs.len())
-        .map(|i| {
-            sigs.iter()
-                .enumerate()
-                .any(|(j, other)| j != i && other.name == sigs[i].name)
-        })
-        .collect();
-    for (i, overloaded) in overloaded.into_iter().enumerate() {
+    // No side table: this runs on every compile while the module's largest
+    // structures are live, so even a small transient allocation leaves a
+    // hole in the device heap. A renamed sig keeps its GLSL name as the
+    // prefix before `(`, which is what later members compare against.
+    for i in 0..sigs.len() {
+        let base = sigs[i].name.as_str();
+        let overloaded = sigs
+            .iter()
+            .enumerate()
+            .any(|(j, other)| j != i && other.name.split('(').next() == Some(base));
         if !overloaded {
             continue;
         }
@@ -365,7 +367,7 @@ pub fn build_hir<'src>(
     source: &'src str,
     tokens: &[Token],
     index: &TopLevelIndex,
-    bodies: Vec<(String, ParsedFunctionBody<'src>)>,
+    bodies: Vec<ParsedFunctionBody<'src>>,
     options: &CompileOptions,
 ) -> Result<HirModule, Diagnostic> {
     let (array_size_consts, const_init_cache) = build_array_size_consts(source, tokens, index)?;
@@ -912,13 +914,13 @@ struct GlobalInit<'src> {
     init: ParsedExpr<'src>,
 }
 
-/// The parsed bodies in function-index order. The body stage parses them
-/// in `index.functions` order, the same order the signature table is built
-/// in, so position is the key; the name rides along for diagnostics only.
-fn function_body_map<'src>(
-    bodies: Vec<(String, ParsedFunctionBody<'src>)>,
-) -> Vec<Option<ParsedFunctionBody<'src>>> {
-    bodies.into_iter().map(|(_, body)| Some(body)).collect()
+/// The parsed bodies in function-index order, each taken once as its
+/// function is typed. The body stage parses them in `index.functions` order,
+/// the same order the signature table is built in, so position is the key
+/// (overloads share a name). `Option` of a `Vec`-backed body has the body's
+/// size, so this collects in place instead of allocating a second list.
+fn function_body_map(bodies: Vec<ParsedFunctionBody<'_>>) -> Vec<Option<ParsedFunctionBody<'_>>> {
+    bodies.into_iter().map(Some).collect()
 }
 
 fn build_global_vars<'src>(
