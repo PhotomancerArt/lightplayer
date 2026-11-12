@@ -68,3 +68,8 @@ expects one. The same job passed on the PR's previous head, and the test
 passes locally. So the 2026-10-23 fix closed one path to the second report,
 not every one; reopened.
 
+**Seen again (2026-11-12)** — `Validate (x64)` on PR #1341 (run
+43289683622, job 131432401736), a PR that touches the Graph's board
+highlight and the engine's output chase, nothing in identify or the
+account list: the same two `Report(… seen_on: Usb)`. It passed five times
+running locally on the same head. Still open.

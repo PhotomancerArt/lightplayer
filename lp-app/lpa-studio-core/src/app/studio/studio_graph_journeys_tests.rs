@@ -19,7 +19,7 @@
 use std::path::{Path, PathBuf};
 
 use lpa_graph::{
-    Button, GraphInput, GraphVerb, Mods, NodeId, NodeKind, Output, Target, Vec2, port_value,
+    Button, GraphInput, GraphVerb, Mods, NodeId, NodeKind, Output, Rgb, Target, Vec2, port_value,
 };
 use lpc_mapping::part::{Mapping, TreeId, render};
 use lpc_mapping::patching::{
@@ -883,6 +883,90 @@ fn the_walk_project_is_a_new_boards_project_with_the_display() {
     for ((path, have), (_, want)) in on_disk.iter().zip(&want) {
         assert!(have == want, "{path} is what Studio generates");
     }
+}
+
+/// Drawing a line lights the board as the pointer moves: the draft, as if
+/// already drawn, chases in the selection's red/blue pattern on the pixels
+/// it will land on (blue head at its first lamp, red tail at its last), and
+/// moving the pointer on moves the tail with it. Nothing is saved while it
+/// is drawn; Escape stops it, and the board shows its own pattern again.
+#[test]
+fn drawing_a_line_lights_the_board_as_the_pointer_moves() {
+    let mut j = Journey::repo("projects/test/circular-display-walk", "/fixture.map2d.json");
+    // The starter's strip filled D0's 64 pixels; cut to 8, the line lands
+    // after it, on pixels nothing is mapped to yet (the board drives them
+    // only for the draft).
+    j.press(
+        "set-lattice",
+        OfferArgs::new()
+            .with("subject", "fixture:strip")
+            .with("columns", "8"),
+    );
+    assert_eq!(j.span("strip"), Some((0, 0, 7)));
+    j.press("path-tool", OfferArgs::new());
+    let output = NodeId::new("output");
+    let at = |j: &Journey, x: f64, y: f64| {
+        let e = j.graph.handle.editor().borrow();
+        let frame = e.project.frame(&j.fixture);
+        e.camera.to_screen(frame.to_world(Vec2::new(x, y)))
+    };
+    let mods = Mods::default();
+    let start = at(&j, 2.0, 6.0);
+    j.graph.handle.input(GraphInput::PointerDown {
+        at: start,
+        button: Button::Primary,
+        mods,
+    });
+    j.graph
+        .handle
+        .input(GraphInput::PointerUp { at: start, mods });
+    let draft = |j: &mut Journey, x: f64| {
+        let to = at(j, x, 6.0);
+        j.graph
+            .handle
+            .input(GraphInput::PointerMove { at: to, mods });
+        j.graph.batch_if_queued();
+        let view = j.graph.refresh();
+        let frame = view.graph.expect("the Graph").frame.0;
+        let pixels = frame.port(&output, "0").expect("port D0").to_vec();
+        assert!(j.graph.handle.editor().borrow().drawing(), "still drawing");
+        pixels
+    };
+    let tail = |pixels: &[Rgb]| pixels.iter().rposition(|p| *p == Rgb::new(255, 0, 0));
+
+    let short = draft(&mut j, 20.0);
+    assert_eq!(
+        short[8],
+        Rgb::new(0, 0, 255),
+        "the draft's blue head: {short:?}"
+    );
+    let short_tail = tail(&short).expect("the draft's red tail");
+    let long = draft(&mut j, 50.0);
+    assert_eq!(
+        long[8],
+        Rgb::new(0, 0, 255),
+        "the draft's blue head: {long:?}"
+    );
+    let long_tail = tail(&long).expect("the draft's red tail");
+    assert!(
+        long_tail > short_tail,
+        "the tail follows the pointer: {short_tail} then {long_tail}"
+    );
+    let saved = lpc_mapping::map2d6::read(&j.saved_text()).expect("it reads");
+    assert_eq!(saved.parts.len(), 1, "nothing is saved while drawing");
+
+    j.graph.handle.input(GraphInput::KeyDown {
+        key: lpa_graph::Key::Escape,
+        mods,
+    });
+    j.graph.batch_if_queued();
+    let view = j.graph.refresh();
+    let frame = view.graph.expect("the Graph").frame.0;
+    let pixels = frame.port(&output, "0").expect("port D0");
+    assert!(
+        pixels.len() <= 8 || pixels[8..].iter().all(|p| *p == Rgb::BLACK),
+        "the draft is gone from the board: {pixels:?}"
+    );
 }
 
 /// Every layout verb is offered at `project/graph/<verb>` with typed

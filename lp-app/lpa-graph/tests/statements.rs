@@ -1921,9 +1921,10 @@ fn a_lamp_outside_its_box_is_never_lit() {
     }
 }
 
-/// While drawing a path into the scarf, the scarf's port shows exactly the
-/// draft's lamps, lit, at the right pixels — the ones the path takes when
-/// it is finished — and everything else is off.
+/// While drawing a path into the scarf, the scarf's port shows the draft's
+/// lamps in the selection's pattern (lp2014's: blue in, red out) at the
+/// right pixels — the ones the path takes when it is finished — and
+/// everything else dims.
 #[test]
 fn drawing_into_the_scarf_lights_the_drafts_pixels() {
     let mut e = editor();
@@ -1939,16 +1940,28 @@ fn drawing_into_the_scarf_lights_the_drafts_pixels() {
     e.pointer_move(b, none());
     let frame = e.board_frame(0.0);
     let d10 = frame.port(&scarf_out, "0").unwrap();
-    let lit: Vec<usize> = (0..d10.len()).filter(|i| !d10[*i].is_black()).collect();
-    assert_eq!(lit, (11..22).collect::<Vec<_>>());
-    assert!(lit.iter().all(|i| d10[*i] == Rgb::WHITE));
+    for i in 11..22 {
+        assert_eq!(
+            d10[i],
+            fixture_overrides::lp2014(i - 11, 11, 0.0),
+            "pixel {i}"
+        );
+    }
+    assert_eq!(
+        d10[11],
+        fixture_overrides::START_COLOUR,
+        "the draft's blue in"
+    );
+    assert_eq!(d10[21], fixture_overrides::END_COLOUR, "its red out");
+    let ends = [
+        fixture_overrides::START_COLOUR,
+        fixture_overrides::END_COLOUR,
+    ];
     for port in &frame.ports {
-        if port.output != scarf_out {
-            assert!(
-                port.pixels.iter().all(|px| px.is_black()),
-                "{} is off",
-                port.output
-            );
+        for (i, px) in port.pixels.iter().enumerate() {
+            if port.output != scarf_out || !(11..22).contains(&i) {
+                assert!(!ends.contains(px), "{} pixel {i} only dims", port.output);
+            }
         }
     }
     // Click there and double-click: the path lands exactly where the draft
@@ -1969,7 +1982,7 @@ fn drawing_into_the_scarf_lights_the_drafts_pixels() {
         .filter(|s| s.segment.part() == id)
         .flat_map(|s| s.start_pixel as usize..(s.start_pixel + s.lamps.len() as u32) as usize)
         .collect();
-    assert_eq!(landed, lit);
+    assert_eq!(landed, (11..22).collect::<Vec<_>>());
 }
 
 /// Pressing = on a selected path lights one more pixel on its port at once.

@@ -709,12 +709,23 @@ impl StudioController {
     /// batch).
     pub async fn settle_graph(&mut self) {
         let wanted = self.editor_view_in_place(false) == Some(crate::UiProjectView::Graph);
+        let pace = crate::app::graph::GraphPace {
+            now: (self.now_secs)(),
+            bluetooth: self
+                .pool
+                .lens_session()
+                .is_some_and(|session| session.transport() == crate::LinkTransport::Ble),
+        };
         let server = self
             .pool
             .lens_session_mut()
             .ok()
             .and_then(|session| session.client_mut().ok());
-        if self.graph.settle(&mut self.project, server, wanted).await {
+        if self
+            .graph
+            .settle(&mut self.project, server, wanted, pace)
+            .await
+        {
             self.mark_dirty();
         }
     }

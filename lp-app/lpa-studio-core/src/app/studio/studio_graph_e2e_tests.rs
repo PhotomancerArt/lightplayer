@@ -241,6 +241,48 @@ fn a_selected_port_breathes_on_the_board() {
     );
 }
 
+/// A selected segment's chase follows its count: a path of 13 lamps set to
+/// 16 chases on the board from its blue head to a red tail at its new last
+/// lamp, read back from the board's own frame. The selection is the same
+/// target before and after, so the board hears of it only because what it
+/// is told to show changed (`chase:0-12` became `chase:0-15`).
+#[test]
+fn a_selected_segments_chase_follows_its_count() {
+    let mut graph = Graph::new("catalog/playful-choker");
+    graph.go_to_graph();
+    let first = graph.first_part();
+    graph
+        .handle
+        .input(GraphInput::Select(vec![Target::Part(first.clone())]));
+    graph.batch();
+    let pixels = |graph: &mut Graph| {
+        let view = graph.refresh();
+        let frame = view.graph.expect("the Graph").frame.0;
+        frame.port(&NodeId::new("output"), "0").unwrap().to_vec()
+    };
+    let (_, tail) = graph.first_segment_pixels();
+    assert_eq!(tail, 12, "P has 13 lamps");
+    assert_eq!(pixels(&mut graph)[12], Rgb::new(255, 0, 0), "P's red tail");
+
+    actor_clicks(&mut graph.actor, &graph.tx).press(
+        "project/graph/set-count",
+        OfferArgs::new()
+            .with("subject", format!("fixture:{}", first.part))
+            .with("count", "16"),
+    );
+    graph.batch_if_queued();
+    let (_, tail) = graph.first_segment_pixels();
+    assert_eq!(tail, 15, "P has 16 lamps now");
+    let after = pixels(&mut graph);
+    assert_eq!(after[0], Rgb::new(0, 0, 255), "still P's blue head");
+    assert_eq!(
+        after[15],
+        Rgb::new(255, 0, 0),
+        "the red tail at P's new last lamp"
+    );
+    assert_ne!(after[12], Rgb::new(255, 0, 0), "lamp 12 is P's body now");
+}
+
 /// Leaving the Graph stops the board's highlight, as leaving Patch did.
 #[test]
 fn leaving_the_graph_stops_the_highlight() {
@@ -613,6 +655,14 @@ impl Graph {
         if let Some(next) = self.view.try_recv() {
             self.last = Some(next);
         }
+    }
+
+    /// Run a batch if the page or a press left one queued (a refresh tick
+    /// otherwise, as the page's timer sends: the actor settles the Graph
+    /// after every batch).
+    pub(super) fn batch_if_queued(&mut self) {
+        self.tx.send(StudioCommand::RefreshTick);
+        self.batch();
     }
 
     pub(super) fn refresh(&mut self) -> UiStudioView {
