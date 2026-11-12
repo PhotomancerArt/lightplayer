@@ -2,14 +2,14 @@
 """Write (or check) the path filters that fire each chip's figure jobs when a
 crate linked into that chip's shipped firmware changes.
 
-Every number the chip figure suites pin (docs/chip-figures.md) is read off the
+Every number the chip figure suites pin (docs/chip-figures.ai.md) is read off the
 SHIPPED image, so any crate in that image's link closure can move one — a
 statics change in `lpa-server` moves the classic's and the S3's main stack, a
 heap allocation in `lpc-engine` moves the C6's ledger. The emulator jobs'
 hand-written filters stop at the firmware's own directories and
 `fw-esp32-common` (director ruling DD77, 2026-09-13), so until 2026-10-15 a
 shared-crate PR skipped them and its figure moves turned main red instead
-(docs/debt/firmware-figures-skip-on-shared-crate-prs.md).
+(docs/debt/firmware-figures-skip-on-shared-crate-prs.ai.md).
 
 The closure is not written by hand: for each chip this asks cargo's own
 resolver (`cargo tree`) for the firmware package's normal and build
@@ -64,7 +64,7 @@ HEADER = """\
 # the "Filter changed paths (firmware closure)" step of pre-merge.yml's
 # `detect-changes` job, which ORs each into that chip's `figures_*` output, so
 # a change to any of these crates runs that chip's pinned-figure jobs.
-# docs/debt/firmware-figures-skip-on-shared-crate-prs.md has the why.
+# docs/debt/firmware-figures-skip-on-shared-crate-prs.ai.md has the why.
 """
 
 

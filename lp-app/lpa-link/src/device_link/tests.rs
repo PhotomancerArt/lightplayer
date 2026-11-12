@@ -268,7 +268,7 @@ fn a_fresh_connect_identifies_a_light_player_through_the_wire() {
 /// A device that is already running has ALREADY sent its unsolicited hello,
 /// so the connect must ask — and the answer, arriving after heartbeat-shaped
 /// traffic, must still classify it correctly. This is the hello-gate defect
-/// (`docs/defects/2026-08-21-hello-gate-assumes-fresh-boot.md`) driven
+/// (`docs/defects/2026-08-21-hello-gate-assumes-fresh-boot.ai.md`) driven
 /// through the real wire.
 #[test]
 fn a_mid_stream_connect_is_classified_by_the_answer_to_our_own_hello() {

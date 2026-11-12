@@ -2,7 +2,7 @@
 //! row's icon and name, and the board's own on/off switch at the line's
 //! end — drawn alike for Wi‑Fi, Bluetooth and lightplayer.app, as macOS
 //! draws the top of its Wi‑Fi and Bluetooth menus
-//! (`docs/ux/anatomy/board-card.md`, "Hushing a row").
+//! (`docs/ux/anatomy/board-card.ai.md`, "Hushing a row").
 //!
 //! The switch is the shared `button[role=switch]`
 //! ([`Switch`](crate::app::home::access_fields::Switch)): on wears the good

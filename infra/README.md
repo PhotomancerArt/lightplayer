@@ -18,11 +18,11 @@ infrastructure.
 
 The pieces outside this directory: `.github/workflows/deploy-cloud.yml`
 (builds the web artifact, then deploys) and
-`docs/runbooks/godaddy-dns-cutover.md` (the DNS switch, by hand, once). The
+`docs/runbooks/godaddy-dns-cutover.ai.md` (the DNS switch, by hand, once). The
 web artifact's firmware is not built by the deploy: it is the release's own,
 attached by `.github/workflows/release-firmware.yml`, and the deploy waits
 for that run and downloads it (`LP_STUDIO_FIRMWARE=release:<version>`;
-`docs/adr/2026-10-06-firmware-distribution.md`). A hand deploy builds its own
+`docs/adr/2026-10-06-firmware-distribution.ai.md`). A hand deploy builds its own
 firmware unless it sets that variable.
 
 **Outbound dependencies.** Besides Google (OAuth) and Tigris (blobs,
@@ -66,7 +66,7 @@ account access.
    `https://lightplayer.fly.dev`, or the OAuth redirect and the OG urls point
    at a domain that is still GitHub Pages. Flip it to
    `https://lightplayer.app` in the same commit as the cutover.
-5. **DNS** — `docs/runbooks/godaddy-dns-cutover.md`. Not before the smoke
+5. **DNS** — `docs/runbooks/godaddy-dns-cutover.ai.md`. Not before the smoke
    passes: a half-working service on the apex has no rollback that is faster
    than DNS propagation.
 
@@ -114,7 +114,7 @@ variables). Never into a chat, a commit, or a shell command line.
 `lightplayer.app` is a GoDaddy-hosted zone (`ns37`/`ns38.domaincontrol.com`).
 The cutover is a hand-edit of nine records, done once, and it has its own
 document with every value inline:
-[`docs/runbooks/godaddy-dns-cutover.md`](../docs/runbooks/godaddy-dns-cutover.md).
+[`docs/runbooks/godaddy-dns-cutover.ai.md`](../docs/runbooks/godaddy-dns-cutover.ai.md).
 
 ## Secrets inventory
 

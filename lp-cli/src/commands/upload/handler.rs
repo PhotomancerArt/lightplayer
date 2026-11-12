@@ -3,7 +3,7 @@
 //! Pushes a project to a host (e.g. serial device). By default waits for
 //! evidence the newly deployed project is running before exiting (see
 //! `wait::wait_for_project_running` and
-//! `docs/defects/2026-07-30-deploy-compiles-previous-upload.md`); pass
+//! `docs/defects/2026-07-30-deploy-compiles-previous-upload.ai.md`); pass
 //! `--no-wait` to restore the old fire-and-forget behaviour.
 
 use std::time::Duration;

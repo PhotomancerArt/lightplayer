@@ -23,9 +23,9 @@ This plan addresses the next phase of emulator performance optimization after th
 
 ## Key Documents
 
-- **[00-design.md](00-design.md)** - Comprehensive design document with technical details
-- **[00-notes.md](00-notes.md)** - Context, insights, and design decisions
-- **[phases.md](phases.md)** - Step-by-step implementation phases
+- **[00-design.ai.md](00-design.ai.md)** - Comprehensive design document with technical details
+- **[00-notes.ai.md](00-notes.ai.md)** - Context, insights, and design decisions
+- **[phases.ai.md](phases.ai.md)** - Step-by-step implementation phases
 
 ## Quick Summary
 
@@ -49,7 +49,7 @@ This plan addresses the next phase of emulator performance optimization after th
 
 ## Implementation Strategy
 
-See [phases.md](phases.md) for detailed step-by-step implementation plan.
+See [phases.ai.md](phases.ai.md) for detailed step-by-step implementation plan.
 
 **High-level phases**:
 1. Create logging macro system

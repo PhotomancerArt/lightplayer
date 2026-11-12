@@ -149,7 +149,7 @@ mod tests {
 
     /// The catalog itself: thirty entries, ten pieces and twenty patterns
     /// (fault-demo is a test rig: its unbounded loop has no fuel meter on a
-    /// GPU tier — `docs/defects/2026-09-06-gpu-tier-executes-unbounded-shaders.md`).
+    /// GPU tier — `docs/defects/2026-09-06-gpu-tier-executes-unbounded-shaders.ai.md`).
     #[test]
     fn the_catalog_splits_ten_and_twenty() {
         let cards: Vec<UiExampleCard> = crate::app::home::embedded_examples()

@@ -43,7 +43,7 @@ fn the_sector_sequence_wraps_under_cuts() {
 }
 
 /// **Pins a known limit**
-/// (`docs/defects/2026-10-08-tree-store-root-sequence-does-not-wrap.md`):
+/// (`docs/defects/2026-10-08-tree-store-root-sequence-does-not-wrap.ai.md`):
 /// the root sequence (u64) does not wrap. A root written past `u64::MAX`
 /// carries seq 0, mount keeps the highest seq, and the store comes back at
 /// the last commit before the wrap — a committed write lost. Unreachable in

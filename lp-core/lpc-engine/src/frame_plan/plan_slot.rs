@@ -124,7 +124,7 @@ impl<K: PartialEq + Debug, T: PartialEq + Debug> PlanSlot<K, T> {
         let message = alloc::format!(
             "frame plan check: {} held by {} replayed under key {key:?} differs from a fresh \
              build — a key the plan reads did not move when what it holds did \
-             (docs/adr/2026-10-24-frame-plan-once-per-edit.md). {difference}",
+             (docs/adr/2026-10-24-frame-plan-once-per-edit.ai.md). {difference}",
             core::any::type_name::<T>(),
             match owner {
                 Some(node) => alloc::format!("node {node:?}"),

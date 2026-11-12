@@ -1,6 +1,6 @@
 //! Memory layout for [`LpsType`] (std430 only for now).
 //!
-//! Rules match GLSL `std430` for transparent types. See `docs/design/glsl-layout.md`.
+//! Rules match GLSL `std430` for transparent types. See `docs/design/glsl-layout.ai.md`.
 
 use crate::{LayoutRules, LpsType, StructMember};
 

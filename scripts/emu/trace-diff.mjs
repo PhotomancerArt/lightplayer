@@ -8,7 +8,7 @@
 // output, and the whole claim of plan two is that the comparison can be
 // re-run when the emulator changes. A diff produced by hand cannot be.
 //
-// WHAT IS NEVER COMPARED, and why (plan.md's own anti-oracles):
+// WHAT IS NEVER COMPARED, and why (plan.ai.md's own anti-oracles):
 //
 //   t          wall clock. A socket is not deterministic and an agent-driven
 //              hidden tab is throttled to ~1 Hz — never assert a duration.
@@ -30,7 +30,7 @@
 //   sync       the connect-as-pull outcome (added because of the s6 sitting).
 //   anomaly    counts only, per side. Non-zero on one side and not the other
 //              is a finding worth its own paragraph
-//              (docs/defects/2026-08-02-serial-line-interleaving.md).
+//              (docs/defects/2026-08-02-serial-line-interleaving.ai.md).
 //   BOOT-LINE SET  the distinct set of NORMALISED boot lines, not the count.
 //              A line the emulator never emits, or emits differently, is
 //              exactly the difference the plan wants named. Read out of `rx`
@@ -93,7 +93,7 @@ function key(record) {
 /// `Input(Event(Link { link: LinkId(9), event: Line("…") }))`. That is not a
 /// difference between silicon and the emulator — it is a difference between
 /// two Studios, and it is filed as
-/// docs/defects/2026-09-10-eight-of-ten-device-event-kinds-lost-their-producer.md.
+/// docs/defects/2026-09-10-eight-of-ten-device-event-kinds-lost-their-producer.ai.md.
 ///
 /// Unwrapping it here is what keeps the comparison the plan actually wants
 /// possible at all: the SET of lines a board emits against the set an
@@ -281,7 +281,7 @@ function main() {
       `  (boot lines UNWRAPPED FROM THE JOURNAL: ${labels[0]}=${leftBoot.fromJournal}, ${labels[1]}=${rightBoot.fromJournal}.\n` +
         `   A 2026-08 fixture carries them as \`rx\` records; a capture taken today carries the same\n` +
         `   bytes inside journal entries, because \`rx\` lost its producer — that is two Studios,\n` +
-        `   not two boards. docs/defects/2026-09-10-eight-of-ten-device-event-kinds-lost-their-producer.md)`,
+        `   not two boards. docs/defects/2026-09-10-eight-of-ten-device-event-kinds-lost-their-producer.ai.md)`,
     );
   }
   console.log(`  distinct boot-line SHAPES (digits → #):  ${labels[0]}=${leftLines.size}  ${labels[1]}=${rightLines.size}  shared=${shared}`);

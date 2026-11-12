@@ -23,7 +23,7 @@
 //!
 //! Two things make this work with no wiring the author has to do:
 //!
-//! - **The sub-module contributes its visual outward for free** (modules.md
+//! - **The sub-module contributes its visual outward for free** (modules.ai.md
 //!   R7): the `effect/` module node mirrors its own scope's `visual.out` as
 //!   a produced `output`, and the loader publishes that to the parent's
 //!   `visual.out` at fallback priority. The rig fixtures read `bus:visual.out`
@@ -335,7 +335,7 @@ fn effect_module_def() -> NodeDef {
 /// the entry contract the body writes (`OneD` ⇒ `render_1d(float)`,
 /// `TwoD` ⇒ `render_2d(vec2)`). Passed in rather than derived: the
 /// declaration is authored, never inferred from source text (ADR
-/// `2026-08-07-two-sided-space-model.md`).
+/// `2026-08-07-two-sided-space-model.ai.md`).
 fn effect_shader_def(space: ShaderSpace) -> NodeDef {
     let mut def = starter_for_kind(NodeKind::Shader)
         .expect("shader starter exists")

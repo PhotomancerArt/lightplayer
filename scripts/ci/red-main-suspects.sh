@@ -4,7 +4,7 @@
 #
 # CI validates each PR against its own branch, never against the merge result,
 # so two independently-green PRs can merge into a red main
-# (docs/debt/two-green-prs-can-red-main.md). A main push forces every gate on,
+# (docs/debt/two-green-prs-can-red-main.ai.md). A main push forces every gate on,
 # which makes it the canary; this script makes the canary say WHERE to look,
 # so the diagnosis does not start on whichever PR merged last.
 #
@@ -97,7 +97,7 @@ summary=$(
   echo "Last green \`pre-merge\` run on main: \`${since:0:10}\`. Red commit: \`${head_sha:0:10}\`."
   echo "Each PR below was green on its own branch; CI never built them together."
   echo "Reproduce on a clean \`origin/main\` before blaming the newest one"
-  echo "(docs/debt/two-green-prs-can-red-main.md)."
+  echo "(docs/debt/two-green-prs-can-red-main.ai.md)."
   echo
   echo "| commit | PR | subject |"
   echo "|---|---|---|"

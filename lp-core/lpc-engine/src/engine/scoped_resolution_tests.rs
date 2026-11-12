@@ -1,4 +1,4 @@
-//! Scoped-channel correctness obligations (engine C2, modules.md R2/R5).
+//! Scoped-channel correctness obligations (engine C2, modules.ai.md R2/R5).
 //!
 //! The three properties pinned here are exactly the silent failure modes
 //! of rekeying the resolver: (1) cache soundness — the same channel name
@@ -353,7 +353,7 @@ fn probe_lists_same_named_channels_as_distinct_scoped_rows() {
 
 #[test]
 fn panel_writer_engages_shadows_and_clears() {
-    // panel.md P1-P4 at the resolution seam: engage -> the in-scope
+    // panel.ai.md P1-P4 at the resolution seam: engage -> the in-scope
     // consumer resolves the panel value while an outer-scope consumer is
     // unaffected; an engaged OUTER scope is inherited by a writerless
     // inner scope (P5 shadowing composes); clear -> authored wiring again.
@@ -513,7 +513,7 @@ fn probe_reports_engaged_writers_with_panel_origin() {
 
 #[test]
 fn momentary_writers_despawn_on_ttl_expiry() {
-    // panel.md P14: gesture channels write while active and despawn past
+    // panel.ai.md P14: gesture channels write while active and despawn past
     // their renewal deadline — the despawn IS the release fallback for a
     // dropped client. Renewal is just another write.
     let mut h = EngineTestBuilder::new()

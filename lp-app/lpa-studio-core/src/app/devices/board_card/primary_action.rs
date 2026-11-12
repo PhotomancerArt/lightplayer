@@ -1,4 +1,4 @@
-//! The name bar's one primary action (`docs/ux/anatomy/board-card.md`,
+//! The name bar's one primary action (`docs/ux/anatomy/board-card.ai.md`,
 //! "Name bar and primary"): the most likely thing the person wants to do
 //! (Yona, 2026-10-17), even when it repeats a row's own button.
 //!

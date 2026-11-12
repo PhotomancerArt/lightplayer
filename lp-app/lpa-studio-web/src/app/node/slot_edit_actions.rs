@@ -21,7 +21,7 @@ pub(crate) fn slot_set_value_action(address: ProjectSlotAddress, value: LpValue)
 
 /// Build the gesture action for a panel widget: a control with a panel
 /// target writes its `(scope, channel)` down the runtime command channel
-/// (panel.md P8 — nothing staged, nothing dirty, the actor coalesces per
+/// (panel.ai.md P8 — nothing staged, nothing dirty, the actor coalesces per
 /// target); one without edits the authored default through the slot path.
 pub(crate) fn panel_or_slot_action(
     panel_target: &Option<UiPanelTarget>,
@@ -58,7 +58,7 @@ pub(crate) fn panel_write_or_slot_action(
     }
 }
 
-/// Build the per-control clear (panel.md P2): release the engaged panel
+/// Build the per-control clear (panel.ai.md P2): release the engaged panel
 /// writer and return the control to Read.
 pub(crate) fn panel_clear_action(target: &UiPanelTarget) -> UiAction {
     UiAction::from_op(
@@ -72,7 +72,7 @@ pub(crate) fn panel_clear_action(target: &UiPanelTarget) -> UiAction {
     )
 }
 
-/// Build the per-scope panel reset (panel.md P2 clear at scope
+/// Build the per-scope panel reset (panel.ai.md P2 clear at scope
 /// granularity; descends per settled P-Q4) — the module panel's ↺.
 pub(crate) fn panel_clear_scope_action(scope: lpc_wire::WireScopeRef) -> UiAction {
     UiAction::from_op(
@@ -83,7 +83,7 @@ pub(crate) fn panel_clear_scope_action(scope: lpc_wire::WireScopeRef) -> UiActio
     )
 }
 
-/// Build the panel-state auto-save toggle (panel.md P11). Project-level,
+/// Build the panel-state auto-save toggle (panel.ai.md P11). Project-level,
 /// so it takes no scope — the root module's panel is the one that presents
 /// it, and the server's answer arrives on the next read rather than being
 /// applied locally.

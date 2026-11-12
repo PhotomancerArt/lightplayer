@@ -718,7 +718,7 @@ fn a_running_trace_refuses_the_published_reads_and_the_lines_match() {
 /// The name is `LP_CLKRST` because `Esp32C6Builder::build` refuses a
 /// peripheral whose name is not in `PERIPHERAL_REGISTRATION_ORDER`; nothing
 /// about the real block is being modelled here, and no modelled peripheral's
-/// behaviour moves (plan.md BD4). What is being modelled is a **bus** — the
+/// behaviour moves (plan.ai.md BD4). What is being modelled is a **bus** — the
 /// one `host::MMIO_PENDING` exists for.
 struct YieldOnRead;
 

@@ -33,7 +33,7 @@ pub struct UiBindingEndpoint {
     /// costs no per-tick churn.
     pub live_gradient: Option<lpc_model::GradientConfig>,
     /// The consumed bus channel's `(scope, channel)` panel-write target
-    /// (panel.md P1), present on Consumes-direction bus endpoints so the
+    /// (panel.ai.md P1), present on Consumes-direction bus endpoints so the
     /// panel control built over this wiring can dispatch panel commands.
     pub panel_target: Option<crate::UiPanelTarget>,
     /// The consumed slot's declared `panel = "show"` hint: this

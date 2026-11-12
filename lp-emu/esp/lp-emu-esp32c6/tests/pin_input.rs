@@ -245,7 +245,7 @@ fn g1_7_a_wire_onto_a_spoken_for_pad_is_refused_at_the_flag() {
 }
 
 /// The defect this test is named for:
-/// `docs/defects/2026-10-04-emu-restart-drops-pad-drives.md`. A pad a
+/// `docs/defects/2026-10-04-emu-restart-drops-pad-drives.ai.md`. A pad a
 /// `--pin-script` line is driving from outside the chip is wired to the
 /// board, not the chip, so it must still read driven after **both**
 /// `reboot()` and `power_cycle()` — on silicon neither resets outside

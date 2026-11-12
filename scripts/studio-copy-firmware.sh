@@ -22,7 +22,7 @@
 # Two segments under `firmware/`, never three: on lightplayer.app every
 # `/firmware/<target>/<release>/<file>` path belongs to lp-cloud-server's
 # firmware lookup, which answers it before the static bundle is consulted
-# (docs/defects/2026-10-06-the-bundles-ota-files-are-shadowed-by-the-firmware-lookup.md).
+# (docs/defects/2026-10-06-the-bundles-ota-files-are-shadowed-by-the-firmware-lookup.ai.md).
 #
 # Used by `studio-web-copy-sidecars` and `studio-dev`'s asset sync loop.
 set -euo pipefail

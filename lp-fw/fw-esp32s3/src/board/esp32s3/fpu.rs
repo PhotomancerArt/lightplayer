@@ -32,7 +32,7 @@
 //! coprocessor.)
 //!
 //! Assembled from mnemonics, no assembler source adapted from binutils, GCC or
-//! QEMU (AGENTS.md license rule). The sibling sequence in
+//! QEMU (AGENTS.ai.md license rule). The sibling sequence in
 //! `tests/xt_fp_conformance.rs` stays as it is: that rig measures what the boot
 //! chain left behind and then sets a known value, which is a different job from
 //! this one.

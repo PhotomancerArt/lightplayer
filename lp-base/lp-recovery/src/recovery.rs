@@ -485,7 +485,7 @@ pub fn stage_crash(
 ///
 /// That rule makes a tentative record worthless as a breadcrumb for a fault
 /// that kills the chip through some *other* reset path. The classic ESP32 has
-/// exactly that fault: `docs/defects/2026-08-01-classic-rmt-open-fault.md`
+/// exactly that fault: `docs/defects/2026-08-01-classic-rmt-open-fault.ai.md`
 /// records a fault in the WS281x open path that resets the board in well under
 /// a millisecond, mid-`println!`, with no watchdog involved. A panic handler
 /// there cannot assume it will live long enough to reach

@@ -186,7 +186,7 @@ pub(crate) fn LampStrip(
 /// `ux-box-sized-canvas` only while BULBS are drawn, because only then is the
 /// backing store sized from layout. That class is the story gate's assertion
 /// that a canvas's bitmap matches the box it was measured for — the
-/// clock-face lesson (`docs/defects/2026-08-05-clock-face-baselines-oscillate.md`):
+/// clock-face lesson (`docs/defects/2026-08-05-clock-face-baselines-oscillate.ai.md`):
 /// a layout-sized canvas painted before the stylesheet lands is a second
 /// stable terminal, and baselines alternate between the two. In gradient mode
 /// the bitmap is deliberately one texel per lamp, so the same assertion would

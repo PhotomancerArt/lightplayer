@@ -163,7 +163,7 @@ fn measure(glsl: &str) -> Result<(u32, usize), String> {
 /// (`regalloc/spill.rs`'s `next_slot: u8` overflows past 255 spill slots),
 /// which would make this test fail for a reason that has nothing to do with
 /// code memory. That defect is an instance of
-/// `docs/debt/bounds-asserted-in-the-wrong-unit.md` — a bound expressed in a
+/// `docs/debt/bounds-asserted-in-the-wrong-unit.ai.md` — a bound expressed in a
 /// unit its consumer does not care about, passing its tests because the test
 /// data happened to be convenient.
 #[test]
@@ -242,7 +242,7 @@ fn an_oversized_shader_is_a_clean_toolarge_not_a_wild_write() {
 /// The corpus measurement and the region-size guard.
 ///
 /// Run with `--nocapture` to see the per-shader table; the numbers in
-/// `docs/adr/2026-08-01-esp32v3-flash-budget.md` come from this output.
+/// `docs/adr/2026-08-01-esp32v3-flash-budget.ai.md` come from this output.
 #[test]
 fn real_shaders_fit_the_classic_code_region_with_margin() {
     let root = repo_root();

@@ -27,7 +27,7 @@ pub fn StudioShell(
     /// opening frame. `web_app` decides; the shell only picks the body.
     #[props(default)]
     mismatch: Option<lpa_studio_core::UiOpenMismatch>,
-    /// Play mode (`docs/design/panel.md` P12): the root module's panel and
+    /// Play mode (`docs/design/panel.ai.md` P12): the root module's panel and
     /// nothing else — no pane column, no workspace, no device card. Set by
     /// the `/play` route suffix; a session whose root wears no module face
     /// falls through to the normal layout rather than showing an empty

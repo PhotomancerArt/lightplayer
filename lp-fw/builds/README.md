@@ -6,7 +6,7 @@ which flash size and partition table. It is a *build input* — the answer to
 "how do I produce this image" — and deliberately **not** a description of what
 the resulting image contains. That answer is extracted from the artifact
 itself (the embedded manifest core, see
-`docs/adr/2026-08-01-firmware-manifest-architecture.md`); nothing here restates
+`docs/adr/2026-08-01-firmware-manifest-architecture.ai.md`); nothing here restates
 feature lists, wire proto, or limits.
 
 `lp-cli firmware list | build <id> | package <id>` reads these files. They
@@ -28,7 +28,7 @@ justfile recipes.
 | `partitionsCsv` | Repo-relative partition table, the same file espflash flashes with. |
 | `chip.family` / `chip.name` | espflash chip identity (`--chip`). |
 | `bootloader` | Optional. Repo-relative second-stage bootloader to merge instead of the one the installed espflash bundles (`--bootloader`). Provenance and the rule for changing it: `lp-fw/bootloaders/README.md`. |
-| `split` | Optional, for a chip with a split profile (the ESP32-C6, layout 1; the ESP32-S3, layout 2). `true` builds the **split image** (`tools/lp-fw-split --chip <chip>`): the loader, the boot records, the core and the engine inside `factory` (`docs/adr/2026-10-04-c6-split-link-firmware-loader-and-boot-records.md`). The package is still one merged image at `0x0`, plus a `split` block in `manifest.json`; `core.bin` and `engine.bin` go to `target/firmware-parts/<id>/`, never into the package. Absent: one linked image. |
+| `split` | Optional, for a chip with a split profile (the ESP32-C6, layout 1; the ESP32-S3, layout 2). `true` builds the **split image** (`tools/lp-fw-split --chip <chip>`): the loader, the boot records, the core and the engine inside `factory` (`docs/adr/2026-10-04-c6-split-link-firmware-loader-and-boot-records.ai.md`). The package is still one merged image at `0x0`, plus a `split` block in `manifest.json`; `core.bin` and `engine.bin` go to `target/firmware-parts/<id>/`, never into the package. Absent: one linked image. |
 
 ## The target
 
@@ -68,7 +68,7 @@ Three names, never confused: the **target** (`esp32c6-4mb`), the
   the table — and, if the detection ranges move, the copy in
   `scripts/c6-lp-ana-i2c.py`. The C6 def names
   `lp-fw/bootloaders/esp32c6-bootloader-idf-v5.1.bin`. See
-  `docs/defects/2026-09-06-c6-first-flash-bootloader-hang-lp-analog-i2c-clock.md`.
+  `docs/defects/2026-09-06-c6-first-flash-bootloader-hang-lp-analog-i2c-clock.ai.md`.
 - Xtensa builds need Espressif's fork on PATH. `lp-cli` runs cargo in the
   crate directory so the crate's `rust-toolchain.toml` selects the channel,
   but the GNU binutils must already be on PATH — `just
@@ -219,7 +219,7 @@ the store serves. A release whose firmware fails does not deploy.
 
 **The published `package.json` is additive-only** from its first release:
 readers ignore unknown keys; a flasher may refuse another `schemaVersion`,
-never an unknown key. See `docs/adr/2026-10-06-firmware-distribution.md`.
+never an unknown key. See `docs/adr/2026-10-06-firmware-distribution.ai.md`.
 
 ## Consumers
 

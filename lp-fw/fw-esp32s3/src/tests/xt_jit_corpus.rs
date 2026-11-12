@@ -245,7 +245,7 @@ fn run_f32_cases(tally: &mut Tally) {
 /// engine at boot, with `NativeCompileOptions::default()` — Q32 — and every
 /// project that runs on that boot compiles through it. So the mode a shader
 /// gets has to arrive with the *compile*, from its authored `float_mode` slot
-/// (`docs/adr/2026-08-01-float-mode-reaches-the-device.md`).
+/// (`docs/adr/2026-08-01-float-mode-reaches-the-device.ai.md`).
 ///
 /// This is the only place that path executes on silicon, and its failure mode
 /// is the reason it is worth a section: if `LpvmCompileParams::float_mode`

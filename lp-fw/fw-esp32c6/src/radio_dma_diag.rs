@@ -7,7 +7,7 @@
 //! the station joined and traffic flowing? The bootloader loads there after
 //! an HP-only warm reset while the radio keeps running, and a stray DMA
 //! write crashed it on 11 of 22 resets before #985
-//! (`docs/defects/2026-10-05-a-requested-reboot-crashed-the-c6-bootloader.md`).
+//! (`docs/defects/2026-10-05-a-requested-reboot-crashed-the-c6-bootloader.ai.md`).
 //! With #985 every radio C block goes to `HEAP_RADIO` first and the main
 //! region when that is full, never to `dram2_seg`; this checks it on the
 //! board under Wi-Fi's load.

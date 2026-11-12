@@ -283,7 +283,7 @@ pub fn clocks() -> MspiClocks {
 
 /// The boot line that states where the two writers of these clocks — PSRAM's
 /// init and [`enter`] — left them (a `psram` image; ADR
-/// `2026-10-22-s3-psram.md`, point 10).
+/// `2026-10-22-s3-psram.ai.md`, point 10).
 #[cfg(feature = "psram")]
 pub fn log_clocks() {
     let c = clocks();

@@ -198,7 +198,7 @@ pub const DEVICE_CARD_FEED_INTERVAL: Duration = Duration::from_millis(150);
 /// — 254 B for Peach's 56 lamps and 811 B for Logo Sign's 241, measured off
 /// the wire tap; ~0.5 KB at 128 lamps, ~1.6 KB at 512 — beside a 187 B
 /// request; and a connected central was re-ruled an operating state whose
-/// ESP-NOW cost is measured, not gated (`docs/adr/2026-09-24-ble-transport.md`,
+/// ESP-NOW cost is measured, not gated (`docs/adr/2026-09-24-ble-transport.ai.md`,
 /// its 2026-09-24 and 2026-10-08 amendments). It was 500 ms from 2026-10-08,
 /// a cautious pick from before anything was measured.
 ///

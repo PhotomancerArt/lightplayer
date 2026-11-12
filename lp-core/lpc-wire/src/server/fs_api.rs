@@ -64,7 +64,7 @@ pub enum FsRequest {
     /// project's saves included) land together or not at all.
     ///
     /// The batch is the first piece of fs state a server holds between
-    /// requests (`docs/adr/2026-10-10-fs-push-boundary-and-deflated-writes.md`):
+    /// requests (`docs/adr/2026-10-10-fs-push-boundary-and-deflated-writes.ai.md`):
     /// at most one is open per server, owned by the link that began it, and
     /// every other link's fs mutations are refused while it is open. It
     /// ends on a commit, an abort, the owner link closing or resetting, a

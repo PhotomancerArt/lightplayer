@@ -31,7 +31,7 @@ controller refuses that update, so every Android request ended in `info!
 ("Connection parameters request procedure failed")` and a Negative Reply —
 which bt-hci 0.8.1 then mis-parsed into a panic
 (`third_party/bt-hci/README-LP.md`,
-`docs/defects/2026-10-17-an-android-phone-connecting-over-bluetooth-panics-the-c6.md`).
+`docs/defects/2026-10-17-an-android-phone-connecting-over-bluetooth-panics-the-c6.ai.md`).
 The fork answers a link-layer request (`l2cap == false`) with the Reply alone;
 the L2CAP path is unchanged.
 

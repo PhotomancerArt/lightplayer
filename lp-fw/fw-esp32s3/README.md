@@ -193,7 +193,7 @@ runtime, so the poll loop busy-waits between samples instead of awaiting
 `embassy_time::Timer`. Hardware verification (flash + jumper walk) happens at
 the milestone gate that first has a use for the button; this harness exists so
 the driver cannot rot uncompiled — see
-`docs/defects/2026-07-28-fw-esp32-harnesses-rotted-uncompiled.md`.
+`docs/defects/2026-07-28-fw-esp32-harnesses-rotted-uncompiled.ai.md`.
 
 ### `test_seam_abi` (emulator only)
 
@@ -202,7 +202,7 @@ just build-fw-esp32s3 test_seam_abi   # `just test-emu-esp32s3-seams` builds and
 ```
 
 The Xtensa emulator-seam ABI under the real `release-esp32s3` build (S3
-radio M5; `docs/adr/2026-10-05-emulator-seams.md` §13). It calls
+radio M5; `docs/adr/2026-10-05-emulator-seams.ai.md` §13). It calls
 `test_echo(1, 2, 4)`, drains `test_take`, and — when the network seam's
 engaged byte reads 1 — `net_mac` and `net_link`, each through the shim
 `lp_seam::seam_fn!` generates for Xtensa, with a value kept live across every
@@ -263,7 +263,7 @@ the driver stays GRB, exactly like the C6's.
 
 `src/output/lcd/` drives **up to eight lanes** from LCD_CAM in i8080 mode,
 fed by GDMA. It is the shipped image's WS281x driver since 2026-10-22 (Yona's
-ruling, S3 radio roadmap M9; `docs/adr/2026-10-22-s3-parallel-ws281x-output.md`).
+ruling, S3 radio roadmap M9; `docs/adr/2026-10-22-s3-parallel-ws281x-output.ai.md`).
 The RMT driver above is what an image built without `lcd-ws281x` registers;
 the `test_loopback` harness and a core-only split image's status light keep
 using the RMT. `ws281x_frame_check` (never shipped) makes either driver
@@ -309,7 +309,7 @@ just build-fw-esp32s3
 Xtensa has no upstream Rust target, so this crate carries its own
 `rust-toolchain.toml` with `channel = "esp"` — Espressif's fork, installed by
 `espup`. That per-crate quarantine is required by
-`docs/adr/2026-07-29-per-chip-fw-toolchains.md`: the rv32 crates stay on the
+`docs/adr/2026-07-29-per-chip-fw-toolchains.ai.md`: the rv32 crates stay on the
 shared pinned nightly and are unaffected.
 
 **Needs esp Rust >= 1.90** (the workspace MSRV). On 1.88 `lpc-model` genuinely
@@ -433,7 +433,7 @@ This crate builds under `[profile.release-esp32s3]` (`inherits = "release"`,
 `opt-level = "s"`), not the workspace's default `opt-level = "z"`. The `"z"`
 codegen was slow enough on the cold first frame to miss the RMT loopback
 harness's 30 µs refill deadline on one channel — see
-`docs/defects/2026-07-31-opt-z-missed-rmt-drain-deadline.md`. `"z"` stays the
+`docs/defects/2026-07-31-opt-z-missed-rmt-drain-deadline.ai.md`. `"z"` stays the
 default for the C6, whose flash budget is genuinely tight; the S3 has ~4.6 MB
 of headroom in its 6 MB app partition, so trading ~104 KB of image size for
 codegen the timing-critical driver was actually validated at is free here.
@@ -479,7 +479,7 @@ budget is genuinely tight.
 
 **This encodes a board assumption: ≥8 MB of flash.** An N4 (4 MB) module
 cannot flash this image, and that is deliberate. The reasoning, with sourcing
-data, is in `docs/adr/2026-07-30-esp32s3-partition-floor.md`; the short
+data, is in `docs/adr/2026-07-30-esp32s3-partition-floor.ai.md`; the short
 version is that N8R8 and N16R8 are the two most-sourced ESP32-S3 WROOM-1
 variants, so 8 MB covers the realistic hardware while 16 MB would strand N8
 boards and inherit the longest lead times. 4 MB was ruled out on measurement:
@@ -561,7 +561,7 @@ cache from flash. On FS3 that took 620 / 1,488 / 2,048 LEDs from 32.0 / 14.6 /
 generated from a committed silicon profile (`hot_iram/profile.tsv`) and
 checked by `just s3-hot-iram-check` in `just fw-esp32s3-size-check`; how it
 is measured and kept current is [`hot_iram/README.md`](hot_iram/README.md),
-the decision `docs/adr/2026-10-24-s3-hot-code-in-iram.md`.
+the decision `docs/adr/2026-10-24-s3-hot-code-in-iram.ai.md`.
 
 It costs the arena 43 KiB (`HOT_IRAM_BYTES`): internal free at boot went from
 187,580 to 143,548 B on FS3, the tagged arena is 92,160 B, and the largest
@@ -578,7 +578,7 @@ is `src/guarded_heap.rs`, which halts core 1 instead. A panic, an exception
 or a forbidden allocation on core 1 halts core 1 alone, and core 0 renders on
 after a 2 s join timeout (`[core1] stopped: …`). On FS3 it took 620 / 1,488 /
 2,048 LEDs from 41.1 / 20.6 / 15.8 to 50.9 / 26.7 / 20.7 fps (2026-10-24).
-The decision is `docs/adr/2026-10-24-s3-second-core-renders.md`; the
+The decision is `docs/adr/2026-10-24-s3-second-core-renders.ai.md`; the
 emulator's gates are `lp-cli/tests/emu_s3_core1_gates.rs`. Core 1's stack
 costs the arena 8 KiB. A `pc-sampler` image (core 1 as the PC sampler)
 builds without it.
@@ -604,7 +604,7 @@ The C6's radio, on this chip (S3 radio plan, M3 and M4,
   plus the advertiser that offers the second one (BTDM counts every
   advertising set and connection against `max_connections`; the C6's NPL
   counts connections only:
-  docs/defects/2026-10-21-the-s3-stops-advertising-after-its-first-connection.md)
+  docs/defects/2026-10-21-the-s3-stops-advertising-after-its-first-connection.ai.md)
   — and the controller task on core 0. Logins draw their nonce from the
   hardware RNG (`fill_random`), as on the C6.
 - **`wifi`**: the station, the IP stack, the secure LAN link at
@@ -618,7 +618,7 @@ The C6's radio, on this chip (S3 radio plan, M3 and M4,
   `relay:<mac>@<origin>`, taken over on the LAN, busy, a deploy, Cloud relay
   off and on, a reset key refused. On silicon the station caps its transmit
   power at 15 dBm (`MAX_TX_POWER_QDBM`): at 20 dBm FS3 never authenticated
-  (docs/defects/2026-10-22-the-s3-wifi-image-never-authenticates.md). With
+  (docs/defects/2026-10-22-the-s3-wifi-image-never-authenticates.ai.md). With
   the cap, FS3 and XS1 each joined 10 of 10 on the first attempt, and FS3
   registered with lightplayer.app's relay by itself.
 
@@ -631,7 +631,7 @@ split image the radio links serve the engine once `split_boot` enters it; a
 core-only S3 serves nothing over the air yet (updates are the updates plan's).
 
 **`ble` is on by default** since its desk walk passed on FS3
-(`docs/reports/2026-10-21-s3-bluetooth-walk.md`): every S3 image starts the
+(`docs/reports/2026-10-21-s3-bluetooth-walk.ai.md`): every S3 image starts the
 BTDM controller unless the device store turns Bluetooth off, emulated ones
 included (they advertise to nobody, as an emulated C6 does). **`espnow` is on
 by default** since PSRAM is (2026-10-23, Yona's ruling): the Wi-Fi blob up
@@ -640,14 +640,14 @@ memory ADR's 2026-10-23 amendment). **`wifi` is on by default** since
 2026-10-29, when FS3 (the XIAO S3 Plus, at its usual metre from the desk's
 access point) and XS1 (the plain XIAO S3) each joined 10 of 10 and stayed
 inside the radio frame-rate budget
-(docs/reports/2026-10-29-s3-wifi-on-by-default.md). A board with no saved
+(docs/reports/2026-10-29-s3-wifi-on-by-default.ai.md). A board with no saved
 network never scans. A radio-free image is `--no-default-features
 --features esp32s3,server,float-f32,…`; a `radio_boot_probe` image runs the
 probe's radio in place of the product's (`build.rs`: `s3_radio`, `s3_ble`,
 `s3_espnow`, `s3_wifi` are the features minus the probe, and the source gates
 on those).
 
-**Memory** is `docs/adr/2026-10-21-s3-radio-memory.md`: the radio blobs' own
+**Memory** is `docs/adr/2026-10-21-s3-radio-memory.ai.md`: the radio blobs' own
 C heap (`src/c_heap.rs`; 32 KB on a Bluetooth image, 48 KB with the Wi-Fi
 blob up), the arena cut around the boot stages' RAM and
 `dram2_seg` untagged — no radio block may land where a boot stage runs after a
@@ -671,7 +671,7 @@ advertising, 32 connected and editing, inside the radio frame-rate budget.
 The S3R8's 8 MB of octal PSRAM, brought up in the core (`src/psram.rs`) and
 given to the engine's heap. On by default since 2026-10-23, with every Rust
 allocation going there first (`all`): Yona's ruling on the walk's numbers
-(`docs/reports/2026-10-22-s3-psram-walk.md`, `docs/adr/2026-10-22-s3-psram.md`).
+(`docs/reports/2026-10-22-s3-psram-walk.ai.md`, `docs/adr/2026-10-22-s3-psram.ai.md`).
 
 ```bash
 just build-fw-esp32s3                               # the default: PSRAM first for every Rust allocation
@@ -797,7 +797,7 @@ executor runs both the link and the server loop, render first.
 logs `[iostack] high-water …` at the heartbeat; the Xtensa port reads `sp`
 from `a1` and scans the esp-rtos `Task` record, a scan that lives only in
 this diagnostic feature. See
-`docs/adr/2026-10-02-c6-link-io-thread.md`'s S3 amendment for the numbers,
+`docs/adr/2026-10-02-c6-link-io-thread.ai.md`'s S3 amendment for the numbers,
 the lock and the core-1 follow-up.
 
 Two dependency lines carry almost all of its size, and both are choices a
@@ -847,7 +847,7 @@ is `lpvm-native`'s rv32 emulation — the *same code generator* the S3 JITs, one
 ISA over. When the three disagree, which pair agrees is the entire diagnosis:
 device+rv32 against wasmtime is a native-versus-wasm difference that the C6
 shares, while a device disagreeing with both is Xtensa-specific. See
-`docs/defects/2026-07-30-q32-native-vs-wasmtime-last-bit.md`.
+`docs/defects/2026-07-30-q32-native-vs-wasmtime-last-bit.ai.md`.
 
 ## Board profile
 

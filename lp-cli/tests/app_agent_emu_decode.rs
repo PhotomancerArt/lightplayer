@@ -49,7 +49,7 @@ const RMT_SIGNALS: [u16; 2] = [71, 72];
 /// Emulated time stage B waits for the first lit frame after the upload.
 /// Generous on purpose: the emulated C6 builds a graphics stage far slower
 /// than silicon (open defect
-/// `docs/defects/2026-09-10-the-emulated-c6-builds-a-graphics-stage-40x-slower-than-silicon.md`),
+/// `docs/defects/2026-09-10-the-emulated-c6-builds-a-graphics-stage-40x-slower-than-silicon.ai.md`),
 /// so a project that loads in a blink on a board can take seconds here.
 /// A golden lights in about half a second, so the wait costs only the
 /// projects that need it.
@@ -352,7 +352,7 @@ fn repo_root() -> PathBuf {
         .to_path_buf()
 }
 
-/// The `lp-emu` commit an emulated number is quoted against (AGENTS.md:
+/// The `lp-emu` commit an emulated number is quoted against (AGENTS.ai.md:
 /// emulated measurements name their emulator and its commit).
 fn lp_emu_commit() -> String {
     std::process::Command::new("git")

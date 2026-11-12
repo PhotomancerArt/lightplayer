@@ -7,13 +7,13 @@ context, and boot-time analysis that turns reset reasons + leftover state
 into "here is what crashed last run".
 
 Design rationale and the persistent-region contract are recorded in
-`docs/adr/2026-07-04-crash-recovery-model.md`.
+`docs/adr/2026-07-04-crash-recovery-model.ai.md`.
 
 This used to be described as the second of two layers, the first being
 in-process `catch_unwind` per node (`catch_node_panic`, wrapping a node call
 in the `unwinding` crate and turning a caught panic into a `NodeError`
 without a reboot). **That layer is gone** — no RV32 target unwinds any more,
-per `docs/adr/2026-08-02-rv32-firmwares-are-abort-tier.md` — and nothing in
+per `docs/adr/2026-08-02-rv32-firmwares-are-abort-tier.ai.md` — and nothing in
 *this* crate changed when it went, because none of its bookkeeping was ever
 gated on unwinding (`src/lib.rs:8-13`). The practical difference: a crash now
 always costs a reboot to record. What remains at the call site
@@ -23,7 +23,7 @@ recovery frame around every node call, so the blame ledger knows what was
 running when the device died, and still denies entry to a red-gated path.
 Frame stack, blame, yellow → red escalation, hierarchical parent gating, and
 safe mode all work exactly as
-`docs/adr/2026-07-04-crash-recovery-model.md` describes; only the "caught
+`docs/adr/2026-07-04-crash-recovery-model.ai.md` describes; only the "caught
 in-process, no reboot" outcome is gone.
 
 The reboot backstop (this crate + platform glue) is therefore the whole
@@ -61,7 +61,7 @@ left behind) against the crashing path and every parent prefix:
   clear it back to green.
 - Second crash while yellow → **red**: `enter` on that path (or anything
   under it) is denied with a legible reason. This is what "a fault is never
-  black" (`docs/adr/2026-09-02-fault-is-never-black.md`) exists downstream
+  black" (`docs/adr/2026-09-02-fault-is-never-black.ai.md`) exists downstream
   of: a red-gated node stops running, and something else must say so.
 - **Every boot** (any cause but `PowerOn`) demotes red entries to yellow —
   `Ledger::on_boot` (`src/ledger.rs`), called unconditionally whenever
@@ -84,7 +84,7 @@ backends live in the respective firmware crates.
 
 `RecoveryHandle::clear_ledger` (`src/recovery.rs`, backed by
 `Ledger::clear` in `src/ledger.rs`) is the user-facing "Clear faults" verb's
-device-side half (`docs/adr/2026-09-02-fault-is-never-black.md`). It is the
+device-side half (`docs/adr/2026-09-02-fault-is-never-black.ai.md`). It is the
 only way to lift a quarantine short of losing power:
 
 - **Clears**: every path entry (red or yellow, back to empty/green) and the

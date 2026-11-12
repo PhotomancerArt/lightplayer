@@ -1,5 +1,5 @@
 //! [`StackBar`]: one of the card's eight rows, one 28 px line in the card's
-//! one grammar (`docs/ux/anatomy/board-card.md`, "The row"): **icon · kind
+//! one grammar (`docs/ux/anatomy/board-card.ai.md`, "The row"): **icon · kind
 //! · name · state · action**. The icon is the kind's own in every state;
 //! the kind is a fixed muted column, so the names line up down the card —
 //! on a link row the link's own name ("USB", "lightplayer.app"), a step
@@ -33,7 +33,7 @@
 //! alone). No row draws one today; the account mark ("From your account")
 //! is the secrets vault's.
 //!
-//! The row's tone tints it in its status family (`docs/style/ui.md`):
+//! The row's tone tints it in its status family (`docs/style/ui.ai.md`):
 //! Attention (a device needs you), Error (broken, striped), Good (work that
 //! just went well); the kind takes the row's own colour, quieter. A stale
 //! row (last known) is dimmed, its words unchanged. Which tone, which words
@@ -348,7 +348,7 @@ pub(crate) fn bar_tone_class(tone: UiStatusKind) -> &'static str {
         UiStatusKind::Attention => {
             "tw:border-status-attention-border tw:bg-status-attention-bg tw:text-status-attention-foreground tw:[--ux-row-flush-edge:var(--studio-status-attention-border)]"
         }
-        // Stripes mark a failure (ui.md): laid over the error ground.
+        // Stripes mark a failure (ui.ai.md): laid over the error ground.
         UiStatusKind::Error => {
             "tw:border-status-error-border tw:bg-status-error-bg tw:bg-[image:var(--studio-status-error-stripes)] tw:text-status-error-foreground tw:[--ux-row-flush-edge:var(--studio-status-error-border)]"
         }

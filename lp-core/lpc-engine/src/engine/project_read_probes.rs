@@ -201,7 +201,7 @@ impl Engine {
     /// every registered binding — authored and default, including bindings
     /// on implicit runtime consumed slots with no def field — plus every
     /// referenced channel with providers/consumers as indices into the
-    /// binding list. See docs/adr/2026-07-06-binding-graph-probe.md.
+    /// binding list. See docs/adr/2026-07-06-binding-graph-probe.ai.md.
     ///
     /// The structure is revision-gated (`request.structure`) and the values
     /// ride every read that asks for them. The structure revision is stamped
@@ -271,7 +271,7 @@ impl Engine {
         // different scopes are distinct entries, and display strings are a
         // client concern. Sink scopes list too — a playlist entry's panel
         // control reads its live/engaged state off the entry's own
-        // (scope, channel) row (panel.md §3, the per-entry held value) —
+        // (scope, channel) row (panel.ai.md §3, the per-entry held value) —
         // but presentation surfaces (the bus listing, binding pickers)
         // are expected to filter `scope.is_sink()` rows out: R2 keeps sink
         // channels invisible to enclosing READERS, which is a resolution
@@ -597,7 +597,7 @@ impl Engine {
     /// state machine. Keeping BOTH out of line took 7,738 B off the
     /// ESP32-C6 image; either one alone saved only a few hundred bytes, so
     /// do not drop one of the pair without re-measuring
-    /// (`just fw-esp32c6-size-check`; `docs/adr/2026-07-28-esp32c6-flash-budget.md`).
+    /// (`just fw-esp32c6-size-check`; `docs/adr/2026-07-28-esp32c6-flash-budget.ai.md`).
     /// One call per probe per read costs nothing measurable.
     #[inline(never)]
     pub fn read_project_output_frame_probe(

@@ -5,7 +5,7 @@
 // `src/builtins/lpfn/generative/fbm/fbm3_tile_q32.rs`: normalized octave sum
 // of tilable gradient noise with persistence 0.5 and lacunarity 2.0.
 // FBM is a standard procedure (see
-// docs/reports/2026-03-31-lpfx-license-audit.md).
+// docs/reports/2026-03-31-lpfx-license-audit.ai.md).
 //
 // NOTE: built on the chaotic sin-hash noise stack — conformance vs the Q32
 // device implementation is statistical, not pointwise (see

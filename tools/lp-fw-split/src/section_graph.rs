@@ -309,7 +309,7 @@ pub fn read_relocations(data: &[u8]) -> Result<Relocations> {
             // up, and `S + A` then lands in whichever section the link put
             // before it — a different one in each pass. Missing that edge
             // placed a table the core reads into the engine region
-            // (docs/defects/2026-10-05-the-split-tool-missed-a-negative-addend-reference.md).
+            // (docs/defects/2026-10-05-the-split-tool-missed-a-negative-addend-reference.ai.md).
             // A section symbol's value is its section's start, not a target.
             if addend != 0 && sym.st_type() != object::elf::STT_SECTION {
                 list.push((at, value));

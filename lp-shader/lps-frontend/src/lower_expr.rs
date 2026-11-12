@@ -1515,7 +1515,7 @@ fn lower_relational(
                     "isnan/isinf expect float",
                 )));
             }
-            // Q32 (and filetest targets): docs/design/q32.md §6 — no NaN/Inf encoding; div0
+            // Q32 (and filetest targets): docs/design/q32.ai.md §6 — no NaN/Inf encoding; div0
             // saturation values are not exposed as infinity through `isinf`.
             let mut out = VRegVec::new();
             for _ in 0..arg_vs.len() {

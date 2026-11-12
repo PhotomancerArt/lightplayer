@@ -10,10 +10,10 @@
 //! empty entry at open, the data at close), so [`LpFs::write_file`] creates a
 //! file under a hidden name in the same directory and renames it into place
 //! — one commit — and a cut leaves no file or the whole one
-//! (`docs/defects/2026-10-10-a-cut-during-a-littlefs-file-create-leaves-it-empty.md`).
+//! (`docs/defects/2026-10-10-a-cut-during-a-littlefs-file-create-leaves-it-empty.ai.md`).
 //! Only ever a rename within one directory: littlefs-rust loses an unrelated
 //! entry when a rename across directories is cut
-//! (`docs/defects/2026-10-08-littlefs-rust-cross-directory-rename-cut-loses-the-next-entry.md`).
+//! (`docs/defects/2026-10-08-littlefs-rust-cross-directory-rename-cut-loses-the-next-entry.ai.md`).
 
 use alloc::{format, rc::Rc, string::ToString, vec, vec::Vec};
 use core::cell::RefCell;
@@ -660,7 +660,7 @@ pub fn lpfs_mounts_read_only<S: Storage>(storage: S, config: Config) -> bool {
 
 /// The tree store's sector magic, `"LTS1"`: bytes 0..4 of every sector
 /// header it writes, in every format version, past and future
-/// (`lp-base/lp-tree-store/FORMAT.md`, "Sector"). Spelled here, not
+/// (`lp-base/lp-tree-store/FORMAT.ai.md`, "Sector"). Spelled here, not
 /// imported, so a littlefs image recognises a tree store without linking
 /// one; a test pins it to `lp_tree_store::SECTOR_MAGIC`.
 pub const TREE_STORE_SECTOR_MAGIC: [u8; 4] = *b"LTS1";

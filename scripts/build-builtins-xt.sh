@@ -11,7 +11,7 @@
 # skip, so not building the image is the correct outcome there — but on a
 # machine that HAS the toolchain, the image must be rebuilt rather than assumed,
 # because it is a gitignored artifact that a cache wipe or a fresh worktree
-# leaves absent. See docs/defects/2026-08-01-xt-builtins-image-strands-just-test.md.
+# leaves absent. See docs/defects/2026-08-01-xt-builtins-image-strands-just-test.ai.md.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 ROOT="$PWD"
@@ -73,7 +73,7 @@ export CARGO_TARGET_DIR="$PWD/target"
 # 1. `lps-builtins/float-f32` did not compile for Xtensa at all — the backend
 #    cannot select a float constant pool. Worked around on our side, with a
 #    bit-equivalence test, in lps-builtins' rgb2hsv_f32.rs.
-#      docs/defects/2026-08-01-xtensa-backend-cannot-select-float-constant-pool.md
+#      docs/defects/2026-08-01-xtensa-backend-cannot-select-float-constant-pool.ai.md
 #      upstream: https://github.com/esp-rs/rust/issues/282
 # 2. It then did not *fit*: link.ld gave .text 112 KiB of the emulator's 128 KiB
 #    code region and `rt_emu::xt_image` placed compiled shader code in whatever
@@ -82,7 +82,7 @@ export CARGO_TARGET_DIR="$PWD/target"
 #    flash-resident firmware as if it lived in SRAM. It doesn't, and now it
 #    doesn't here either: the image links into IROM/DROM, and the whole SRAM
 #    code region is the shader's.
-#      docs/defects/2026-08-01-xt-f32-builtins-exhaust-the-emulator-code-region.md
+#      docs/defects/2026-08-01-xt-f32-builtins-exhaust-the-emulator-code-region.ai.md
 #
 # This is load-bearing beyond the f32 path: scripts/filetests.sh builds this
 # image before running the xtn/xtlpn targets, so anything wrong here takes the

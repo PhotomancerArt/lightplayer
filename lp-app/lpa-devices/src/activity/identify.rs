@@ -9,7 +9,7 @@
 //! - Readiness is granted by exactly one thing — a hello (on any wire proto),
 //!   either the unsolicited boot hello or the answer to our own hello
 //!   request. A connect cannot assume the power to cause a boot, so asking
-//!   is mandatory (`docs/defects/2026-08-21-hello-gate-assumes-fresh-boot.md`).
+//!   is mandatory (`docs/defects/2026-08-21-hello-gate-assumes-fresh-boot.ai.md`).
 //! - Non-hello frames are **absorbed** as live-peer evidence and counted,
 //!   never condemned on sight. Frames-but-no-hello is a verdict the
 //!   *deadline* reaches, not the first frame.
@@ -85,7 +85,7 @@ impl IdentifyActivity {
     /// access list read, the login, the account's board report, the restart
     /// watch; the network panel; the card's picture feed) — an asked hello
     /// repeated each of them on the same connection
-    /// (docs/defects/2026-10-23-a-re-identify-reported-the-board-to-the-account-twice.md).
+    /// (docs/defects/2026-10-23-a-re-identify-reported-the-board-to-the-account-twice.ai.md).
     pub fn on_hello_in_hand(started_at: Millis, ask_interval_ms: u64) -> Self {
         Self {
             settle_at: started_at,

@@ -114,7 +114,7 @@ runtime code; only the *source* of the delta differs. The `lpa-link`
 ## Instance-Fatal Contract (Panics)
 
 This crate builds with `panic=abort`
-(`docs/adr/2026-07-23-per-target-panic-strategy.md`): a Rust panic inside a
+(`docs/adr/2026-07-23-per-target-panic-strategy.ai.md`): a Rust panic inside a
 wasm export escapes to JavaScript as a `WebAssembly.RuntimeError` *without
 running Rust drops*, so instance state (notably the runtime registry's
 `RefCell` borrow) is leaked and the instance is permanently condemned —
@@ -127,7 +127,7 @@ the logger captures the primary panic message before the abort (mirrored to
 the console and stashed on the worker global for the fatal status). Shader
 *fuel traps* are not this case: emitted shader modules are separate wasm
 instances whose traps are caught and typed at the shader-call boundary
-(`docs/adr/2026-07-23-sim-wasm-fuel.md`). The `debug_force_panic` export /
+(`docs/adr/2026-07-23-sim-wasm-fuel.ai.md`). The `debug_force_panic` export /
 worker message exists to exercise this path deliberately.
 
 ## Validation

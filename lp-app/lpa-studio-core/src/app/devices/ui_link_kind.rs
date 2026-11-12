@@ -1,6 +1,6 @@
 //! How a board is reached right now, in the words and glyph the card and
 //! the editor header use: USB, Bluetooth, Wi‑Fi, or lightplayer.app (the
-//! link is lightplayer.app: P1, `docs/ux/anatomy/board-card.md`).
+//! link is lightplayer.app: P1, `docs/ux/anatomy/board-card.ai.md`).
 //!
 //! One rule, read off the link's endpoint key, so the card's preview
 //! sentence, the header's glyph and the lens's refusals can never name

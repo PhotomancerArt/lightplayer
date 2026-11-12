@@ -28,7 +28,7 @@
 //! the scenario runner and would otherwise churn the lifecycle events out
 //! of the bounded ring. Anomaly COUNTS are always maintained, capture or
 //! not: they are what distinguishes "disconnected after garbled input"
-//! from a clean drop (docs/defects/2026-08-02-serial-line-interleaving.md).
+//! from a clean drop (docs/defects/2026-08-02-serial-line-interleaving.ai.md).
 //!
 //! # Persistence and streaming
 //!

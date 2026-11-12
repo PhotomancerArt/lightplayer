@@ -155,7 +155,7 @@ pub trait NodeRuntime {
     /// [`Self::open_compile_window`], so the deferred transient runs against
     /// a heap where rebuildable state has been dropped. See the
     /// memory-pressure contract in
-    /// `docs/adr/2026-08-03-memory-pressure-at-compile-safe-points.md`.
+    /// `docs/adr/2026-08-03-memory-pressure-at-compile-safe-points.ai.md`.
     fn wants_compile_window(&self) -> bool {
         false
     }

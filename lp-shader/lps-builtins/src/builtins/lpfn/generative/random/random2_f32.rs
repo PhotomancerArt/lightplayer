@@ -2,11 +2,11 @@
 //!
 //! Transliterated from the canonical GLSL
 //! `glsl/lpfn/generative/random/random2.glsl` (normative — see
-//! `docs/adr/2026-07-08-glsl-canonical-builtins.md`).
+//! `docs/adr/2026-07-08-glsl-canonical-builtins.ai.md`).
 //!
 //! `fract(sin(dot(p, K)) * 43758.5453)`. Credit: MIT License (MIT)
 //! Copyright 2014, David Hoskins; distributed by LYGIA in
-//! generative/random.glsl (see docs/reports/2026-03-31-lpfx-license-audit.md).
+//! generative/random.glsl (see docs/reports/2026-03-31-lpfx-license-audit.ai.md).
 //!
 //! Seed semantics: raw seed word added to the angle = `seed * 2^-16` radians of
 //! phase, matching the Q32 implementation (see `random1_f32`).

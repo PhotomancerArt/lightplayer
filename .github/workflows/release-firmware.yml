@@ -140,7 +140,7 @@ jobs:
           default: false
 
       # The repo's one cargo-registry entry, restored read-only (`@main` for
-      # the reason above; docs/debt/actions-cache-budget.md).
+      # the reason above; docs/debt/actions-cache-budget.ai.md).
       - name: Restore cargo registry
         uses: PhotomancerArt/lightplayer/.github/actions/cargo-registry@main
 

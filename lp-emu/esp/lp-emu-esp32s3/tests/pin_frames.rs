@@ -567,7 +567,7 @@ fn the_walk_is_the_c6s_captured_bytes() {
     // ⚠️ The one difference, and the reason it exists. The C6 waits on the
     // `stopAllProjects` reply's own bytes; on this chip the link dropped one
     // 64 B packet of that reply
-    // (`docs/defects/2026-09-13-the-s3-link-drops-the-io-tasks-next-chunk-on-a-stale-serial-in-empty.md`,
+    // (`docs/defects/2026-09-13-the-s3-link-drops-the-io-tasks-next-chunk-on-a-stale-serial-in-empty.ai.md`,
     // now fixed), so a walk that waited on them would have stalled for ever
     // at request 2 — it did, and that is how this was found. The handler's
     // own log line is the same event, one record earlier, and waiting on it

@@ -43,7 +43,7 @@
 //!
 //! # The link's one send buffer, and the firmware's gate
 //!
-//! `docs/defects/2026-09-13-the-s3-link-drops-the-io-tasks-next-chunk-on-a-stale-serial-in-empty.md`:
+//! `docs/defects/2026-09-13-the-s3-link-drops-the-io-tasks-next-chunk-on-a-stale-serial-in-empty.ai.md`:
 //! the block has **one** IN buffer that firmware cannot write from a flush
 //! until the host has read it (the TRM; `lp-emu-esp-common`'s `ip/usb_sj.rs`
 //! cites it and pins the contract at the registers). esp-println (polled)
@@ -119,7 +119,7 @@ fn images() -> Option<(PathBuf, PathBuf)> {
 const GATE_US: u64 = 2_000_000;
 
 /// The defect entry for the link's stale-`serial_in_empty` drop (module docs).
-const LINK_DEFECT: &str = "docs/defects/2026-09-13-the-s3-link-drops-the-io-tasks-next-chunk-on-a-stale-serial-in-empty.md";
+const LINK_DEFECT: &str = "docs/defects/2026-09-13-the-s3-link-drops-the-io-tasks-next-chunk-on-a-stale-serial-in-empty.ai.md";
 
 /// The lines P05 pinned as absent and P06 delivers (DD86) that are still raw
 /// text on the port since proto 30 (the hardware manifest, the hello and

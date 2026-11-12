@@ -14,7 +14,7 @@
 //! ISA-agnostic **types**, so no downstream consumer (`lps-filetests`,
 //! `lp-shader`) ever grows per-ISA match arms.
 //!
-//! See `docs/adr/2026-07-30-isa-parameterized-host-emu-engine.md`.
+//! See `docs/adr/2026-07-30-isa-parameterized-host-emu-engine.ai.md`.
 
 pub mod engine;
 pub mod image;

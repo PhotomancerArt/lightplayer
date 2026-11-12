@@ -1107,7 +1107,7 @@ pub fn App() -> Element {
                     // address IS the answer — the core binds the library's
                     // own copy when the board is at its head, or adopts an
                     // unknown project under its own uid first
-                    // (docs/adr/2026-09-22-opening-a-board-adopts-its-project.md).
+                    // (docs/adr/2026-09-22-opening-a-board-adopts-its-project.ai.md).
                     // A board not yet identified, or one whose content is
                     // not at the library head (F1), simply has no project
                     // address yet, and the URL is left where the user put
@@ -1473,7 +1473,7 @@ pub fn App() -> Element {
             _ => false,
         })
         .cloned();
-    // Play mode (panel.md P12) is a zoom on the SAME session: the flag only
+    // Play mode (panel.ai.md P12) is a zoom on the SAME session: the flag only
     // picks what the shell renders, and the toggle only rewrites the URL.
     let project_view = current_route.project_view();
     let play = current_route.is_play();
@@ -2527,7 +2527,7 @@ fn install_serial_hotplug(tx: &CommandSender) {
 /// Web Serial's hotplug. `connect` is a session becoming present (a reconnect
 /// that succeeded, a page-load restore); `disconnect` is one dropping —
 /// including a drop only noticed when the page was shown again, which is how
-/// iOS delivers them (docs/defects/2026-09-23-bluefy-hidden-page-does-not-see-ble-drops.md).
+/// iOS delivers them (docs/defects/2026-09-23-bluefy-hidden-page-does-not-see-ble-drops.ai.md).
 #[cfg(target_arch = "wasm32")]
 fn install_ble_hotplug(tx: &CommandSender) {
     use lpa_studio_core::app::studio::studio_command::DeviceHotplug;

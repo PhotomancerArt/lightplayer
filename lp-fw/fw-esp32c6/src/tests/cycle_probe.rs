@@ -65,7 +65,7 @@ use crate::logger;
 // public on `esp32c6` alone, so the concrete type is reachable without one.
 use crate::serial::usb_serial::Esp32UsbSerialIo;
 
-/// UART0 `status`, `0x6000_0000 + 0x01c`. The register `notes.md` F9 names:
+/// UART0 `status`, `0x6000_0000 + 0x01c`. The register `notes.ai.md` F9 names:
 /// 86 % of this harness's MMIO reads are of this one address, so it is the
 /// APB read whose cost the model most needs.
 const UART0_STATUS: *const u32 = 0x6000_001C as *const u32;
@@ -242,7 +242,7 @@ const CODE_WALK_PAIRS: u32 = 12_288;
 /// Sized to exceed a **32 KiB** L1 cache by 3×. That 32 KiB is a
 /// *hypothesis*, not a citation: the C6's cache geometry — size, line length,
 /// ways — is not in this repository, and esp-hal 1.1.1 and esp-metadata 0.4.0
-/// carry no cache constant for the part (`notes.md` F7). **Establishing it is
+/// carry no cache constant for the part (`notes.ai.md` F7). **Establishing it is
 /// P3's job (OQ3)**, from the TRM's Cache chapter and the ROM's `Cache_*`
 /// writes into EXTMEM. So this kernel is deliberately over-sized rather than
 /// tuned: if the cache turns out larger than 32 KiB the walk still exceeds it

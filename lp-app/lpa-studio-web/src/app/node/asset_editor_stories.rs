@@ -152,7 +152,7 @@ layout(binding = 1) uniform float phase;
 // tank drains, and the runtime traps — a RUNTIME failure of a shader that
 // compiled fine. The engine reports the node as `Fault`, and every output
 // of this project shows the fault pattern instead of black
-// (docs/adr/2026-09-02-fault-is-never-black.md). Fuel metering is on for every backend
+// (docs/adr/2026-09-02-fault-is-never-black.ai.md). Fuel metering is on for every backend
 // (`lpvm-native` NativeOptions.fuel defaults true; the browser sim's
 // `infinite_loop_shader_reports_fuel_error_and_keeps_ticking` pins it),
 // so this never hangs or reboots a board.

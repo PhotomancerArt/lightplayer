@@ -4,7 +4,7 @@ The cloud relay's device-leg protocol. `no_std` + `alloc`, sans-IO: one
 crate that the hub (`lp-cloud-server`), the board's firmware, lp-cli's host
 board (`lp-cli serve --relay`) and the tests all share.
 
-Decision record: `docs/adr/2026-10-06-cloud-relay.md`.
+Decision record: `docs/adr/2026-10-06-cloud-relay.ai.md`.
 
 ## The shape
 

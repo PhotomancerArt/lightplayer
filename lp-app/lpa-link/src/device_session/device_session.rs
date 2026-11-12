@@ -327,7 +327,7 @@ impl DeviceShared {
     /// fails means the port is still held, and the operation about to run
     /// will fail to open it. Left silent, that surfaced a whole step later
     /// as an unexplained "Device or resource busy"
-    /// (`docs/defects/2026-09-08-serial-close-leaks-the-port-on-a-wedged-device.md`),
+    /// (`docs/defects/2026-09-08-serial-close-leaks-the-port-on-a-wedged-device.ai.md`),
     /// so the
     /// failure goes to the console feed where the operator reads the walk.
     pub(super) async fn release_link(&self) {
@@ -420,7 +420,7 @@ impl DeviceShared {
     /// assume the power to cause one (Web Serial cannot reset a CH340
     /// classic; a running server would otherwise never pass the gate).
     /// Periodic rather than once: the running server's response path drops
-    /// frames under engine load (`docs/debt/shared-uart-io-task-starvation.md`),
+    /// frames under engine load (`docs/debt/shared-uart-io-task-starvation.ai.md`),
     /// so a lost answer must not strand an otherwise-healthy connect.
     pub(crate) async fn drive_readiness(&self) -> DeviceState {
         if !matches!(self.state(), DeviceState::Booting) {

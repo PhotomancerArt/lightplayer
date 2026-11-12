@@ -3,7 +3,7 @@
 //! one.
 //!
 //! The C6 boots through one of two front doors (ADR
-//! `docs/adr/2026-10-17-the-c6-boots-through-our-own-bootloader.md`):
+//! `docs/adr/2026-10-17-the-c6-boots-through-our-own-bootloader.ai.md`):
 //!
 //! - **The IDF door**: ESP-IDF's second stage at `0x0`, which starts the
 //!   loader at `factory+0` as its app (every board flashed before the

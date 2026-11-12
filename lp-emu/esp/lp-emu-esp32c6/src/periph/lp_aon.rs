@@ -20,7 +20,7 @@
 //! and nothing happened: the ROM returned into esp-hal's `-> !` function,
 //! which falls through into whatever follows it in flash, and the RTC
 //! watchdog rebooted the chip seconds later with the wrong cause
-//! (`docs/defects/2026-09-29-the-emulated-c6-does-not-perform-a-software-reset.md`).
+//! (`docs/defects/2026-09-29-the-emulated-c6-does-not-perform-a-software-reset.ai.md`).
 //!
 //! Now the store raises [`MachineRequest::Reset`] with
 //! [`ResetSource::Software`] — which this chip's ROM table names

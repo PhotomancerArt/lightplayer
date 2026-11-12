@@ -15,7 +15,7 @@
 //! happened not to trip on it; the ROM-up boot, whose mask ROM and
 //! bootloader have run their own `regi2c` traffic first, printed three
 //! `error: pll_cal exceeds 2ms!!!` lines that silicon does not
-//! (`docs/defects/2026-09-08-regi2c-is-one-data-register-not-a-register-file.md`).
+//! (`docs/defects/2026-09-08-regi2c-is-one-data-register-not-a-register-file.ai.md`).
 //!
 //! # The transaction
 //!

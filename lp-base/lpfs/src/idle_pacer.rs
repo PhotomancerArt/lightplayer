@@ -1,6 +1,6 @@
 //! When a filesystem may spend a tick on its own cleanup (`LpFs::idle_tick`;
 //! the tree store's idle steps): the radio frame-rate budget's ceilings
-//! (`docs/adr/2026-10-06-radio-frame-rate-budget.md`) applied to cleanup,
+//! (`docs/adr/2026-10-06-radio-frame-rate-budget.ai.md`) applied to cleanup,
 //! from the server's injected tick times alone (no clock is read here).
 //!
 //! - **Quiet first.** No piece until no request has changed a file (and no

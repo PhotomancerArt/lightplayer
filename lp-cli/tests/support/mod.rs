@@ -239,7 +239,7 @@ impl Serve {
     /// Asked, not waited for. The board's own unsolicited hello is its first
     /// frame after boot, and a port nobody had open when it was written
     /// dropped it, as a board on a desk does
-    /// (`docs/defects/2026-09-23-emulated-usb-port-drains-with-no-client-attached.md`).
+    /// (`docs/defects/2026-09-23-emulated-usb-port-drains-with-no-client-attached.ai.md`).
     /// The request is repeated on a short wall cadence until one is answered:
     /// the firmware may still be latched "not draining" for the instant after
     /// the open, and drops what it writes until its probe gets through. The

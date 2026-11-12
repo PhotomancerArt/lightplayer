@@ -60,7 +60,7 @@ tail -5 "$LOG" 2>/dev/null
 # retrying flashes is what makes it worse.
 if grep -qa 'TG0_WDT_HPSYS' "$LOG" 2>/dev/null; then
     echo "WEDGED: the log carries rst:0x7 (TG0_WDT_HPSYS) — the board needs a replug."
-    echo "        Do not retry the flash. See docs/defects/2026-09-06-c6-analog-master-wedges-the-bootloader.md"
+    echo "        Do not retry the flash. See docs/defects/2026-09-06-c6-analog-master-wedges-the-bootloader.ai.md"
     rc=8
 fi
 

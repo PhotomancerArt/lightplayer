@@ -41,7 +41,7 @@ impl EmuSharedArena {
     /// [`DEFAULT_SHARED_START`] (`0x4000_0000`) is only free in rv32's. On
     /// Xtensa that address is the emulator's unmapped return sentinel, so the
     /// Xtensa host engine passes `lp_xt_emu::SHARED_DBUS_BASE` instead. See
-    /// `docs/adr/2026-07-30-xtensa-host-shared-memory.md`.
+    /// `docs/adr/2026-07-30-xtensa-host-shared-memory.ai.md`.
     pub fn with_start(capacity: usize, shared_start: u32) -> Self {
         Self {
             storage: Arc::new(std::sync::Mutex::new(vec![0u8; capacity])),

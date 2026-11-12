@@ -3,7 +3,7 @@
 //! The tree store (`lp-base/lp-tree-store`, the filesystem an `fs-tree`
 //! core writes) begins every sector it uses with a 24-byte header whose
 //! first four bytes are the magic `"LTS1"` — in every format version, past
-//! and future (its FORMAT.md, "Sector"). Its free sectors are erased, and it
+//! and future (its FORMAT.ai.md, "Sector"). Its free sectors are erased, and it
 //! levels its wear, so its headers can be anywhere in the partition: the
 //! probe looks at the start of every sector it read. Only the magic is
 //! looked at, never a CRC or a version: a newer store may have moved them,

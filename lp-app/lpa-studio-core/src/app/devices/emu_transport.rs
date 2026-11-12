@@ -343,11 +343,11 @@ impl DeviceTransport for EmuDeviceTransport {
                 // inspect a layout with: an emulated tab board updates as a
                 // plain flash: the image's own sectors only, as esptool writes
                 // it, so a board on the current layout keeps its files
-                // (docs/defects/2026-10-02-updating-a-tab-hosted-board-erases-its-files.md).
+                // (docs/defects/2026-10-02-updating-a-tab-hosted-board-erases-its-files.ai.md).
                 // ⚠️ A board on the LEGACY layout is not migrated: its files
                 // are held at the old offset, and Finish update cannot move
                 // them on this transport (open:
-                // docs/defects/2026-10-04-a-legacy-tab-board-cannot-finish-its-update.md).
+                // docs/defects/2026-10-04-a-legacy-tab-board-cannot-finish-its-update.ai.md).
                 // The `?emu=tab` polyfill lane (esptool-js over the ROM) is
                 // not this path: it migrates like a board (walk W12).
                 DeviceEffectCall::InspectLayout { .. } => Ok(DeviceEffectFacts {

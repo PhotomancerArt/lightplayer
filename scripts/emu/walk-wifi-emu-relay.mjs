@@ -40,13 +40,13 @@
 // The board's console has no line of its own for a relay state change (its
 // heartbeat's `[relay] state=…` comes every five emulated seconds, and the
 // last steps end before it prints); one was tried and cost a 32 KB flash
-// page (docs/reports/2026-10-07-wifi-relay-emulator-walk.md), so the walk
+// page (docs/reports/2026-10-07-wifi-relay-emulator-walk.ai.md), so the walk
 // reads the status answers instead.
 //
 // and writes `summary.json` beside the log: the steps, the board's heap
 // readings, the picture lines and the round-trip lines, with the
 // configuration (`lp-emu:esp32c6:t1+net=lan@<commit>`). Times are WALL time
-// on this host and never a gate (AGENTS.md: emulated runs never gate on wall
+// on this host and never a gate (AGENTS.ai.md: emulated runs never gate on wall
 // clock).
 //
 // `--protocol-1` (`relay-p1`) walks a core built at LAST_PROTOCOL_1 (below)

@@ -9,7 +9,7 @@
 //! and the link's frames back into bytes. That split is ruling DD20 of plan
 //! `classic-uart-on-lp-link`: the I/O task stays a byte shuttle under the
 //! executor-isolation rules (no embassy-time, no logging, ISR-scale stack —
-//! `docs/adr/2026-08-25-classic-uart-io-task-executor-isolation.md`), and the
+//! `docs/adr/2026-08-25-classic-uart-io-task-executor-isolation.ai.md`), and the
 //! link, its timers and its logs live here, where all three are allowed.
 //!
 //! The shape is the C6's (`crate::usb_link::usb_link_task`), minus the

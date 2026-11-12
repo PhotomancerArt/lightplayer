@@ -38,7 +38,7 @@ MAX_PROBES=50
 # foreign listener, evict own stale servers, printed URL is the source of
 # truth). Use it for hardware-walk sessions ONLY: it partially
 # reintroduces the shared-fixed-port risk that
-# docs/defects/2026-07-27-launch-json-pinned-port.md exists to warn about,
+# docs/defects/2026-07-27-launch-json-pinned-port.ai.md exists to warn about,
 # so ordinary dev stays on hashed ports. getPorts() probe sinks should
 # also sit on block ports, or they escape the grant.
 BENCH_BASE=36000

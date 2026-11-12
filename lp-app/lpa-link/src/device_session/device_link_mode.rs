@@ -11,7 +11,7 @@
 //! ids, never the chip's state.
 //!
 //! So the mode has to be established by *talking* to the device. See
-//! `docs/adr/2026-07-30-bootloader-mode-detection.md`.
+//! `docs/adr/2026-07-30-bootloader-mode-detection.ai.md`.
 //!
 //! # The evidence, cheapest first
 //!

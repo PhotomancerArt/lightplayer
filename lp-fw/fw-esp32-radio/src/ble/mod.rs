@@ -1,7 +1,7 @@
 //! The BLE link: the wire, on lp-link, over a Nordic-UART GATT service.
 //!
 //! Plan `ble-remote-control` M4; the decision record is
-//! `docs/adr/2026-09-24-ble-transport.md`. In one paragraph: BLE is on
+//! `docs/adr/2026-09-24-ble-transport.ai.md`. In one paragraph: BLE is on
 //! unless the device store turns it off (`/.lp/access.json`, `bleEnabled`),
 //! read once at boot — an emulated C6 starts the controller and advertises,
 //! but no central ever connects to it. When on, each connection is one

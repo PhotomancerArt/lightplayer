@@ -5,7 +5,7 @@
 //! retired count u16 | retired sector u16 × count (ascending) | a tail of
 //! TLV entries (tag u8 | length u16 | value) to the payload's end. This
 //! version defines no tag: a reader skips every one, and a writer does not
-//! carry them into its next root (FORMAT.md "Root tail"). The record's id is
+//! carry them into its next root (FORMAT.ai.md "Root tail"). The record's id is
 //! `H(Root ++ payload)`.
 
 use alloc::vec::Vec;

@@ -56,7 +56,7 @@ const T2_COMPILE: &str = "lp-emu-esp32c6-t2-2026-09-08-773ebf997.txt";
 /// the transcript's commit, so a re-recording has to arrive as a new stem
 /// with its own sha and its own line here — which is the same rule
 /// `build-reference-image.sh` exists to make checkable
-/// (`docs/debt/reference-images-are-not-reproducible-across-hosts.md`).
+/// (`docs/debt/reference-images-are-not-reproducible-across-hosts.ai.md`).
 const SHA_T3_COMPILE: &str = "23d82aa5fbeabe230634c48a3eea804d3472f88456024eebd644eaf6dcb7fda1";
 const SHA_T3_PROBE: &str = "9222e09d3515a33d0696589b5e79da8ca1efd6cd663c9a9b32fee4736920f7e7";
 const SHA_SILICON_PROBE: &str = "1410bee6780988e395ea92b8c236ee3dda923a38cfe22102733af2d5d0f1b0a0";

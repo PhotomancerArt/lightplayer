@@ -46,7 +46,7 @@ pub struct ServerRuntimeStatus {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub memory: Option<MemoryStats>,
     /// Whether panel state keeps being written for the project this read
-    /// targets (panel.md P11). Server-owned, like the `.lp/state.json`
+    /// targets (panel.ai.md P11). Server-owned, like the `.lp/state.json`
     /// file itself — the engine knows nothing about it, so an engine-only
     /// caller leaves it `None` and the client renders no toggle.
     ///

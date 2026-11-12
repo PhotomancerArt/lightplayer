@@ -1,6 +1,6 @@
 //! The unsolicited wire hello is the first id-0 frame a fw-host runtime
 //! sends when its server loop starts serving (M2 bootstrap contract, see
-//! docs/adr/2026-07-14-wire-hello-versioning.md).
+//! docs/adr/2026-07-14-wire-hello-versioning.ai.md).
 
 use fw_host::HostRuntime;
 use lpc_wire::{WIRE_PROTO_VERSION, server::ServerMsgBody};

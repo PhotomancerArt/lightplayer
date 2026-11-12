@@ -65,9 +65,9 @@ cargo test -p lpvm-wasm
 
 Emitted modules are fuel-metered so an infinite loop in shader code
 aborts cleanly instead of hanging the host — including the browser sim's
-web worker (see `docs/adr/2026-07-23-sim-wasm-fuel.md`; the unit and
+web worker (see `docs/adr/2026-07-23-sim-wasm-fuel.ai.md`; the unit and
 header contract are shared with the rv32 backend,
-`docs/adr/2026-07-20-lpvm-native-fuel.md`):
+`docs/adr/2026-07-20-lpvm-native-fuel.ai.md`):
 
 - `emit/fuel.rs` inserts a check-then-decrement of the fuel low u32
   (vmctx+0) before every loop back-edge `br` and a check-only at every

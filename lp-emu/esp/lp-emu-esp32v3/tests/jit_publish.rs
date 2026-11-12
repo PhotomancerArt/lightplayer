@@ -199,7 +199,7 @@ fn program0() -> Vec<(u32, Inst)> {
     }
     // The product's own publish is store-only, with no barrier at all —
     // `lp-shader/lpvm-native/src/codemem_esp32.rs`'s `DeviceCodeSink` and
-    // `docs/adr/2026-09-05-classic-jit-code-lives-in-sram0.md` measured zero
+    // `docs/adr/2026-09-05-classic-jit-code-lives-in-sram0.ai.md` measured zero
     // stale results with none, `fence`, and `fence`+`isync` alike. This test
     // issues an `isync` anyway for its own reason, not the product's: it is a
     // whole flush on the core, and the seam has to survive one landing in the

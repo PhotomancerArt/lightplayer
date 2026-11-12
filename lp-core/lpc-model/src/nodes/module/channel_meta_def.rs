@@ -1,8 +1,8 @@
 //! Per-channel authored meta overrides: the module author's curation
-//! escape hatch (modules.md R9 / Q1 lean).
+//! escape hatch (modules.ai.md R9 / Q1 lean).
 //!
 //! Control meta normally derives from the currently-bound slots
-//! (widest-range merge, panel.md P6); an entry here overrides the derived
+//! (widest-range merge, panel.ai.md P6); an entry here overrides the derived
 //! presentation for one channel of the module's scope. The vocabulary
 //! survives from the superseded spike's `PromotedControlDef` display
 //! fields — aliasing itself is dead (binding is publicity, R3), so the

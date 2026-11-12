@@ -34,7 +34,7 @@
 // --features wifi` ROM-up from the merged chip `just test-emu-esp32s3-wifi`
 // writes. Its report goes to target/walk-wifi-emu/lan-s3/.
 //
-// THE BOARD'S WORDS DECIDE EVERY STEP (AGENTS.md: "wait for the board's
+// THE BOARD'S WORDS DECIDE EVERY STEP (AGENTS.ai.md: "wait for the board's
 // words, not Studio's"). Three sources, none of which the page can satisfy:
 //
 //   * the board's console: each board's USB link held for the whole walk by
@@ -576,7 +576,7 @@ async function probeBrowse(doorAddr) {
   return response.json();
 }
 
-/// The lp-emu commit numbers are quoted against (AGENTS.md: name it inline).
+/// The lp-emu commit numbers are quoted against (AGENTS.ai.md: name it inline).
 export function lpEmuCommit() {
   try {
     const sha = execFileSync("git", ["log", "-1", "--format=%h", "--", "lp-emu"], { cwd: ROOT, encoding: "utf8" }).trim();

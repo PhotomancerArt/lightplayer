@@ -40,7 +40,7 @@
 //! indent) inside a fixed-height scroll box ([`TERMINAL_CLASS`] +
 //! `height_class`), so a long line costs scroll distance and never card
 //! height — the device card's "board events never move it" rule
-//! (`docs/adr/2026-09-03-device-card-fixed-height-and-disconnect-disappears.md`)
+//! (`docs/adr/2026-09-03-device-card-fixed-height-and-disconnect-disappears.ai.md`)
 //! holds without a fold — and a selection copies exactly what the board
 //! said. The model bounds the COUNT (`TERMINAL_CAP` in `lpa-devices`), and
 //! every summary it mints (`wire_summary`, an outcome's `summary()`) is
@@ -48,7 +48,7 @@
 //! newline is the one input that could fill the box, and if it ever
 //! happens the answer is a model-side bound on what the fold keeps, not a
 //! render-side fold that lies to the clipboard.
-//! See `docs/adr/2026-09-04-device-terminal-never-folds-a-line.md`.
+//! See `docs/adr/2026-09-04-device-terminal-never-folds-a-line.ai.md`.
 //!
 //! # One box, and flush inside it (D3; G1 2026-09-03)
 //!

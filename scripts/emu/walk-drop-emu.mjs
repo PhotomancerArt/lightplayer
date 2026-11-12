@@ -63,7 +63,7 @@ const [VIEW_W, VIEW_H] = (process.env.WALK_VIEWPORT ?? "1440x1100").split("x").m
 const STEP_DEADLINE_MS = 180_000;
 /// The power-off wait is bounded in the BOARD's time, not the wall's: an
 /// emulated board's clock lags the wall under load (a loaded desk held 180 s
-/// of wall time to under 3 s of board time), and AGENTS.md says never to gate
+/// of wall time to under 3 s of board time), and AGENTS.ai.md says never to gate
 /// on host wall-clock time from an emulated run. The board's power-off takes
 /// 2.7-3.5 s of its own time in every run; 10 s is about three times that.
 /// Ticket 2026-10-20-drop-walk-switch-off-flake.

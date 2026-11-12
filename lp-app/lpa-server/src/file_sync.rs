@@ -5,7 +5,7 @@
 //! client state). **One exception:** the fs batch (`FsRequest::BeginBatch`
 //! … `CommitBatch`) is server-held state between requests, owned by the link
 //! that began it — [`crate::batch_state`], and the ADR
-//! `docs/adr/2026-10-10-fs-push-boundary-and-deflated-writes.md` for why and
+//! `docs/adr/2026-10-10-fs-push-boundary-and-deflated-writes.ai.md` for why and
 //! its rules. Everything here stays stateless: a write inside a batch is the
 //! same request as one outside it. Pagination determinism comes from bytewise path ordering;
 //! a [`FileCursor`] identifies an exact resume point. Reads never consume or
@@ -319,7 +319,7 @@ pub fn handle_hash_package(fs: &dyn LpFs, prefix: LpPathBuf) -> FsResponse {
 /// nothing was read. Studio's Edit press asks for this hash first (the
 /// library bind), and on the choker the 27,091 B mapping SVG reset the C6
 /// out of memory here
-/// (`docs/defects/2026-10-10-the-edit-press-package-hash-reads-files-whole-ungated.md`).
+/// (`docs/defects/2026-10-10-the-edit-press-package-hash-reads-files-whole-ungated.ai.md`).
 pub fn handle_hash_package_with_headroom(
     fs: &dyn LpFs,
     prefix: LpPathBuf,

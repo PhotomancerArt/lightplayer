@@ -1,4 +1,4 @@
-//! Stories for the module face (`docs/design/modules.md` §5).
+//! Stories for the module face (`docs/design/modules.ai.md` §5).
 //!
 //! These carry G2 questions 1–3: does one face hold up at every zoom
 //! level, is the controls/wiring split right, and does the root module back
@@ -57,7 +57,7 @@ fn root_card() -> Element {
 }
 
 #[story(
-    description = "The presentation overlap the model implies, cropped to the two cards that show it: plasma_1's speed appears as a nested group on the host's panel AND on plasma_1's own card below. Both are amber, because they are the same (scope, channel) control — one control, two views (panel.md P1), the same way a playlist's bound control shows on the parent face and the child card. Kept deliberately, not suppressed."
+    description = "The presentation overlap the model implies, cropped to the two cards that show it: plasma_1's speed appears as a nested group on the host's panel AND on plasma_1's own card below. Both are amber, because they are the same (scope, channel) control — one control, two views (panel.ai.md P1), the same way a playlist's bound control shows on the parent face and the child card. Kept deliberately, not suppressed."
 )]
 fn author_zoom() -> Element {
     let mut view = held_root_view();

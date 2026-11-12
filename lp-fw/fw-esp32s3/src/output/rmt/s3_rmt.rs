@@ -42,7 +42,7 @@
 //! (`2026-esp32s3-experiment`, `fw/led-lab-esp32s3/src/s3_rmt.rs`), which ran
 //! the loopback and stress suites on this exact chip. The adaptation is
 //! packaging — crate paths and harness gating — not redesign. No GPL source
-//! was consulted; see `AGENTS.md`.
+//! was consulted; see `AGENTS.ai.md`.
 
 use esp_hal::peripherals::RMT;
 use lp_ws281x::{BlockPlan, InterruptFlags, RamWindow, RmtHw, SharedBlockPlan};

@@ -114,14 +114,14 @@ pub fn resolve(doc: &Map2dDoc) -> Result<ResolvedMap2d, Map2dError> {
 /// `positions`, so a load costs ONE exact-size 8 B/lamp buffer — the caller
 /// can fit it in place and keep it as the mapping. The `resolve` form's
 /// 16 B/lamp `ResolvedLamp` rows never exist here
-/// (docs/reports/2026-09-02-per-lamp-memory-table.md: at dome scale the rows
+/// (docs/reports/2026-09-02-per-lamp-memory-table.ai.md: at dome scale the rows
 /// were the load's largest single ask).
 ///
 /// The doc declares its lamp counts up front, so `positions` is reserved to
 /// its exact size. Growing it push-by-push doubles capacity past the real
 /// need — at dome scale that is a device-killing contiguous ask (5,950 lamps:
 /// the 2048→4096-entry doubling asks 64 KiB mid-load, see
-/// docs/defects/2026-08-29-load-project-resets-instead-of-refusing.md).
+/// docs/defects/2026-08-29-load-project-resets-instead-of-refusing.ai.md).
 /// `shape_lamp_count` mirrors the resolver exactly (pinned by
 /// `shape_lamp_count_matches_the_resolver_for_every_kind`); for filled
 /// polygons it re-runs the lattice walk, which is editor-scale work.

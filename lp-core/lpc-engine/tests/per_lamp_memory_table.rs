@@ -5,7 +5,7 @@
 //! question — *how many bytes per lamp, and in which phase* — by running each
 //! fixture at two lamp counts and taking the slope. A slope is a measurement;
 //! a formula summed from code reading is a guess, and the two are compared in
-//! `docs/reports/2026-09-02-per-lamp-memory-table.md`, which also carries the
+//! `docs/reports/2026-09-02-per-lamp-memory-table.ai.md`, which also carries the
 //! owner attribution (which struct holds each buffer) and the device-width
 //! figures from `lp-cli profile --collect alloc`.
 //!
@@ -15,7 +15,7 @@
 //!   as authored only — its map is ten repeat objects plus patch documents
 //!   keyed by object path, so a scaled copy is not a faithful variant;
 //! - a dome-scale synthetic (190 panels × 119 = 22,610 lamps, the big dome's
-//!   shape per `docs/glossary.md`) and its 2× (45,220), generated from zook's
+//!   shape per `docs/glossary.ai.md`) and its 2× (45,220), generated from zook's
 //!   files with a bigger repeat and enough output ports. Host only: no board
 //!   runs the whole dome, and the emulator's guest heap is 320 K.
 //!
@@ -411,7 +411,7 @@ fn per_lamp_memory_table() {
     );
 
     // The per-lamp ratchets. Measured 2026-09-02 after the copy removals
-    // (docs/reports/2026-09-02-per-lamp-memory-table.md): load 8.0 B/lamp
+    // (docs/reports/2026-09-02-per-lamp-memory-table.ai.md): load 8.0 B/lamp
     // resident and 8.0 transient (one exact-size positions buffer, fitted in
     // place); tick 1 17.7 B/lamp since 2026-09-06 (output samples 6, the
     // host provider's u16 copy 6 + 8-bit frame 3 + ws281x data 3 — the
@@ -449,7 +449,7 @@ fn per_lamp_memory_table() {
 
     // A patched product renders straight into the output buffer through a
     // scattered target; nothing whole-product is materialized per frame
-    // (`docs/adr/2026-09-06-control-render-targets-scatter.md`). Before that,
+    // (`docs/adr/2026-09-06-control-render-targets-scatter.ai.md`). Before that,
     // every patched product cost 6 B/lamp of scratch per tick: small-dome
     // 42,278 B (the dome's 35,700 alone halted the 320 K emulator guest),
     // zook-patched 10,548 against unpatched zook's 839. After: 5,834 and

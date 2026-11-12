@@ -449,7 +449,7 @@ mod tests {
     /// which holds the sret pointer for the entire function and sits squarely
     /// inside the allocatable pool, so aggregate-returning shaders wrote their
     /// results through whatever value had replaced the pointer. See
-    /// `docs/defects/2026-07-30-xtensa-sret-pointer-clobber.md`.
+    /// `docs/defects/2026-07-30-xtensa-sret-pointer-clobber.ai.md`.
     #[cfg(feature = "isa-xt")]
     #[test]
     fn for_abi_withholds_the_sret_pointer_register() {

@@ -276,8 +276,8 @@ impl IsaTarget {
     ///
     /// LPIR requires integer division and remainder to never trap and to
     /// follow RV32M semantics on the edge cases (`x / 0 == -1`, `x % 0 == x`) —
-    /// see `docs/design/lpir/02-core-ops.md` and
-    /// `docs/adr/2026-07-30-integer-division-never-traps.md`. RV32M defines
+    /// see `docs/design/lpir/02-core-ops.ai.md` and
+    /// `docs/adr/2026-07-30-integer-division-never-traps.ai.md`. RV32M defines
     /// those results in hardware, so `Rv32imac` emits the bare instruction and
     /// answers `false`.
     ///
@@ -307,7 +307,7 @@ impl IsaTarget {
     /// linker resolves them to the chip's **ROM** `rvfplib` routines
     /// (`esp32c6.rom.rvfp.ld`), and in the host emulator's builtins image to
     /// Rust's `compiler_builtins`. See
-    /// `docs/adr/2026-07-31-soft-float-via-compiler-builtins.md`.
+    /// `docs/adr/2026-07-31-soft-float-via-compiler-builtins.ai.md`.
     ///
     /// `Xtensa` names a part **with** the Floating-Point Coprocessor Option
     /// (ESP32-S3 / LX7 — 26/26 FP instructions confirmed present on desk

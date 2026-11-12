@@ -1,7 +1,7 @@
 //! Stories for the panel's three control states and its reset gestures
-//! (`docs/design/panel.md` P2/P-Q2).
+//! (`docs/design/panel.ai.md` P2/P-Q2).
 //!
-//! `docs/design/panel.md` P-Q2 asks for confirmation that
+//! `docs/design/panel.ai.md` P-Q2 asks for confirmation that
 //! Read-following-automation, Read-at-default, and Engaged are three
 //! *visibly distinct* states. These stories put them next to each other so
 //! that is a judgement about pixels rather than about prose.

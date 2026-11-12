@@ -1,4 +1,4 @@
-//! Growing the partition a store lives in (FORMAT.md "Writing and
+//! Growing the partition a store lives in (FORMAT.ai.md "Writing and
 //! killing", growing the partition). The store records no identity, and
 //! `N` is not on flash: mounted over a bigger partition, it reads the added
 //! sectors like its own. A sector there that still holds a trusted header —

@@ -343,7 +343,7 @@ mod tests {
     /// `ClientMessage` framed by `lpc_wire::json::to_serial_line` (what every
     /// lpa-client serial transport writes) must come back out of `receive`.
     /// Bare JSON without the prefix was dropped as a log line for a month
-    /// (docs/defects/2026-09-06-emu-transport-drops-unprefixed-client-lines.md).
+    /// (docs/defects/2026-09-06-emu-transport-drops-unprefixed-client-lines.ai.md).
     #[test]
     fn shared_framer_output_round_trips_through_receive() {
         let mock_io = MockSerialIo::new();

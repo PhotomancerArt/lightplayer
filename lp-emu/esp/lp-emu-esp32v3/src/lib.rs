@@ -39,7 +39,7 @@
 //! until it spins on a register only a model can answer — the flash
 //! controller's command word on the direct path, `RTC_IO.dig_pad_hold` on the
 //! ROM path. Which phase answers which is the P3 report
-//! (`docs/reports/2026-09-10-esp32v3-strict-boot-inventory.md`).
+//! (`docs/reports/2026-09-10-esp32v3-strict-boot-inventory.ai.md`).
 
 /// The `bench` build's guest-side report (`--features bench`). Off in every
 /// default build, and never in a gate binary.

@@ -21,7 +21,7 @@ use crate::lower_ctx::{
 use crate::lower_error::LowerError;
 use crate::lower_expr::coerce_assignment_vregs;
 
-/// Clamp dynamic index to `[0, element_count-1]` (v1 safety; see `docs/design/arrays.md`).
+/// Clamp dynamic index to `[0, element_count-1]` (v1 safety; see `docs/design/arrays.ai.md`).
 /// Build flat element index from mixed const/dynamic subscripts (row-major).
 pub(crate) fn emit_row_major_flat_from_operands(
     ctx: &mut LowerCtx<'_>,

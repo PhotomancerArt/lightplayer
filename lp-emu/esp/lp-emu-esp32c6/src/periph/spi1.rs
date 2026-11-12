@@ -100,7 +100,7 @@ pub const CTRL: u32 = 0x008;
 /// Chip-select setup and hold timing. The PAC calls this register
 /// **write-only** and the mask ROM reads it back twice — see
 /// [`Spi1::reg_grade`] and
-/// `docs/defects/2026-09-09-the-pac-calls-spi-ctrl2-write-only-and-the-mask-rom-reads-it.md`.
+/// `docs/defects/2026-09-09-the-pac-calls-spi-ctrl2-write-only-and-the-mask-rom-reads-it.ai.md`.
 pub const CTRL2: u32 = 0x010;
 /// The SPI clock divider (`clkcnt_n`, `clk_equ_sysclk`); read at `t4`.
 pub const CLOCK: u32 = 0x014;
@@ -680,7 +680,7 @@ impl Peripheral for Spi1 {
     /// | register | grade | source |
     /// |---|---|---|
     /// | `cmd` +0x000 | `documented` | PAC `spi1::cmd`: every trigger bit is documented as cleared once the operation is done, and `mst_st`/`slv_st` are status that read idle when nothing is running. This block completes inside the write, so `cmd` reads exactly 0 — which is the state the ROM's own `Wait_SPI_Idle` (`0x4002_42e8`) spins for. The *duration* is a timing claim this block does not make (`t2`'s rung), not a register-behaviour one. |
-    /// | `ctrl2` +0x010 | `documented` | The PAC calls it **write-only**, so the rule above graded it `modeled` and a `--strict-grade documented` run refused the mask ROM's own flash-timing setup. It is not write-only: `spi_common_set_flash_cs_timing` (`0x4002_497e`) read-modify-writes it **twice** — `lw a4,16(a5)` / `andi a4,a4,-993` / `ori a4,a4,64` / `sw`, then `lw` / `andi a4,a4,-32` / `ori a4,a4,1` / `sw` — so the ROM both reads it and depends on the bits it reads back. A register the mask ROM reads is readable. See `docs/defects/2026-09-09-the-pac-calls-spi-ctrl2-write-only-and-the-mask-rom-reads-it.md`. |
+    /// | `ctrl2` +0x010 | `documented` | The PAC calls it **write-only**, so the rule above graded it `modeled` and a `--strict-grade documented` run refused the mask ROM's own flash-timing setup. It is not write-only: `spi_common_set_flash_cs_timing` (`0x4002_497e`) read-modify-writes it **twice** — `lw a4,16(a5)` / `andi a4,a4,-993` / `ori a4,a4,64` / `sw`, then `lw` / `andi a4,a4,-32` / `ori a4,a4,1` / `sw` — so the ROM both reads it and depends on the bits it reads back. A register the mask ROM reads is readable. See `docs/defects/2026-09-09-the-pac-calls-spi-ctrl2-write-only-and-the-mask-rom-reads-it.ai.md`. |
     /// | `rd_status` +0x02c | `documented` | The flash part's status register, not the SoC's: WIP (bit 0) and WEL (bit 1) are the SPI NOR command set's, and the ROM's `_SPI_write_enable` (`0x4002_4630`) loops until it reads WEL set — a model that left it clear would hang the first write. Bits above WEL are whatever `flash_wrsr` last wrote, because `_esp_rom_spiflash_unlock` writes block-protect bits and reads them back. |
     ///
     /// Everything else is the PAC's own rule: a named read/write register

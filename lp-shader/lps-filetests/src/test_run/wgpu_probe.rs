@@ -2,7 +2,7 @@
 //! 1-row fragment render on the GPU tier and read back bit-exactly.
 //!
 //! The probe forks at the GLSL source exactly like the product GPU path
-//! (ADR `docs/adr/2026-07-09-gpu-path-forks-at-glsl.md`): the authored test
+//! (ADR `docs/adr/2026-07-09-gpu-path-forks-at-glsl.ai.md`): the authored test
 //! source is appended with a generated `vec4 render_2d(vec2 pos)` that calls
 //! the directive's function and encodes the result scalars into `width =
 //! ceil(scalars/4)` pixels, selected by `int(pos.x)`. lp-gfx-wgpu assembles

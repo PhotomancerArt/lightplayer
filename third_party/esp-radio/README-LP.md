@@ -38,7 +38,7 @@ exceed; a longer chain would be cut with a warning rather than overrun it).
 bytes (indicator and header), which is what separates a short packet from a
 garbled one.
 
-See `docs/defects/2026-09-25-a-knob-jump-over-bluetooth-kills-the-c6-ble-host.md`.
+See `docs/defects/2026-09-25-a-knob-jump-over-bluetooth-kills-the-c6-ble-host.ai.md`.
 Both changes are upstream candidates.
 
 ### 3. A research switch: the BLE controller's flash-only parameters (`esp_config.yml`, `src/ble/npl.rs`)

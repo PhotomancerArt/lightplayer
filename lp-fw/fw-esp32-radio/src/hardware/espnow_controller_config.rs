@@ -6,7 +6,7 @@
 //! moving bulk traffic — 10 static RX buffers, 32 dynamic RX, 32 dynamic TX,
 //! a 6-frame block-ack window — and all of it lands in the radio's C heap,
 //! which lived in the reclaimed `dram2_seg` region until 2026-10-05 and has
-//! its own region in main RAM since (`docs/adr/2026-09-02-esp32c6-ram-split.md`,
+//! its own region in main RAM since (`docs/adr/2026-09-02-esp32c6-ram-split.ai.md`,
 //! `src/c_heap.rs`).
 //!
 //! The lean counts below are the ones measured on silicon on 2026-10-01

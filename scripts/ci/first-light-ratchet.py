@@ -2,7 +2,7 @@
 """The C6's first-light ratchet: power-on to the first lit frame, gated on t4.
 
 The one deliberate exception to "never gate on emulated time"
-(docs/adr/2026-09-10-the-emulator-first-device-walk.md, Amendment
+(docs/adr/2026-09-10-the-emulator-first-device-walk.ai.md, Amendment
 2026-10-18): `lp-cli/tests/emu_first_light.rs` boots the SPLIT image ROM-up
 through our bootloader on `lp-emu:esp32c6:t4`, `projects/test/basic` with a
 saved Wi-Fi network on the emulated LAN (`basic+net`), and reads the
@@ -59,7 +59,7 @@ JOB = "c6-first-light"
 JOB_NAME = "C6 first light (x64)"
 
 ABOUT = (
-    "The C6's first-light ratchet (docs/first-light-ratchet.md): `first_light_ms` is "
+    "The C6's first-light ratchet (docs/first-light-ratchet.ai.md): `first_light_ms` is "
     "the firmware's own `[perf] first light at <ms> ms`, read off a ROM-up power-on boot "
     "of the split image through our bootloader on lp-emu:esp32c6:t4, projects/test/basic "
     "with a saved Wi-Fi network on the emulated LAN, the higher of two boots. CI fails "

@@ -3,7 +3,7 @@
 //
 // Chrome on Android lists no wired board in Web Serial, so Studio's USB
 // square speaks to one over WebUSB there (`usb_cdc_serial.js`,
-// `docs/adr/2026-10-18-android-usb-over-webusb.md`). This walks that path
+// `docs/adr/2026-10-18-android-usb-over-webusb.ai.md`). This walks that path
 // with nothing shimmed: Studio in the desk phone's own Chrome
 // (`scripts/phone/phone.mjs`), a C6 plugged into the PHONE's USB-C port (not
 // the desk hub), Chrome's own WebUSB chooser and Android's own "Allow Chrome
@@ -300,7 +300,7 @@ async function main() {
         // The same card, with no reload: the erase reboots the board out of
         // the stub, its ROM loops on the blank flash, and the card reads that
         // as blank; and the card that erased it knows it is blank, heard or
-        // not (`docs/defects/2026-10-19-a-board-erased-over-webusb-reads-not-responding-until-a-reload.md`).
+        // not (`docs/defects/2026-10-19-a-board-erased-over-webusb-reads-not-responding-until-a-reload.ai.md`).
         blank = await driver.waitFor(BLANK_CARD, { timeoutMs: STEP_DEADLINE_MS, what: "the same page's card offering the blank board Install firmware" });
         return `was ${report.before}; the blank board is ${blank}, offered Install firmware with no reload`;
       });

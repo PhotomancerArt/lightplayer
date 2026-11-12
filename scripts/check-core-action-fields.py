@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The core action-fields ratchet (docs/adr/2026-10-01-agentic-control-offers-in-core.md).
+"""The core action-fields ratchet (docs/adr/2026-10-01-agentic-control-offers-in-core.ai.md).
 
 Every verb the user can press is meant to be published once, into the
 offer tree beside the view (`UiStudioView::offers`), where the web renders
@@ -133,7 +133,7 @@ def write_record(counts):
         handle.write(
             "# Action-carrying pub fields on core view types, per file — a ratchet:\n"
             "# counts may only go down. Written by `scripts/check-core-action-fields.py\n"
-            "# --bless`; see that script and docs/adr/2026-10-01-agentic-control-offers-in-core.md.\n"
+            "# --bless`; see that script and docs/adr/2026-10-01-agentic-control-offers-in-core.ai.md.\n"
         )
         for path in sorted(counts):
             handle.write(f"{counts[path]} {path}\n")

@@ -5,7 +5,7 @@
 # the bump, updated to this tree) need a fielded release's own bytes, never
 # a rebuild of it from this tree. Fetched from the firmware store
 # (`<store>/firmware/<target>/<release>/<file>`, the URLs Studio reads,
-# `docs/adr/2026-10-06-firmware-distribution.md`), each file checked
+# `docs/adr/2026-10-06-firmware-distribution.ai.md`), each file checked
 # against the release's own `package.json`/`ota-manifest.json` hashes.
 # <out> gets:
 #

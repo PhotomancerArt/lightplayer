@@ -29,7 +29,7 @@
 //!
 //! `CPENABLE` is **per-core**, and unlike the S3 this chip runs two cores with
 //! a deliberate split: the RMT refill ISR lives on the APP core
-//! (`docs/adr/2026-08-04-rmt-isr-on-app-core.md`,
+//! (`docs/adr/2026-08-04-rmt-isr-on-app-core.ai.md`,
 //! `output::rmt::shared_driver::app_core_main`), while the embassy executor,
 //! the server loop and the shader run on the PRO core.
 //!
@@ -47,7 +47,7 @@
 //! hazard is real here rather than theoretical.
 //!
 //! Assembled from mnemonics, no assembler source adapted from binutils, GCC or
-//! QEMU (AGENTS.md license rule).
+//! QEMU (AGENTS.ai.md license rule).
 
 use core::arch::global_asm;
 

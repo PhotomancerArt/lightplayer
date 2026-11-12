@@ -9,7 +9,7 @@
 //!
 //! It lives here rather than in `fw-esp32c6` because that crate is RV32-only
 //! and excluded from host builds: a `#[cfg(test)]` module there would never
-//! run. See `docs/adr/2026-07-30-boot-control-sector.md`.
+//! run. See `docs/adr/2026-07-30-boot-control-sector.ai.md`.
 
 use lp_bootctl::{
     BOOTCTL_PARTITION_OFFSET, BOOTCTL_PARTITION_SIZE, LAYOUT_2_REGION_START, RECORD_LEN,
@@ -21,7 +21,7 @@ const S3_PARTITIONS: &str = include_str!("../../../lp-fw/fw-esp32s3/partitions.c
 
 /// Per-board expectations. The boards' tables legitimately DIVERGE above
 /// `0x10000` — the S3 has an 8 MB partition floor
-/// (`2026-07-30-esp32s3-partition-floor.md`) — so the invariant lp-bootctl
+/// (`2026-07-30-esp32s3-partition-floor.ai.md`) — so the invariant lp-bootctl
 /// actually needs is narrower than whole-table identity: the LOW region
 /// (nvs, bootctl, phy_init, factory start) is identical everywhere, which is
 /// what lets `BOOTCTL_PARTITION_OFFSET` be a constant instead of a
@@ -36,9 +36,9 @@ const COMMON_LOW_REGION: &[(&str, u32)] =
 /// The C6's moved TWICE, deliberately, each time because Studio's Update
 /// firmware and `lp-cli hardware lpfs migrate` carry every fielded board's
 /// files across: the 2026-10 repartition (`0x310000` → `0x350000`,
-/// `docs/adr/2026-10-02-c6-repartition-and-layout-migration.md`) and the
+/// `docs/adr/2026-10-02-c6-repartition-and-layout-migration.ai.md`) and the
 /// tree-store cutover (`0x350000` → `0x380000`, 128 sectors,
-/// `docs/adr/2026-10-16-c6-tree-store-cutover-migration.md`). Changing a row
+/// `docs/adr/2026-10-16-c6-tree-store-cutover-migration.ai.md`). Changing a row
 /// here again needs a migration of its own, not just a new number.
 const LPFS_OFFSETS: &[(&str, u32, u32)] = &[
     ("esp32c6", 0x380000, 0x40_0000),

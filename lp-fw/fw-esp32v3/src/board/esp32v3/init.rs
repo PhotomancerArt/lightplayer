@@ -86,7 +86,7 @@ pub fn init_board() -> (
     //    and `esp_hal::init` above has just moved the CPU to 240 MHz, so until
     //    something reprograms the divisor every `esp_println!` prints garbage
     //    at any standard host baud. Constructing this `Uart` is what
-    //    reprograms it (experiment repo FINDINGS.md "C1", diagnosed on this
+    //    reprograms it (experiment repo FINDINGS.ai.md "C1", diagnosed on this
     //    exact chip). Which is why this happens HERE and not in `io_task`:
     //    the `[INIT]` lines `main.rs` prints on the way to spawning that task
     //    would otherwise be unreadable.

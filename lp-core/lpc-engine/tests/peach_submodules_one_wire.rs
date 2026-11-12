@@ -3,7 +3,7 @@
 //! `body/` and `leaf/` each own a shader and a fixture wired over their own
 //! scope's bare `visual.out`, and each exports its scope's `control.out` to
 //! the root — where ONE output merges the two into ONE strand of 56 channels
-//! (R4/R7, `docs/design/modules.md`). None of that plumbing is visible in a
+//! (R4/R7, `docs/design/modules.ai.md`). None of that plumbing is visible in a
 //! byte-identity check or a panel walk, and it is the whole reason the
 //! example is shaped this way, so it is asserted here: both fixtures reach
 //! the wire, at the channels their patch documents name, and the display

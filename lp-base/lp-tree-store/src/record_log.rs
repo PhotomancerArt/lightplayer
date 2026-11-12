@@ -291,7 +291,7 @@ impl<F: Flash> RecordLog<F> {
             let addr = self.addr(pick, 0);
             // The magic last, as its own program, and only once the rest
             // reads back: a torn or worn header never shows the magic in
-            // front of a wrong version (FORMAT.md "Sector": a reader refuses
+            // front of a wrong version (FORMAT.ai.md "Sector": a reader refuses
             // the magic + a newer version).
             // (The `MagicFirst` mutant programs and verifies it whole.)
             let first = if mutant!(MagicFirst) { 0 } else { 4 };
@@ -338,7 +338,7 @@ impl<F: Flash> RecordLog<F> {
         Ok(true)
     }
 
-    /// Program `s`'s header magic, then its CRC, to zeros (FORMAT.md
+    /// Program `s`'s header magic, then its CRC, to zeros (FORMAT.ai.md
     /// "Writing and killing"): from then on it is untrusted on every read,
     /// whatever the sector holds, and its erase count still reads. Program
     /// only clears bits, so this also finishes a kill a power cut left weak.

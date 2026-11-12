@@ -1,6 +1,6 @@
 //! Panel gestures the module surfaces raise.
 //!
-//! `docs/design/panel.md` P8: the wire carries exactly two runtime ops —
+//! `docs/design/panel.ai.md` P8: the wire carries exactly two runtime ops —
 //! `PanelWrite { scope, channel, value }` and `PanelClear { scope?,
 //! channel? }` — and Studio, play mode, phones, and future hardware inputs
 //! all speak only those. Widget VALUE writes don't come through here: the
@@ -43,7 +43,7 @@ pub enum PanelGesture {
     SetAutoSave(bool),
 }
 
-/// The gesture→op seam (panel.md P8): every gesture becomes a wire-shaped
+/// The gesture→op seam (panel.ai.md P8): every gesture becomes a wire-shaped
 /// op, riding the given action dispatcher. Every live mount of a panel
 /// surface builds its handler here, so Studio and play mode speak exactly
 /// the same ops.

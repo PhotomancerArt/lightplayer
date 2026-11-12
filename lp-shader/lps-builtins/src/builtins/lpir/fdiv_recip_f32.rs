@@ -5,7 +5,7 @@
 //! divisor is reused across a vector.
 //!
 //! The consequence is a **second rounding**, so this builtin is *not* covered
-//! by the `docs/design/float.md` §3 Guaranteed row for `/` — it is a builtin
+//! by the `docs/design/float.ai.md` §3 Guaranteed row for `/` — it is a builtin
 //! with a tolerance (§6), and its tolerance is "within 2 ulp of `a / b`".
 //! Callers that need the correctly-rounded quotient must use
 //! [`super::fdiv_f32`].

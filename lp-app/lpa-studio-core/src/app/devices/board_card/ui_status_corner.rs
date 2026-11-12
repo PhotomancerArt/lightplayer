@@ -2,7 +2,7 @@
 //! a quiet ⋯, always, so the card's details are one press away. Its own
 //! details hold every notice, how the board is running, the picture's words,
 //! and the board's terminal. What needs you is the surface's to say, not the
-//! corner's (`docs/ux/anatomy/board-card.md`, "Corner").
+//! corner's (`docs/ux/anatomy/board-card.ai.md`, "Corner").
 
 use crate::RichSection;
 

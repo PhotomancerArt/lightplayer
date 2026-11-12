@@ -8,9 +8,9 @@ extern crate std;
 /// The band is `max(|want| * rel, abs)` — relative so it scales with magnitude,
 /// with an absolute floor so results near zero are not held to an impossible
 /// standard. Every f32 builtin states its band in its module docs; this is what
-/// enforces it (`docs/design/float.md` §6).
+/// enforces it (`docs/design/float.ai.md` §6).
 ///
-/// **Never call this on a `docs/design/float.md` §5 Unspecified input** —
+/// **Never call this on a `docs/design/float.ai.md` §5 Unspecified input** —
 /// `asin(2.0)`, `log(-1.0)`, `normalize(vec3(0))` and the rest of the GLSL
 /// "undefined if" catalog. Those are permitted to return anything, so asserting
 /// them pins behavior the spec deliberately leaves free.

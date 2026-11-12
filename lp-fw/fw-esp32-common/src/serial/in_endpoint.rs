@@ -37,9 +37,9 @@
 //! classic ESP32 (`fw-esp32v3`) has no USB-Serial-JTAG block: it never names
 //! this type, and a generic nobody instantiates costs its image nothing.
 //!
-//! See `docs/defects/2026-09-13-the-s3-link-drops-the-io-tasks-next-chunk-on-a-stale-serial-in-empty.md`
+//! See `docs/defects/2026-09-13-the-s3-link-drops-the-io-tasks-next-chunk-on-a-stale-serial-in-empty.ai.md`
 //! (the mechanism, PR #805) and
-//! `docs/defects/2026-09-24-the-real-c6-link-loses-bytes-inside-a-packed-frame.md`
+//! `docs/defects/2026-09-24-the-real-c6-link-loses-bytes-inside-a-packed-frame.ai.md`
 //! (the C6's silicon symptom this gate is the candidate fix for).
 
 use core::marker::PhantomData;

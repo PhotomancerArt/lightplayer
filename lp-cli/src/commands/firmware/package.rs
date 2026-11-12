@@ -94,7 +94,7 @@ fn package_build(repo_root: &Path, def: &BuildDef, out_dir: &Path) -> Result<Pat
     // Every packaged image ends on a flash sector, padded with 0xFF — the
     // bytes a flasher's erase leaves there anyway. An image ending mid-word
     // lost its last 254 bytes to espflash 3.3.0's stub on silicon
-    // (docs/defects/2026-10-05-the-host-flasher-dropped-the-split-images-last-bytes.md).
+    // (docs/defects/2026-10-05-the-host-flasher-dropped-the-split-images-last-bytes.ai.md).
     let image_bytes = sector_padded(
         std::fs::read(&image_path).with_context(|| format!("reading {}", image_path.display()))?,
     )?;

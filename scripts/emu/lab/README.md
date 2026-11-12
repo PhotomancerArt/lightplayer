@@ -42,7 +42,7 @@ with one once. `LAB_HOME` overrides it (tests use a temp dir).
 
 **The port is pinned at 41111.** The lab is a machine-wide service, not a
 per-worktree dev server, so `scripts/dev-port.sh`'s hash does not apply; the
-pin is the user-visible exception `docs/process/review-gates.md` allows,
+pin is the user-visible exception `docs/process/review-gates.ai.md` allows,
 declared in the plan (D14) and repeated in every gate handoff. Edit
 `config.json` to move it; `LAB_PORT=0` is for tests only.
 
@@ -755,6 +755,6 @@ burn it was given, and the cooldown, spacing, lost, drop and notify-grace
 tests check equalities off the server's own press record — including "still
 pending one millisecond before". A wall-clock gap measured from the client
 went red on a loaded CI runner on 2026-09-25
-(`docs/defects/2026-09-25-emu-lab-cooldown-tests-measured-wall-clock.md`);
+(`docs/defects/2026-09-25-emu-lab-cooldown-tests-measured-wall-clock.ai.md`);
 `clock.test.mjs` covers the clock itself. Wall-clock timeouts are fine as
 liveness bounds (`until`), never as the thing asserted.

@@ -2,7 +2,7 @@
 //! lane's pad registers at bind and on every frame, and says when one moved.
 //!
 //! Written for the D6 defect
-//! (`docs/defects/2026-10-24-the-s3s-d6-pad-garbles-its-lcd-ws281x-lane.md`):
+//! (`docs/defects/2026-10-24-the-s3s-d6-pad-garbles-its-lcd-ws281x-lane.ai.md`):
 //! GPIO43 is UART0's TX pad, so the question is whether anything puts U0TXD
 //! back on it, or writes UART0, while the lane runs. Per lane it reads
 //! `IO_MUX_GPIOn_REG` (MCU_SEL, FUN_IE, drive, pulls), `GPIO_FUNCn_OUT_SEL_CFG_REG`

@@ -1151,7 +1151,7 @@ impl ProjectController {
     }
 
     /// Whether the server is saving panel state for this project
-    /// (panel.md P11), as of the last runtime read.
+    /// (panel.ai.md P11), as of the last runtime read.
     ///
     /// The lens session's newest composed picture across every output the
     /// board has published, with the lens's own frame clock
@@ -1336,7 +1336,7 @@ impl ProjectController {
                     endpoint = endpoint.with_live_gradient(config);
                 }
             }
-            // A consumed bus channel is a panel-write target (panel.md P1):
+            // A consumed bus channel is a panel-write target (panel.ai.md P1):
             // the control built over this wiring dispatches PanelWrite at
             // this (scope, channel) instead of editing the authored default.
             if binding.direction == lpc_wire::WireBindingDirection::Consumes
@@ -2389,7 +2389,7 @@ impl ProjectController {
                 .ui_binding_endpoint(&binding.endpoint)
                 .with_default_origin();
             // A consumed bus channel is a panel-write target here exactly as
-            // on the synthesized rows (panel.md P1); the declared
+            // on the synthesized rows (panel.ai.md P1); the declared
             // `panel = "show"` hint rides along so the face gate can promote
             // this default wiring to a control (fixture brightness).
             if binding.direction == lpc_wire::WireBindingDirection::Consumes
@@ -2487,7 +2487,7 @@ impl ProjectController {
 
     /// Project the synced controller tree into the project editor shell DTO.
     ///
-    /// **Root card restored** (`docs/design/modules.md` §5, the flat-root
+    /// **Root card restored** (`docs/design/modules.ai.md` §5, the flat-root
     /// reversal): the tree root IS the single top-level `nodes` entry, and
     /// every other node rides its `UiNodeView::children` as a nested card.
     /// The root now does something — it wears the module face, whose panel
@@ -4113,7 +4113,7 @@ impl ProjectController {
     }
 
     /// Derive the **module face** for every module card in the workspace
-    /// (`docs/design/modules.md` §5, `docs/design/panel.md` P1).
+    /// (`docs/design/modules.ai.md` §5, `docs/design/panel.ai.md` P1).
     ///
     /// A module card's face is its output mirror plus its scope's panel; the
     /// panel's controls are exactly the widget controls its subtree already
@@ -5250,7 +5250,7 @@ impl ProjectController {
     /// Every panel control a card subtree already derived whose
     /// `panel_target` names `scope`, deduplicated per channel.
     ///
-    /// One `(scope, channel)` is ONE control (panel.md P1) however many
+    /// One `(scope, channel)` is ONE control (panel.ai.md P1) however many
     /// cards below consume it; the first one found wins. Shared by the
     /// module panel and by a playlist entry's bubbled-up group, so a knob
     /// reaching a panel through either door is the SAME `UiPanelControl`
@@ -5717,7 +5717,7 @@ impl ProjectController {
     }
 
     /// Which of the three panel states a control is in, and what owns its
-    /// displayed value while it is reading (`docs/design/panel.md` P2).
+    /// displayed value while it is reading (`docs/design/panel.ai.md` P2).
     fn panel_control_state(
         &self,
         graph: &lpc_wire::WireBindingGraph,
@@ -7314,7 +7314,7 @@ impl ProjectController {
         })
     }
 
-    /// Flip panel-state auto-save (panel.md P11) via
+    /// Flip panel-state auto-save (panel.ai.md P11) via
     /// `WireProjectCommand::PanelAutoSave`. Same runtime-command posture as
     /// [`Self::panel_write`]: the new value is not applied locally — it
     /// arrives on the next read as `ServerRuntimeStatus::panel_auto_save`,
@@ -8068,7 +8068,7 @@ impl ProjectController {
     ///
     /// Returns the envelope text for the caller to hand to the clipboard
     /// (core never touches the clipboard — see
-    /// `docs/adr/2026-07-28-share-envelopes.md`).
+    /// `docs/adr/2026-07-28-share-envelopes.ai.md`).
     pub async fn copy_node(
         &mut self,
         server: &mut StudioServerClient,

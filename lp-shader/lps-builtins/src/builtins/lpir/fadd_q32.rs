@@ -2,7 +2,7 @@
 //!
 //! Reference saturating implementation. **The shipped Q32 lowering does not
 //! call this**: `lpvm-native` and `lpvm-wasm` inline a 1-instruction wrapping
-//! `add` for `LpirOp::Fadd` (`docs/design/q32.md`). It survives as the
+//! `add` for `LpirOp::Fadd` (`docs/design/q32.ai.md`). It survives as the
 //! reference semantics and as `lpvm-cranelift`'s Q32 `Fadd` target.
 
 const MAX_FIXED: i32 = 0x7FFF_FFFF; // Maximum representable fixed-point value (not i32::MAX)

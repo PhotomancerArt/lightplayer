@@ -42,7 +42,7 @@ pub fn HFaderField(
     /// Violet bound treatment on the fill, slot border, and grip ring.
     #[props(default = false)]
     bound: bool,
-    /// Gold ENGAGED treatment (`docs/design/panel.md` P2/P6): a panel
+    /// Gold ENGAGED treatment (`docs/design/panel.ai.md` P2/P6): a panel
     /// writer has captured this channel and holds it. Outranks the violet
     /// bound family — bound means "wired", engaged means "captured".
     #[props(default = false)]
@@ -313,7 +313,7 @@ mod tests {
     #[test]
     fn engaged_fader_wears_amber_over_the_bound_violet() {
         // Same rule as the knob: a captured fader has stopped following its
-        // binding, so the engaged family wins (panel.md P-Q2) — and the
+        // binding, so the engaged family wins (panel.ai.md P-Q2) — and the
         // amber rides a STATIC class, never a compound inline style.
         let fill = fader_fill_class(&UiSlotFieldState::editable(), true, true);
         assert!(fill.contains("--studio-status-engaged-text"));

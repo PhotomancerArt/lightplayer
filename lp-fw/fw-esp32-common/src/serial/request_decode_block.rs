@@ -8,7 +8,7 @@
 //! binary body's base64). Before wire 41 a shader edit was a JSON array of
 //! byte values, and the gate, written for a file write's base64, asked a
 //! fragmented board for three times the block that edit needed
-//! (`docs/defects/2026-10-08-shader-edits-over-wi-fi-are-refused-board-memory-busy.md`).
+//! (`docs/defects/2026-10-08-shader-edits-over-wi-fi-are-refused-board-memory-busy.ai.md`).
 //!
 //! The estimate is the largest of what each value builds, decoded by
 //! `serde_json::from_str` (`server_payload::decode_client_payload`):

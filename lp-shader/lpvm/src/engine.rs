@@ -14,12 +14,12 @@ use crate::module::LpvmModule;
 /// [`FloatMode`] is the numeric mode the backend emits for, and it is here
 /// rather than on the engine because the authored `float_mode` slot lives on
 /// each shader node — one engine compiles Fixed and Float modules side by side
-/// (`docs/adr/2026-08-01-float-mode-as-a-compiler-parameter.md`, decision 1).
+/// (`docs/adr/2026-08-01-float-mode-as-a-compiler-parameter.ai.md`, decision 1).
 ///
 /// Not every engine can honour every mode. Ask
 /// [`LpvmEngine::supports_float_mode`] **before** compiling: it is the
 /// capability query, and the never-silent-fallback rule
-/// (`docs/adr/2026-07-09-preview-fidelity-tiers.md` §4) makes an unsupported
+/// (`docs/adr/2026-07-09-preview-fidelity-tiers.ai.md` §4) makes an unsupported
 /// request an error rather than a quiet downgrade to Fixed.
 /// There is deliberately no `Default`, for the same reason
 /// [`crate::LpvmEngine::supports_float_mode`] exists: which numeric mode a

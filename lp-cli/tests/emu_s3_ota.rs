@@ -807,7 +807,7 @@ fn u12_a_build_that_dies_on_trial_rolls_back_and_is_refused() {
 
 // --- U19: a power cycle after a failed trial and its heal ----------------------------------
 
-/// `docs/defects/2026-10-17-a-power-cycle-after-a-failed-trial-and-its-heal-leaves-the-c6-core-only.md`:
+/// `docs/defects/2026-10-17-a-power-cycle-after-a-failed-trial-and-its-heal-leaves-the-c6-core-only.ai.md`:
 /// X → Y puts Y's core high and its engine low; Y → Y-dies puts the dying
 /// core low, over Y's engine; the rollback to Y and the heal put Y's engine
 /// back low — over the dead core the newer record still names. Every power
@@ -1221,7 +1221,7 @@ fn engine_entered(console: &str) -> bool {
 /// rides the log channel, best-effort datagrams a link reset clears, and on
 /// the S3 the first link session after an update's reset is reset by a
 /// `ProtocolError` while the host is mid-conversation, which loses it
-/// (`docs/defects/2026-10-22-the-s3-loses-its-core-line-after-an-updates-reset.md`).
+/// (`docs/defects/2026-10-22-the-s3-loses-its-core-line-after-an-updates-reset.ai.md`).
 fn expect_last_core(host: &mut EmuLinkHost<S3Board>, img: &Image, engine: bool) {
     let console = host.console().join("\n");
     assert!(

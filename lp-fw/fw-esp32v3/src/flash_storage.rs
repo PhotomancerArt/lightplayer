@@ -9,7 +9,7 @@
 //! (Q7 of the classic bring-up roadmap copied the C6's pre-2026-10 table), so
 //! transcribing would even be *correct* here today — the C6 did exactly that
 //! until 2026-10, when its own table moved and it too began reading its table
-//! (`docs/debt/firmware-partition-constants-transcribed.md`).
+//! (`docs/debt/firmware-partition-constants-transcribed.ai.md`).
 //!
 //! It is still not done, for the reason the S3's copy gives: a transcribed
 //! offset that drifts from the flashed table does not fail, it erases running

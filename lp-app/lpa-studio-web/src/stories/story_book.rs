@@ -415,7 +415,7 @@ fn component_source_path(stories: &[StoryDescriptor]) -> String {
 /// baseline set, because a composite stacks a whole component's stories into a
 /// 10k-25k px page and `captureBeyondViewport` renders composited effects that
 /// far below the fold nondeterministically (see
-/// `docs/defects/2026-07-28-overview-composite-capture-races.md`). Changing
+/// `docs/defects/2026-07-28-overview-composite-capture-races.ai.md`). Changing
 /// this suffix silently puts the composites back in the pixel pipeline, so
 /// `overview_ids_are_reserved_for_generated_composites` pins it.
 const OVERVIEW_ID_SUFFIX: &str = "/overview";

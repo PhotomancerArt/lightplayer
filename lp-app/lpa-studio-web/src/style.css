@@ -160,7 +160,7 @@
     --studio-status-attention-border: #795833;
     --studio-status-attention-text: #f0b97a;
     /* Engaged (gold): a panel writer holds this channel — "your hand is
-       on it" (panel.md P6, gate-picked 2026-08-06: the spike's gold,
+       on it" (panel.ai.md P6, gate-picked 2026-08-06: the spike's gold,
        laddered like every status family — dark tinted bg, mid border,
        bright text). Deliberately distinct from attention-orange
        (device/roster health) and warning-yellow (unsaved edits). */
@@ -714,7 +714,7 @@ label:has(> input:not(:disabled)) {
     overflow: hidden;
 }
 
-/* ---- the board card (`app/board_card/`, docs/style/ui.md "The board
+/* ---- the board card (`app/board_card/`, docs/style/ui.ai.md "The board
    card"; the look as decided: spikes/board-card-stack) ------------------
    The card's rows are Tailwind on the pieces; this is only what Tailwind
    cannot say: the picture's row height (a RULE — it is what keeps the card
@@ -795,7 +795,7 @@ label:has(> input:not(:disabled)) {
     color: var(--studio-status-attention-text);
 }
 
-/* Stripes mark a failure (ui.md), in the icon's circle as on a row. */
+/* Stripes mark a failure (ui.ai.md), in the icon's circle as on a row. */
 .ux-board-surface-icon[data-tone="error"] {
     border-color: var(--studio-status-error-border);
     background-color: var(--studio-status-error-bg);
@@ -1392,7 +1392,7 @@ label:has(> input:not(:disabled)) {
     border-color: var(--studio-status-bound-border);
 }
 
-/* Engaged (panel.md P2 latch): a panel writer holds this channel. Amber,
+/* Engaged (panel.ai.md P2 latch): a panel writer holds this channel. Amber,
    never the bound violet — bound means "wired", engaged means "captured". */
 .ux-hfader.is-engaged::-webkit-slider-thumb {
     border-color: var(--studio-status-attention-border);

@@ -248,7 +248,7 @@ Two properties are contract rather than implementation.
   reads on both sides. If the two disagree about how long a kernel took, that
   disagreement is a finding and is meant to be visible — a payload that
   reported one clock could not tell "the model is wrong" from "the counter
-  stopped". Plan one lost a sitting to exactly that ambiguity (`notes.md` F3).
+  stopped". Plan one lost a sitting to exactly that ambiguity (`notes.ai.md` F3).
 - **Nothing is reduced.** Every repetition reaches the record; there is no
   mean, and `bracket_overhead` is reported rather than subtracted. Variance on
   silicon is data, and a payload that hides it hands the model a precision it
@@ -320,7 +320,7 @@ chat message, and they name the board by MAC because two XIAO C6s are
 indistinguishable to a port list.
 
 The other `check-*` features are declared and have no module yet; the Q12
-ledger in the 2026-09-06 esp-emulator plan's `notes.md` tracks which `test_*`
+ledger in the 2026-09-06 esp-emulator plan's `notes.ai.md` tracks which `test_*`
 harness becomes which.
 
 ## Running one

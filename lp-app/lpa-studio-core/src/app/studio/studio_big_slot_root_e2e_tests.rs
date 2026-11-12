@@ -1,5 +1,5 @@
 //! A slot root bigger than one read frame, end to end against a real server
-//! (`docs/defects/2026-10-31-a-big-playlist-loses-the-panel-after-its-first-step.md`).
+//! (`docs/defects/2026-10-31-a-big-playlist-loses-the-panel-after-its-first-step.ai.md`).
 //!
 //! The board is the PLAYFUL Choker Tryout (`catalog/projects/playful-choker-tryout`,
 //! the project on Yona's "flower" C6) with its playlist grown to

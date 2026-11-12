@@ -6,7 +6,7 @@
 // do. See `lp-emu/esp/README.md` §"The tab host" for the ABI itself; this
 // file is the other side of it. `emulator_worker.js` is the caller (it holds
 // the module and the pacing loop); `emulator_tab.js` is the port object one
-// layer up. `docs/adr/2026-09-10-the-c6-emulator-runs-in-the-tab.md` is the
+// layer up. `docs/adr/2026-09-10-the-c6-emulator-runs-in-the-tab.ai.md` is the
 // decision record for the whole shape.
 //
 // NO FILE FAÇADE. The bench rig's shim (`scripts/emu/bench-web/worker.js`,

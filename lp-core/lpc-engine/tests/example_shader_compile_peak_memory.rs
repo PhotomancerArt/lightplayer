@@ -4,7 +4,7 @@
 //! the device's whole 300 KB heap consumed inside the frontend's type
 //! checker while `[mem] boot auto_load after` still read ~195 KB free), and
 //! the classic's px-path sibling
-//! (`docs/defects/2026-08-29-shader-jit-compile-transient-starves-classic-heap.md`).
+//! (`docs/defects/2026-08-29-shader-jit-compile-transient-starves-classic-heap.ai.md`).
 //!
 //! The device compiles each shader through exactly the path this probe
 //! steps:

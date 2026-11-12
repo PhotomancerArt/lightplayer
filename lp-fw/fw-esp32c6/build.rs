@@ -332,7 +332,7 @@ fn main() {
                  bootloader (`unpack_load_app, bootloader_utility.c:762, rom_index < 2`).\n\
                  \n\
                  Failing the build here is deliberate. See \
-                 docs/defects/2026-09-08-cold-target-dir-links-esp-hals-stock-rodata.md."
+                 docs/defects/2026-09-08-cold-target-dir-links-esp-hals-stock-rodata.ai.md."
             )
         },
     ));
@@ -404,7 +404,7 @@ SECTIONS {
 /// Emit `LP_FLASH_APP_BYTES` from partitions.csv's `app` row, so the embedded
 /// firmware manifest's limits come from the same file espflash flashes with —
 /// never a hand-transcribed integer (cf.
-/// docs/debt/firmware-partition-constants-transcribed.md).
+/// docs/debt/firmware-partition-constants-transcribed.ai.md).
 fn emit_partition_facts() {
     let path = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"))
         .join("partitions.csv");

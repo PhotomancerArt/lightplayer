@@ -18,7 +18,7 @@
     "esp-emu": "0.42.0",
     "esp-emu-sha256": "69df1ad11fe7f3d315e2ce17924a1cfe7bc10c2f47fb887a50449f327091671a"
   },
-  "source": "docs/reports/2026-09-07-esp-emu-c6-spike.md §11.1; the spike planning directory's desk-captures/emu-harness5-run.stdout (the emulator's harness/5/run.stdout)",
+  "source": "docs/reports/2026-09-07-esp-emu-c6-spike.ai.md §11.1; the spike planning directory's desk-captures/emu-harness5-run.stdout (the emulator's harness/5/run.stdout)",
   "capture": "esp-emu --chip esp32c6 --firmware harness.bin --timeout 90s --exit-on '=== DONE ===' --log-color never, on the merged image built from the same ELF the desk flashed. Install per spike report §10: a checksum-verified release asset from espressif/esp-emulator v0.42.0, installed outside the repository.",
   "note": "This transcript predates the in-band [fw-checks-header] line, so this sidecar is the whole header. The silicon_rev and mac here are the emulator's SYNTHETIC values, not the board's: esp-emu's eFuse reports chip revision v0.3 on a v0.2 board and a fixed MAC. They are recorded as captured rather than corrected, because a header that quietly reported the board's values would hide a real fidelity gap (spike report §8). Ratios in the replay are silicon divided by this side.",
   "trust": [

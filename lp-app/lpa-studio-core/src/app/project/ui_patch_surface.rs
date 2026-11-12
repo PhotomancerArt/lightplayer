@@ -247,7 +247,7 @@ impl UiPatchTarget {
     /// multi-run fixture painted two heads and two tails and read as two
     /// objects selected at once. A fixture is not an object (Q8) — it is a
     /// bag of them — so it BREATHES: "these lamps are this fixture", no
-    /// direction claim. See `docs/adr/2026-08-10-patch-selection-pulse.md`
+    /// direction claim. See `docs/adr/2026-08-10-patch-selection-pulse.ai.md`
     /// (Amendments 2026-08-20 and 2026-08-22).
     #[must_use]
     pub fn pulse_language(&self) -> Option<crate::PatchPulseLanguage> {

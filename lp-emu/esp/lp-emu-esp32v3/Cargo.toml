@@ -76,7 +76,7 @@ lp-xt-inst = { path = "../../../lp-xt/lp-xt-inst" }
 sha2 = "0.10"
 # The tests' firmware-derived figures (cycle counts, the main stack's size,
 # boot chains that print it) are read from lp-emu/esp/figures/<chip>.json, not
-# pinned as literals; `just bless-chips` rewrites them. docs/chip-figures.md.
+# pinned as literals; `just bless-chips` rewrites them. docs/chip-figures.ai.md.
 lp-emu-esp-figures = { path = "../lp-emu-esp-figures" }
 
 # The speed probe's two instruments, both OFF by default and neither in a gate

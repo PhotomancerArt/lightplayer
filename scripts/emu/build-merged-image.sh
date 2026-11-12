@@ -16,7 +16,7 @@
 #
 # ⚠️ **The flash size is a per-chip value, not a constant.** Both the C6 and
 # the classic are 4 MB; the S3's partition table does not fit a 4 MB part and
-# deliberately does not try to (`docs/adr/2026-07-30-esp32s3-partition-floor.md`
+# deliberately does not try to (`docs/adr/2026-07-30-esp32s3-partition-floor.ai.md`
 # — factory 6 MB at 0x010000, `lpfs` 1.5 MB at 0x610000), so its merged image
 # is **8 MB**. A merged image built at the wrong size is not a smaller chip;
 # it is a file whose partition table points past its own end.

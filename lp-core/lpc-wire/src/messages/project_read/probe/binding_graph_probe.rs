@@ -39,7 +39,7 @@
 //! it last changed. A value can therefore never sit inside the structure —
 //! which is why an engaged panel writer is the value-free
 //! [`WireBindingEndpoint::PanelWriter`], not a literal carrying the knob's
-//! position. See `docs/adr/2026-07-06-binding-graph-probe.md` (amended
+//! position. See `docs/adr/2026-07-06-binding-graph-probe.ai.md` (amended
 //! 2026-09-23).
 
 use alloc::string::String;
@@ -138,7 +138,7 @@ pub enum WireBindingDirection {
     Publishes,
 }
 
-/// Structured identity of one bus scope on the wire (modules.md R1/R2).
+/// Structured identity of one bus scope on the wire (modules.ai.md R1/R2).
 ///
 /// Owners are runtime node ids from the same tree the probe ships, so
 /// clients key scoped channels structurally and derive any display string

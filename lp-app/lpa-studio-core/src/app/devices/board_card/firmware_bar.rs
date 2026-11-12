@@ -1,4 +1,4 @@
-//! The Firmware row: what runs the board (`docs/ux/anatomy/board-card.md`,
+//! The Firmware row: what runs the board (`docs/ux/anatomy/board-card.ai.md`,
 //! "Firmware ▲"). **Firmware · version · state · action**; its work in the
 //! row, and everything else in its details.
 //!

@@ -1,5 +1,5 @@
 //! Which emulator seams a tab-hosted board asks for, and the one journal line
-//! that says what came of it (ADR `docs/adr/2026-10-05-emulator-seams.md`).
+//! that says what came of it (ADR `docs/adr/2026-10-05-emulator-seams.ai.md`).
 //!
 //! Pure, and declared outside the wasm gate so its tests run natively; the
 //! bridge reads the worker's report into [`EmuSeamsInfo`] and the link hands

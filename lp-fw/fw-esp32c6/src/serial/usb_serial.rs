@@ -8,7 +8,7 @@
 //! and dropped — never waited on indefinitely — when nothing is draining.
 //! esp-hal's blocking `UsbSerialJtag::write` spins forever on an unread
 //! endpoint buffer, which wedged every harness that logged before its first
-//! frame of real work (docs/defects/2026-08-31-c6-rmt-ws281x-dark.md: test_rmt
+//! frame of real work (docs/defects/2026-08-31-c6-rmt-ws281x-dark.ai.md: test_rmt
 //! sat "dark" in that spin until any process opened the port). The app path is
 //! immune — its logs ride `io_task`'s `ChunkedWriter`, which already bounds
 //! and latches — so this type owns the same policy for the harnesses.

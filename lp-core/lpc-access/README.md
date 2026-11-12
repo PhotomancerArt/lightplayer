@@ -48,7 +48,7 @@ The anonymous key (an all-zero salt, an all-zero PSK) gets an encrypted
 session at the `open` tier only, so **no entry may have an all-zero salt**:
 `DeviceAccessFile::upsert_secret` refuses one (`AccessFileError::ZeroSalt`).
 Only adding is refused; no stored shape changes, so this is not a format
-change. See `docs/adr/2026-10-01-network-link-security.md`.
+change. See `docs/adr/2026-10-01-network-link-security.ai.md`.
 
 Both access files and the network file are persisted formats with schemas
 under `schemas/` (`project-access.schema.json`, `device-access.schema.json`,
@@ -59,9 +59,9 @@ it.
 The network file holds the Wi-Fi password **in plaintext** — a C6 has no
 secret to hide a key in, and physical possession is already everything. What
 the product guarantees is that no link reads it back. See
-[`docs/adr/2026-10-04-device-wifi-settings.md`](../../docs/adr/2026-10-04-device-wifi-settings.md).
+[`docs/adr/2026-10-04-device-wifi-settings.ai.md`](../../docs/adr/2026-10-04-device-wifi-settings.ai.md).
 
 RustCrypto's `hmac` and `pbkdf2` crates are dev-dependency **oracles** only;
 the tests also carry RFC 4231 and the published PBKDF2-SHA256 vectors.
 
-Decision record: [`docs/adr/2026-09-23-ble-access-model.md`](../../docs/adr/2026-09-23-ble-access-model.md).
+Decision record: [`docs/adr/2026-09-23-ble-access-model.ai.md`](../../docs/adr/2026-09-23-ble-access-model.ai.md).

@@ -46,7 +46,7 @@ pub enum FsBootState {
     /// missing, which is open by default). Read the files with `lp-cli
     /// hardware tree extract`. Not a layout migration: never `migrate` over
     /// it. Produced only by an `fs-tree` build (the tree store,
-    /// docs/adr/2026-10-10-fs-tree-refused-state-and-update-guard.md).
+    /// docs/adr/2026-10-10-fs-tree-refused-state-and-update-guard.ai.md).
     Refused,
 }
 

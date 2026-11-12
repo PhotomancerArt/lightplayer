@@ -22,7 +22,7 @@ transcribed the toolchain's real divide/sqrt sequences end to end. Result:
 **zero divergence, result bits and FSR both**, replayed with no board
 attached by `tests/fp_silicon_replay.rs`, forever. The behavior contract —
 what is measured, what is still open, and by which vector family each row is
-proven — is `docs/adr/2026-07-31-xtensa-fp-behavior-contract.md`. Trust the
+proven — is `docs/adr/2026-07-31-xtensa-fp-behavior-contract.ai.md`. Trust the
 ADR, not this paragraph, if the two ever disagree.
 
 ## Architecture
@@ -293,7 +293,7 @@ the builtins — turning on the f32 builtin family left 931 bytes and took the
 `xtn.q32` filetest suite from 849/849 files to 522/849 — and it hid the fact
 that a shader→builtin call spans SRAM→flash, far outside `call8`'s ±512 KiB
 direct reach. `tests/call_range.rs` pins both halves of that now. See
-`docs/defects/2026-08-01-xt-f32-builtins-exhaust-the-emulator-code-region.md`.
+`docs/defects/2026-08-01-xt-f32-builtins-exhaust-the-emulator-code-region.ai.md`.
 
 ### D-bus / I-bus dual mapping
 
@@ -326,7 +326,7 @@ assertion caught it.
 
 This address is **host-emulator fiction** — no ESP32 has a host-shared region,
 and the on-device JIT never needs one. See
-`docs/adr/2026-07-30-xtensa-host-shared-memory.md`, which also records why it is
+`docs/adr/2026-07-30-xtensa-host-shared-memory.ai.md`, which also records why it is
 deliberately *not* the rv32 engine's `0x4000_0000` (that address is
 `SENTINEL_PC`).
 
@@ -381,7 +381,7 @@ silicon measurement is what falsified these
 (`settled_rows_declare_manual_or_silicon_provenance` pins the manual/silicon
 split, and the falsified set, so neither can drift). The full row list, each
 with its proving vector family, is the M6 FP-contract ADR's §4
-(`docs/adr/2026-07-31-xtensa-fp-behavior-contract.md`). A non-default
+(`docs/adr/2026-07-31-xtensa-fp-behavior-contract.ai.md`). A non-default
 `FCR.RM` is **implemented** for `add.s`/`sub.s`/`mul.s` (measured: all three
 directed modes match IEEE-754 directed rounding bit-for-bit) and **refused**
 everywhere else, per D6 — its encoding is architectural (`cpu::FCR_RM_*`, ISA
@@ -711,4 +711,4 @@ including the word-mirrored SRAM1 rule, established with 5 sentinel probes.
 their windowed-register handling and the `_WindowOverflow`/`_WindowUnderflow`
 handlers — are behavioral references only: observed to understand semantics,
 never copied or transliterated. See the repo license ADR
-(`docs/adr/2026-07-29-license-provenance-discipline.md`) and `AGENTS.md`.
+(`docs/adr/2026-07-29-license-provenance-discipline.ai.md`) and `AGENTS.ai.md`.

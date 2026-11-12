@@ -42,7 +42,7 @@
 #
 # Identity is NOT this script's job: `scripts/emu/s3-oracle.sh` compares the
 # bytes, counts and frames of two legs. Emulated microseconds never gate
-# anything (AGENTS.md); this prints, it does not judge.
+# anything (AGENTS.ai.md); this prints, it does not judge.
 set -euo pipefail
 
 repo="$(cd "$(dirname "$0")/../.." && pwd)"

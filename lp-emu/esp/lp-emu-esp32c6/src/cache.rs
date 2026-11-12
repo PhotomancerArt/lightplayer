@@ -443,7 +443,7 @@ pub fn fill(bus: &mut SocBus, flash: &FlashHandle, cache: &CacheHandle) -> usize
 ///
 /// — and P2's `rodata_stride` kernel found the knee between 16 and 32 bytes
 /// with the instruction side (`code_walk`) agreeing independently
-/// (`docs/reports/2026-09-08-esp32c6-t3-calibration.md` §2.4).
+/// (`docs/reports/2026-09-08-esp32c6-t3-calibration.ai.md` §2.4).
 pub const LINE_BYTES: u32 = 32;
 
 /// Ways. `documented` — the mask ROM, not the TRM (see [`CACHE_BYTES`]).
@@ -565,7 +565,7 @@ pub const APB_ACCESS_CYCLES: u32 = 9;
 /// the same gap per transfer (1.9–2.8 µs). The least-squares fit through the
 /// five is 29. It is validated on firmware it was not fitted to (`pr1n`,
 /// and the save/load and first-light records:
-/// `docs/reports/2026-10-17-c6-flash-timing-emulator.md`). A kernel that
+/// `docs/reports/2026-10-17-c6-flash-timing-emulator.ai.md`). A kernel that
 /// polls an SPI1 register in a loop (`cycle-probe`'s `mmio_poll` at SPI1)
 /// would turn this into a measurement.
 pub const MSPI_REG_EXTRA_CYCLES: u32 = 29;

@@ -70,7 +70,7 @@ impl BindingPriority {
     }
 
     /// Engaged panel writers sit above authored bindings within their
-    /// scope (panel.md P4): the user's hand outranks the project's wiring
+    /// scope (panel.ai.md P4): the user's hand outranks the project's wiring
     /// until an explicit clear.
     pub fn panel() -> Self {
         Self(1000)

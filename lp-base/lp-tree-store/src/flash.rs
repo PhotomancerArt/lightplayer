@@ -17,7 +17,7 @@ pub trait Flash {
     fn program(&mut self, addr: u32, data: &[u8]) -> Result<(), Self::Error>;
     fn erase_sector(&mut self, sector: u32) -> Result<(), Self::Error>;
 
-    /// FORMAT.md's CRC-32 of `bytes`, going on from the finished CRC `crc`
+    /// FORMAT.ai.md's CRC-32 of `bytes`, going on from the finished CRC `crc`
     /// (0 to start): what checks every record. The default is `lp-crc32`'s,
     /// bitwise; a platform with a faster engine for the same CRC may answer
     /// it instead (the C6's mask ROM, `fw-esp32c6`'s `tree_flash.rs`), which

@@ -6,7 +6,7 @@
 //! §4.7.1.3 "Window Overflow Check" for `WindowCheck`, §4.7.1.4 "Call, Entry,
 //! and Return Mechanism" for CALLn/ENTRY/RETW, the ENTRY, RETW, MOVSP, ROTW,
 //! RFWO and RFWU instruction pages for the rest. No QEMU/binutils/GCC source
-//! was consulted (AGENTS.md license rule).
+//! was consulted (AGENTS.ai.md license rule).
 
 use lp_xt_inst::{CallOp, CallxOp, Inst, MacSrc, MacY};
 
@@ -23,7 +23,7 @@ use crate::cpu::{Cpu, NUM_BASES};
 /// Machine mode raises the **real** exception and runs the guest's own
 /// `_WindowOverflow{4,8,12}` / `_WindowUnderflow{4,8,12}` handlers, because
 /// the direct model gives wrong answers for firmware that reads another
-/// frame's save area — `docs/adr/2026-07-30-xtensa-backtrace-window-spill.md`
+/// frame's save area — `docs/adr/2026-07-30-xtensa-backtrace-window-spill.ai.md`
 /// measured a 25-deep chain reporting 19 identical PCs.
 ///
 /// This is a **selector, not a fork**: there is one `ENTRY`/`RETW`

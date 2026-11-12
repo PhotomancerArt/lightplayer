@@ -17,7 +17,7 @@
 //! opts into this one, at its own construction site. Nothing here
 //! feature-gates the compiler out of `lpc-engine` or `lpa-server`, and
 //! nothing here makes `LpGraphics` optional — see the hard rule at the top
-//! of `AGENTS.md` ("Make the compiler an opt-in feature on `lp-engine` or
+//! of `AGENTS.ai.md` ("Make the compiler an opt-in feature on `lp-engine` or
 //! `lp-server` … STOP. You are about to break the product."). A future
 //! reader must not mistake this file for permission to do that.
 //!
@@ -33,7 +33,7 @@
 //!
 //! The message is currently the **only** signal a user gets that the build
 //! cannot run shaders; the general fix is firmware capability reporting,
-//! tracked in `docs/debt/firmware-capability-reporting.md`.
+//! tracked in `docs/debt/firmware-capability-reporting.ai.md`.
 
 use alloc::boxed::Box;
 use alloc::format;

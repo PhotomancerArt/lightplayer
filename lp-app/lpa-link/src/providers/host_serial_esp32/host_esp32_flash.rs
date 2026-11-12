@@ -169,7 +169,7 @@ pub(super) fn flash_firmware(
 /// `FLASH_DEFL_END`), and its stub silently dropped the last 254 bytes of a
 /// packaged image whose length was not a multiple of 4: the engine's last
 /// functions read back `0xFF` and it faulted on every boot
-/// (`docs/defects/2026-10-05-the-host-flasher-dropped-the-split-images-last-bytes.md`).
+/// (`docs/defects/2026-10-05-the-host-flasher-dropped-the-split-images-last-bytes.ai.md`).
 /// The check runs after the write is finished, over the whole range, so any
 /// short or wrong write fails here, loudly, instead of on the next boot.
 ///

@@ -377,7 +377,7 @@ fn s9_the_loader_skips_a_core_that_will_not_load_and_boots_the_other() {
     );
 }
 
-/// The C6's S12 (`docs/defects/2026-10-17-a-power-cycle-after-a-failed-trial-and-its-heal-leaves-the-c6-core-only.md`)
+/// The C6's S12 (`docs/defects/2026-10-17-a-power-cycle-after-a-failed-trial-and-its-heal-leaves-the-c6-core-only.ai.md`)
 /// on the S3: a dead trial's record names where X's engine now is. Every
 /// power cycle, the loader finds the engine header where the core was and
 /// falls back to the proven core, which must read the fallback as the

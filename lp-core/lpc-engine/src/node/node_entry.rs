@@ -34,7 +34,7 @@ pub struct RuntimeNodeEntry<N> {
     pub created_at: Revision,
 
     /// The bus scope this node INHABITS (`None` for the root module, which
-    /// no scope contains). Structural per modules.md R1: assigned by
+    /// no scope contains). Structural per modules.ai.md R1: assigned by
     /// `ensure_runtime_spine` on both the load and apply paths, present for
     /// `Pending`/`Failed` entries, and untouched by payload reattach.
     pub scope: Option<ScopeRef>,

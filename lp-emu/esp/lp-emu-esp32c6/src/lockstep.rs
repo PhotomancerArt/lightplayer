@@ -72,7 +72,7 @@
 //!
 //! See [`Lockstep::stagger`]. Two identical guests started in the same cycle
 //! wedge in the same cycle, and the wedge is
-//! `docs/debt/emu-c6-radio-tx-never-completes.md`, not this runner.
+//! `docs/debt/emu-c6-radio-tx-never-completes.ai.md`, not this runner.
 //!
 //! # Emulator seam media ride the same quantum
 //!
@@ -334,7 +334,7 @@ impl Lockstep {
     /// Two identical images on two machines started in the same cycle do
     /// **the same thing in the same cycle**. On the `test_espnow` image that
     /// is fatal to a pair run, because of the open question in
-    /// `docs/debt/emu-c6-radio-tx-never-completes.md`: each guest arms one
+    /// `docs/debt/emu-c6-radio-tx-never-completes.ai.md`: each guest arms one
     /// frame at 1,036.4 ms and then **never returns from its own `send`**,
     /// so when the air offers the other machine that frame 672 µs later,
     /// the receiver is already spinning inside its own send and its

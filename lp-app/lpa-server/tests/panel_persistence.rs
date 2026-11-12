@@ -1,4 +1,4 @@
-//! Panel state persistence (panel.md P10/P11, roadmap P10).
+//! Panel state persistence (panel.ai.md P10/P11, roadmap P10).
 //!
 //! The requirement these tests exist for, verbatim from the design: *4
 //! a.m., Burning Man, LED scarf dimmed from a phone; unplug, replug — it

@@ -41,7 +41,7 @@ std = [
 #
 # Do NOT read `node-shader` as a step toward making the GLSL JIT compiler
 # itself opt-in on `lpc-engine`/`lp-server` — see the hard rule in
-# `AGENTS.md` ("Make the compiler an opt-in feature ... STOP. You are about
+# `AGENTS.ai.md` ("Make the compiler an opt-in feature ... STOP. You are about
 # to break the product."). Disabling `node-shader` removes the *Shader* and
 # *ComputeShader* node runtimes only; `lp-shader` stays linked whenever any
 # node that uses it (fixture, fluid) is enabled, and a default build always

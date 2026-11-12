@@ -41,7 +41,7 @@ pub const NVS_OFFSET: u32 = 0x0000_9000;
 pub const NVS_LEN: u32 = 0x0000_5000;
 
 /// The `bootctl` sector (`partitions.csv`,
-/// `docs/adr/2026-07-30-boot-control-sector.md`).
+/// `docs/adr/2026-07-30-boot-control-sector.ai.md`).
 pub const BOOTCTL_OFFSET: u32 = 0x0000_e000;
 pub const BOOTCTL_LEN: u32 = 0x0000_1000;
 

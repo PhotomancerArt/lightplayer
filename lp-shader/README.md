@@ -45,7 +45,7 @@ native and WASM backends. Builtins (`sin`, `cos`, `sqrt`, etc.) are provided as 
 functions in `lps-builtins` and linked at JIT time.
 
 **Normative semantics** for Q32 (arithmetic, div-by-zero, relational builtins, filetest policy) are
-in `[docs/design/q32.md](../docs/design/q32.md)`.
+in `[docs/design/q32.ai.md](../docs/design/q32.ai.md)`.
 
 Float mode selection is a backend parameter — the IR itself is mode-agnostic.
 
@@ -58,7 +58,7 @@ buffers are wired outside GLSL — see `CompilePxDesc::with_texture_spec`,
 `LpsTextureBuf::{to_texture2d_value, to_named_texture_uniform}` in `lp-shader`.
 
 Full contract (formats, wraps/filters, guest vs host metadata, filetests,
-follow-ups): [`docs/design/lp-shader-texture-access.md`](../docs/design/lp-shader-texture-access.md).
+follow-ups): [`docs/design/lp-shader-texture-access.ai.md`](../docs/design/lp-shader-texture-access.ai.md).
 
 ## Crate index
 

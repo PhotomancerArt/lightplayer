@@ -331,7 +331,7 @@ mod tests {
     /// Float mode converts instead of reinterpreting: `points` is still Q16.16,
     /// so each coordinate becomes `ItofS(word) * 2^-16` against one hoisted
     /// constant. Reinterpreting here is the defect
-    /// (`docs/defects/2026-08-02-f32-shader-cannot-render-a-frame.md`).
+    /// (`docs/defects/2026-08-02-f32-shader-cannot-render-a-frame.ai.md`).
     #[test]
     fn f32_decodes_points_by_scaling_the_fixed_point_word() {
         let (mut ir, mut meta) = make_stub_render_module();

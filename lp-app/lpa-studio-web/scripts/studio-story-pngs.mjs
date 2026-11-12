@@ -634,7 +634,7 @@ async function discoverStoryIdsOnce() {
     // viewport, where every non-composite story fits in 3400 — and
     // `captureBeyondViewport` does not reliably paint composited effects that
     // far below the fold: in the flip that filed
-    // docs/defects/2026-07-28-overview-composite-capture-races.md, the device
+    // docs/defects/2026-07-28-overview-composite-capture-races.ai.md, the device
     // card's `backdrop-filter` overlays kept their blur but lost their own
     // background and children, at every overlay story in the page and nowhere
     // above y=5658. Both terminals survive the stable pair, so each capture
@@ -700,7 +700,7 @@ async function captureStories(storyIds, directory) {
   // (~1-2s each, resume from disk). The historical navigation wedges were
   // ultimately the static server's fault (see createStaticServer), but a
   // bounded browser lifetime keeps any future renderer-side degradation
-  // from ever wedging a whole run. See docs/debt/story-capture-pipeline.md.
+  // from ever wedging a whole run. See docs/debt/story-capture-pipeline.ai.md.
   for (let start = 0; start < pending.length; start += browserRestartEvery) {
     const chunk = pending.slice(start, start + browserRestartEvery);
     const chunkConcurrency = Math.min(concurrency, chunk.length);
@@ -918,7 +918,7 @@ async function createCapturePage(cdp) {
       // Chromium silently drops `backdrop-filter` from beyond-viewport
       // captures — even when the clip is entirely on screen — so glass
       // surfaces bake into baselines without their blur (see
-      // docs/defects/2026-08-30-story-capture-drops-backdrop-filter.md). Ask for a
+      // docs/defects/2026-08-30-story-capture-drops-backdrop-filter.ai.md). Ask for a
       // beyond-viewport capture only when the clip actually overflows the
       // viewport: `fitViewportToStory` restores the base height before the
       // shot, so tall stories still need it (flipping unconditionally
@@ -1102,7 +1102,7 @@ async function settleFocus(cdp, sessionId, storyId) {
 // not change. The viewport is restored to its normal height before the capture
 // (see below), so the grown height is a measurement window, not the height any
 // story is photographed at.
-// See docs/defects/2026-07-27-code-editor-gutter-misaligned.md
+// See docs/defects/2026-07-27-code-editor-gutter-misaligned.ai.md
 async function fitViewportToStory(cdp, sessionId, viewport, storyId) {
   const needed = await evaluate(
     cdp,
@@ -1227,7 +1227,7 @@ async function waitForStoryReady(cdp, sessionId, storyId) {
       // box before the app's stylesheet lands and the bitmap is drawn for the
       // unstyled 300x150 intrinsic size, then squeezed into the real box —
       // a second stable terminal that alternated baselines run to run
-      // (docs/defects/2026-08-05-clock-face-baselines-oscillate.md). The app
+      // (docs/defects/2026-08-05-clock-face-baselines-oscillate.ai.md). The app
       // repaints on resize; this refuses to shoot until it has.
       const dpr = window.devicePixelRatio || 1;
       const mismatched = [...el.querySelectorAll('canvas.ux-box-sized-canvas')].filter((c) => {
@@ -1411,7 +1411,7 @@ async function compareBaselines(storyIds, expectedDir, actualDir) {
   // while containing per-channel deltas the significance test itself calls
   // real. That is the fingerprint of a bistable render or a content change
   // hiding under the count-only gate — see
-  // docs/defects/2026-07-27-story-check-tolerance-ignores-amplitude.md.
+  // docs/defects/2026-07-27-story-check-tolerance-ignores-amplitude.ai.md.
   // Warn loudly; do not fail (single-story calibration so far — promote to a
   // gate once a few real runs have confirmed where the boundary sits).
   const suspects = tolerated.filter(({ diff }) => diff.significantPixels > 0);
@@ -1427,7 +1427,7 @@ async function compareBaselines(storyIds, expectedDir, actualDir) {
     }
     console.warn(
       "  Fresh + baseline pixels are retained as the story-images-tolerated CI artifact.\n" +
-        "  See docs/defects/2026-07-27-story-check-tolerance-ignores-amplitude.md.",
+        "  See docs/defects/2026-07-27-story-check-tolerance-ignores-amplitude.ai.md.",
     );
   }
 
@@ -1754,7 +1754,7 @@ async function runChrome(args, options) {
 // Ticket lp2025/_auto/2026-10-20-story-discovery-teardown-exit. On the desk,
 // Google Chrome 155 and Brave write the whole `--dump-dom` page and THEN exit 2
 // from their teardown watchdog, which made every local
-// `just studio-story-pngs` fail at discovery (docs/debt/story-capture-pipeline.md,
+// `just studio-story-pngs` fail at discovery (docs/debt/story-capture-pipeline.ai.md,
 // 2026-10-20). CI's Chrome for Testing never does this. Accept exactly that:
 // exit code 2 (not a signal), "Teardown watchdog expired" on stderr, and
 // stdout holding the page's HTML. A crash, an empty dump or any other code
@@ -1771,7 +1771,7 @@ function isTeardownWatchdogExit({ code, stdout, stderr }) {
 
 // Wait for a child process, BOUNDED. The bare `once(child, "exit")` this
 // replaced is what let a hung discovery Chrome burn 5 hours of CI in silence
-// (docs/debt/story-capture-pipeline.md, 2026-08-05): nothing else in this file
+// (docs/debt/story-capture-pipeline.ai.md, 2026-08-05): nothing else in this file
 // covers a child that never exits, because every other timeout guards the CDP
 // capture path.
 //

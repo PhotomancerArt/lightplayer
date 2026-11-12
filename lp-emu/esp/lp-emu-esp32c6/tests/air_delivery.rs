@@ -245,7 +245,7 @@ fn the_pair_hears_itself() {
 
 /// P2 wrote this as `the_symmetric_pair_delivers_but_cannot_print`, and said
 /// in its own docstring: "if this ever starts printing, a TX has completed
-/// and `docs/debt/emu-c6-radio-tx-never-completes.md` is closed — which would
+/// and `docs/debt/emu-c6-radio-tx-never-completes.ai.md` is closed — which would
 /// be very good news and should be chased, not silenced."
 ///
 /// **M4 U1 chased it.** Two identical images started in the same cycle both
@@ -688,7 +688,7 @@ fn the_descriptor_words_undetermined_bits_change_nothing() {
 // ---------------------------------------------------------------------------
 // M4 U1 — the TX-completion pass.
 //
-// The experiment `docs/debt/emu-c6-radio-tx-never-completes.md` asks for, run
+// The experiment `docs/debt/emu-c6-radio-tx-never-completes.ai.md` asks for, run
 // against **the state a real completion would find** rather than against the
 // machine as it sits: M4 P2's lesson (Appendix B.5) is that a sweep with
 // nothing to find measures the experiment. `test_espnow`'s own
@@ -1412,7 +1412,7 @@ fn broadcast_sender_and_receiver(
 }
 
 /// **The instrumentation that named the cause of
-/// `docs/debt/emu-c6-air-delivers-every-other-frame.md`.**
+/// `docs/debt/emu-c6-air-delivers-every-other-frame.ai.md`.**
 ///
 /// Eight frames from a real `espnow-broadcast` sender, handed to a real
 /// `espnow-broadcast` receiver **one at a time, with the receiver run in

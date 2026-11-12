@@ -4,7 +4,7 @@
 //! `glsl/lpfn/generative/gnoise/gnoise3.glsl` (normative): random values at the
 //! eight cell corners, trilinear interpolation with quintic-smoothstep weights,
 //! remapped from `[0, 1]` to `[-1, 1]`. Standard lattice value noise (see
-//! docs/reports/2026-03-31-lpfx-license-audit.md).
+//! docs/reports/2026-03-31-lpfx-license-audit.ai.md).
 //!
 //! **Follows the canonical, not the Q32 implementation:** the Q32 device code
 //! uses a 256-entry quintic LUT; this uses the exact `6t^5 - 15t^4 + 10t^3`.

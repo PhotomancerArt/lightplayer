@@ -629,8 +629,8 @@ impl LpvmInstance for WasmLpvmInstance {
         // count low against the rv32 oracle; that turned out to be a wrong
         // scale constant in this crate's own unorm lowering, not a
         // target-defined rounding difference
-        // (`docs/defects/2026-08-07-wasm-f32-unorm-scale-convention.md`), and
-        // the codes are Guaranteed-class — `docs/design/float.md` §7. Assert
+        // (`docs/defects/2026-08-07-wasm-f32-unorm-scale-convention.ai.md`), and
+        // the codes are Guaranteed-class — `docs/design/float.ai.md` §7. Assert
         // them against the rv32 table exactly:
         // `lps-filetests/tests/f32_render_entry_wasm.rs`.
         let func = self.resolve_render_texture(fn_name)?;

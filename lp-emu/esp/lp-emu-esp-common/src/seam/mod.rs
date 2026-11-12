@@ -1,7 +1,7 @@
 //! Emulator seams, the chip-neutral half.
 //!
 //! A seam is a named function in the shipped firmware where an emulator may
-//! answer (`lp-base/lp-seam`; the ADR `docs/adr/2026-10-05-emulator-seams.md`).
+//! answer (`lp-base/lp-seam`; the ADR `docs/adr/2026-10-05-emulator-seams.ai.md`).
 //! This module holds what is the same on every chip: finding the firmware's
 //! descriptor tables in a flash image ([`seam_scan`]), what a run asked for
 //! ([`seam_request`]), the implementations this emulator has

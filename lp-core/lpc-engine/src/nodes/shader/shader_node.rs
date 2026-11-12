@@ -7,7 +7,7 @@
 //! at most once (the `needs_compile` latch) — it is retried only when the
 //! source or config changes again. This is what makes live editing safe: a
 //! mid-edit bad apply shows its error without blanking the output. See
-//! `docs/adr/2026-07-04-studio-editing-model.md` (revised by the shader
+//! `docs/adr/2026-07-04-studio-editing-model.ai.md` (revised by the shader
 //! auto-apply plan).
 
 use alloc::boxed::Box;
@@ -171,7 +171,7 @@ pub struct ShaderNode {
     /// resolve error — the shader keeps running on their authored defaults,
     /// and the status reports a warning instead of silently degrading (a
     /// broken `bus:time` binding must not look like a frozen shader; see
-    /// docs/defects/2026-08-02-authored-source-bindings-silently-dropped.md).
+    /// docs/defects/2026-08-02-authored-source-bindings-silently-dropped.ai.md).
     input_resolve_failures: Vec<(String, String)>,
     /// Consecutive frames rendered/sampled as the black fallback, used to
     /// throttle the log below. See [`BLACK_FALLBACK_RESTATE_EVERY`].
@@ -322,7 +322,7 @@ impl ShaderNode {
         // windows), the compile proceeds without one rather than deferring
         // forever. On tick-driven hosts the window always opens before the
         // second render, so pressure still precedes every compile there.
-        // See docs/adr/2026-08-03-memory-pressure-at-compile-safe-points.md.
+        // See docs/adr/2026-08-03-memory-pressure-at-compile-safe-points.ai.md.
         if self.compile_window != Some(ctx.revision()) && !self.compile_window_requested {
             self.compile_window_requested = true;
             return Ok(self.shader.is_some());
@@ -1102,7 +1102,7 @@ impl NodeRuntime for ShaderNode {
 /// Both answers come from the backend rather than from a table here: which
 /// tier a backend runs for Fixed and which for Float are its own product
 /// decisions, stated once where it is defined
-/// (`docs/adr/2026-08-01-float-mode-as-a-compiler-parameter.md`). This
+/// (`docs/adr/2026-08-01-float-mode-as-a-compiler-parameter.ai.md`). This
 /// function exists so the two shader node kinds cannot disagree about how the
 /// slot maps.
 pub(super) fn semantics_for(
@@ -2200,7 +2200,7 @@ fn project_batch(
 ///
 /// Under the old `panic-recovery` feature (fw-esp32c6 / fw-emu) this raised a
 /// **panic** — deliberate, limited panic-as-control-flow per the lpvm-native
-/// fuel ADR (`docs/adr/2026-07-20-lpvm-native-fuel.md`). The reason was
+/// fuel ADR (`docs/adr/2026-07-20-lpvm-native-fuel.ai.md`). The reason was
 /// mechanical: the render/sample calls above run inside
 /// `catch_node_panic_framed`, and only a **caught** panic recorded blame in the
 /// lp-recovery ledger, so a repeat offender went yellow → red-gate and the
@@ -2311,7 +2311,7 @@ fn palette_slot_count(slots: &MapSlot<String, ShaderSlotDef>) -> usize {
 /// One [`lps_shared::TextureBindingSpec`] per `sampler2D` uniform leaf, keyed
 /// by uniform name — the map `lp-shader` validates the shader's declared
 /// samplers against, failing compilation on a missing *or* extra spec
-/// (`docs/design/lp-shader-texture-access.md`). A shader node left this
+/// (`docs/design/lp-shader-texture-access.ai.md`). A shader node left this
 /// defaulted-empty until palettes existed, which is why any `sampler2D` used
 /// to fail to compile at all.
 ///
@@ -2732,7 +2732,7 @@ fn resolve_gradient_config(
 /// `EngineResolveHost::read_shader_consumed_slot_default` projects the
 /// uniform name onto `consumed[<name>]`. Without that projection every
 /// unbound uniform reported here, and the warning meant nothing —
-/// `docs/defects/2026-08-04-unbound-shader-uniform-warns.md`.
+/// `docs/defects/2026-08-04-unbound-shader-uniform-warns.ai.md`.
 ///
 /// The timebase kinds (`phasor`, `seconds`) never reach the materialize
 /// helper: their value comes from the scope's time product, not from the
@@ -2799,15 +2799,15 @@ pub(super) fn resolve_or_default_input(
 /// authored default.
 ///
 /// That is the shipped shape of a knob — a shader declares `bus:reach`, the
-/// panel derives a control for the channel (panel.md P1), and until someone
+/// panel derives a control for the channel (panel.ai.md P1), and until someone
 /// touches it the control sits in `UiPanelControlState::ReadDefault` while
-/// the uniform takes the slot's default. `modules.md` R6 rules exactly that
+/// the uniform takes the slot's default. `modules.ai.md` R6 rules exactly that
 /// healthy: "an unfilled public input is an *invitation*, not an error". The
 /// node badge was the one surface still calling it a warning, so every
 /// gallery example that shipped a knob opened onto a Warn (`reach`/`sparks`,
 /// `scale`, `tail`, `depth`, `count`) — the panel said "default", the card
 /// said "problem". It is the same conflation
-/// `docs/defects/2026-08-04-unbound-shader-uniform-warns.md` fixed one step
+/// `docs/defects/2026-08-04-unbound-shader-uniform-warns.ai.md` fixed one step
 /// earlier, for an *unbound* uniform.
 ///
 /// Deliberately narrow, so the diagnosable faults stay loud:
@@ -3260,7 +3260,7 @@ mod tests {
     /// unbound uniform resolves through its authored default and leaves the
     /// node status clean. Both node kinds go through the same engine-host
     /// projection, and it keys off the `NodeDef` variant, so both variants
-    /// stay pinned — docs/defects/2026-08-04-unbound-shader-uniform-warns.md.
+    /// stay pinned — docs/defects/2026-08-04-unbound-shader-uniform-warns.ai.md.
     #[test]
     fn unbound_uniform_runs_on_its_authored_default_without_warning() {
         let source = "layout(binding = 0) uniform float time;\nvec4 render_2d(vec2 pos) { return vec4(fract(time), 0.0, 0.0, 1.0); }";
@@ -4221,7 +4221,7 @@ mod tests {
     ///
     /// This is the C6 case, and the whole reason the tier request is explicit:
     /// a board given different numerics than the author asked for, with no
-    /// signal, is the failure `2026-07-09-preview-fidelity-tiers.md` §4
+    /// signal, is the failure `2026-07-09-preview-fidelity-tiers.ai.md` §4
     /// forbids. The refusing backend is `CountingGraphics::fixed_only` rather
     /// than the real `TargetLpvmGraphics`, which used to refuse here only
     /// because the host engine happened to be Q32-only — it compiles Float as

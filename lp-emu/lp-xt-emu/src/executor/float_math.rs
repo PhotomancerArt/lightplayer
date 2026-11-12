@@ -124,7 +124,7 @@ impl<B: Bus> Exec<'_, B> {
                 let (out, fsr) = match op {
                     // Sign-bit operations, not `f32::abs()` / `-x`: they must
                     // not canonicalize a NaN and must give the right signed
-                    // zero. `float.md` §3 makes both Guaranteed.
+                    // zero. `float.ai.md` §3 makes both Guaranteed.
                     FpRrOp::AbsS => (a & !SIGN, 0),
                     FpRrOp::NegS => (a ^ SIGN, 0),
                     // The measured estimate ROMs and helper semantics (D5).
@@ -762,7 +762,7 @@ mod tests {
         let cases: &[(FpCmpOp, u32, u32, bool)] = &[
             (FpCmpOp::OeqS, one, one, true),
             (FpCmpOp::OeqS, one, two, false),
-            // +0 == -0 is true; `float.md` §3 makes it Guaranteed.
+            // +0 == -0 is true; `float.ai.md` §3 makes it Guaranteed.
             (FpCmpOp::OeqS, pos0, neg0, true),
             (FpCmpOp::OltS, one, two, true),
             (FpCmpOp::OltS, two, one, false),

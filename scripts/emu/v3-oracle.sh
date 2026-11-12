@@ -65,7 +65,7 @@
 # `render-loop`. Both cores, `--core-quantum 256`, `--time-grade t1` — the
 # only grade this machine has (plan decision E1).
 #
-# Emulated microseconds never gate anything (AGENTS.md): transcripts decide.
+# Emulated microseconds never gate anything (AGENTS.ai.md): transcripts decide.
 set -euo pipefail
 
 repo="$(cd "$(dirname "$0")/../.." && pwd)"

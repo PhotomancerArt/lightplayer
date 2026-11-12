@@ -427,7 +427,7 @@ fn pusher_recycles_a_channel_abort_then_restart() {
 /// thread is scheduled again; `send_blocking` then returns `Ok` after a single
 /// poll, the closure never panics, and the assertion below is the only thing
 /// that notices (see
-/// `docs/defects/2026-08-05-cross-core-panic-races-the-isr-thread.md`).
+/// `docs/defects/2026-08-05-cross-core-panic-races-the-isr-thread.ai.md`).
 ///
 /// So the budget is zero across `start_frame`: with nothing advancing the
 /// transmitter, the channel is provably incomplete at `send_blocking`'s first

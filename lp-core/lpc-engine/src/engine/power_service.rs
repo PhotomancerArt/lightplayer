@@ -6,7 +6,7 @@
 //! act the engine has no business performing. So the node hands a
 //! [`PowerOffRequest`] to a [`PowerService`], and whoever implements that
 //! service — the server — finishes the frame, unloads the projects, and asks
-//! the platform to sleep. See `docs/adr/2026-06-16-power-button-runtime-event.md`.
+//! the platform to sleep. See `docs/adr/2026-06-16-power-button-runtime-event.ai.md`.
 
 use alloc::string::String;
 use core::fmt;

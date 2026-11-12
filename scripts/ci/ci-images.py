@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """CI's own firmware images, for running the chip emulator suites locally
-without building firmware. See docs/ci-images.md.
+without building firmware. See docs/ci-images.ai.md.
 
   scripts/ci/ci-images.py pack  <chip> <out-dir>          # CI: collect + manifest
   scripts/ci/ci-images.py fetch [main|<pr>|<sha>|<run-id>] [chip...] [--force]
@@ -544,7 +544,7 @@ def cmd_fetch(args: list[str]) -> None:
         print("export LP_CI_IMAGES_FORCE=1   # --force: these images are NOT this checkout's firmware")
     print(
         "then e.g.  just test-emu-esp32s3-boot   just test-emu-esp32v3-boot   just test-emu-c6-boot\n"
-        "           just bless-chips esp32s3     (see docs/ci-images.md)"
+        "           just bless-chips esp32s3     (see docs/ci-images.ai.md)"
     )
 
 

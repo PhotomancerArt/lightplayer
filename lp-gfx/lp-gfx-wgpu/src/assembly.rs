@@ -33,7 +33,7 @@
 //!    seeded at `Q_HALF`) — which is exactly what `gl_FragCoord` already
 //!    carries — so the `floor` here evaluates every fragment half a pixel
 //!    away from the CPU tier
-//!    (`docs/defects/2026-08-09-gpu-render-pass-floors-the-fragment-center.md`).
+//!    (`docs/defects/2026-08-09-gpu-render-pass-floors-the-fragment-center.ai.md`).
 //!    The likely fix is dropping the `floor`; it is parked in that entry
 //!    rather than done here because it moves every GPU frame and the
 //!    render-parity bounds with it.

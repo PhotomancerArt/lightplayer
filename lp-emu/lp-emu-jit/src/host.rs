@@ -84,7 +84,7 @@
 //!   [`FLAG_PENDING`] is set, because an earlier MMIO **load** left a yield —
 //!   has no call to fuse into, so it gets [`HostOps::poll`].
 //!
-//! Per plan.md BD1 the poll is its own import rather than a widened
+//! Per plan.ai.md BD1 the poll is its own import rather than a widened
 //! `step_one`: `step_one` runs a guest *instruction*, `poll` runs a *polling
 //! point*, and giving the escape hatch's status codes two meanings would put a
 //! poll on a path where none belongs.
@@ -553,7 +553,7 @@ pub trait HostOps {
     /// An MMIO **load** that left a yield sets [`FLAG_PENDING`], and from then
     /// on every store — including an inline RAM store translated code performs
     /// itself — is a polling point. There is no host call to fuse into, so
-    /// this is it (plan.md BD1).
+    /// this is it (plan.ai.md BD1).
     ///
     /// `pc`, `cycle` and `instret` are all **post-store**: the state the
     /// interpreter would be holding at the polling point.

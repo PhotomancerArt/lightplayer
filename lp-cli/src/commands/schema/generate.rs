@@ -185,7 +185,7 @@ fn populated_registry() -> Result<SlotShapeRegistry> {
 
 /// Schema for the `project.json` container manifest.
 ///
-/// The container is NOT a node envelope (docs/design/modules.md §1/§6): it
+/// The container is NOT a node envelope (docs/design/modules.ai.md §1/§6): it
 /// carries the workspace identity — `format` pinned to the current
 /// [`PROJECT_FORMAT_VERSION`], optional `uid`/`name`, the optional card
 /// blurb `description`, the advisory `target`, the optional provenance

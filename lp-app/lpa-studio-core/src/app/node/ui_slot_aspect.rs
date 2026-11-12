@@ -37,7 +37,7 @@ pub enum UiSlotAspectKind {
     /// Slot value family and type metadata.
     TypeInfo,
     /// **Panel state** for a control on a module panel
-    /// (`docs/design/panel.md` P2): held / following / at default, plus
+    /// (`docs/design/panel.ai.md` P2): held / following / at default, plus
     /// what the held value displaced. Unlike the other kinds this one
     /// titles itself from [`UiSlotAspect::title`], because the three panel
     /// states are the section's whole point.

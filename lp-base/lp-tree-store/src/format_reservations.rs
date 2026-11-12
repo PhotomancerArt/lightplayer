@@ -1,5 +1,5 @@
 //! Numbers the format has allocated that version 3 does not write
-//! (FORMAT.md "Reserved: the index checkpoint"). They are here so that the
+//! (FORMAT.ai.md "Reserved: the index checkpoint"). They are here so that the
 //! code that builds the feature, and the image inspector, name them from
 //! one place, and so a test can pin that a version-3 reader skips them.
 //! A number, once allocated, is never handed out for anything else.

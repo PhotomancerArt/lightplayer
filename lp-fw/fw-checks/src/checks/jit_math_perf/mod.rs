@@ -7,7 +7,7 @@
 //! no shader compile or execution here, only the arithmetic and the corpus
 //! that exercises it.
 //!
-//! Q12 retirement ledger (2026-09-06 esp-emulator plan, `notes.md`): the
+//! Q12 retirement ledger (2026-09-06 esp-emulator plan, `notes.ai.md`): the
 //! cheapest remaining `test_*` migration, because the whole harness was
 //! already `lps-builtins` calls plus cycle timing — no product wire types to
 //! keep out, unlike `test_json`'s heartbeat.

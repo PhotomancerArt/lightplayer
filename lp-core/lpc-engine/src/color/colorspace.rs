@@ -1,7 +1,7 @@
 //! Authoring space → canonical LinearSrgb, and interpolation *inside* an
 //! authoring space.
 //!
-//! Two operations, in the order `docs/design/color.md` §7 mandates:
+//! Two operations, in the order `docs/design/color.ai.md` §7 mandates:
 //! **interpolate first, in the gradient's own space; convert second.** An
 //! Oklch rainbow that is converted before interpolation is just an sRGB
 //! rainbow with extra steps — the ordering is the whole reason non-canonical
@@ -27,7 +27,7 @@
 //! else here is an angle, so "the only unit that is not a `0..1` fraction is
 //! a hue angle, and it is degrees" is the whole rule.
 //!
-//! Coordinates outside those ranges are legal and meaningful (`color.md` §10
+//! Coordinates outside those ranges are legal and meaningful (`color.ai.md` §10
 //! rule 6): hues wrap, and out-of-gamut/boosted values survive until the
 //! texture-write boundary clamps them to the Unorm16 grid.
 //!
@@ -40,7 +40,7 @@ use lpc_model::{Colorspace, InterpMethod};
 
 /// Convert one stop's coordinates from `space` to canonical LinearSrgb.
 ///
-/// The result is **not** clamped: `color.md` §10 rule 6 keeps overshoot
+/// The result is **not** clamped: `color.ai.md` §10 rule 6 keeps overshoot
 /// meaningful all the way to the storage boundary, which is the one place
 /// that has to give up range.
 #[must_use]
@@ -81,7 +81,7 @@ pub fn interpolate_in_space(
 ) -> [f32; 3] {
     let t = match method {
         // A step gradient never leaves the stop it is on; the segment's
-        // start IS the sample (`color.md` §6).
+        // start IS the sample (`color.ai.md` §6).
         InterpMethod::Step => return from,
         InterpMethod::Linear => clamp_unit(t),
         InterpMethod::Smooth => smoothstep(clamp_unit(t)),

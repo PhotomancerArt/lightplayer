@@ -4,7 +4,7 @@
 //! `break`, MAC16, `clamps`, the Boolean ops, the TLB ops).
 //!
 //! Semantics are the Xtensa ISA Reference Manual's, cited per instruction.
-//! No QEMU/binutils/GCC source (AGENTS.md).
+//! No QEMU/binutils/GCC source (AGENTS.ai.md).
 
 use lp_emu_core::{Bus, InstClass};
 use lp_xt_inst::{

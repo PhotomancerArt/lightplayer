@@ -9,7 +9,7 @@
 // `browser_serial.js` uses for the device controller it loads.
 //
 // `EmulatorTabLink` / `EmulatorTabControl` (`mod.rs` in this directory) are
-// the Rust side of this handle; `docs/adr/2026-09-10-the-c6-emulator-runs-in-the-tab.md`
+// the Rust side of this handle; `docs/adr/2026-09-10-the-c6-emulator-runs-in-the-tab.ai.md`
 // is the decision record for the shape (rule 1 and its Consequences on why a
 // handle rather than the port object).
 //
@@ -441,7 +441,7 @@ export async function flashEmuPackage(id, requestedUrl) {
  * covers are erased, so the filesystem partition after it — the board's
  * projects, stamped `/hardware.json` and `/.lp/` files — stays. Never
  * `putFlash`: that erases the whole chip, which is Erase, not Update
- * (docs/defects/2026-10-02-updating-a-tab-hosted-board-erases-its-files.md).
+ * (docs/defects/2026-10-02-updating-a-tab-hosted-board-erases-its-files.ai.md).
  * An image that claims any other address is refused by name rather than
  * written at the wrong offset.
  */

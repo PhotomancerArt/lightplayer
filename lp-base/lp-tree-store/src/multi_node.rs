@@ -19,7 +19,7 @@ const DIR_FLAG: u8 = 0x80;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MultiHead {
     pub level: u8,
-    /// The node's bytes are a directory (FORMAT.md "Dir").
+    /// The node's bytes are a directory (FORMAT.ai.md "Dir").
     pub dir: bool,
     pub total_len: u32,
     pub count: usize,

@@ -12,7 +12,7 @@
 //! the main thread cannot read it back, and reaching the CPU tier's canvas
 //! for an arbitrary project — including the closed ones the sign-in sweep
 //! publishes — would mean new worker-protocol surface. That was explicitly
-//! out of this slice's timebox. See `docs/debt/sidecar-preview-capture.md`.
+//! out of this slice's timebox. See `docs/debt/sidecar-preview-capture.ai.md`.
 
 use lpa_studio_core::app::library::LibraryError;
 use lpa_studio_core::app::library::package_manifest::read_manifest;

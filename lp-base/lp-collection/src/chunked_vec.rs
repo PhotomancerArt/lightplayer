@@ -24,7 +24,7 @@ use core::ptr;
 /// 1 KiB is chosen to sit under the smallest hole a working classic reliably
 /// has. `HirExpr` gets 8 elements per chunk (768 B), `LpirOp` 32 (640 B).
 ///
-/// See `docs/defects/2026-08-02-classic-oom-retry-succeeds.md`.
+/// See `docs/defects/2026-08-02-classic-oom-retry-succeeds.ai.md`.
 const CHUNK_BYTES: usize = 1024;
 
 /// A vector backed by multiple smaller allocations.

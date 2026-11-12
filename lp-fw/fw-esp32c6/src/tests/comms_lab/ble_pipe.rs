@@ -64,7 +64,7 @@ pub async fn run(
     rng: Rng,
 ) {
     // XIAO ESP32C6 RF switch: GPIO3 LOW powers it, GPIO14 LOW selects the
-    // on-board antenna (`test_ble`; docs/defects/2026-09-23-xiao-c6-rf-switch-never-powered.md).
+    // on-board antenna (`test_ble`; docs/defects/2026-09-23-xiao-c6-rf-switch-never-powered.ai.md).
     core::mem::forget(esp_hal::gpio::Output::new(
         gpio3,
         esp_hal::gpio::Level::Low,

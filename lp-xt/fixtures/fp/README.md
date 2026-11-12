@@ -14,13 +14,13 @@ regenerable, never committed.
 
 ## Why these are `.S` files and not byte arrays
 
-House rule (AGENTS.md): **instruction bytes are assembler-derived or
+House rule (AGENTS.ai.md): **instruction bytes are assembler-derived or
 hardware-verified, never hand-written from memory.** The spike lesson behind it
 was that 2 of 3 recalled encodings were wrong. These files hold mnemonics only;
 the bytes come out of `xtensa-esp32s3-elf-as`.
 
 The same rule is why binutils' *output* is used freely here while its *source*
-is off limits — see `docs/adr/2026-07-29-license-provenance-discipline.md`.
+is off limits — see `docs/adr/2026-07-29-license-provenance-discipline.ai.md`.
 
 ## The objdiff oracle
 
@@ -32,7 +32,7 @@ cargo run -p lp-xt-inst --features objdiff --bin objdiff -- obj/fp_subset.elf
 Every instruction must MATCH: `lp-xt-inst`'s disassembly of the bytes has to
 agree with `xtensa-esp32s3-elf-objdump`'s, mnemonic and operand values. As of
 M6 P7 (after adding `mksadj.s`, missed at P1 — see
-`docs/defects/2026-07-31-mksadj-missing-from-fp-subset.md`) this reports
+`docs/defects/2026-07-31-mksadj-missing-from-fp-subset.ai.md`) this reports
 **136 / 136 matched, 0 mismatches, 0 unsupported**.
 
 An instruction that is not in `fp_subset.S` is not covered by the mechanical
@@ -130,5 +130,5 @@ an FR value that must outlive a call is the *caller's* problem, and the frame
 needs the spill slots.
 
 One incidental measurement worth the ADR: the toolchain **contracts** `a*b + c`
-into `madd.s` at `-O3`. `docs/design/float.md` §4 files expression contraction
+into `madd.s` at `-O3`. `docs/design/float.ai.md` §4 files expression contraction
 under target-defined, and this is that target being definite about it.

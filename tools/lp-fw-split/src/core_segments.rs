@@ -9,7 +9,7 @@
 //! needs a gap before it and there are too few RAM bytes left to fill it; the
 //! loader copied one to address 0 on silicon, and the store faulted before
 //! the core could mark its trial `attempted`
-//! (`docs/defects/2026-10-14-the-c6-loader-copies-an-address-zero-padding-segment-to-address-zero.md`).
+//! (`docs/defects/2026-10-14-the-c6-loader-copies-an-address-zero-padding-segment-to-address-zero.ai.md`).
 //!
 //! The loader is never updated over the air, so the image is what has to
 //! obey: [`check`] refuses a core with **any** segment the loader cannot
@@ -217,7 +217,7 @@ pub fn check_in(image: &[u8], rules: &SegmentRules) -> Result<Vec<CoreSegment>> 
         let table: Vec<_> = segs.iter().map(|s| s.line_in(rules)).collect();
         bail!(
             "the core image has {} segment(s) the loader cannot place; a board would not boot it \
-             (docs/defects/2026-10-14-the-c6-loader-copies-an-address-zero-padding-segment-to-address-zero.md):\n{}",
+             (docs/defects/2026-10-14-the-c6-loader-copies-an-address-zero-padding-segment-to-address-zero.ai.md):\n{}",
             refused.len(),
             table.join("\n")
         );

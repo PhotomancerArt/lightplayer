@@ -18,7 +18,7 @@
 //! ([`v3_rmt::route_rmt_to_gpio`]). Five wires transmit as a wave of four
 //! plus a wave of one; eight as two waves. The design target is eight wires
 //! ("Fadecandy shape"); five (the Zook dome) is the first hardware-validated
-//! instance — see `docs/future/2026-08-05-pinmux-8wire-validation.md` for
+//! instance — see `docs/future/2026-08-05-pinmux-8wire-validation.ai.md` for
 //! what remains unvalidated.
 //!
 //! The block plan is computed **here, at init, from the manifest**: declared

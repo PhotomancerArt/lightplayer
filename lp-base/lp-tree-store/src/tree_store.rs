@@ -40,7 +40,7 @@ pub(crate) type Res<T, F> = Result<T, StoreError<<F as Flash>::Error>>;
 /// Deepest path (components) the store accepts and mount follows.
 pub const MAX_DEPTH: usize = 32;
 
-/// Sectors `format` erases: 0 and 1, littlefs's superblock pair (FORMAT.md
+/// Sectors `format` erases: 0 and 1, littlefs's superblock pair (FORMAT.ai.md
 /// "Formatting").
 const LAZY_FORMAT_ERASES: u32 = 2;
 
@@ -113,7 +113,7 @@ pub struct TreeStore<F: Flash, H: ObjectHasher> {
 
 impl<F: Flash, H: ObjectHasher> TreeStore<F, H> {
     /// Make an empty store on any flash content, and mount it: the store
-    /// `mount` returns for this flash. **Lazy** (FORMAT.md "Formatting"):
+    /// `mount` returns for this flash. **Lazy** (FORMAT.ai.md "Formatting"):
     /// it erases two sectors, not all of them — sectors 0 and 1 (littlefs's
     /// superblock pair, so nothing reads the partition as littlefs again;
     /// the two heads open there) — and kills the header of every other
@@ -593,7 +593,7 @@ fn check_config<E>(
     sector_size: u32,
     cfg: &StoreConfig,
 ) -> Result<(), StoreError<E>> {
-    // A power of two: the sector header records its log2 (FORMAT.md).
+    // A power of two: the sector header records its log2 (FORMAT.ai.md).
     if !(512..=32768).contains(&sector_size) || !sector_size.is_power_of_two() {
         return Err(StoreError::BadConfig(
             "sector size must be a power of two in 512..=32768",

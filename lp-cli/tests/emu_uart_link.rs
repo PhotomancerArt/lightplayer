@@ -471,7 +471,7 @@ fn soak(test: &str, spec: &str) -> Option<Soak> {
     // datagrams this very soak loses, and a lost `compilation succeeded`
     // once held the wait to its whole budget with the board rendering flat
     // out (12 minutes of CI; docs/defects/
-    // 2026-10-07-the-uart-soak-waited-on-a-log-line-its-own-faults-lose.md).
+    // 2026-10-07-the-uart-soak-waited-on-a-log-line-its-own-faults-lose.ai.md).
     let seen = host.console().len();
     let deadline = host.board.micros() + (host.answer_budget_s * 1e6) as u64;
     while host.board.micros() < deadline

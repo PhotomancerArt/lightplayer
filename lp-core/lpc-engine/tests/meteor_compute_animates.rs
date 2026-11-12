@@ -15,7 +15,7 @@
 //! the compute shader's persistent globals each frame. The GPU tier hid the
 //! defect (its render shader lives in wgpu), which is why the gallery
 //! preview animated while the editor sim froze. See
-//! docs/defects/2026-08-03-wasm-shader-instances-share-vmctx.md.
+//! docs/defects/2026-08-03-wasm-shader-instances-share-vmctx.ai.md.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

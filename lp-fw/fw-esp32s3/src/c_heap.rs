@@ -9,14 +9,14 @@
 //!   restarts (the advertised name follows the loaded project), and blocks
 //!   that land in the main arena above a project split the space the next
 //!   project needs
-//!   (docs/defects/2026-09-24-ble-enabled-c6-refuses-a-project-switch-after-the-heap-cut.md).
+//!   (docs/defects/2026-09-24-ble-enabled-c6-refuses-a-project-switch-after-the-heap-cut.ai.md).
 //!   So the blobs' blocks go to a region of their own, [`HEAP_RADIO`].
 //! - **Warm-reset DMA.** A radio keeps running across a warm reset of the
 //!   system, and its DMA keeps writing into buffers the previous app gave
 //!   it. On the C6 those writes crashed the second-stage bootloader
-//!   (docs/defects/2026-10-05-a-requested-reboot-crashed-the-c6-bootloader.md)
+//!   (docs/defects/2026-10-05-a-requested-reboot-crashed-the-c6-bootloader.ai.md)
 //!   and could reach the split loader's RAM
-//!   (docs/defects/2026-10-17-radio-heap-overflow-reached-the-split-loaders-ram.md).
+//!   (docs/defects/2026-10-17-radio-heap-overflow-reached-the-split-loaders-ram.ai.md).
 //!   On this chip the boot stages are `lp_bootctl::S3_BOOT_STAGE_RAM`: the
 //!   split loader's RAM, inside the core's `.bss` at the top of the main
 //!   arena, and the IDF bootloader's, which is `dram2_seg` and the top of
@@ -80,7 +80,7 @@ pub const FENCED: EnumSet<MemoryCapability> = EnumSet::empty();
 /// task stack, which esp-rtos takes from the heap with `Internal`, so from the
 /// main arena, not from here); this image asks for two connections and the
 /// advertiser. Connected on FS3 its high water was 26,084 B
-/// (docs/reports/2026-10-21-s3-bluetooth-walk.md). The heartbeat's
+/// (docs/reports/2026-10-21-s3-bluetooth-walk.ai.md). The heartbeat's
 /// `[radio-heap]` line is the figure this is checked against.
 #[cfg(not(s3_espnow))]
 pub const HEAP_RADIO_BYTES: usize = 32 * 1024;

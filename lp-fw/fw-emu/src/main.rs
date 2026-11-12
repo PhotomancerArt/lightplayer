@@ -81,7 +81,7 @@ pub extern "C" fn _lp_main() -> ! {
     // recovery, filesystem, hardware registry, output provider, graphics,
     // the server itself, and the transport. The window makes that
     // residency attributable in `lp-cli profile --collect alloc` and
-    // ratcheted by the heap-budget gate (docs/heap-budget-gate.md).
+    // ratcheted by the heap-budget gate (docs/heap-budget-gate.ai.md).
     lp_perf::emit_begin!(lp_perf::EVENT_SERVER_BOOT);
     let reset_cause = recovery_area::boot_reset_cause();
     let (recovery_inst, boot_assessment) =

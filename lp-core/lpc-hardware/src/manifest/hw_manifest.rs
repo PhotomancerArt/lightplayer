@@ -243,7 +243,7 @@ impl HwManifest {
 /// Which logic level asserts a [`HwPowerGate`]. Polarity varies by install —
 /// the Dig-Quad's Q1R drives a user-supplied external relay board, which may
 /// invert relative to a solid-state gate — so it lives in metadata, never in
-/// code. See docs/future/2026-08-06-quinled-board-metadata-prep.md.
+/// code. See docs/future/2026-08-06-quinled-board-metadata-prep.ai.md.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
@@ -253,7 +253,7 @@ pub enum HwGateLevel {
 }
 
 /// "Assert this pin or these outputs are dead" — board metadata, not a
-/// claimable resource. See docs/future/2026-08-06-quinled-board-metadata-prep.md.
+/// claimable resource. See docs/future/2026-08-06-quinled-board-metadata-prep.ai.md.
 ///
 /// Deliberately not a [`HwCapability`] and not an endpoint: a capability says
 /// "this resource can do X"; this says the outputs are dead until it is

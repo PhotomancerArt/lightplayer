@@ -1,5 +1,5 @@
 //! The harness's executor: a null-waker `block_on` that polls, sleeps a
-//! moment, and polls again — the edge-and-test-only loop AGENTS.md's sans-IO
+//! moment, and polls again — the edge-and-test-only loop AGENTS.ai.md's sans-IO
 //! rule allows ("tests count as edges") — and the two clocks it waits on.
 //!
 //! Nothing in the code under test registers a waker the harness could use

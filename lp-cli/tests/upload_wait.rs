@@ -1,7 +1,7 @@
 //! `lp-cli upload` waits for evidence the newly deployed project is
 //! running before it disconnects.
 //!
-//! Coverage for P5 of `docs/defects/2026-07-30-deploy-compiles-previous-upload.md`:
+//! Coverage for P5 of `docs/defects/2026-07-30-deploy-compiles-previous-upload.ai.md`:
 //! `upload` used to disconnect the instant `LoadProject` was acked, so every
 //! compile line an operator could observe described the *previous* upload.
 //!

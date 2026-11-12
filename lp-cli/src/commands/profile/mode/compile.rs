@@ -9,7 +9,7 @@ pub const COMPILE_MAX_FRAMES: u32 = 8;
 /// Stops at the End of the frame containing the shader compile.
 ///
 /// The compile-window deferral (see
-/// docs/adr/2026-08-03-memory-pressure-at-compile-safe-points.md) means the
+/// docs/adr/2026-08-03-memory-pressure-at-compile-safe-points.ai.md) means the
 /// first render only requests a compile window; the compile itself runs in a
 /// later frame. So the gate cannot stop after a fixed frame count — it waits
 /// for a `shader-compile` End bracket and stops at that frame's End, which

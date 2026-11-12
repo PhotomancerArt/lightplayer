@@ -846,7 +846,7 @@ pub(crate) fn emit_op(
                     .local_set(dst.0);
             }
             // `floor(v * 65536)` clamped to `[0, 65535]` — the scale
-            // convention `docs/design/float.md` §7 fixes and
+            // convention `docs/design/float.ai.md` §7 fixes and
             // `lps_builtins::builtins::lpir::unorm_conv_f32` implements. It is
             // NOT the GPU `v * 65535` convention: this code is the frame
             // boundary's channel-out lowering, and a 65535 scale reads one

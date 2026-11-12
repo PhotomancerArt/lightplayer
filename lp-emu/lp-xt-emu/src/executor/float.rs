@@ -37,7 +37,7 @@
 //!
 //! Semantics come from the Xtensa ISA Reference Manual; no QEMU, binutils, or
 //! GCC source was read or adapted (see
-//! `docs/adr/2026-07-29-license-provenance-discipline.md`).
+//! `docs/adr/2026-07-29-license-provenance-discipline.ai.md`).
 
 use lp_emu_core::bus::Bus;
 use lp_xt_inst::{FpLsiOp, FpLsxOp, FpRrOp, Inst, SpecialReg, SrOp, UrOp, UserReg};

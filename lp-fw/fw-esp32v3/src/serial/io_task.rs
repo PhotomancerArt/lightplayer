@@ -80,7 +80,7 @@ const IO_TICK_PERIOD: esp_hal::time::Duration = esp_hal::time::Duration::from_mi
 /// on must be a *direct* waker wake: channel/signal sends, and this pacer —
 /// a hardware timer (TIMG0's second timer, which esp-rtos does not use)
 /// whose ISR signals [`IO_TICK`] every millisecond. See
-/// `docs/adr/2026-08-25-classic-uart-io-task-executor-isolation.md`.
+/// `docs/adr/2026-08-25-classic-uart-io-task-executor-isolation.ai.md`.
 static IO_TICK: Signal<CriticalSectionRawMutex, ()> = Signal::new();
 
 /// The pacer timer, parked in a static so [`io_pacer_isr`] can clear its
@@ -243,7 +243,7 @@ unsafe impl Send for SendUart {}
 /// Priority2), NOT the thread executor the server loop and the link task run
 /// on: the 1 ms poll cadence below must hold while a ~41 ms engine tick
 /// monopolizes the thread executor, or the 128 B RX FIFO (~1.4 ms at 921600)
-/// overflows (`docs/debt/shared-uart-io-task-starvation.md`). Two
+/// overflows (`docs/debt/shared-uart-io-task-starvation.ai.md`). Two
 /// consequences to preserve: the future must stay `Send` (it is spawned
 /// through a `SendSpawner`), and everything it shares with the rest of the
 /// firmware must remain statics safe from interrupt context — the byte pipes

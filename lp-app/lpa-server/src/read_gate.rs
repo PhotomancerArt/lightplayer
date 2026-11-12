@@ -2,7 +2,7 @@
 //!
 //! A read on a device runs through infallible allocations, and an allocation
 //! that fails there aborts and **resets** the board
-//! (`docs/defects/2026-08-26-project-read-assembly-oom-resets-classic.md`).
+//! (`docs/defects/2026-08-26-project-read-assembly-oom-resets-classic.ai.md`).
 //! The gate refuses a read the heap cannot afford with a structured terminal
 //! error instead (ADR `2026-08-28-project-reads-bounded-streamed-refusable`).
 //!
@@ -28,7 +28,7 @@
 //! largest block falls to ~19.5 KB (the second heap region, which the
 //! Bluetooth controller shares) while ~90 KB is still free — and every read,
 //! down to the device card's 2 KB one, was refused
-//! (`docs/defects/2026-09-27-fragmented-heap-refuses-every-read.md`).
+//! (`docs/defects/2026-09-27-fragmented-heap-refuses-every-read.ai.md`).
 //!
 //! [`PROJECT_READ_MIN_HEADROOM_BYTES`]: crate::PROJECT_READ_MIN_HEADROOM_BYTES
 

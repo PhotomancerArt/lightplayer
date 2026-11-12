@@ -3,7 +3,7 @@
 // `xtensa-esp32-elf-as` / `xtensa-esp32s3-elf-as` + `-objdump` output for
 // one-instruction `.S` files (see `lp-xt/fixtures/fp/README.md`). Tool *output*
 // is fact; no binutils, GCC, or QEMU source was read or adapted. See
-//   docs/adr/2026-07-29-license-provenance-discipline.md
+//   docs/adr/2026-07-29-license-provenance-discipline.ai.md
 //
 //! Special- and user-register access over the **whole LX6/LX7 firmware SR/UR
 //! space**.

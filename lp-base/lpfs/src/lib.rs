@@ -13,7 +13,7 @@
 //! `true` — the tree store) and a **deflated chunk write**
 //! (`write_deflated_chunk`, whose default inflates and writes plain bytes):
 //! the two halves of a wire push
-//! (`docs/adr/2026-10-10-fs-push-boundary-and-deflated-writes.md`); and an
+//! (`docs/adr/2026-10-10-fs-push-boundary-and-deflated-writes.ai.md`); and an
 //! **idle tick** (`idle_tick`: the server says how each tick went, and a
 //! filesystem with cleanup to do — the tree store — does a piece of it when
 //! [`IdlePacer`] says the tick has time; the default does nothing). A

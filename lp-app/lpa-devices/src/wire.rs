@@ -267,7 +267,7 @@ impl LoadedProjectFacts {
 /// not-hello frame is **live-peer evidence, never a verdict** — a running
 /// server heartbeats every 5 s, so a mid-stream attach legitimately sees
 /// frames before any hello answer
-/// (`docs/defects/2026-08-21-hello-gate-assumes-fresh-boot.md`).
+/// (`docs/defects/2026-08-21-hello-gate-assumes-fresh-boot.ai.md`).
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum ServerFrameBody {
     Hello(HelloFacts),

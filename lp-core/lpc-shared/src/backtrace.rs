@@ -119,7 +119,7 @@ fn capture_frames_arch(_buf: &mut [u32]) -> usize {
 //
 // The ABI facts this rests on, from the Xtensa ISA Reference Manual's Windowed
 // Register Option and the ESP32-S3 TRM (no GDB/binutils/GCC/QEMU source was
-// read or adapted — see `docs/adr/2026-07-29-license-provenance-discipline.md`):
+// read or adapted — see `docs/adr/2026-07-29-license-provenance-discipline.ai.md`):
 //
 //   * `CALLn` writes the return address into the caller's `a(4n)` as *30 bits*
 //     — `a0[31:30]` carries the call increment `n`, not address bits. The full

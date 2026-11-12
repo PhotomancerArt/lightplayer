@@ -1,5 +1,5 @@
 //! Emulator seams on the S3 (S3 radio M5; ADR
-//! `docs/adr/2026-10-05-emulator-seams.md`, the Xtensa amendment).
+//! `docs/adr/2026-10-05-emulator-seams.ai.md`, the Xtensa amendment).
 //!
 //! Two tables, one per image kind, as on the C6:
 //!

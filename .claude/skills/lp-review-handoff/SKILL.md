@@ -5,7 +5,7 @@ description: Hand work to Yona at a review gate — merge main (final gates), st
 
 # LightPlayer review handoff
 
-Execute the handoff checklist from `docs/process/review-gates.md` (read it if
+Execute the handoff checklist from `docs/process/review-gates.ai.md` (read it if
 anything here is ambiguous — it is the source of truth). This skill is the
 Claude-specific mechanics.
 

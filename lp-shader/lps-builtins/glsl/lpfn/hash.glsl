@@ -7,7 +7,7 @@
 //
 // Algorithm credit: noiz library (github.com/ElliottjPierce/noiz), MIT license.
 // The bit-mixing pattern is inspired by https://nullprogram.com/blog/2018/07/31/.
-// See docs/reports/2026-03-31-lpfx-license-audit.md.
+// See docs/reports/2026-03-31-lpfx-license-audit.ai.md.
 
 // Core hash: rotate/xor/multiply mixing with a large prime (249222277).
 uint lpfn_hash_mix(uint x, uint seed) {

@@ -19,7 +19,7 @@
 //! slots), and the advertiser drops whatever it was waiting on and
 //! advertises again. Before 2026-09-25 the restart left the dead connections
 //! open in the host and the board silent until a USB reboot
-//! (docs/defects/2026-09-25-a-knob-jump-over-bluetooth-kills-the-c6-ble-host.md).
+//! (docs/defects/2026-09-25-a-knob-jump-over-bluetooth-kills-the-c6-ble-host.ai.md).
 
 use core::sync::atomic::{AtomicBool, Ordering};
 

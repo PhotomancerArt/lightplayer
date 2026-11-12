@@ -4,7 +4,7 @@
 //!
 //! On a desk XIAO ESP32-C6, before PR #795's gate, ~4 of ~1,400 packed frames
 //! arrived a few bytes short; with the gate, 0 of 1,327
-//! (`docs/defects/2026-09-24-the-real-c6-link-loses-bytes-inside-a-packed-frame.md`).
+//! (`docs/defects/2026-09-24-the-real-c6-link-loses-bytes-inside-a-packed-frame.ai.md`).
 //! The link model (`lp_emu_esp_common::ip::usb_sj`) never lost a byte with or
 //! without the gate: after boot the C6 has one writer on the IN endpoint, and
 //! the model raises `serial_in_empty` and returns `serial_in_ep_data_free` at

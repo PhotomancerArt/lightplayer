@@ -1,5 +1,5 @@
 //! Panel writer store: lazy, unauthored runtime writers per
-//! `(scope, channel)` (panel.md P1–P4).
+//! `(scope, channel)` (panel.ai.md P1–P4).
 //!
 //! Panel controls are stateful runtime data sources, never authored
 //! bindings: a writer materializes only when a control is first touched
@@ -24,7 +24,7 @@ use crate::node::ScopeRef;
 /// One engaged panel writer.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PanelWriter {
-    /// The held value (latched until cleared, panel.md P2).
+    /// The held value (latched until cleared, panel.ai.md P2).
     pub value: LpValue,
     /// Engine revision of the most recent write (display/coalescing aid).
     pub written_at: Revision,
@@ -34,7 +34,7 @@ pub struct PanelWriter {
     /// Q2). Two writes between the same pair of ticks share a revision but
     /// never a `write`.
     pub write: u64,
-    /// Momentary liveness deadline (panel.md P14), in engine total-ms:
+    /// Momentary liveness deadline (panel.ai.md P14), in engine total-ms:
     /// gesture channels write while active and DESPAWN past this instant —
     /// the despawn IS the fallback mechanism. `None` = latching writer.
     /// Renewal is simply another write. Momentary writers never persist.

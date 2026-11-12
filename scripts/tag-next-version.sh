@@ -10,7 +10,7 @@ set -euo pipefail
 # to `git pull` and tag HEAD, so when two PRs merged close together the first
 # run tagged the SECOND merge commit, the first stayed untagged, and its
 # workflow_run deploy failed `print-app-version.sh --require-tag`
-# (docs/defects/2026-09-25-tag-next-version-tagged-the-tip-not-its-commit.md).
+# (docs/defects/2026-09-25-tag-next-version-tagged-the-tip-not-its-commit.ai.md).
 #
 # Idempotent and race-safe:
 # - a commit that already carries a version tag on origin is left alone

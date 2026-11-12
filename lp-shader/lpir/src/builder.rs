@@ -434,7 +434,7 @@ impl FunctionBuilder {
         // and the arity actually returned here — have no other cross-check, and a
         // disagreement is silent: a declared-but-unwritten result lands in a
         // register nobody reads. See
-        // `docs/defects/2026-08-01-xt-pipeline-rigs-declare-param-types-as-return-types.md`.
+        // `docs/defects/2026-08-01-xt-pipeline-rigs-declare-param-types-as-return-types.ai.md`.
         // (sret functions carry empty `return_types` and return no values, so
         // they satisfy this as-is.)
         debug_assert_eq!(

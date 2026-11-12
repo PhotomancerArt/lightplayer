@@ -233,7 +233,7 @@ impl PowerButtonNode {
     /// attempt walks every button endpoint the board has and formats an error,
     /// which is too much to do sixty times a second. The failure is returned
     /// as an error once per distinct message (the same ruling as
-    /// `docs/defects/2026-07-28-tick-error-restated-every-frame.md`): a
+    /// `docs/defects/2026-07-28-tick-error-restated-every-frame.ai.md`): a
     /// retry that fails the same way is silent.
     fn ensure_input(
         &mut self,

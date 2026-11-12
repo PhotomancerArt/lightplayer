@@ -51,7 +51,7 @@
 //! when one names the project it is watching. Push, not poll: the driver's
 //! ledger stays the diagnostic notebook it was built as, and a face that
 //! would otherwise read "Private" until the next reload flips on its own
-//! (`docs/debt/relationship-face-stale-after-publish.md`).
+//! (`docs/debt/relationship-face-stale-after-publish.ai.md`).
 
 use dioxus::prelude::*;
 use lpc_cloud_api::request::{AddMember, GetProject, RemoveMember, SetAccess};
@@ -241,7 +241,7 @@ pub fn use_project_roster(uid: Option<PrefixedUid>) -> ProjectRoster {
     // The effect above asks once per project route, so a project this tab
     // publishes AFTER that ask kept the "no door here" answer — and the
     // relationship face read "Private" — until a reload
-    // (`docs/debt/relationship-face-stale-after-publish.md`). The fix parks
+    // (`docs/debt/relationship-face-stale-after-publish.ai.md`). The fix parks
     // on the driver's conclusions rather than polling its ledger: the
     // notice board wakes this task only when a trip put something in the
     // cloud, and only a notice for the project we are watching costs a

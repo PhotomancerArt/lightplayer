@@ -8,7 +8,7 @@
 // trilinear interpolation with quintic weights, normalized to [0, 1].
 // tileLength == 0 falls back to (non-tiling) lpfn_gnoise(vec3) remapped to
 // [0, 1]. Standard tilable lattice gradient noise (see
-// docs/reports/2026-03-31-lpfx-license-audit.md).
+// docs/reports/2026-03-31-lpfx-license-audit.ai.md).
 //
 // NOTE: built on the chaotic sin-hash lpfn_srandom3_vec — conformance vs the
 // Q32 device implementation is statistical, not pointwise (see

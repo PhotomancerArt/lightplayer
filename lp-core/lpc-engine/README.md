@@ -18,7 +18,7 @@ tells the node through `entry_loaded` / `entry_unloaded` /
 `entry_load_failed` / `residency_refused`. The registry owns which entries
 are resident; the tick owner (`lpa-server` `Project::tick`) calls this step,
 because `tick` itself has no filesystem. See
-`docs/adr/2026-09-25-parent-owned-child-residency.md`.
+`docs/adr/2026-09-25-parent-owned-child-residency.ai.md`.
 
 **Bindings and resolution:** bindings are node-instance data stored on
 `node::NodeEntry` and indexed by `node::NodeTree`. Bus names remain useful
@@ -56,11 +56,11 @@ that mention `lp_value` / `LpType` vs `LpsValueF32` / `LpsType`).
 ## The frame plan
 
 Resolution persists across frames until a structural edit
-(`docs/adr/2026-07-31-resolver-persistent-resolution.md`). The frame plan
+(`docs/adr/2026-07-31-resolver-persistent-resolution.ai.md`). The frame plan
 carries the same idea one step further: graph work a node (or the engine)
 re-derived every frame — binding topology, parsed paths, spans, fragments,
 uniform slots — is built **once per edit** and replayed every frame after
-(`docs/adr/2026-10-24-frame-plan-once-per-edit.md`).
+(`docs/adr/2026-10-24-frame-plan-once-per-edit.ai.md`).
 
 **The contract:** any engine mutation that can change what a plan holds must
 move a key the plan reads. Keys are the resolver's structure epoch plus a few
@@ -227,7 +227,7 @@ across all three modes.
 
 Do not read `node-shader` as a step toward making the GLSL JIT compiler
 itself opt-in on `lpc-engine`/`lpa-server` — see the hard rule in
-`AGENTS.md` ("Make the compiler an opt-in feature ... STOP. You are about to
+`AGENTS.ai.md` ("Make the compiler an opt-in feature ... STOP. You are about to
 break the product."). Disabling `node-shader` removes the *Shader* and
 *ComputeShader* node runtimes only.
 
@@ -266,9 +266,9 @@ as an error-toned "Not on this device", with the node's pane body replaced
 by a hazard-striped "not supported on this device" surface. Only kinds that CAN be gated report it —
 the project root is a placeholder too, and `LpFeature::for_node_kind` is the
 line. See
-[`docs/adr/2026-08-01-capability-reporting-on-hello.md`](../../docs/adr/2026-08-01-capability-reporting-on-hello.md)
+[`docs/adr/2026-08-01-capability-reporting-on-hello.ai.md`](../../docs/adr/2026-08-01-capability-reporting-on-hello.ai.md)
 and the retired
-[`docs/debt/firmware-capability-reporting.md`](../../docs/debt/firmware-capability-reporting.md).
+[`docs/debt/firmware-capability-reporting.ai.md`](../../docs/debt/firmware-capability-reporting.ai.md).
 
 **The trap** — the compiler will not catch this: any crate depending on
 `lpc-engine` (or `lpa-server`, which forwards these same eight gates — see

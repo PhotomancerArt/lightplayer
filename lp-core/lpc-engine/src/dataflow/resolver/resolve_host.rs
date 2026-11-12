@@ -83,7 +83,7 @@ pub trait ResolveHost {
     }
 
     /// The winning provider set for a bus read performed from `scope`:
-    /// writer-shadowing (modules.md R5) resolves outward to the nearest
+    /// writer-shadowing (modules.ai.md R5) resolves outward to the nearest
     /// enclosing scope with at least one provider — entirely host-side, so
     /// the resolver itself stays scope-dumb. `scope: None` (scopeless
     /// hosts) answers with the flat provider set.

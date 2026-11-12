@@ -21,7 +21,7 @@
 //!    a running slot, and on a revisit it is there on the first render.
 //!    Every quadrant has a capture path, including the shader-only GPU
 //!    tier (worker-side texture readback; see
-//!    `docs/adr/2026-08-14-poster-first-gallery-previews.md`). Sourceless
+//!    `docs/adr/2026-08-14-poster-first-gallery-previews.ai.md`). Sourceless
 //!    (and hidden) only on a card that genuinely has none yet — including
 //!    every story. The same `<img>` is M6's save-time snapshot seam.
 //! 4. **Gradient base** — the deterministic identity gradient with the

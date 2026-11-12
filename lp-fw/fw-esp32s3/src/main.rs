@@ -249,7 +249,7 @@ const HEAP_SIZE: usize = 168 * 1024 - PSRAM_INIT_IRAM - HOT_IRAM_BYTES - PC_SAMP
 /// 104 KB smaller than a radio-free image's, so the main stack keeps its share
 /// of `dram_seg` (about 52 KB) with both radios in the image. Where the bytes
 /// went — the radio blobs' 48 KB region, the controllers' IRAM, the BLE
-/// stack's and the network's statics — is docs/adr/2026-10-21-s3-radio-memory.md.
+/// stack's and the network's statics — is docs/adr/2026-10-21-s3-radio-memory.ai.md.
 #[cfg(s3_espnow)]
 const HEAP_SIZE: usize = 136 * 1024 - PSRAM_INIT_IRAM - HOT_IRAM_BYTES - PC_SAMPLER_BSS - CORE1_BSS;
 /// The radio probe's arena: 80 KB smaller, because the esp-radio blobs' IRAM
@@ -280,7 +280,7 @@ const PSRAM_INIT_IRAM: usize = 0;
 /// grew by 43,296 B on the first hot set (2026-10-24). The figure is that,
 /// rounded up; `just s3-hot-iram-check` fails a build whose hot set outgrows
 /// it, and the stack's own figure moves if it ever does. See
-/// `hot_iram/README.md` and docs/adr/2026-10-24-s3-hot-code-in-iram.md.
+/// `hot_iram/README.md` and docs/adr/2026-10-24-s3-hot-code-in-iram.ai.md.
 const HOT_IRAM_BYTES: usize = 43 * 1024;
 
 /// What the `pc-sampler` diagnostic takes of `dram_seg`'s `.bss` (core 1's
@@ -508,7 +508,7 @@ fn esp32_memory_stats() -> Option<(u32, u32)> {
 /// for a single-use 32-byte nonce when it does not (a nonce needs
 /// uniqueness, not secrecy). Without it every login is refused ("this server
 /// has no entropy source"), so a locked board could not be unlocked
-/// (docs/defects/2026-10-21-a-locked-s3-refuses-every-login.md).
+/// (docs/defects/2026-10-21-a-locked-s3-refuses-every-login.ai.md).
 #[cfg(not(fw_harness))]
 fn fill_random(buf: &mut [u8]) {
     esp_hal::rng::Rng::new().read(buf);

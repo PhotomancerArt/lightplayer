@@ -16,7 +16,7 @@
 //! *through* — as opposed to what it resolves *to* this frame — must call
 //! [`Resolver::invalidate_structure`].** Getting this wrong does not fail
 //! loudly; it serves a stale answer. The known sites are enumerated in
-//! `docs/adr/2026-07-31-resolver-persistent-resolution.md`.
+//! `docs/adr/2026-07-31-resolver-persistent-resolution.ai.md`.
 //!
 //! Frame-scoped and structure-scoped invalidation are deliberately separate
 //! names rather than one `clear()`, so that persisting resolution across

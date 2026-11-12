@@ -5,7 +5,7 @@
 //! decisions, and decisions get tests. The renderer lays out [`PushOffer`]'s
 //! cards and dispatches the op it hands back.
 //!
-//! The rules (plan.md's card ruling, M3's §2):
+//! The rules (plan.ai.md's card ruling, M3's §2):
 //!
 //! - **ONE inline picker, three sources, no dialog flow.** An example (the
 //!   gallery's, installed as a library project), a project the library

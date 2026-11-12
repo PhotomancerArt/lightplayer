@@ -3,10 +3,10 @@
 //! History: until 2026-09-06 the crossfade created and freed two
 //! count-sized RGBA16 sample-outs EVERY frame — 16 B/lamp of churn through
 //! the classic's infallible allocator (the shape of
-//! `docs/defects/2026-08-29-flash-write-wedges-under-zook-playback.md`), and
+//! `docs/defects/2026-08-29-flash-write-wedges-under-zook-playback.ai.md`), and
 //! on the host a leak outright, because the wasmtime backend's bump
 //! allocator never frees. Bounded sample batches
-//! (`docs/adr/2026-09-06-direct-sampling-bounded-batches.md`) cut that to
+//! (`docs/adr/2026-09-06-direct-sampling-bounded-batches.ai.md`) cut that to
 //! one window-sized sample-out per transition. Since the one-entry switch
 //! (multi-pattern plan P4) only one entry is ever loaded: a switch captures
 //! the frame it showed, unloads the old entry, loads the new one, holds the
@@ -26,7 +26,7 @@
 //! Sample-outs are counted, not weighed: the host graphics backend is
 //! wasmtime and its sample-outs live in wasm linear memory, which the
 //! tracking allocator below cannot see
-//! (`docs/reports/2026-09-02-per-lamp-memory-table.md`, "Instruments"). The
+//! (`docs/reports/2026-09-02-per-lamp-memory-table.ai.md`, "Instruments"). The
 //! held frame and the scratch are host `Vec`s, so the tracking allocator does
 //! see those.
 //!
@@ -47,7 +47,7 @@
 //! timeout queue right *after* spawning the test thread, and whatever
 //! helper threads the graphics backend runs — so a loaded runner moved a
 //! tick's figures by bytes that were not the engine's
-//! (`docs/debt/process-wide-heap-counters-in-tests.md`).
+//! (`docs/debt/process-wide-heap-counters-in-tests.ai.md`).
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
@@ -538,7 +538,7 @@ fn playlist_crossfade_memory() {
         let (lamps, first, second) = measure(scale);
         // The fade blends through a window-sized host scratch, never a
         // lamp-sized one: sampling streams through a bounded batch
-        // (`docs/adr/2026-09-06-direct-sampling-bounded-batches.md`).
+        // (`docs/adr/2026-09-06-direct-sampling-bounded-batches.ai.md`).
         let window = lamps.min(lp_gfx_lpvm::CPU_SAMPLE_BATCH_POINTS) as usize;
         assert!(
             window < lamps as usize,

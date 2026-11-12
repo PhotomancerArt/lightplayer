@@ -146,7 +146,7 @@ fn normalize_const_in_one_line(line: &str) -> String {
 // LightPlayer’s public surface is still `uniform sampler2D` (classic GLSL), so we rewrite the
 // declarations `lps_shared::scan_uniform_sampler2d_decls` recognizes — the recognizer is shared
 // with the GPU tier (`lp-gfx-wgpu::texture_lowering`) so the two can never disagree about *which*
-// declarations are rewritten (docs/defects/2026-08-05-generated-palette-header-dies-on-naga.md).
+// declarations are rewritten (docs/defects/2026-08-05-generated-palette-header-dies-on-naga.ai.md).
 // Non-declaration `sampler2D` sites (function parameters, arrays, multi-declarators) pass through
 // untouched and get Naga's own diagnostic; the GPU tier makes them hard errors instead.
 //

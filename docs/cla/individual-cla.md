@@ -107,7 +107,7 @@ code You are including from a third-party project), You will identify it as
 such when Submitting, including the complete details of its source and of any
 license or other restriction of which You are aware — consistent with the
 Project's license-provenance rules in
-`docs/adr/2026-07-29-license-provenance-discipline.md`.
+`docs/adr/2026-07-29-license-provenance-discipline.ai.md`.
 
 ## 7. No Warranty; No Support Obligation
 

@@ -1,5 +1,5 @@
 // Updating a tab-hosted emulated board keeps its files
-// (docs/defects/2026-10-02-updating-a-tab-hosted-board-erases-its-files.md):
+// (docs/defects/2026-10-02-updating-a-tab-hosted-board-erases-its-files.ai.md):
 // the page's real `TabEmulatorPort` and the bridge's real package write, over
 // a hub answering the worker's flash verbs as `emu_flash_*` does —
 // `flash-erase` is the whole chip, `flash-write` erases only its own sectors.

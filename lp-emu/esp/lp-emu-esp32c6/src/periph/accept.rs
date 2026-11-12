@@ -13,7 +13,7 @@
 //! been *observed* to need and read 0 everywhere else — which is how SPI1's
 //! `user` came to read 0 with `usr_command` clear and every flash read moved
 //! no bytes while looking exactly like a blank chip
-//! (`docs/defects/2026-09-07-accept-blocks-carry-only-the-reset-values-a-boot-needed.md`).
+//! (`docs/defects/2026-09-07-accept-blocks-carry-only-the-reset-values-a-boot-needed.ai.md`).
 //! A `with_reset` in this file is now a **deviation from the PAC**, and
 //! `the_only_deviations_from_the_pacs_resets_are_the_listed_ones` below is
 //! the list.
@@ -42,7 +42,7 @@
 //! no image or transcript exercises either block across a reboot.
 //!
 //! Two blocks in this file are `LP_`-shaped and deliberately **stay
-//! HP-restored** (plan `notes.md` D4, conservative on purpose — fewer ways
+//! HP-restored** (plan `notes.ai.md` D4, conservative on purpose — fewer ways
 //! to move a clean board's transcript):
 //!
 //! - **`LP_CLKRST`** — `reset_cause` is an *input to the run*, re-poked by
@@ -218,13 +218,13 @@ pub fn modem_lpcon() -> RegFile {
 // `{block, register}` store the drivers and the mask ROM both address, and
 // carries the two read overrides (`busy` 0, `cal_done` 1) unchanged.
 //
-// `docs/defects/2026-09-08-regi2c-is-one-data-register-not-a-register-file.md`
+// `docs/defects/2026-09-08-regi2c-is-one-data-register-not-a-register-file.ai.md`
 
 // `LP_I2C_ANA_MST` was an accept block here from P5 until 2026-09-22, with
 // `i2c0_ctrl` bit 25 (`I2C0_BUSY`) pinned 0 and a note calling it the fourth
 // spin site — which is exactly the reason it could not be one: a pinned 0
 // cannot reproduce the hang the bench found (director note 6,
-// `docs/defects/2026-09-06-c6-analog-master-wedges-the-bootloader.md`).
+// `docs/defects/2026-09-06-c6-analog-master-wedges-the-bootloader.ai.md`).
 // `super::lp_i2c_ana_mst` is the block with the gate on it: `LP_PERI`'s
 // `clk_en`/`reset_en` bit 29 ride in on a `LpPeriLines` handle, a
 // transaction started unclocked latches busy, and only a reset-line pulse
@@ -588,7 +588,7 @@ mod tests {
     /// Where an accept block's power-on state differs from what the PAC
     /// states, and why. Anything not on this list is a bug in the seeding
     /// or an undocumented hand exception — the whole point of the sweep
-    /// (`docs/defects/2026-09-07-accept-blocks-carry-only-the-reset-values-a-boot-needed.md`).
+    /// (`docs/defects/2026-09-07-accept-blocks-carry-only-the-reset-values-a-boot-needed.ai.md`).
     ///
     /// `(block, offset, what this machine reads instead, why)`.
     const DEVIATIONS: &[(&str, u32, u32, &str)] = &[(

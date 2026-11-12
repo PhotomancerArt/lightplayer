@@ -6,10 +6,10 @@
 //! its stub, over a pty into the emulated mask ROM's download console.
 //!
 //! The fielded board's firmware is pinned ([`FIELDED`]), never this tree's:
-//! ADR `2026-10-02-c6-repartition-and-layout-migration.md` Decision 11 lets
+//! ADR `2026-10-02-c6-repartition-and-layout-migration.ai.md` Decision 11 lets
 //! the image grow past `0x300000`, and once it did, "this tree's image on the
 //! old table" was a board that cannot exist
-//! (`docs/defects/2026-10-09-the-layout-migration-fixture-outgrew-the-old-layout.md`).
+//! (`docs/defects/2026-10-09-the-layout-migration-fixture-outgrew-the-old-layout.ai.md`).
 //! What `migrate` writes is this tree's image, so the migration under test
 //! is today's, onto a board that could really be in a house.
 //!

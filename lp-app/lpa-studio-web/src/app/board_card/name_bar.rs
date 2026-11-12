@@ -1,7 +1,7 @@
 //! [`NameBar`]: the board's name (one line, cut, its whole on hover), its
 //! place under it when core gives one (the bar keeps its 50 px either way),
 //! and the one primary as a flush section at the bar's end — icon before
-//! word, the spectrum ring on hover (`docs/style/ui.md` "The board card").
+//! word, the spectrum ring on hover (`docs/style/ui.ai.md` "The board card").
 //!
 //! The bar carries `data-name-bar`, the walks' hook for the primary (an
 //! empty board's Add a project is pressed there).

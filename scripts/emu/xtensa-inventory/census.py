@@ -38,7 +38,7 @@ configuration to lose in the first place. Wrapping it with `objcopy -I binary
 no "whole, unlifted" original to prefer it over, so that path is unchanged
 from before and is not an instance of this bug.
 
-Licence note (AGENTS.md): binutils is used here as a *tool whose output is
+Licence note (AGENTS.ai.md): binutils is used here as a *tool whose output is
 fact*. No binutils source, table, or logic is read or adapted.
 
 Usage

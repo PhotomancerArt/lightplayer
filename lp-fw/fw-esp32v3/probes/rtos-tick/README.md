@@ -1,6 +1,6 @@
 # RTOS tick probe — what the scheduler's PRO-core interrupts cost
 
-The measurement behind `docs/debt/classic-iram-handlers-reach-flash.md`'s
+The measurement behind `docs/debt/classic-iram-handlers-reach-flash.ai.md`'s
 esp-rtos rows, kept as patches rather than as code because the answer was
 "not worth carrying a fork": esp-rtos's `timer_tick_handler` and
 `cross_core_yield_handler` read `CCOUNT` on entry and exit, the firmware

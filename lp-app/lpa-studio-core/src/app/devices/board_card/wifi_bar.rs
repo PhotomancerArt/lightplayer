@@ -1,4 +1,4 @@
-//! The Wi‑Fi row: the networks the board joins (`docs/ux/anatomy/board-card.md`,
+//! The Wi‑Fi row: the networks the board joins (`docs/ux/anatomy/board-card.ai.md`,
 //! "Wi‑Fi"). Its kind is the link's name, "Wi‑Fi"; its name is the
 //! network the board is on, or how its Wi‑Fi stands. Read off the board's
 //! own network status — as it answered on this link, else as it last did

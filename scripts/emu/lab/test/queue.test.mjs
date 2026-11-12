@@ -8,7 +8,7 @@
 // press) says so, so a wait is an equality, and "not yet" one millisecond
 // before it is checkable too. Nothing here measures a wall-clock gap — that
 // is what reddened main on 2026-09-25
-// (docs/defects/2026-09-25-emu-lab-cooldown-tests-measured-wall-clock.md).
+// (docs/defects/2026-09-25-emu-lab-cooldown-tests-measured-wall-clock.ai.md).
 'use strict';
 
 import { test, before, after } from 'node:test';

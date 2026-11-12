@@ -56,7 +56,7 @@ pub fn default_esp32s3_hardware_manifest() -> HwManifest {
 ///
 /// The DOM-Z-102 — the classic bring-up roadmap's desk board and its
 /// WLED-class deployment exemplar — rather than a bare devkit: the roadmap's
-/// Q5-as-amended decision (see the plan's notes.md, 2026-07-31). Data
+/// Q5-as-amended decision (see the plan's notes.ai.md, 2026-07-31). Data
 /// channels LED1-4 = GPIO 18/16/14/2, matching the board silkscreen and the
 /// display sidecar authored from a photo of the desk unit. Like the S3
 /// profile above, deliberately incomplete: only pins the board exposes are
@@ -201,7 +201,7 @@ mod tests {
     /// D5 = GPIO23/SCL). The 2026-05 calibration recorded them `not-found`
     /// only because the profile it searched listed GPIO0-21, so neither pin
     /// was ever a candidate — and a project could not put LEDs on D5.
-    /// See `docs/defects/2026-10-03-xiao-c6-d4-d5-unmapped.md`.
+    /// See `docs/defects/2026-10-03-xiao-c6-d4-d5-unmapped.ai.md`.
     #[test]
     fn default_esp32c6_manifest_resolves_d4_and_d5_to_gpio22_and_gpio23() {
         use alloc::rc::Rc;

@@ -1,6 +1,6 @@
 //! One project's trip to the service: publish it or push it, once.
 //!
-//! Runtime-neutral on purpose (AGENTS.md sans-IO): it takes a
+//! Runtime-neutral on purpose (AGENTS.ai.md sans-IO): it takes a
 //! [`CloudPort`] and a [`LocalProject`] and returns a future with no
 //! spawning and no executor-flavored sleeps, so the browser driver drives it
 //! with `spawn_local` and the tests drive it with `block_on` against the

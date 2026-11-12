@@ -38,7 +38,7 @@
 //!
 //! - [`Roster::handle`] — the one entry point.
 //! - [`replay`] — the fixture harness; every scenario is a script.
-//! - `README.md` and `docs/adr/2026-08-25-event-fold-device-model.md`.
+//! - `README.md` and `docs/adr/2026-08-25-event-fold-device-model.ai.md`.
 
 pub mod activity;
 pub mod app_version;

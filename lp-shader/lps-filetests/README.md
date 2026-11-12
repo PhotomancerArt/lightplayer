@@ -76,7 +76,7 @@ and it is a disposition question rather than a defect — see that file's commen
 > siblings. They are emitted only by the synthesised frame wrappers
 > (`lp-shader/src/synth/`), which no filetest drives, and their f32 wasm
 > lowering was wrong for months behind a green 6353/6353
-> (`docs/defects/2026-08-07-wasm-f32-unorm-scale-convention.md`). Corpus green
+> (`docs/defects/2026-08-07-wasm-f32-unorm-scale-convention.ai.md`). Corpus green
 > is not frame-path green; that seam is covered by
 > `tests/f32_render_entry_wasm.rs` instead.
 
@@ -86,7 +86,7 @@ and it is a disposition question rather than a defect — see that file's commen
 same `lpvm-native` backend, same emulator — compiled in `FloatMode::F32`, where
 every float op becomes a call to the platform soft-float library (`__addsf3`,
 `__ltsf2`, …) that the guest builtins image already links. See
-`docs/adr/2026-07-31-soft-float-via-compiler-builtins.md`.
+`docs/adr/2026-07-31-soft-float-via-compiler-builtins.ai.md`.
 
 ```bash
 scripts/filetests.sh --target rv32lpn.f32     # the device pipeline in Float mode
@@ -112,7 +112,7 @@ by one:
   undefined-behaviour domain probes whose `~= 0.0` expectation was written for
   the clamping Q32 path, plus two files naga rejects outright.
 - **`builtins/edge-precision:19`** (`rv32lpn.f32` only) — `round(2.5)`. The tie
-  direction is *target-defined* (`docs/design/float.md` §4), and the `lps-glsl`
+  direction is *target-defined* (`docs/design/float.ai.md` §4), and the `lps-glsl`
   frontend routes `round` to the ties-away-from-zero builtin where naga lowers it
   to ties-to-even. A real frontend divergence, legal under the spec.
 - **`function/overload-local-duplicate`** — genuine overloads still hit a
@@ -144,7 +144,7 @@ frontend *and* Xtensa *and* f32 together, which is why no configuration anyone
 ran before M8 could falsify it. It was `@broken` and not `@unsupported`
 deliberately: the corpus must not read green while the compiler is wrong.
 
-That bug is **fixed** (`docs/defects/2026-08-01-xtlpn-f32-loses-writes-to-value-parameters.md`,
+That bug is **fixed** (`docs/defects/2026-08-01-xtlpn-f32-loses-writes-to-value-parameters.ai.md`,
 closed), the annotations are gone, and both f32 targets are now clean.
 
 A bare `xtn` / `xtlpn` shorthand now selects **both** float modes, as `wasm`
@@ -294,7 +294,7 @@ uniform Params params;
 ```
 
 Semantics and supported `texture()` / `texelFetch` formats:
-[`docs/design/lp-shader-texture-access.md`](../../docs/design/lp-shader-texture-access.md).
+[`docs/design/lp-shader-texture-access.ai.md`](../../docs/design/lp-shader-texture-access.ai.md).
 
 ## Dispositions: `@unsupported`, `@unimplemented`, `@broken`, `@ignore`
 

@@ -2,7 +2,7 @@
 //! beside the row's name. Wi‑Fi, Bluetooth and lightplayer.app are the three
 //! a board can turn off, and all three draw it alike — as macOS draws the
 //! switch at the top of its Wi‑Fi and Bluetooth menus
-//! (`docs/ux/anatomy/board-card.md`, "Hushing a row").
+//! (`docs/ux/anatomy/board-card.ai.md`, "Hushing a row").
 //!
 //! The switch is the board's own setting, so the choice holds across
 //! browsers and is true. Its press is an offer the tree publishes

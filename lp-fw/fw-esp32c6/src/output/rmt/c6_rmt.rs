@@ -66,7 +66,7 @@
 //! properties, and esp-hal 1.1.1's `rmt::chip_specific` module for
 //! `not(any(esp32, esp32s2))` (MIT/Apache-2.0) — which is the *same* code path
 //! the S3 uses, so the start/stop sequence transfers unchanged. No GPL source
-//! was consulted; see `AGENTS.md`.
+//! was consulted; see `AGENTS.ai.md`.
 
 use esp_hal::peripherals::RMT;
 use lp_ws281x::{BlockPlan, InterruptFlags, RamWindow, RmtHw, SharedBlockPlan};
@@ -104,7 +104,7 @@ pub static TX_PLAN: SharedBlockPlan<PLAN_SLOTS> = SharedBlockPlan::new();
 ///   as the legacy driver always ran): a 192-word window, 96-word halves,
 ///   ~120 µs refill deadlines. Measured stakes on this chip: 24-word halves
 ///   truncate 28 % of frames under a WiFi scan, 48-word halves 0.49 %
-///   (`docs/debt/c6-scan-truncation-accepted.md`) — the wider the window,
+///   (`docs/debt/c6-scan-truncation-accepted.ai.md`) — the wider the window,
 ///   the further from the cliff a lone strip sits.
 /// * **2 declared channels** — one block each (the shipped XIAO C6 default,
 ///   the RMT-priority plan's G1 decision): 24-word halves, ~30 µs deadlines,

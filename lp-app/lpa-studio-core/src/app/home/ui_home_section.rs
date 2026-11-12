@@ -3,7 +3,7 @@
 //! The page is one column of sections; which of them a tab shows is
 //! [`UiHomeTab::shows`](super::ui_home_tab::UiHomeTab::shows), and what each
 //! holds is [`UiHomeSections`](super::ui_home_sections::UiHomeSections). The
-//! words here are the page's own (`docs/style/language.md`, "Boards and the
+//! words here are the page's own (`docs/style/language.ai.md`, "Boards and the
 //! home page"), so the web draws no heading core did not name.
 
 /// One section of the home page.

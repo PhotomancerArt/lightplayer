@@ -5,7 +5,7 @@
 //!
 //! `fract(sin(dot(p, K)) * 43758.5453123)`. Credit: David Hoskins (MIT) via
 //! LYGIA generative/random.glsl
-//! (see docs/reports/2026-03-31-lpfx-license-audit.md).
+//! (see docs/reports/2026-03-31-lpfx-license-audit.ai.md).
 //!
 //! Note the multiplier differs from the 1D/2D variants (`...5453123` rather
 //! than `...5453`); that is the canonical constant, not a typo, and changing it

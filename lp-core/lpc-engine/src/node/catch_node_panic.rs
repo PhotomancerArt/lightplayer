@@ -16,7 +16,7 @@
 //! died, and it denies entry to a path that repeated crashes have gated red.
 //! Frame stack, blame, yellow → red escalation, hierarchical parent gating and
 //! safe mode all still work exactly as
-//! `docs/adr/2026-07-04-crash-recovery-model.md` describes — the only change is
+//! `docs/adr/2026-07-04-crash-recovery-model.ai.md` describes — the only change is
 //! that a crash costs a reboot to record instead of being caught in place.
 
 use super::NodeError;

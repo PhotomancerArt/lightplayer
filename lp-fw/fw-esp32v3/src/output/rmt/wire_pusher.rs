@@ -32,7 +32,7 @@
 //! `release_wire_slot`, `Ws281xDriver::start_frame`, `ChannelState::stats`
 //! and the `v3_rmt` pad ops run from flash (~1.3 KB, measured 2026-09-05
 //! with `scripts/iram-flash-literals.py`; see
-//! docs/debt/classic-iram-handlers-reach-flash.md). That is accepted, not
+//! docs/debt/classic-iram-handlers-reach-flash.ai.md). That is accepted, not
 //! an oversight: the PRO core's flash traffic can stall a core-1 flash
 //! fetch, but a *stalled pusher* is only a delayed wave (thread context has
 //! no deadline), and the APP core's private cache keeps that small working
@@ -90,7 +90,7 @@ pub fn ring_doorbell() {
     // ⚠️ swi1 is claimed HERE, via steal(), as the wire pusher's doorbell —
     // invisible to `SoftwareInterruptControl` ownership. Anything else
     // wanting a SWI must not touch 1 (the io executor learned this the hard
-    // way; see docs/adr/2026-08-25-classic-uart-io-task-executor-isolation.md).
+    // way; see docs/adr/2026-08-25-classic-uart-io-task-executor-isolation.ai.md).
     unsafe { SoftwareInterrupt::<1>::steal() }.raise();
 }
 

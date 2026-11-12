@@ -293,7 +293,7 @@ fn profile_dir_name() -> Option<String> {
 /// Emit `LP_FLASH_APP_BYTES` from partitions.csv's `app` row, so the embedded
 /// firmware manifest's limits come from the same file espflash flashes with —
 /// never a hand-transcribed integer (cf.
-/// docs/debt/firmware-partition-constants-transcribed.md).
+/// docs/debt/firmware-partition-constants-transcribed.ai.md).
 fn emit_partition_facts() {
     let path = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"))
         .join("partitions.csv");

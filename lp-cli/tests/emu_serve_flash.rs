@@ -83,7 +83,7 @@ fn a_rom_up_board_boots_the_mask_rom_out_of_its_own_chip() {
     // The client connects after power-on, and the door does not replay what
     // the ROM printed before anyone had the port open — at most the IN
     // FIFO's leftovers are waiting, which can be a torn line
-    // (`docs/defects/2026-09-23-emulated-usb-port-drains-with-no-client-attached.md`).
+    // (`docs/defects/2026-09-23-emulated-usb-port-drains-with-no-client-attached.ai.md`).
     // An erased C6 resets and re-runs its boot on a loop, so what a late
     // monitor reliably sees is the NEXT pass whole: wait for a boot-mode line
     // with an `invalid header` after it.

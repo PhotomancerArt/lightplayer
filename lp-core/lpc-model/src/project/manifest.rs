@@ -1,6 +1,6 @@
 //! `project.json` container manifest: the project's workspace identity.
 //!
-//! The container manifest is **not a node artifact** (docs/design/modules.md
+//! The container manifest is **not a node artifact** (docs/design/modules.ai.md
 //! §1/§6): it carries the workspace concerns — `format`, `uid`, `name` —
 //! while the root module node lives in `module.json`. It is deliberately NOT
 //! a `#[derive(Slotted)]` type: the container is read by a streaming
@@ -37,7 +37,7 @@ use crate::slot_codec::{JsonSyntaxSource, SyntaxEvent, SyntaxEventSource};
 ///   11 landed it, and refuses a segment a port boundary cuts. The engine
 ///   refuses a map2d of format 5 or older, or a `PathPoints` mapping,
 ///   inside a format-12 project by name. See
-///   `docs/adr/2026-10-27-mapping-model-parts-segments-patcher.md`.
+///   `docs/adr/2026-10-27-mapping-model-parts-segments-patcher.ai.md`.
 /// - `9` — the projection vocabulary FACTORED (post-G2 ruling):
 ///   `SpaceAnswer2` (`ShaderDef.space.OneD.in_2d`) and `ConsumerCell2`
 ///   (`FixtureDef.consume.Policy.from_1d`) collapsed their per-shape
@@ -61,11 +61,11 @@ use crate::slot_codec::{JsonSyntaxSource, SyntaxEvent, SyntaxEventSource};
 ///   representation). An explicit `"float_mode": "fixed"` from format 6 was
 ///   the pre-posture default spelled out — a meaningless pin — so the
 ///   upgrade drops it; `"float"` is a real pin and survives unchanged.
-///   See `docs/adr/2026-08-08-float-semantics-per-target-representation.md`.
+///   See `docs/adr/2026-08-08-float-semantics-per-target-representation.ai.md`.
 /// - `6` — project/device uids became one token: prefix plus a lowercase
 ///   Crockford base-32 body with no separator (`prj_…` → `prj…`). The
 ///   upgrader transcodes every uid it finds; see
-///   `docs/adr/2026-08-07-uid-format-single-token-base32.md`.
+///   `docs/adr/2026-08-07-uid-format-single-token-base32.ai.md`.
 /// - `5` — `bus:time` carries a **time product**, not raw seconds:
 ///   `ClockState` publishes a new `product` output on the channel (its
 ///   `seconds`/`delta_seconds` stay produced-but-unbound), `FluidDef.time`
@@ -110,7 +110,7 @@ use crate::slot_codec::{JsonSyntaxSource, SyntaxEvent, SyntaxEventSource};
 pub const PROJECT_FORMAT_VERSION: u32 = 12;
 
 /// A project's authored kind (module authoring unit, P1 —
-/// `docs/design/modules.md`): the default general project, or one of two
+/// `docs/design/modules.ai.md`): the default general project, or one of two
 /// *library* kinds that export named modules for other projects to import.
 ///
 /// Resolved from the manifest's flat `kind`/`exports` JSON keys via
@@ -170,7 +170,7 @@ pub struct ProjectManifest {
     pub kind_raw: Option<String>,
     /// Authored module export list: plain folder names under the project,
     /// each one another project imports by
-    /// (`docs/design/modules.md`). Meaningful only when [`Self::kind_raw`]
+    /// (`docs/design/modules.ai.md`). Meaningful only when [`Self::kind_raw`]
     /// is `"pattern"` or `"rig"` — [`Self::read_json`] refuses `exports`
     /// alongside any other kind, including absent.
     pub exports_raw: Option<Vec<String>>,

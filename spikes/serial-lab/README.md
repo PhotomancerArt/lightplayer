@@ -8,9 +8,9 @@ serial primitive over HTTP while the human watches the live log.
 Built 2026-08-21 during the dig2go hardware walk; it root-caused the
 hello-gate defect, discovered the CH340 reset sequence, and provisioned
 `/hardware.json` over the wire in one evening. Findings from that session:
-`docs/defects/2026-08-21-hello-gate-assumes-fresh-boot.md`,
-`docs/debt/shared-uart-io-task-starvation.md`, and the dig2go plan dir's
-notes.md.
+`docs/defects/2026-08-21-hello-gate-assumes-fresh-boot.ai.md`,
+`docs/debt/shared-uart-io-task-starvation.ai.md`, and the dig2go plan dir's
+notes.ai.md.
 
 ## Architecture
 
@@ -57,7 +57,7 @@ Scripted sequences live in `scripts/`: `starvation-bench.py` drives the
 whole io_task-starvation measurement (liveness → load → ≥4 KB inbound
 write under load → response round-trips → idle control → torn-frame
 session check) and prints a pass/fail table — the hardware-gate evidence
-for `docs/debt/shared-uart-io-task-starvation.md`.
+for `docs/debt/shared-uart-io-task-starvation.ai.md`.
 
 `capture` returns timestamped entries since command start, classified:
 `log` (text line), `frame` (`M!` JSON, parsed), `bin` (hex preview),
@@ -86,7 +86,7 @@ redeploying.
   DTR-only pulses do NOTHING. Assert **DTR+RTS together, hold ~120 ms,
   drop both together** (`sequence both_high_low`) → clean power-on reset.
   Native CLI tools (espflash) reset fine via the OS driver.
-- **The device WAS lossy under load** (`docs/debt/shared-uart-io-task-starvation.md`):
+- **The device WAS lossy under load** (`docs/debt/shared-uart-io-task-starvation.ai.md`):
   on firmware before PR #448 (2026-08-25), inbound frames >~128 B were
   silently dropped (`FifoOverflowed`) while a project played and
   outbound responses died on TX timeouts (`responses=0`) — **send

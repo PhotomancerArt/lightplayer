@@ -134,7 +134,7 @@ pub enum ServerMsgBody {
         /// resets by reason, stalls, …); absent on targets whose host link
         /// is not an lp-link (host server, ws, fw-emu). Every recovery the
         /// link makes is counted here so a lossy edge stays visible
-        /// (lp-link principle 2; `docs/adr/2026-09-27-lp-link-one-comms-layer.md`).
+        /// (lp-link principle 2; `docs/adr/2026-09-27-lp-link-one-comms-layer.ai.md`).
         #[serde(default)]
         link: Option<crate::server::LinkCounters>,
         /// Who this device is, repeated on every heartbeat.

@@ -1,4 +1,4 @@
-//! Stories for playlist meta-switching (`modules.md` E2).
+//! Stories for playlist meta-switching (`modules.ai.md` E2).
 //!
 //! A playlist is an *isolating* node: each entry gets its own anonymous
 //! sink scope (R2), so the same channel name lists separately per entry and

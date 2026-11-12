@@ -20,7 +20,7 @@ use crate::texture_handle::TextureHandle;
 /// DRAM is left, and the classic's is pinned against a silicon capture.
 ///
 /// The one reader today is the wire probe's texture previews; see
-/// `docs/adr/2026-08-05-browser-sample-readback-is-async.md`.
+/// `docs/adr/2026-08-05-browser-sample-readback-is-async.ai.md`.
 pub trait LatentReadBackSource: Send + Sync {
     /// Read `texture` back into `out`, replacing its contents with tightly
     /// packed logical texels (as [`crate::LpGraphics::read_back`] returns

@@ -73,7 +73,7 @@ impl Figures {
     /// to land. Such a figure is reproducible within one build environment
     /// and not between two: the tree's image embeds the checkout's absolute
     /// paths and the host rustc's own build
-    /// (`docs/debt/reference-images-are-not-reproducible-across-hosts.md`),
+    /// (`docs/debt/reference-images-are-not-reproducible-across-hosts.ai.md`),
     /// so a desk worktree and a CI runner can read different values off the
     /// same commit.
     ///
@@ -173,7 +173,7 @@ impl Figures {
             "\n[positional] figures depend on where the build put the code, so the record holds \
              CI's value and a desk build can legitimately read another. A desk bless leaves them \
              alone; take the new value from CI's failure (or bless under GITHUB_ACTIONS=true). \
-             docs/chip-figures.md."
+             docs/chip-figures.ai.md."
         } else {
             ""
         };
@@ -222,7 +222,7 @@ impl Figures {
             if o.positional && !in_ci() {
                 eprintln!(
                     "bless {}:{line}   [positional: NOT written on a desk — the record holds \
-                     CI's value; see docs/chip-figures.md]",
+                     CI's value; see docs/chip-figures.ai.md]",
                     self.chip
                 );
                 continue;

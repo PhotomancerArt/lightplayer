@@ -1,5 +1,5 @@
 //! The board card, built in core
-//! (`docs/adr/2026-10-08-the-board-card-and-one-home-page.md`): one board as
+//! (`docs/adr/2026-10-08-the-board-card-and-one-home-page.ai.md`): one board as
 //! a surface (its picture, and over it what matters now), a status corner,
 //! a name bar with one primary action, and eight rows — project, USB,
 //! Wi‑Fi, Bluetooth, lightplayer.app, access, firmware, hardware — each with

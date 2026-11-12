@@ -4,7 +4,7 @@
 //! there. This is the half that touches pins. It runs once the hardware
 //! manifest is loaded and before any radio init, because the one quirk today
 //! is the XIAO ESP32-C6's RF switch
-//! (docs/defects/2026-09-23-xiao-c6-rf-switch-never-powered.md).
+//! (docs/defects/2026-09-23-xiao-c6-rf-switch-never-powered.ai.md).
 
 use esp_hal::gpio::{AnyPin, Level, Output, OutputConfig};
 use lpc_hardware::{GpioHold, HwGateLevel, board_quirks_for};

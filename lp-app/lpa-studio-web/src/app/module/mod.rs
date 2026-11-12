@@ -1,7 +1,7 @@
 //! The module face, the panel, and play mode.
 //!
 //! The rendering half of the module container model
-//! (`docs/design/modules.md`, `docs/design/panel.md`). Everything here is
+//! (`docs/design/modules.ai.md`, `docs/design/panel.ai.md`). Everything here is
 //! fed by real DTOs: `ProjectController::module_face` derives the face from
 //! the engine's scoped channels, and the controls dispatch `PanelWriteOp` /
 //! `PanelClearOp` down the runtime command channel. The story fixtures

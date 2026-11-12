@@ -108,7 +108,7 @@ pub fn log_if_grown(label: &str) {
         // lands inside it — the frame is resent, the text is lost with it,
         // and a raw diagnostic line concurrent with the host link is the
         // interleaving defect itself
-        // (`docs/defects/2026-08-02-serial-line-interleaving.md`). The S3's
+        // (`docs/defects/2026-08-02-serial-line-interleaving.ai.md`). The S3's
         // probe made the same move at its own cut-over.
         log::info!(
             "[stack] {label}: high-water {used} B of {total} B ({} B headroom)",

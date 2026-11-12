@@ -46,7 +46,7 @@ The S3's is the C6's shape with only what the chip forces changed:
 ### What GNU ld on Xtensa does that lld on RV32 does not
 
 Found by the split-image spike (2026-10-20) on GNU ld's output — never read
-off its source (AGENTS.md, license rule):
+off its source (AGENTS.ai.md, license rule):
 
 1. **Stale addends.** `--emit-relocs` keeps a zero addend on relocations
    against a merged section's symbol: 18,355 of 30,236 `R_XTENSA_32` read
@@ -124,7 +124,7 @@ off its source (AGENTS.md, license rule):
    address, and espflash 3.3.0 writes an address-0 padding segment when a
    page crossing leaves a gap the RAM segments cannot fill: on silicon that
    copy faulted before the core ran
-   (`docs/defects/2026-10-14-the-c6-loader-copies-an-address-zero-padding-segment-to-address-zero.md`).
+   (`docs/defects/2026-10-14-the-c6-loader-copies-an-address-zero-padding-segment-to-address-zero.ai.md`).
    So first each such padding segment's load address becomes a run at the
    start of the core's `.bss` (`core_padding`; `_bss_start.._bss_end` from
    the pass-2 ELF). Its bytes stay where they are, so every later segment
@@ -141,7 +141,7 @@ off its source (AGENTS.md, license rule):
    appended SHA-256 — and checks the way the ROM reads it, refusing a stage
    without this tree's `LPLB` word or one that would run into the partition
    table. `bootloader.elf`, `bootloader.bin`. See
-   [`docs/adr/2026-10-17-the-c6-boots-through-our-own-bootloader.md`](../../docs/adr/2026-10-17-the-c6-boots-through-our-own-bootloader.md).
+   [`docs/adr/2026-10-17-the-c6-boots-through-our-own-bootloader.ai.md`](../../docs/adr/2026-10-17-the-c6-boots-through-our-own-bootloader.ai.md).
 9. **`app.bin`** for `0x10000`: loader, record sector 0 (seq 1, proven),
    record sector 1 erased, core at `0x18000`, engine at the first 32 KiB page
    after the core — all through `lp-bootctl` — then `0xFF` to the next 4 KiB

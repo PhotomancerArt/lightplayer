@@ -2,11 +2,11 @@
 //!
 //! **Implementation:** `libm::powf`.
 //!
-//! **Tolerance (`docs/design/float.md` §6):** `1e-6` relative with a `1e-6`
+//! **Tolerance (`docs/design/float.ai.md` §6):** `1e-6` relative with a `1e-6`
 //! absolute floor against the f64 reference.
 //!
 //! **Domain:** GLSL says `pow(x, y)` is undefined for `x < 0`, and for `x = 0`
-//! with `y <= 0` — float.md §5 Unspecified. `libm::powf` still answers (real
+//! with `y <= 0` — float.ai.md §5 Unspecified. `libm::powf` still answers (real
 //! result for integer exponents, NaN otherwise) and never traps, but nothing
 //! may depend on which. The corpus must not assert those inputs.
 
@@ -89,7 +89,7 @@ mod tests {
 
     #[test]
     fn negative_base_does_not_trap() {
-        // float.md §5: the *value* is Unspecified, so only "it returned" is
+        // float.ai.md §5: the *value* is Unspecified, so only "it returned" is
         // asserted — never what it returned.
         let _ = __lps_pow_f32(-2.0, 0.5);
         let _ = __lps_pow_f32(0.0, -1.0);
