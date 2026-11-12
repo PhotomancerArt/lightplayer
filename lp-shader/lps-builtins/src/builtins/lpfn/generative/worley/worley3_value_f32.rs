@@ -3,7 +3,7 @@
 //! Transliterated from the canonical GLSL
 //! `glsl/lpfn/generative/worley/worley3_value.glsl` (normative). Same
 //! nearest-feature search as `lpfn_worley(vec3)` (noise-rs lineage,
-//! MIT/Apache-2.0 — see docs/reports/2026-03-31-lpfx-license-audit.md), but
+//! MIT/Apache-2.0 — see docs/reports/2026-03-31-lpfx-license-audit.ai.md), but
 //! returns a per-cell hash value in approximately `[-1, 1]`.
 //!
 //! **Tolerance:** value Worley is discontinuous at cell-ownership boundaries;

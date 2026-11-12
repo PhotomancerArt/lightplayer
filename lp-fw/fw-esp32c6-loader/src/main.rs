@@ -34,7 +34,7 @@
 //!   the IDF left that a core relies on — watchdogs, brownout, the flash
 //!   clocks, 32 KiB MMU pages) and says which bootloader it is in one line.
 //!   `app.bin` is byte-identical under both doors. ADR
-//!   `docs/adr/2026-10-17-the-c6-boots-through-our-own-bootloader.md`.
+//!   `docs/adr/2026-10-17-the-c6-boots-through-our-own-bootloader.ai.md`.
 
 #![no_std]
 #![no_main]

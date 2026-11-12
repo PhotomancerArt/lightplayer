@@ -8,7 +8,7 @@
 /// Exact, not rounded: the gates compare it against round floors (a project
 /// load's 64 KiB, a read's 16 KiB), and an answer rounded down by even one
 /// byte turned a whole 65,536 B hole into "65,535 < 65,536, refused"
-/// (`docs/defects/2026-10-06-the-largest-block-probe-reads-a-64-kib-hole-as-65535.md`).
+/// (`docs/defects/2026-10-06-the-largest-block-probe-reads-a-64-kib-hole-as-65535.ai.md`).
 /// The cost is a few more probes: about log2(`upper`).
 pub fn largest_fitting(upper: usize, mut fits: impl FnMut(usize) -> bool) -> usize {
     // Invariant: `lo` fits (0 always does), `hi` does not.

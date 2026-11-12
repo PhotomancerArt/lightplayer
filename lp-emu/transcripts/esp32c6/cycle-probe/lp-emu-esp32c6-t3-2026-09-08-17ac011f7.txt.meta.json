@@ -40,7 +40,7 @@
     {
       "class": "timing",
       "grade": "modeled",
-      "because": "the model exists but the contract does not. t3 is structural rather than per-class — a 32 KiB 4-way cache of 32-byte lines at 338 cycles a fill (the mask ROM's Cache_Get_Mode for the geometry, cycle-probe's code_walk for the cost) and 9 cycles of APB wait state (cycle-probe's mmio_poll) — and it is calibrated on the cycle-probe kernels and validated against 92 like-for-like silicon ticks in docs/reports/2026-09-08-esp32c6-t3-calibration.md. What it does not yet have is a stated band it is allowed to be wrong inside, and a cycle model is never exact; `modeled` until that contract exists (M1 P4)"
+      "because": "the model exists but the contract does not. t3 is structural rather than per-class — a 32 KiB 4-way cache of 32-byte lines at 338 cycles a fill (the mask ROM's Cache_Get_Mode for the geometry, cycle-probe's code_walk for the cost) and 9 cycles of APB wait state (cycle-probe's mmio_poll) — and it is calibrated on the cycle-probe kernels and validated against 92 like-for-like silicon ticks in docs/reports/2026-09-08-esp32c6-t3-calibration.ai.md. What it does not yet have is a stated band it is allowed to be wrong inside, and a cycle model is never exact; `modeled` until that contract exists (M1 P4)"
     },
     {
       "class": "boot-log",

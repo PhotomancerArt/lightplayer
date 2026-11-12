@@ -5,7 +5,7 @@
 //! boot runs the previous project again and says why (`lp-recovery`'s
 //! `InterruptedLoad`; ADR `2026-10-07-project-loads-are-tried-and-recovered`).
 //! The blunt 64 KiB headroom gate this file used
-//! to pin is gone (`docs/defects/2026-08-29-load-project-resets-instead-of-refusing.md`).
+//! to pin is gone (`docs/defects/2026-08-29-load-project-resets-instead-of-refusing.ai.md`).
 
 extern crate alloc;
 

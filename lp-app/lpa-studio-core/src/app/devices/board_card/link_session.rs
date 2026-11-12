@@ -1,5 +1,5 @@
 //! This tab's session with the board, said on the row of the link it is
-//! about (`docs/ux/anatomy/board-card.md`, the link rows). Four link rows
+//! about (`docs/ux/anatomy/board-card.ai.md`, the link rows). Four link rows
 //! each say their own link; what this tab is doing about reaching the board
 //! — connecting, reconnecting, a Connect that failed, a board that stopped
 //! answering, another tab or someone else holding it — belongs to the row of
@@ -35,7 +35,7 @@
 //! row's problem, the row goes quiet ([`super::board_surface::carried_layer`]).
 //! "Someone else connected" is for a holder Studio cannot name (a stranger
 //! on the network slot); "Open in another tab" is a tab of this browser
-//! (`docs/style/language.md`). The held words are [`super::held_board`]'s.
+//! (`docs/style/language.ai.md`). The held words are [`super::held_board`]'s.
 
 use lpa_devices::device::DeviceStatus;
 

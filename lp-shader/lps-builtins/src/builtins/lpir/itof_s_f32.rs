@@ -2,7 +2,7 @@
 //!
 //! The Q32 sibling clamps to `[-32768, 32767]` before shifting, because that is
 //! all Q16.16 can hold. **f32 does not clamp**: the whole point of the mode is
-//! that the integer range survives. `docs/design/float.md` §3 makes int→float
+//! that the integer range survives. `docs/design/float.ai.md` §3 makes int→float
 //! a Guaranteed correctly-rounded (RNE) conversion, and `as f32` is that.
 
 /// Signed i32 → f32, correctly rounded.

@@ -2,7 +2,7 @@
 //!
 //! Transliterated from the canonical GLSL
 //! `glsl/lpfn/math/saturate.glsl`, which is normative
-//! (`docs/adr/2026-07-08-glsl-canonical-builtins.md`).
+//! (`docs/adr/2026-07-08-glsl-canonical-builtins.ai.md`).
 //!
 //! **Tolerance:** exact. `clamp` introduces no rounding.
 //!

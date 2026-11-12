@@ -3,7 +3,7 @@
 //! A batch (`FsRequest::BeginBatch` … `CommitBatch`) is the first piece of
 //! fs state a server holds between requests — an exception to
 //! `file_sync`'s pull-model rule, recorded in
-//! `docs/adr/2026-10-10-fs-push-boundary-and-deflated-writes.md`. The
+//! `docs/adr/2026-10-10-fs-push-boundary-and-deflated-writes.ai.md`. The
 //! filesystem holds the transaction itself (`LpFs::begin_batch`); this holds
 //! only its owner and its idle time:
 //!

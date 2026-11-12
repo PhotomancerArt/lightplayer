@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The web-built actions ratchet (docs/adr/2026-10-01-agentic-control-offers-in-core.md).
+"""The web-built actions ratchet (docs/adr/2026-10-01-agentic-control-offers-in-core.ai.md).
 
 Every verb the user can press is meant to be built in core and published
 on the view model, where the app agent can see it. Studio's web layer
@@ -149,7 +149,7 @@ def write_record(counts):
         handle.write(
             "# Web-built UiActions per file — a ratchet: counts may only go down.\n"
             "# Written by `scripts/check-web-actions.py --bless`; see that script and\n"
-            "# docs/adr/2026-10-01-agentic-control-offers-in-core.md.\n"
+            "# docs/adr/2026-10-01-agentic-control-offers-in-core.ai.md.\n"
         )
         for path in sorted(counts):
             handle.write(f"{counts[path]} {path}\n")

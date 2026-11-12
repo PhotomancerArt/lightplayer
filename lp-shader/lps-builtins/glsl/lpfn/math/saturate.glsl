@@ -4,7 +4,7 @@
 // matching `src/builtins/lpfn/math/saturate_q32.rs`.
 //
 // The saturate operation is standard mathematical procedure with no
-// licensing concerns (see docs/reports/2026-03-31-lpfx-license-audit.md).
+// licensing concerns (see docs/reports/2026-03-31-lpfx-license-audit.ai.md).
 
 float lpfn_saturate(float x) {
     return clamp(x, 0.0, 1.0);

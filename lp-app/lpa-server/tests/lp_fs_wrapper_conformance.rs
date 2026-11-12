@@ -4,7 +4,7 @@
 //! the filesystem underneath without asking it. That is how a batch begun
 //! through `AccessGuardedFs` became a silent per-call commit (the guard took
 //! `begin_batch`'s `Ok(())` default) — the class this test closes
-//! (`docs/defects/2026-10-10-lp-fs-wrappers-silently-take-trait-defaults.md`).
+//! (`docs/defects/2026-10-10-lp-fs-wrappers-silently-take-trait-defaults.ai.md`).
 //!
 //! The wrapped filesystem here is a recorder: every method notes its name
 //! and answers from an in-memory map. Each wrapper is driven through

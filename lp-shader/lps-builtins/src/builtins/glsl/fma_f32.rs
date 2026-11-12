@@ -1,6 +1,6 @@
 //! Native f32 `fma` — the f32 sibling of [`super::fma_q32`].
 //!
-//! **A single rounding, and that is the whole point.** `docs/design/float.md`
+//! **A single rounding, and that is the whole point.** `docs/design/float.ai.md`
 //! §3 makes explicitly-spelled `fma` a Guaranteed row: `a * b + c` computed
 //! with one rounding of the exact product-plus-addend. Writing `a * b + c` here
 //! would round twice and quietly violate the row — and §4 separately makes

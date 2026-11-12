@@ -9,7 +9,7 @@
 //!
 //! The former in-process host JIT (`CraneliftEngine` / `jit_from_ir`) was removed: it exhibited
 //! non-deterministic heap corruption when multiple `JITModule` instances lived in one process
-//! (see `docs/bugs/2026-03-30-jit-filetest-segfault.md`), and `lpvm-wasm`'s wasmtime engine is
+//! (see `docs/bugs/2026-03-30-jit-filetest-segfault.ai.md`), and `lpvm-wasm`'s wasmtime engine is
 //! the host execution backend. Do not add host-execution paths here.
 
 #![no_std]

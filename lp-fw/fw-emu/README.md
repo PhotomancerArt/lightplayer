@@ -34,4 +34,4 @@ cargo test -p fw-tests --test scene_render_emu
 ```
 
 Do not use host workspace-wide cargo commands for this target. Use the targeted
-commands or root just recipes described in `AGENTS.md`.
+commands or root just recipes described in `AGENTS.ai.md`.

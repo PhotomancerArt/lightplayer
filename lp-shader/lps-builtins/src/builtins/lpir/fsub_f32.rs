@@ -1,6 +1,6 @@
 //! Native f32 subtraction — the f32 sibling of [`super::fsub_q32`].
 //!
-//! `-` is a `docs/design/float.md` §3 Guaranteed row (correctly rounded, RNE).
+//! `-` is a `docs/design/float.ai.md` §3 Guaranteed row (correctly rounded, RNE).
 
 /// f32 subtraction: `a - b`.
 #[unsafe(no_mangle)]

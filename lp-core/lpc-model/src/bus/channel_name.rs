@@ -4,7 +4,7 @@ use core::fmt;
 /// A **bus channel** name: a convention-only string shaped
 /// `purpose[.in|.out][/instance]` (naming norms decided 2026-07-08;
 /// supersedes the retired `<kind>/<dir>/<index>` convention from the
-/// archived quantity.md):
+/// archived quantity.ai.md):
 ///
 /// - **purpose**: lowercase dotted segments (`time`, `time.delta`,
 ///   `transport.next`). Dots group families for display/pickers; the full

@@ -39,7 +39,7 @@
 #
 # It is not a replacement for holding a board. The emulator has no Chromium
 # USB stack, no radio traffic, no analog anything, and its clock is a model —
-# the walk record (`docs/reports/2026-09-08-esp32c6-emulator-walk.md`) lists
+# the walk record (`docs/reports/2026-09-08-esp32c6-emulator-walk.ai.md`) lists
 # what it does not cover, and nothing here should be read as covering it.
 #
 # ## Why one run where the hardware walk needs two flashes
@@ -698,7 +698,7 @@ if [[ "$device_hex" != "$oracle_hex" ]]; then
         echo "          JITs Xtensa, so rv32-emu is neither its ISA nor its backend and"
         echo "          the agreement is only two engines out of three. Two host engines"
         echo "          differing is the q32 last-bit question"
-        echo "          (docs/defects/2026-07-30-q32-native-vs-wasmtime-last-bit.md),"
+        echo "          (docs/defects/2026-07-30-q32-native-vs-wasmtime-last-bit.ai.md),"
         echo "          not a verdict on the machine. Compare the Xtensa JIT's own"
         echo "          output (lp-xt) before touching the emulator."
     else
@@ -735,10 +735,10 @@ echo "===== FRAME RATE (t1 vs t3) ====="
 # line fill measured on silicon 2026-09-08) is the grade that charges it, and
 # the io-thread spike found it reproduces about half of silicon's frame-rate
 # cost on a project with a preempting link thread — see
-# docs/defects/2026-10-01-the-emulated-c6-charges-a-cold-code-path-10x-less-than-silicon.md.
+# docs/defects/2026-10-01-the-emulated-c6-charges-a-cold-code-path-10x-less-than-silicon.ai.md.
 # `shader-oracle` (this walk's project) has no such thread, so there is no
 # reason to expect its t1/t3 gap to echo that number — this prints whatever
-# this run measures, never a threshold (AGENTS.md: "never gate on emulated
+# this run measures, never a threshold (AGENTS.ai.md: "never gate on emulated
 # microseconds"). It can only fail the walk if the t3 run itself errors or
 # renders nothing — never on the fps figures themselves.
 if [[ "$CHIP" != "esp32c6" ]]; then
@@ -824,7 +824,7 @@ else
     echo "  here — unlike the reference below, where one is the whole point."
     echo "  reference only, a different project: a XIAO C6 lost 9.9% idle frame rate to a"
     echo "  preempting io thread where lp-emu:esp32c6:t3 showed 4.8% and t1/t2 near 0% (2026-10-01"
-    echo "  io-thread spike; docs/defects/2026-10-01-the-emulated-c6-charges-a-cold-code-path-10x-less-than-silicon.md)."
+    echo "  io-thread spike; docs/defects/2026-10-01-the-emulated-c6-charges-a-cold-code-path-10x-less-than-silicon.ai.md)."
     echo "  added host time for this leg: ${t3_wall_secs}s"
 fi
 

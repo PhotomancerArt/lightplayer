@@ -424,7 +424,7 @@ debug = 1
 # ESP32-C6: abort tier (ADR 2026-08-02-rv32-firmwares-are-abort-tier). Both this
 # AND `-C panic=abort` in lp-fw/fw-esp32c6/.cargo/config.toml are set; the
 # rustflag is the one that decides, because the target spec overrides the
-# profile key (docs/reports/2026-03-13-esp32-unwinding-implementation.md,
+# profile key (docs/reports/2026-03-13-esp32-unwinding-implementation.ai.md,
 # Problem 6). A June-2026 A/B that changed only this key reported "panic=abort
 # saves ~2 KB" and was measuring nothing; the real figure is 796,032 B.
 [profile.release-esp32]
@@ -490,7 +490,7 @@ codegen-units = 4
 # rather than inherited, though for a bare-metal target this key is decorative:
 # the target spec's `panic-strategy: abort` overrides the profile, and only
 # `-C panic=...` in rustflags actually decides (see
-# docs/reports/2026-03-13-esp32-unwinding-implementation.md, Problem 6). That is
+# docs/reports/2026-03-13-esp32-unwinding-implementation.ai.md, Problem 6). That is
 # exactly why the old unwind builds needed a `with_unwind_support` rustflags
 # builder in the test harness — the profile alone never did anything.
 panic = "abort"
@@ -577,20 +577,20 @@ esp-alloc = { path = "third_party/esp-alloc" }
 # buffer — LE Remote Connection Parameter Request (Negative) Reply complete
 # with a handle bt-hci has no room for, which panicked the C6 on every
 # Android connection. See third_party/bt-hci/README-LP.md and
-# docs/defects/2026-10-17-an-android-phone-connecting-over-bluetooth-panics-the-c6.md.
+# docs/defects/2026-10-17-an-android-phone-connecting-over-bluetooth-panics-the-c6.ai.md.
 bt-hci = { path = "third_party/bt-hci" }
 esp-storage = { path = "third_party/esp-storage" }
 # esp-hal 1.1.1 fork: `#[ram]` on the three helpers the `#[ram]` Xtensa
 # level-1/2/3 interrupt entries call on every peripheral interrupt
 # (`InterruptStatus::current`, `InterruptStatusIterator::next`, `mapped_to_raw`),
 # so the RMT refill interrupt's dispatch never fetches from flash. See
-# third_party/esp-hal/README-LP.md and docs/debt/classic-iram-handlers-reach-flash.md.
+# third_party/esp-hal/README-LP.md and docs/debt/classic-iram-handlers-reach-flash.ai.md.
 esp-hal = { path = "third_party/esp-hal" }
 # esp-radio 0.18.0 fork: the NPL controllers' (C6's) ACL receive path copies
 # every mbuf of a chained packet, not only the first — a knob write over
 # Bluetooth arrived 8 B short and killed the C6's BLE host. See
 # third_party/esp-radio/README-LP.md and
-# docs/defects/2026-09-25-a-knob-jump-over-bluetooth-kills-the-c6-ble-host.md.
+# docs/defects/2026-09-25-a-knob-jump-over-bluetooth-kills-the-c6-ble-host.ai.md.
 esp-radio = { path = "third_party/esp-radio" }
 # naga 29.0.0 fork: glsl-in lowers `&&`/`||` with side-effecting right operands
 # to control flow so they short-circuit per the GLSL spec (upstream evaluates

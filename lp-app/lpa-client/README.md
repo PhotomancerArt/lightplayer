@@ -93,8 +93,8 @@ via `ClientRequest::Hello`. This crate surfaces it two ways:
 No version policy lives here: absence of a hello from a responding server
 means pre-hello firmware and is treated as a protocol mismatch by the
 consumer (`lpa-link`'s `DeviceSession`, whose readiness IS the hello). See
-`docs/adr/2026-07-14-wire-hello-versioning.md` and
-`docs/adr/2026-07-15-device-session-model.md`.
+`docs/adr/2026-07-14-wire-hello-versioning.ai.md` and
+`docs/adr/2026-07-15-device-session-model.ai.md`.
 
 ## Overlay In The Pull Contract
 
@@ -112,7 +112,7 @@ their revisions (`WireOverlayReadResponse.revision`,
 `WireOverlayCommitResponse.overlay_revision`), so a mutating caller can
 stamp its mirror from its own ack without a follow-up fetch. The mirror,
 edit buffer, and gating policy live above this crate (in
-`lpa-studio-core`); see `docs/adr/2026-07-04-studio-editing-model.md`.
+`lpa-studio-core`); see `docs/adr/2026-07-04-studio-editing-model.ai.md`.
 
 ## Feature Model
 
@@ -208,7 +208,7 @@ of two conversations: `device_push_one_slot` (atomic: the project replaced in
 its own folder, hash-checked, then committed; any failure aborts and reloads
 the old project) or `device_push_two_slot` (not atomic: today's `demo` ↔
 `demo-b` push, deleted once every board runs the tree store). See
-`docs/adr/2026-10-10-fs-push-boundary-and-deflated-writes.md`.
+`docs/adr/2026-10-10-fs-push-boundary-and-deflated-writes.ai.md`.
 `device_stamp`'s journaled `/hardware.json` writes stay raw `WriteChunk`s.
 
 Use `deploy_project_files` for initial upload/load flows such as CLI upload,

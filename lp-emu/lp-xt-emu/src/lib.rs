@@ -5,7 +5,7 @@
 //! semantics and validated by diffing against real hardware via the experiment
 //! repo's `xt-runner` (2026-esp32s3-experiment). No GPL source (QEMU, binutils)
 //! was copied or transliterated — see the repo license ADR
-//! (`docs/adr/2026-07-29-license-provenance-discipline.md`) and the Provenance
+//! (`docs/adr/2026-07-29-license-provenance-discipline.ai.md`) and the Provenance
 //! section of this crate's README.
 //!
 //! ## Shape

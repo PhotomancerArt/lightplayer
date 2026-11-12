@@ -37,7 +37,7 @@ resolves only EXACT addresses and prints every name an address has. An
 address with no exact match is reported as unresolved, never snapped to the
 nearest symbol below it.
 
-Licence note (AGENTS.md): binutils (`objdump`, `nm`) is used here as a tool
+Licence note (AGENTS.ai.md): binutils (`objdump`, `nm`) is used here as a tool
 whose *output* is fact — disassembly text and the symbol table. No binutils
 source, table or logic is read or adapted. The PAC bases and the ROM symbol
 addresses are read from the crates' own generated sources, the same way

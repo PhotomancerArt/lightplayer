@@ -82,7 +82,7 @@ primary_region = "sjc"  # Seattle (sea) was retired for new fly orgs; San Jose i
   # with the same 301 to https this switch used to send; its route-walk test
   # (lp-cloud-server/tests/https_redirect.rs) and the post-deploy smoke in
   # .github/workflows/deploy-cloud.yml hold it. ADR:
-  # docs/adr/2026-10-06-cloud-relay.md.
+  # docs/adr/2026-10-06-cloud-relay.ai.md.
   force_https = false
 
   # Machines never stop. A stopped machine means a cold start on the first

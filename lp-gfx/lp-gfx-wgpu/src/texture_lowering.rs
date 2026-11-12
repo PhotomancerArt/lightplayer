@@ -255,7 +255,7 @@ fn sample_helper(entry: &UsedHelper) -> (String, String) {
 /// Recognition is `lps_shared::scan_uniform_sampler2d_decls`, shared with
 /// the CPU tier (`lps-frontend::parse`) so the two can never disagree about
 /// which declarations are rewritten
-/// (docs/defects/2026-08-05-generated-palette-header-dies-on-naga.md). No
+/// (docs/defects/2026-08-05-generated-palette-header-dies-on-naga.ai.md). No
 /// companion sampler is synthesized on this tier: `texture()` sites lower
 /// to generated `texelFetch` helpers (see the module docs), so no sampler
 /// object is ever bound.
@@ -635,7 +635,7 @@ mod tests {
     /// The engine's generated palette spelling — `layout(binding = N)`, no
     /// `set` — keeps its layout verbatim and only the type token changes.
     /// The CPU tier's independent scanner once declined exactly this shape
-    /// (docs/defects/2026-08-05-generated-palette-header-dies-on-naga.md);
+    /// (docs/defects/2026-08-05-generated-palette-header-dies-on-naga.ai.md);
     /// recognition is shared now, and this pins the GPU half of the contract.
     #[test]
     fn binding_only_layout_is_kept_and_type_swapped() {

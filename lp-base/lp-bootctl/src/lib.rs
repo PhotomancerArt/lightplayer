@@ -34,7 +34,7 @@
 //!   `0x0` (absent under the IDF bootloader).
 //!
 //! These bind once a fielded core can install an update (see
-//! `docs/adr/2026-10-04-c6-split-link-firmware-loader-and-boot-records.md`).
+//! `docs/adr/2026-10-04-c6-split-link-firmware-loader-and-boot-records.ai.md`).
 //!
 //! # Layout 2: the ESP32-S3's
 //!

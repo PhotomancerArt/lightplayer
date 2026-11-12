@@ -15,7 +15,7 @@ pub struct ShaderCompileOptions {
     pub frontend: lp_shader::ShaderFrontend,
     /// Compile-time texture binding contract: one [`lps_shared::TextureBindingSpec`]
     /// per `sampler2D` uniform leaf, keyed by canonical dotted uniform path
-    /// (`docs/design/lp-shader-texture-access.md`). Every backend validates
+    /// (`docs/design/lp-shader-texture-access.ai.md`). Every backend validates
     /// this map against the shader's declared samplers and fails compilation
     /// on a mismatch — missing or extra specs are compile errors on the CPU
     /// and GPU tiers alike.
@@ -66,7 +66,7 @@ impl ShaderCompileOptions {
     ///
     /// The Q32 arithmetic configuration is no longer selectable per shader —
     /// the compiler hard-codes the shader-speed expansion (wrapping add/sub/mul,
-    /// reciprocal divide). See `docs/design/q32.md`.
+    /// reciprocal divide). See `docs/design/q32.ai.md`.
     pub fn to_compiler_config(&self) -> lpir::CompilerConfig {
         lpir::CompilerConfig::default()
     }

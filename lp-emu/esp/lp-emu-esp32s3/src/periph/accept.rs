@@ -10,7 +10,7 @@
 //! `with_reset` in this file is a **deviation from the PAC**, and the test
 //! `the_only_deviations_from_the_pacs_resets_are_the_listed_ones` is the
 //! list. The sweep that produced the rule is
-//! `docs/defects/2026-09-07-accept-blocks-carry-only-the-reset-values-a-boot-needed.md`:
+//! `docs/defects/2026-09-07-accept-blocks-carry-only-the-reset-values-a-boot-needed.ai.md`:
 //! an accept block seeded with the value a spin happened to want looks
 //! exactly like one seeded from the PAC, right up to the moment a different
 //! image spins on a different value.

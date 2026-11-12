@@ -96,7 +96,7 @@ impl SerWrite for ErasedSerWrite<'_> {
 /// again into the firmware's stack buffer to actually write it. Routing both
 /// through `ErasedSerWrite` collapses each pair into one instantiation, which
 /// is worth tens of KB of flash in an image that must fit a 3 MB partition.
-/// See `docs/adr/2026-07-28-esp32c6-flash-budget.md`.
+/// See `docs/adr/2026-07-28-esp32c6-flash-budget.ai.md`.
 ///
 /// The cost is one virtual call per write op. The serializer writes slices
 /// rather than single bytes, so this is not measurable on the streaming path.

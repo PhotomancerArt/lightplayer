@@ -104,7 +104,7 @@ pub(crate) unsafe fn load_r16_texel_lane(base: *const u8, texel_byte_off: usize)
 // with the Q32 path above rather than duplicated.
 //
 // Note there is no f32 analogue of `sat_i64_to_q32_raw`: an f32 lane needs no
-// saturation, and clamping one would contradict `docs/design/float.md` §3.
+// saturation, and clamping one would contradict `docs/design/float.ai.md` §3.
 // ---------------------------------------------------------------------------
 
 /// Packed descriptor + normalized-coordinate arguments for 2D UNORM sampling in f32.

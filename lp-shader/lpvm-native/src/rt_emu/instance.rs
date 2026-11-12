@@ -261,7 +261,7 @@ impl NativeEmuInstance {
     /// The **one** ISA branch in this file. Everything above and below it —
     /// vmctx, uniforms, globals, snapshot, textures, fuel, Q32 — is ISA-neutral,
     /// and all host-side read-back goes through the shared arena rather than the
-    /// emulator. See `docs/adr/2026-07-30-isa-parameterized-host-emu-engine.md`.
+    /// emulator. See `docs/adr/2026-07-30-isa-parameterized-host-emu-engine.ai.md`.
     fn run_emulator_call(
         &mut self,
         ir_func: &IrFunction,

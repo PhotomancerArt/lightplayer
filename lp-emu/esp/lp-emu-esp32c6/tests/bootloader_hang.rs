@@ -7,8 +7,8 @@
 //! does it every 0.4 s for ever; this file asks the emulator to do it once,
 //! and asks a clean board of the same image to boot as it always has.
 //!
-//! `docs/defects/2026-09-06-c6-first-flash-bootloader-hang-lp-analog-i2c-clock.md`,
-//! `docs/defects/2026-09-06-c6-analog-master-wedges-the-bootloader.md`.
+//! `docs/defects/2026-09-06-c6-first-flash-bootloader-hang-lp-analog-i2c-clock.ai.md`,
+//! `docs/defects/2026-09-06-c6-analog-master-wedges-the-bootloader.ai.md`.
 //!
 //! P1 owns AC1 and the control; **P2 owns the loop** (AC2) — the MWDT0
 //! flash-boot watchdog ending each hang with `rst:0x7 (TG0_WDT_HPSYS)` and a
@@ -67,7 +67,7 @@ const GATE_US: u64 = 2_000_000;
 const LATER_US: u64 = 2_500_000;
 
 /// Silicon's loop period: the wedged XIAO "boot-loops about every 0.4 s"
-/// (`docs/defects/2026-09-06-c6-analog-master-wedges-the-bootloader.md`, an
+/// (`docs/defects/2026-09-06-c6-analog-master-wedges-the-bootloader.ai.md`, an
 /// eyeballed figure, not an instrumented one). AC2 asks the emulator to land
 /// within 2× of it.
 const SILICON_LOOP_US: u64 = 400_000;

@@ -890,7 +890,7 @@ mod tests {
         assert!(error.message().contains("payload"));
     }
 
-    /// The def-file seam of the gradient storage (color.md §5): a
+    /// The def-file seam of the gradient storage (color.ai.md §5): a
     /// `GradientConfig` value — token metadata, a variable-length `set`,
     /// and one stops literal per gradient — must write into authored JSON
     /// and read back unchanged through the shape-driven codec. This is

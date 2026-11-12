@@ -156,7 +156,7 @@ Story source-root guidance:
   component stories yet.
 
 When a change touches Studio web source or story output, follow the repo
-baseline workflow (AGENTS.md "Studio UI visual baselines"): push, and the
+baseline workflow (AGENTS.ai.md "Studio UI visual baselines"): push, and the
 `validate-stories` CI job captures, compares against the nearest captured
 main ancestor's snapshot in the companion stories repo, and posts a sticky
 PR comment with the changed stories. Nothing is committed to this repo —

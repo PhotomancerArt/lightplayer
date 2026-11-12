@@ -21,7 +21,7 @@
 //!   interrupted `lr.w` and its `sc.w` may change the reserved word, and a
 //!   resumed `sc.w` that still succeeds writes over that change. That is how
 //!   esp-rtos's run queue lost a task on the emulated C6
-//!   (`docs/defects/2026-10-09-the-emulated-sc-w-ignored-its-reservation.md`).
+//!   (`docs/defects/2026-10-09-the-emulated-sc-w-ignored-its-reservation.ai.md`).
 //! - **A newer `lr.w`**, which replaces it.
 //!
 //! The privileged spec also lets `mret` clear a reservation, without

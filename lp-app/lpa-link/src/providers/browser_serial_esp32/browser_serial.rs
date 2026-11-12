@@ -198,7 +198,7 @@ fn port_handle(value: &JsValue) -> Result<BrowserSerialPortHandle, LinkError> {
 ///
 /// The controller (`browser_esp32_device_controller.js`) is the only place
 /// these run, and the JS layer has no CI (docs/debt/
-/// web-serial-js-untestable.md), so the table lives here too — a rename on
+/// web-serial-js-untestable.ai.md), so the table lives here too — a rename on
 /// either side that is not mirrored is a silently DIFFERENT reset, which is
 /// worse than a failed one.
 ///

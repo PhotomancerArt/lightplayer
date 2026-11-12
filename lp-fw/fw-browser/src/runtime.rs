@@ -240,7 +240,7 @@ impl BrowserFirmwareRuntime {
         // Wire hello: queued before anything else so it flushes as the first
         // protocol_out frame when the runtime starts serving (the worker
         // drains outputs right after boot). See
-        // docs/adr/2026-07-14-wire-hello-versioning.md.
+        // docs/adr/2026-07-14-wire-hello-versioning.ai.md.
         block_on(fw_core::send_unsolicited_hello(&server, &mut transport))
             .map_err(|error| format!("queue boot hello: {error}"))?;
 

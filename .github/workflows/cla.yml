@@ -1,9 +1,9 @@
 name: CLA Assistant
 
 # Requires every outside contributor to sign the LightPlayer Individual CLA
-# (docs/cla/individual-cla.md) before their first PR can merge. Signatures are
+# (docs/cla/individual-cla.ai.md) before their first PR can merge. Signatures are
 # recorded on the `cla-signatures` branch, keyed by GitHub account.
-# See docs/adr/2026-07-31-contributor-license-agreement.md.
+# See docs/adr/2026-07-31-contributor-license-agreement.ai.md.
 
 on:
   issue_comment:

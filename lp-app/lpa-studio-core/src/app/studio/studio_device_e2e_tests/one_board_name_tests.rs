@@ -1,4 +1,4 @@
-//! One board name (`docs/adr/2026-10-28-one-board-name.md`), end to end
+//! One board name (`docs/adr/2026-10-28-one-board-name.ai.md`), end to end
 //! through the real effects layer and the fake board's own `LpServer`:
 //!
 //! - an example pushed to a board lands as a library copy named after the

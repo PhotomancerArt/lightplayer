@@ -1,7 +1,7 @@
 # Skirt 620 — a 620-pixel, two-channel measurement rig
 
 The S3's load at the skirt's target size
-([`docs/reports/2026-10-22-s3-620px-ble-load.md`](../../../docs/reports/2026-10-22-s3-620px-ble-load.md)):
+([`docs/reports/2026-10-22-s3-620px-ble-load.ai.md`](../../../docs/reports/2026-10-22-s3-620px-ble-load.ai.md)):
 two fixtures of 10 strands × 31 lamps = **620 lamps**, one WS281x output per
 side of the skirt (`D10`, `D9` — GPIO9 and GPIO8 on the XIAO ESP32-S3 Plus),
 both sampling [`../basic`](../basic)'s noise shader at 32 × 32 (Direct).

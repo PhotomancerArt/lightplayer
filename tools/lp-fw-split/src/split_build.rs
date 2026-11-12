@@ -508,7 +508,7 @@ pub fn core_roots(graph: &SectionGraph, elf: &[u8]) -> Result<Vec<usize>> {
 /// reads only the core (its engine, which holds the manifest, is written
 /// after the core boots on trial), so a tree core without the mark is
 /// refused by every board it is sent to, its own kind included
-/// (docs/defects/2026-10-16-the-fs-tree-update-guard-reads-a-manifest-the-core-does-not-carry.md).
+/// (docs/defects/2026-10-16-the-fs-tree-update-guard-reads-a-manifest-the-core-does-not-carry.ai.md).
 pub fn check_core_tree_mark(elf: &[u8], core: &[u8]) -> Result<&'static str> {
     let lists_tree = manifest_lists_fs_tree(elf);
     let mark = lpc_model::manifest::CORE_FS_TREE_MARK.as_bytes();

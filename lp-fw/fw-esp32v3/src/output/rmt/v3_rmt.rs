@@ -19,7 +19,7 @@
 //! question): esp-hal 1.1.1 `src/rmt.rs` `chip_specific` module for
 //! `any(esp32, esp32s2)` (MIT/Apache-2.0), the `esp32` PAC 0.40.2 field docs,
 //! and `esp-metadata-generated` (`rmt.*` properties for `esp32`). No GPL
-//! source was consulted; see `AGENTS.md`.
+//! source was consulted; see `AGENTS.ai.md`.
 //!
 //! # Where the RAM is
 //!

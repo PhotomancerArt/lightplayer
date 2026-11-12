@@ -1,7 +1,7 @@
 //! The network seam (`net=lan`): the calls, and the shapes they exchange.
 //!
 //! A **capability** seam in the **switch** shape (ADR
-//! `docs/adr/2026-10-05-emulator-seams.md` §3): at network bring-up the
+//! `docs/adr/2026-10-05-emulator-seams.ai.md` §3): at network bring-up the
 //! firmware reads [`crate::net_mac`]'s engaged byte. On silicon it reads 0
 //! and the radio runs; on an emulated board that engaged `net=lan` it reads
 //! 1, and a seam-backed station and frame device plug in under the same

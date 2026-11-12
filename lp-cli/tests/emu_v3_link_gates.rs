@@ -35,7 +35,7 @@
 //!   921,600, so it misreads them — a seam no `lp-emu/` UART models
 //!   (`lp-emu-esp32v3/src/periph/uart.rs:398-399` delivers bytes clean
 //!   whatever the baud), hence this lives here rather than there
-//!   (`docs/defects/2026-10-03-the-classic-loses-its-boot-text-when-a-host-holds-the-link.md`).
+//!   (`docs/defects/2026-10-03-the-classic-loses-its-boot-text-when-a-host-holds-the-link.ai.md`).
 //!
 //! What changed with the move, for every test here: the conversation is the
 //! product's own (a deploy over the link, requests sent once the hello has
@@ -44,7 +44,7 @@
 //! and the runs are shorter. And the console is **no longer repaired**: the
 //! old files carried a `deinterleave` that rejoined records another task's
 //! records had been spliced into (the PR #300 interleaving defect,
-//! `docs/defects/2026-08-02-serial-line-interleaving.md`). On the link every
+//! `docs/defects/2026-08-02-serial-line-interleaving.ai.md`). On the link every
 //! record arrives whole, so these tests read the console as it came, and an
 //! interleaved record would now fail them rather than be mended.
 //!

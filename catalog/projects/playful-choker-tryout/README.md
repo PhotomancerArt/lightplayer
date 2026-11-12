@@ -102,7 +102,7 @@ post-deploy check, and leaves:
 | after 7 cycle switches (at the end) | 98,400 B | 66,304 B |
 
 The full method, and a heap trace across two full cycles, are in
-`docs/reports/2026-09-25-dormant-playlist-entries-proof.md`.
+`docs/reports/2026-09-25-dormant-playlist-entries-proof.ai.md`.
 
 ## What it needs
 

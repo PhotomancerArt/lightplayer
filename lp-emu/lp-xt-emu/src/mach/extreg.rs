@@ -34,7 +34,7 @@
 //!   than replacing the register. Modelling that would be inventing
 //!   behaviour nothing exercises: across the classic ROM, the IDF bootloader
 //!   and the shipped app image the M0 inventory found **three `rer` sites and
-//!   no `wer` at all** (`docs/reports/2026-09-10-xtensa-firmware-isa-inventory.md`).
+//!   no `wer` at all** (`docs/reports/2026-09-10-xtensa-firmware-isa-inventory.ai.md`).
 //!   A plain per-address store is the smaller claim, and a guest that does
 //!   start driving the debug module will show up in the trace (every access
 //!   emits [`crate::TraceEvent::ExtRegAccess`]) rather than silently getting a

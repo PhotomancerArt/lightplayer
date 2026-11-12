@@ -118,7 +118,7 @@ mod tests {
     }
 
     /// The tree store reserves `/.lp/snapshots/` for snapshots of a
-    /// project (`lp_tree_store::SNAPSHOT_DIR`, FORMAT.md "The snapshot
+    /// project (`lp_tree_store::SNAPSHOT_DIR`, FORMAT.ai.md "The snapshot
     /// namespace"). A snapshot never takes a write-only file, and should a
     /// copy of one ever sit there, it is still write-only: the predicate
     /// matches the last two components wherever they are.

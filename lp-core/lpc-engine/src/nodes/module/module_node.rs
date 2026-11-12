@@ -1,5 +1,5 @@
 //! The module node's runtime: mirror the introduced scope's `visual.out`
-//! as produced `output` (modules.md R7).
+//! as produced `output` (modules.ai.md R7).
 //!
 //! Attached to every module node, root included — uniformity is the point
 //! (the root is an ordinary module that happens to be at the root; its

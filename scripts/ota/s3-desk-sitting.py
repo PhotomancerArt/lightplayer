@@ -31,14 +31,14 @@ Two halves, because FS3's power and its USB arrive at different times:
           mid-engine (`hw-power-cut.py --chip esp32s3` through
           `board power-cycle`).
 
-Rules it keeps (AGENTS.md, the planning dir's fs3-queue.md): the board is
+Rules it keeps (AGENTS.ai.md, the planning dir's fs3-queue.md): the board is
 resolved by MAC, never a port; every step needs the lease (`board check`
 as --as); flashing writes the PACKAGED image (bootloader, table, app — not
 `lpfs`, which holds FS3's saved network and the other lanes' files); if FS3
 leaves the bus and does not come back, the sitting stops and says so (hands
 needed — never retry). `--dry-run` prints every command and runs none.
 
-Everything lands in --out: one console per step and `summary.md`, the walk
+Everything lands in --out: one console per step and `summary.ai.md`, the walk
 record's raw material (configuration `silicon:esp32s3`). Nothing here is a
 gate: a disagreement with the emulator is a fidelity defect to file.
 """
@@ -148,7 +148,7 @@ class Sitting:
         return ok
 
     def write_summary(self):
-        (self.out / "summary.md").write_text(
+        (self.out / "summary.ai.md").write_text(
             f"# FS3 sitting ({time.strftime('%Y-%m-%d %H:%M')}) — silicon:esp32s3\n\n"
             "FS3 (XIAO ESP32-S3 Plus, 16 MB), antenna attached.\n\n"
             + "\n".join(self.lines) + "\n")
@@ -184,7 +184,7 @@ class Sitting:
         port = self.board_port(step)
         out = self.out / f"{step}.records.bin"
         # One packet in flight: espflash 3.3's default window (64) fails reads
-        # on FS3 (docs/defects/2026-10-25-espflash-pipelined-reads-fail-on-the-s3s-usb.md).
+        # on FS3 (docs/defects/2026-10-25-espflash-pipelined-reads-fail-on-the-s3s-usb.ai.md).
         self.run(["espflash", "read-flash", "--chip", "esp32s3", "--port", port,
                   "--max-in-flight", "1", hex(RECORDS), "0x2000", out], check=True)
         # After a read FS3 has been seen sitting in the ROM, silent, until a

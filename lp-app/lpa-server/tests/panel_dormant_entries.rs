@@ -5,7 +5,7 @@
 //! entry is absent from the tree. Until 2026-09-25 `panel_state::restore`
 //! dropped every persisted writer whose scope no live node inhabited — a
 //! reboot forgot every dormant pattern's knobs
-//! (`docs/defects/2026-09-25-panel-restore-drops-dormant-entry-knobs.md`).
+//! (`docs/defects/2026-09-25-panel-restore-drops-dormant-entry-knobs.ai.md`).
 //!
 //! These tests also prove the server's tick runs the pre-tick residency
 //! step: every switch here is applied by `LpServer::advance_frame` →

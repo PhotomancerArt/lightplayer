@@ -278,7 +278,7 @@ mod tests {
     }
 
     /// The article's own fences, verbatim: the exact argument spellings
-    /// `docs/user-guide/what-is-a-shader.md` uses must all resolve.
+    /// `docs/user-guide/what-is-a-shader.ai.md` uses must all resolve.
     #[test]
     fn the_articles_own_fences_all_resolve() {
         let fences = [

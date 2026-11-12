@@ -14,7 +14,7 @@
 # main moved a record since, a plain apply can fail; the script then fetches
 # origin and retries with --3way, which merges from the blobs the patch names.
 #
-# See docs/chip-figures.md.
+# See docs/chip-figures.ai.md.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 
@@ -82,7 +82,7 @@ else
     git apply --3way "${patches[@]}"
 fi
 
-# The first-light ratchet (docs/first-light-ratchet.md): a raised record is
+# The first-light ratchet (docs/first-light-ratchet.ai.md): a raised record is
 # Yona's to bless, never a CI patch's. CI hands back none, so a staged rise
 # here is a patch that should not exist — roll every record back and stop.
 # A ratchet down, or CI's re-record for an image-unchanged change, passes.
@@ -100,6 +100,6 @@ echo "apply-ci-figures: applied ${#patches[@]} patch(es) from run $run_id and st
 echo "apply-ci-figures: review 'git diff --cached', commit with the change that moved them, and push."
 # The same run built the images those figures were read off. To re-check the
 # applied records against exactly those bytes, with no firmware build
-# (docs/ci-images.md):
+# (docs/ci-images.ai.md):
 echo "apply-ci-figures: to re-check them locally on the SAME run's images, no firmware build:"
 echo "  just fetch-ci-images $run_id && LP_CI_IMAGES=<printed dir> just bless-chips --check"

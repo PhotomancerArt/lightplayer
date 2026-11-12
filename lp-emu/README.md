@@ -4,7 +4,7 @@ Every emulator LightPlayer owns lives here, and everything here is **MIT**
 (`LICENSE-MIT`), while the rest of the repository is AGPL-3.0-or-later. That
 is the point of the directory: it is a home *and* a licence fence, and
 `just lint-emu-fence` is what keeps the fence real. See
-`docs/adr/2026-09-06-lp-emu-home-and-mit-fence.md`.
+`docs/adr/2026-09-06-lp-emu-home-and-mit-fence.ai.md`.
 
 ## Layout
 
@@ -131,7 +131,7 @@ cranelift or on any `lp-riscv-*` / `lp-xt-*` crate. Architecture specifics
 enter by injection — the profiler's `StackUnwinder` fn pointer and
 `CpuCollector`'s `ram_start`, or the per-arch `trap_code_from_cranelift` that
 lives in the arch emulator. See
-`docs/adr/2026-07-28-emu-core-crate-family.md`.
+`docs/adr/2026-07-28-emu-core-crate-family.ai.md`.
 
 ## The fence
 
@@ -219,11 +219,11 @@ RAM stub cannot connect, and a board can enter a state where the second-stage
 bootloader spins forever on `LP_I2C_ANA_MAST_I2C0_BUSY` — LP-domain state that
 survives every reset short of power-on. Both are the same root cause and both
 are written up in
-`docs/defects/2026-09-06-c6-analog-master-wedges-the-bootloader.md`.
+`docs/defects/2026-09-06-c6-analog-master-wedges-the-bootloader.ai.md`.
 
 The payload itself is `fw-checks`' `uart-bridge` (see that crate's README); the
 fixture and its current blocker are
-`docs/defects/2026-09-06-c6-analog-master-wedges-the-bootloader.md`.
+`docs/defects/2026-09-06-c6-analog-master-wedges-the-bootloader.ai.md`.
 
 ## Translation
 
@@ -293,7 +293,7 @@ anyway: the images the product's own workload looks like both gain, and
 rediscover it.
 
 `lp-emu-jit/README.md` is the translator; `lp-emu-esp32c6/README.md`'s flag
-table is the switches; `docs/adr/2026-09-11-emulator-wasm-translator.md` is
+table is the switches; `docs/adr/2026-09-11-emulator-wasm-translator.ai.md` is
 the argument, the licence posture and the ladder's honest history.
 
 ### The Xtensa side, from M7 P04
@@ -343,7 +343,7 @@ The interpreter's throughput is a product concern, not a curiosity: the
 emulator is on its way to being a *device* in Studio, and a machine that runs
 at a fifth of real time cannot stand in for a board someone is watching.
 
-> **The ledger.** [`docs/emulator-perf-ledger.md`](../docs/emulator-perf-ledger.md)
+> **The ledger.** [`docs/emulator-perf-ledger.ai.md`](../docs/emulator-perf-ledger.ai.md)
 > is the living record of what has been tried, what it measured, what was
 > rejected and why, and the menu of what is left. **Read it before proposing a
 > performance change** — several attractive-looking levers are already on it
@@ -374,7 +374,7 @@ scripts/emu/bench-c6.sh --bin <saved-binary> --no-build --no-promote
 It reports user seconds, instructions/second, two real-time ratios and the
 load average, and `cmp`s the UART0 bytes against the previous run. It is an
 **oracle, not a gate** — nothing in CI runs it, and no number it prints gates
-anything (see "never gate on emulated microseconds", above and in AGENTS.md).
+anything (see "never gate on emulated microseconds", above and in AGENTS.ai.md).
 Read the user-seconds column: this desk is often at load 150+ with other
 agents building, and a wall-clock ratio measured there is not a result. A
 before/after belongs in a PR body as a same-window A/B with the load quoted.
@@ -462,7 +462,7 @@ and a running best-of-t2 headline per image; `--collect` reads every
 `result-*.json` in the stage directory and prints device, engine guess,
 image, grade, wall seconds, instr/s and the real-time ratio. Baseline numbers
 and the method are in
-`docs/reports/2026-09-07-emu-web-bench-baseline.md`.
+`docs/reports/2026-09-07-emu-web-bench-baseline.ai.md`.
 
 `manifest.json`'s top-level `build` object (sha, short, branch, dirty,
 built_at, wasm_sha256, wasm_bytes) says what was actually measured: the page
@@ -526,7 +526,7 @@ retires **3.4× fewer** instructions a second. Two windows, not one: read that
 as an order, not a same-window pair.
 
 > **The classic ledger.**
-> [`docs/emulator-perf-ledger-classic.md`](../docs/emulator-perf-ledger-classic.md)
+> [`docs/emulator-perf-ledger-classic.ai.md`](../docs/emulator-perf-ledger-classic.ai.md)
 > is this chip's own living record — the C6 ledger's shape, this chip's own
 > rungs (the block cache, the window hoist, PGO), the ladder table and the
 > menu of what is left. Read it before proposing a performance change on this
@@ -568,7 +568,7 @@ against 4 % on the guest's arithmetic. It measured **1.15× on `render-basic`
 t2 and 1.33× on `render-rocaille` t2**. Nothing observable depends on a hit or
 a miss — that is the invariant the design hangs on — so `--no-block-cache` is a
 free identity oracle and the bisection tool when a transcript moves.
-`docs/adr/2026-09-09-emulator-block-cache.md` is the argument;
+`docs/adr/2026-09-09-emulator-block-cache.ai.md` is the argument;
 `lp-emu-core/src/block.rs`'s module docs are the mechanism.
 
 **The first rung, climbed** (M7 P01): the block cache on the Xtensa machine
@@ -622,7 +622,7 @@ every leg under loadavg ~8: **8.23 → 5.65 user s = 1.457×**, rt(user)
 0.259× → 0.377×. Every `v3-oracle.sh` pair-mode column `same` on all three
 images, including the masked `blocks:` counters themselves, which is the
 whole claim: PGO changes codegen and nothing the guest, the cache or the
-hoist can observe. `docs/emulator-perf-ledger-classic.md` §3 has the full
+hoist can observe. `docs/emulator-perf-ledger-classic.ai.md` §3 has the full
 table, the contaminated-window rounds this phase set aside, and why.
 
 **Three rungs, one ladder**: 1.71× (block cache) × 1.18× (window hoist) ×
@@ -667,7 +667,7 @@ per-slice machinery — has to fall by 1.78x before 3x is even arithmetically
 possible. That is its own milestone, planned at
 `lp2025/2026-09-11-1731-emu-loop-redesign/`.
 
-`docs/adr/2026-09-11-emulator-wasm-translator.md` has the whole argument and
+`docs/adr/2026-09-11-emulator-wasm-translator.ai.md` has the whole argument and
 the per-milestone history.
 
 ## Roadmap
@@ -713,7 +713,7 @@ eight emulated seconds. What it proves per-tick is
 
 What the emulator does **not** cover — the Chromium USB stack, radio traffic,
 anything analog, RX pins, and any claim about wall-clock time — is listed in
-`docs/reports/2026-09-08-esp32c6-emulator-walk.md`. Read that before quoting a
+`docs/reports/2026-09-08-esp32c6-emulator-walk.ai.md`. Read that before quoting a
 number from here.
 
 Next: plan two (the browser shim, vision D16) and plan three (the classic

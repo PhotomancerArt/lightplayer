@@ -4,7 +4,7 @@
 // builtin, matching `src/builtins/lpfn/generative/gnoise/gnoise2_q32.rs`:
 // random values at the four cell corners, bilinear interpolation with
 // cubic-smoothstep weights. Standard lattice value noise (see
-// docs/reports/2026-03-31-lpfx-license-audit.md; originally written with
+// docs/reports/2026-03-31-lpfx-license-audit.ai.md; originally written with
 // reference to LYGIA's gnoise.glsl).
 //
 // The Q32 device implementation approximates the cubic smoothstep with a

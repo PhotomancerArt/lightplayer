@@ -1,7 +1,7 @@
 //! A module's **panel**: this scope's channels, plus each child module's
 //! panel as a nested group.
 //!
-//! `docs/design/modules.md` R8. The recursion is presentation only —
+//! `docs/design/modules.ai.md` R8. The recursion is presentation only —
 //! nothing is promoted, and two embedded instances of one effect present
 //! two independent groups because they are two different scopes. A nested
 //! group is a **hairline rule with its name on it**, not a box: boxes stack
@@ -13,7 +13,7 @@
 //! upper right**, not chips in the content flow — the controls are the
 //! subject, and these are the settings that sit beside them:
 //!
-//! - **Reset panel** (`docs/design/panel.md` P2 clear at scope
+//! - **Reset panel** (`docs/design/panel.ai.md` P2 clear at scope
 //!   granularity): the revert glyph alone, with the count as a small
 //!   superscript and the full sentence in its tooltip. Present only while
 //!   something under this scope is held, so an untouched panel shows no

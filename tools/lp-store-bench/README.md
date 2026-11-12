@@ -225,7 +225,7 @@ names; default `clean,byte_prefix,random_bits`, `lp-nor-sim`'s
 it the smoke is what it always was (the sweeps under the three guessed
 models, the double cut under `random_bits`).
 `calibrated` is the model measured on a real part (CX1, 700 cuts:
-`docs/reports/2026-10-08-c6-nor-tear-calibration.md`) — torn erases that
+`docs/reports/2026-10-08-c6-nor-tear-calibration.ai.md`) — torn erases that
 read `0x00` from the front or throughout, or silently read erased; rarely a
 cut that lands before an erase starts, an erase caught inside a pre-program
 word or with only its first bit lifted, or a program torn inside a 4-byte

@@ -18,7 +18,7 @@
 //! one output with interpolation and LUT on) by the same rules as the committed
 //! projects `projects/test/basic-{2n,4n,2n-half}`, so the host probe and the
 //! emulator's alloc-diff cannot drift. Results are written up in
-//! `docs/reports/2026-09-06-classic-not-enough-heap.md`.
+//! `docs/reports/2026-09-06-classic-not-enough-heap.ai.md`.
 //!
 //! An in-memory output provider is installed so the flush leg is measured too
 //! (`EngineServices::flush_samples`, the provider's per-port buffers) — this is
@@ -565,7 +565,7 @@ fn print_derived(fixture: &Fixture, phases: &[Phase]) {
 /// probe pins (steady ticks do not grow, nothing outlives the engine). It does
 /// not assert byte figures — like `per_lamp_memory_table.rs` it is a probe, and
 /// the numbers it prints are read into
-/// `docs/reports/2026-09-06-classic-not-enough-heap.md`.
+/// `docs/reports/2026-09-06-classic-not-enough-heap.ai.md`.
 #[test]
 fn per_node_memory_table() {
     let _ = env_logger::builder().is_test(true).try_init();

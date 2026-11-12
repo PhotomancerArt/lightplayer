@@ -39,7 +39,7 @@
 //! here mounts it. A board whose files are still in littlefs is recognised by
 //! the superblock's name alone ([`littlefs_found`]) and HELD — never
 //! formatted (AD3) — until the USB migration moves them
-//! (`docs/adr/2026-10-16-c6-tree-store-cutover-migration.md`).
+//! (`docs/adr/2026-10-16-c6-tree-store-cutover-migration.ai.md`).
 
 use esp_storage::FlashStorage;
 use fw_esp32_common::aligned_nor_flash::AlignedNorFlash;
@@ -73,7 +73,7 @@ pub type TreePart = AlignedNorFlash<FlashStorage<'static>>;
 pub type TreeFlash = WindowedFlash<TreePart, Option<LpfsWindow>>;
 
 /// The store's flash over the located `lpfs` partition. Records are checked
-/// by the mask ROM's table-driven `crc32_le` (FORMAT.md's CRC-32/ISO-HDLC,
+/// by the mask ROM's table-driven `crc32_le` (FORMAT.ai.md's CRC-32/ISO-HDLC,
 /// the same values as `lp-crc32`): ~8x fewer cycles a byte than the bitwise
 /// one, which bounds mount and every record read, for no flash.
 pub fn tree_flash(flash: FlashStorage<'static>, partition: PartitionExtent) -> TreeFlash {

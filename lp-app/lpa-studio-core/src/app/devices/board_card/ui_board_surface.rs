@@ -1,5 +1,5 @@
 //! [`UiBoardSurface`]: the top of the board card, its main surface
-//! (`docs/ux/anatomy/board-card.md`, "Surface"). Yona, 2026-10-17: "the
+//! (`docs/ux/anatomy/board-card.ai.md`, "Surface"). Yona, 2026-10-17: "the
 //! primary surface should always give the most important information" —
 //! so it is never black — and "the surface explains; the primary gives the
 //! thing to do".
@@ -50,7 +50,7 @@ pub struct UiSurfaceNotice {
     /// `project`, `lock`, `usb`, `wifi`, `bluetooth`, `cloud`, `play`,
     /// `edit`): the same icon as the row whose state it is.
     pub icon: String,
-    /// The icon's tone, in ui.md's status families: Attention (a device
+    /// The icon's tone, in ui.ai.md's status families: Attention (a device
     /// needs you), Error (broken), Working (under way), Neutral. The tone is
     /// the icon's alone; the sentences stay plain (the director's call,
     /// 2026-10-17).

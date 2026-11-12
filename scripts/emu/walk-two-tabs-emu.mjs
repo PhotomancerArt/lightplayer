@@ -36,7 +36,7 @@
 // exclusive `open()` across tabs (the door's one-client rule stands in for
 // it), not a hidden tab's behaviour (both pages are visible), not a taker
 // with a cable. It is not a hardware result; the desk check is queued
-// (`docs/adr/2026-10-08-the-board-card-and-one-home-page.md`, section 5
+// (`docs/adr/2026-10-08-the-board-card-and-one-home-page.ai.md`, section 5
 // amendment).
 //
 // Not a CI job and must not become one. `--serve-release` serves the release
@@ -553,7 +553,7 @@ async function main() {
       if (!door409.free) {
         const registry = await boardRegistry(door.addr);
         report.notes.push(`the door's /bytes stayed claimed ${door409.afterMs} ms after tab A closed: ${JSON.stringify(registry.find((b) => b.id === BOARD))}`);
-        throw new Error(`the door's /bytes is still claimed ${door409.afterMs} ms after tab A closed (a stuck 409, reported — docs/defects/2026-09-24-a-departed-page-kept-the-doors-boards.md)`);
+        throw new Error(`the door's /bytes is still claimed ${door409.afterMs} ms after tab A closed (a stuck 409, reported — docs/defects/2026-09-24-a-departed-page-kept-the-doors-boards.ai.md)`);
       }
       if (door409.tries > 1) {
         report.notes.push(`the door freed /bytes ${door409.afterMs} ms after tab A's card went (${door409.tries} probes)`);
@@ -635,7 +635,7 @@ async function main() {
 }
 
 /// A holder's answer should come well inside a second (the asker waits 5 s;
-/// docs/defects/2026-10-09-a-holders-release-can-outlast-the-askers-five-seconds.md).
+/// docs/defects/2026-10-09-a-holders-release-can-outlast-the-askers-five-seconds.ai.md).
 /// Page wall-clock on an emulated board is never a gate, so a slow answer is
 /// a note in the report, not a failure.
 function noteSlowAnswer(report, holder, ms) {

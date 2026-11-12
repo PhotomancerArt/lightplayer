@@ -13,7 +13,7 @@
 //!
 //! **Which copy.** Two copies of an id (a GC copy and the original it has
 //! not erased yet) are kept as the level walk finds them: the copy in the
-//! sector later in sector-sequence order wins (FORMAT.md mount step 2), and
+//! sector later in sector-sequence order wins (FORMAT.ai.md mount step 2), and
 //! inside one sector the first. Pass 1 visits the sectors in that order, so
 //! a copy from another sector replaces the one held, and a second copy in
 //! the same sector does not.

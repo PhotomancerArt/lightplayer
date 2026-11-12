@@ -8,12 +8,12 @@ geometry, and the record CRC with a default a chip may answer faster) and
 an injected `ObjectHasher`. Not linked into any firmware yet: M5 wires it behind the C6's
 non-default `fs-tree` feature.
 
-**Every on-flash byte is in [`FORMAT.md`](FORMAT.md)** (format version 3),
+**Every on-flash byte is in [`FORMAT.ai.md`](FORMAT.ai.md)** (format version 3),
 pinned by `tests/format_golden.rs`. This README is the design, the dials,
 the RAM and code figures, and what changed from the prototype.
 
 The format has **room to grow without a version bump** (G1, option B;
-FORMAT.md "Versioning and extension"): compat and incompat flags and the
+FORMAT.ai.md "Versioning and extension"): compat and incompat flags and the
 sector size in every sector header, a skippable TLV tail on the root, and
 record kinds this version does not know skipped as garbage. A good header
 with an unknown incompat flag, an unknown head kind or another sector size
@@ -31,7 +31,7 @@ change has to be readable, or cleanly refused, by the core before it.
 
 - Files are absolute paths; directories are implicit. Every file, chunk,
   directory and root is a record whose id is 64 bits of SHA-256 over a tag
-  and its bytes (FORMAT.md "Ids"). A multi-part node's id is a **Merkle**
+  and its bytes (FORMAT.ai.md "Ids"). A multi-part node's id is a **Merkle**
   hash of its children, so an append rewrites only the right spine.
 - The tree is a **cold** directory tree (path-copied on change) and a flat
   **hot** directory of every `…/.lp/panel.json` by full path; the **root**
@@ -57,7 +57,7 @@ change has to be readable, or cleanly refused, by the core before it.
   to its length or its id, and stores the deflated bytes as they came (or
   the logical bytes, when the stream does not fit a record or does not
   shrink — same id). Device writes are stored.
-- **The wire contract** (wire 42, `docs/adr/2026-10-10-fs-push-boundary-and-deflated-writes.md`).
+- **The wire contract** (wire 42, `docs/adr/2026-10-10-fs-push-boundary-and-deflated-writes.ai.md`).
   `LpFsTree` is the one `LpFs` whose `batches_are_atomic()` is `true`, so a
   server answers `BeginBatch` with `atomic: true` and a push is one
   transaction, committed after the board has loaded and hashed it. An
@@ -76,7 +76,7 @@ change has to be readable, or cleanly refused, by the core before it.
   back. A mismatch retires the sector (never opened, erased or collected
   again; persisted in the next root), and the record goes elsewhere.
 - **Mount reads what it needs, not every byte ever written** (A2,
-  2026-10-16; FORMAT.md "A faster reading"). Its first pass reads the
+  2026-10-16; FORMAT.ai.md "A faster reading"). Its first pass reads the
   newest sector of each kind whole and CRC-checked (the only place a cut
   can have torn a program) and every other sector by its record headers
   alone, reading only roots whole; it notes where each sector's records
@@ -85,10 +85,10 @@ change has to be readable, or cleanly refused, by the core before it.
   a transient **whole index** (12 B a record on flash, `mount_index.rs`;
   K1+ of the mount study, 2026-10-16). Then it indexes only the newest
   root's closure, level by level: with the whole index, each level's ids
-  are looked up there (the copy in the later sector, as FORMAT.md keeps);
+  are looked up there (the copy in the later sector, as FORMAT.ai.md keeps);
   without it (it outgrew its cap, or the dial is 0), by one scan of record
   headers over the sectors the filters say may hold the level's ids,
-  newest sector first, so the first copy seen is the one FORMAT.md keeps.
+  newest sector first, so the first copy seen is the one FORMAT.ai.md keeps.
   The two ways adopt the same records (`mount_walk.rs`'s tests, and every
   cut of the in-crate sweeps mounts both ways and compares). Each record
   found is visited with the mark's own step, every root, directory and
@@ -122,7 +122,7 @@ change has to be readable, or cleanly refused, by the core before it.
   records end at a record that did not check, it programs that record's
   header to zeros (it then fails on every read); a newest sector holding no
   record is not resumed. Every later mount reads what this one read
-  (`docs/defects/2026-10-14-tree-store-trusts-a-torn-record-that-reads-whole-once.md`).
+  (`docs/defects/2026-10-14-tree-store-trusts-a-torn-record-that-reads-whole-once.ai.md`).
 - **Lookups walk.** No path is kept in RAM: `get`, `file_size` and
   `exists` read one directory record per path level from the working tree
   (the delta laid over it), as writes do. A lookup costs flash reads, not
@@ -134,7 +134,7 @@ change has to be readable, or cleanly refused, by the core before it.
   live upper bounds and marks only when they say no, so it is cheap far
   from full; near full it costs a mark a write phase. Because it never
   reads the layout, a step and its re-run after a power cut get the same
-  answer (`docs/defects/2026-10-10-tree-store-gc-cannot-pack-what-the-bound-admits.md`).
+  answer (`docs/defects/2026-10-10-tree-store-gc-cannot-pack-what-the-bound-admits.ai.md`).
 - **GC** runs only when free space is short, at the start of a write phase
   (when everything written is reachable from the committed root, the working
   tree, the delta and the in-flight directories of a flush): a full mark
@@ -286,7 +286,7 @@ namespace), and the numbers reserved for the index checkpoint
 (`INDEX_CHUNK_KIND`, `INDEX_FENCE_KIND`, `INDEX_TOP_ROOT_TAG`, …,
 `format_reservations.rs`).
 
-**`LpFsTree`'s writer rules** (each in FORMAT.md): a new file under a file,
+**`LpFsTree`'s writer rules** (each in FORMAT.ai.md): a new file under a file,
 or where files are, is refused (`InvalidPath`, nothing written: a file and a
 directory never share a name); nothing is written under `/.lp/snapshots/`
 (`InvalidPath`); and with `with_secret_paths(is_secret)` — the firmware
@@ -318,7 +318,7 @@ first `format` at every operation under every named tear model, over blank,
 littlefs-shaped and garbage flash: every cut mounts as `NoStore`, and a
 second format works.
 
-**`format` is lazy** (FORMAT.md "Formatting"): it erases two sectors, not
+**`format` is lazy** (FORMAT.ai.md "Formatting"): it erases two sectors, not
 all of them. Sectors 0 and 1 — littlefs's superblock pair, so neither a
 littlefs core nor the host's probe finds the old files again — are killed,
 erased and read back, and the two heads open there. Every other sector
@@ -373,7 +373,7 @@ lp-cli hardware tree extract --image raw-lpfs-0x350000-123.bin --out ./recovered
   rules (mount accepts a CRC-good tree whose names break them; `list` calls
   such a name corrupt). It also accounts for the rest of the flash: every
   sector that refuses the mount is named (`NEWER` = the magic and a format
-  version above this tool's, FORMAT.md "Sector" rule 0) with whether the
+  version above this tool's, FORMAT.ai.md "Sector" rule 0) with whether the
   other sectors are a complete store, orphans, older copies (which must be
   byte-identical), torn tails (a warning: a handled crash), retired sectors,
   and, with `--reread` (or `--port`, which reads the board twice), sectors
@@ -450,7 +450,7 @@ settles nothing and on one that re-programs a tail it read whole but leaves
 one it read bad (both at per-call step 2, cut 6, seed 33: a torn root).
 
 **Log order and root placement** (`log_order_check.rs`): every sweep
-above (and the remount sweep) checks FORMAT.md's I4 and I5 over raw images
+above (and the remount sweep) checks FORMAT.ai.md's I4 and I5 over raw images
 after every fault-free step and every cut — nothing changed below a head's
 records' end or in a sector that is not a head, a new header's seq newer
 than every trusted one, every root in a hot sector, root seqs never
@@ -469,7 +469,7 @@ in the reserved layout mounting as if absent.
 sector sequence (u32) wraps safely under cuts; the root sequence (u64) does
 not — a commit past `u64::MAX` mounts as the one before it, pinned by
 `the_root_sequence_does_not_wrap`
-(`docs/defects/2026-10-08-tree-store-root-sequence-does-not-wrap.md`; 2^64
+(`docs/defects/2026-10-08-tree-store-root-sequence-does-not-wrap.ai.md`; 2^64
 commits, not reachable in practice).
 
 **Idle steps** (`idle_gc_tests.rs`): a step changes no file; steps settle
@@ -560,7 +560,7 @@ See "G1 figures" for the numbers.
 The one-way-door review and the 8 MB screen
 (`lp2025/2026-10-16-1043-tree-store-mount-study`) found no byte to change;
 the director adopted these provisions (plan
-`lp2025/2026-10-16-0848-tree-store-adoption`), all in FORMAT.md:
+`lp2025/2026-10-16-0848-tree-store-adoption`), all in FORMAT.ai.md:
 
 | provision | where | bytes on flash |
 |---|---|---|
@@ -580,7 +580,7 @@ the director adopted these provisions (plan
 ## Future options
 
 **Reading the erase count from a killed header.** A kill leaves bytes 4..20
-(FORMAT.md "Writing and killing"), so a mount could take a killed sector's
+(FORMAT.ai.md "Writing and killing"), so a mount could take a killed sector's
 erase count (magic and CRC zero, version 3, its sector size) instead of
 starting it at 0, and keep wear history across a lazy format or a cut
 between kill and erase. Not done: it changes which sector `open_sector`
@@ -589,7 +589,7 @@ writer improvement that needs no format change.
 
 **An identity for a store** (for Studio backups): a root tag, if wanted. A
 store id in every sector header was considered and rejected before the
-freeze (FORMAT.md "Growing the partition").
+freeze (FORMAT.ai.md "Growing the partition").
 
 **A RAM path table** (removed in the size pass, `5db02b3d0`): a sorted
 table of `(path hash u64, file id u64, size u32)` rows, 20 B per file, built
@@ -624,7 +624,7 @@ layout, before the extension room).
 
 Added: verify-after-write and sector retirement (and `lp-nor-sim`'s
 injected wear-out), host-deflated chunks, the `LpFs` adapter and the trait's
-batch methods, FORMAT.md and its golden.
+batch methods, FORMAT.ai.md and its golden.
 
 The prototype's design corrections that still apply all hold: kill before
 erase; dedup only against complete closures; a record never spans a sector;
@@ -643,7 +643,7 @@ logical bytes, stored or deflated.)
    files of a directory with more than ~35 entries (at `record_max` 1024)
    were garbage to GC. Latent there (no prototype test GC'd a big
    directory); v1's mark reassembles a directory node, and directory multis
-   carry a flag (FORMAT.md "Multi").
+   carry a flag (FORMAT.ai.md "Multi").
 2. **GC could not win back tails.** A sector stops being a head when a
    record does not fit, keeping an unused tail; the prototype's victim rule
    only took sectors with garbage, so a flash of live-dense sectors with
@@ -670,7 +670,7 @@ logical bytes, stored or deflated.)
 
 ### Found by M3's long walks (fixed after G1)
 
-`docs/defects/2026-10-09-tree-store-rerun-after-a-cut-is-refused-at-the-edge.md`:
+`docs/defects/2026-10-09-tree-store-rerun-after-a-cut-is-refused-at-the-edge.ai.md`:
 on a nearly full flash, a step that fitted was refused `NoSpace` when run
 again after a power cut. Nothing committed was lost; the store refused a
 write it could hold. Five causes, each pinned by `edge_gc_tests.rs`:
@@ -700,7 +700,7 @@ write it could hold. Five causes, each pinned by `edge_gc_tests.rs`:
    round the same few sectors. Compaction now copies the largest record
    that fits the head's tail first, and opens a sector only when none does.
 
-Then `docs/defects/2026-10-10-tree-store-gc-cannot-pack-what-the-bound-admits.md`
+Then `docs/defects/2026-10-10-tree-store-gc-cannot-pack-what-the-bound-admits.ai.md`
 (first accepted, then fixed in F2): packed to the reserve, a re-run after a
 cut could still be refused where the step fitted, by a few bytes of layout
 (11 of 792 in-crate re-runs; M3's c13 walks at 48 sectors 4 of 4 stopped;
@@ -776,7 +776,7 @@ the test's ceilings hold.
 
 Mount read every byte ever written: on CX1 a written-out partition (the
 soak's) mounted in 554 ms and one full of live files in 793 ms. A2 makes it
-read what it needs ("The design in brief"; FORMAT.md "A faster reading of
+read what it needs ("The design in brief"; FORMAT.ai.md "A faster reading of
 steps 2–3"). No byte of the format changed.
 
 **What a mount costs on CX1** — a least-squares fit of 20 silicon mounts (4
@@ -885,9 +885,9 @@ written with checkpoints): used 70.6 → 31.8 ms, c40 29.7 → 31.4, empty
 full store), mount RAM up to ~29 KB on the used store (the checkpoint's
 entries plus the recent records, against the 16 KB budget — unoptimized),
 and a format allocation (kind 6, tag 1) that had to be decided before
-FORMAT.md froze. **Decided (2026-10-16, the 8 MB screen):** kinds 6 and 7
+FORMAT.ai.md froze. **Decided (2026-10-16, the 8 MB screen):** kinds 6 and 7
 and root tag 1 are reserved for an index checkpoint in a different, scalable
-layout (FORMAT.md "Reserved: the index checkpoint": sorted 14-byte entries,
+layout (FORMAT.ai.md "Reserved: the index checkpoint": sorted 14-byte entries,
 whole entries per chunk, fenced runs read in place, per-head-kind
 watermarks). The prototype's stream schema is loaded and rewritten whole and
 does not scale; if it is ever built it adopts that layout. The alternative, a per-sector summary written when a
@@ -1034,11 +1034,11 @@ B in 1,376 reads.
 > `calibrated` and `calibrated_before_erase`, every in-crate sweep passes at
 > its own geometry, 128 and 176 sectors, and the bench's `sweep` + `double`
 > fail 0 cases (lp-nor-sim simulator):
-> `docs/defects/2026-10-14-tree-store-trusts-a-torn-record-that-reads-whole-once.md`.
+> `docs/defects/2026-10-14-tree-store-trusts-a-torn-record-that-reads-whole-once.ai.md`.
 > The P10 numbers below are the 200-cut model's, on the store before it.
 
 `TearModel::Calibrated` is the tear measured on a real C6's flash (CX1, 200
-cuts, `docs/reports/2026-10-08-c6-nor-tear-calibration.md` §5): a torn
+cuts, `docs/reports/2026-10-08-c6-nor-tear-calibration.ai.md` §5): a torn
 erase pre-programs the sector to `0x00` front to back before lifting it, so
 it leaves a `0x00` run from offset 0, all `0x00`, a zero residue with weak
 bits, or a sector that reads `0xFF` (silently, 101 of 166 erase cuts); a

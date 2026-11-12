@@ -404,7 +404,7 @@ pub mod telemetry {
     /// Not `esp_println`: since wire proto 32 UART0 carries lp-link frames,
     /// and a raw line written from the render path while io_task writes a
     /// frame lands inside it — the concurrent-writer defect itself
-    /// (`docs/defects/2026-08-02-serial-line-interleaving.md`). Not `log`
+    /// (`docs/defects/2026-08-02-serial-line-interleaving.ai.md`). Not `log`
     /// either: a log record is cut at 200 bytes, a `[WS281X]` line runs to
     /// ~300, and the capacity-matrix scripts read its fields by position. A
     /// line the TX pipe has no room for this period is dropped; the next one

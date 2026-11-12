@@ -7,12 +7,12 @@
 //! here is the single most likely way to get this builtin wrong, which is why
 //! the shared helper spells the formula out once.
 //!
-//! **Tolerance (`docs/design/float.md` §6):** `1e-6` relative with a `1e-6`
+//! **Tolerance (`docs/design/float.ai.md` §6):** `1e-6` relative with a `1e-6`
 //! absolute floor. The subtraction can cancel badly when `x / y` is large, and
 //! that is inherent to the canonical formula — not something to "fix" with a
 //! different algorithm, since the canonical GLSL is normative.
 //!
-//! **Domain:** `y = 0` is GLSL-undefined (float.md §5); it yields NaN here and
+//! **Domain:** `y = 0` is GLSL-undefined (float.ai.md §5); it yields NaN here and
 //! never traps.
 
 /// GLSL `mod(x, y)`.
@@ -53,7 +53,7 @@ mod tests {
 
     #[test]
     fn zero_divisor_does_not_trap() {
-        // float.md §5: value Unspecified, so only "it returned" is asserted.
+        // float.ai.md §5: value Unspecified, so only "it returned" is asserted.
         let _ = __lps_mod_f32(1.0, 0.0);
     }
 }

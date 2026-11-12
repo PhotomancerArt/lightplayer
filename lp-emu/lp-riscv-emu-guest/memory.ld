@@ -17,7 +17,7 @@ STACK_SIZE = 0x30000;  /* 192KB stack */
  * same project — within 2.6%. So derive memory budgets from window deltas
  * (project-load, shader-compile) rather than from whether the guest survives
  * at a device-sized heap. See the plan directory referenced in
- * docs/adr/2026-08-01-esp32v3-flash-budget.md.
+ * docs/adr/2026-08-01-esp32v3-flash-budget.ai.md.
  *
  * Override for pressure experiments (verified 2026-08-02; note there is no
  * `-Wl,` prefix — rust-lld is invoked directly, not through a compiler driver,

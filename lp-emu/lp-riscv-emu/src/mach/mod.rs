@@ -1564,7 +1564,7 @@ impl<B: Bus> MachineHart<B> {
     ///
     /// It is `pub` for one caller and one reason: a translated core that wants
     /// to run polling point (c) **without ending its stay** has to run *this*,
-    /// not a copy of it (M7b, plan.md BD2). Two copies of a polling point is
+    /// not a copy of it (M7b, plan.ai.md BD2). Two copies of a polling point is
     /// the bug the poll import exists to avoid, so the rule is written down
     /// here rather than left to the caller:
     ///

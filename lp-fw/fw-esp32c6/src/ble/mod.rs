@@ -2,7 +2,7 @@
 //!
 //! The link itself is `fw_esp32_radio::ble` (bring-up, the host runner,
 //! advertising, each connection's link; the decision record is
-//! `docs/adr/2026-09-24-ble-transport.md`). What stays here is this chip's:
+//! `docs/adr/2026-09-24-ble-transport.ai.md`). What stays here is this chip's:
 //! the controller's configuration ([`ble_controller_config`], NPL setters
 //! only this controller family has), and the rule that the XIAO-C6's RF
 //! switch is set before the controller starts ([`start`] takes the proof).

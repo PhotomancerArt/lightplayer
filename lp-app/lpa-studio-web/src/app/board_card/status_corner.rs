@@ -1,6 +1,6 @@
 //! [`StatusCorner`]: the status corner, a 24 px notch cut out of the
 //! picture's top-right corner (not laid over it): a quiet ⋯ in every state
-//! (`docs/ux/anatomy/board-card.md`, "Corner"). It says nothing itself —
+//! (`docs/ux/anatomy/board-card.ai.md`, "Corner"). It says nothing itself —
 //! what needs you, and the editor holding the board, are the surface's to
 //! say — and it keeps the card's details one press away.
 //!

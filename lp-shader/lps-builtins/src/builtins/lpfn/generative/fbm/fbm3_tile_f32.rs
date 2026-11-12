@@ -3,7 +3,7 @@
 //! Transliterated from the canonical GLSL
 //! `glsl/lpfn/generative/fbm/fbm3_tile.glsl` (normative): normalized octave sum
 //! of tilable gradient noise with persistence 0.5 and lacunarity 2.0. FBM is a
-//! standard procedure (see docs/reports/2026-03-31-lpfx-license-audit.md).
+//! standard procedure (see docs/reports/2026-03-31-lpfx-license-audit.ai.md).
 //!
 //! Note the octave loop scales the tile length as well as the position, so each
 //! octave tiles at its own frequency — that is what keeps the sum periodic.
@@ -58,7 +58,7 @@ mod tests {
     #[test]
     fn zero_octaves_is_the_canonical_zero_over_zero() {
         // The canonical divides by the accumulated normalization, which is 0
-        // with no octaves. float.md §3 makes that NaN rather than a trap, and
+        // with no octaves. float.ai.md §3 makes that NaN rather than a trap, and
         // the canonical has the same behavior — so this pins "does not crash",
         // not a value.
         assert!(__lp_lpfn_fbm3_tile_f32(1.0, 2.0, 3.0, 4.0, 0, 0).is_nan());

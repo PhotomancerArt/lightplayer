@@ -90,7 +90,7 @@
 //! **0.325 s**. So the watchdog is counting from the reset vector and the
 //! bootloader turns it off with room to spare; a bootloader that never gets
 //! there resets the chip, which is the whole of
-//! `docs/defects/2026-09-06-c6-analog-master-wedges-the-bootloader.md` —
+//! `docs/defects/2026-09-06-c6-analog-master-wedges-the-bootloader.ai.md` —
 //! whose board looped "about every 0.4 s", against 0.325 s of watchdog plus
 //! the 40 ms of ROM in front of it.
 //!

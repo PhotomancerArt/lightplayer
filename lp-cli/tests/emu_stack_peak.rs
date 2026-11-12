@@ -9,7 +9,7 @@
 //! (`scripts/heap-budget-check.sh`, "The stack's size is derived"), which a
 //! loaded project exceeds three times over, so until this test nothing failed
 //! when the stack fell below what the flagship needs
-//! (`docs/defects/2026-10-09-the-c6-main-stack-margin-is-unguarded.md`).
+//! (`docs/defects/2026-10-09-the-c6-main-stack-margin-is-unguarded.ai.md`).
 //!
 //! The run, per project: the shipped split image (loader direct-loaded over
 //! the flashed chip, as the heap ratchet boots it) with this process as the
@@ -110,7 +110,7 @@ fn the_main_stack_holds_the_deepest_projects_with_a_12_kib_margin() {
         "the C6 main stack gate ({CONFIGURATION}):\n  {}\n\n{}\nThe main stack is what main \
          RAM leaves after the statics and HEAP_MAIN (lp-fw/fw-esp32c6/src/board/esp32c6/init.rs). \
          Give it back from HEAP_MAIN, or make the path shallower; never lower the margin to pass \
-         (docs/defects/2026-10-09-the-c6-main-stack-margin-is-unguarded.md).",
+         (docs/defects/2026-10-09-the-c6-main-stack-margin-is-unguarded.ai.md).",
         failures.join("\n  "),
         table(&rows)
     );

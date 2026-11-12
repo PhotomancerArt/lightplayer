@@ -426,7 +426,7 @@ pub fn sexth(rd: Gpr, rs1: Gpr) -> u32 {
 /// Encoding it as OP-IMM funct3=100 / funct12=0x080 — which is what this used
 /// to do — is bit-for-bit `xori rd, rs1, 128`, and the decoder that matched it
 /// stole that instruction from the base ISA. See
-/// `docs/defects/2026-07-31-zexth-encoding-steals-xori-128.md`.
+/// `docs/defects/2026-07-31-zexth-encoding-steals-xori-128.ai.md`.
 pub fn zexth(rd: Gpr, rs1: Gpr) -> u32 {
     encode_r(0x33, rd, rs1, Gpr::new(0), 0x4, 0x04)
 }

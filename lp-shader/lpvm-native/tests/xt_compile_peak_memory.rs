@@ -1,6 +1,6 @@
 //! Peak-DRAM probe for the GLSL → Xtensa compile pipeline (the classic's
 //! compile-transient OOM shape,
-//! `docs/defects/2026-08-29-shader-jit-compile-transient-starves-classic-heap.md`).
+//! `docs/defects/2026-08-29-shader-jit-compile-transient-starves-classic-heap.ai.md`).
 //!
 //! The device compiles `catalog/projects/zook-dome/shader.glsl` through exactly this
 //! path — `lps-glsl` staged frontend, the two synthesised render wrappers,

@@ -7,7 +7,7 @@
 //! builder fills a gap with the image's RAM segments first and writes **an
 //! address-0 segment of zeros** for what is left. The IDF bootloader skips
 //! one; the C6 split loader copies it to address 0 and faults
-//! (`docs/defects/2026-10-14-the-c6-loader-copies-an-address-zero-padding-segment-to-address-zero.md`).
+//! (`docs/defects/2026-10-14-the-c6-loader-copies-an-address-zero-padding-segment-to-address-zero.ai.md`).
 //!
 //! The loader is never updated over the air, so the image changes instead:
 //! each padding segment's **load address** becomes a run of the core's

@@ -31,7 +31,7 @@ pub struct NorTiming {
 }
 
 /// The program size the C6's mask ROM sends (`esp_rom_spiflash_write` cuts a
-/// write into 32-byte page programs; `docs/reports/2026-10-08-c6-nor-tear-calibration.md`
+/// write into 32-byte page programs; `docs/reports/2026-10-08-c6-nor-tear-calibration.ai.md`
 /// found the tear unit is this command, not the 256-byte page). A program of
 /// any other size is billed per started unit of this many bytes.
 pub const PROGRAM_UNIT: u32 = 32;

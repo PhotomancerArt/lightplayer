@@ -5,7 +5,7 @@
 // builtin, matching
 // `src/builtins/lpfn/generative/worley/worley2_value_q32.rs`.
 // Same nearest-feature search as lpfn_worley (noise-rs lineage,
-// MIT/Apache-2.0 — see docs/reports/2026-03-31-lpfx-license-audit.md), but
+// MIT/Apache-2.0 — see docs/reports/2026-03-31-lpfx-license-audit.ai.md), but
 // returns a per-cell hash value in approximately [-1, 1] instead of the
 // distance.
 //

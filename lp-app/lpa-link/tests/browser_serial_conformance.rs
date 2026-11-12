@@ -1,5 +1,5 @@
 //! The Web Serial JS layer, executed in a real Chrome against a virtual USB
-//! bus — the harness `docs/debt/web-serial-js-untestable.md` has been asking
+//! bus — the harness `docs/debt/web-serial-js-untestable.ai.md` has been asking
 //! for since 2026-07-10.
 //!
 //! Every test here drives the SHIPPED JS: `browser_serial.js` and, through
@@ -712,7 +712,7 @@ async fn a_chip_reset_does_not_re_enumerate() {
 
 /// `closePort` releases the streams and KEEPS the session entry, because the
 /// entry is the grant handle and the flash flow closes the link session then
-/// flashes through the same id (`docs/defects/2026-07-22-flash-session-map-deleted.md`).
+/// flashes through the same id (`docs/defects/2026-07-22-flash-session-map-deleted.ai.md`).
 /// `forgetPort` is the contrast: the grant is gone, so the entry goes with it
 /// and the port stops being enumerated.
 #[wasm_bindgen_test]
@@ -1120,7 +1120,7 @@ async fn the_signal_lines_pass_through_undecoded() {
 
 // ---------------------------------------------------------------------------
 // Chrome on Android: the same boards over WebUSB
-// (`docs/adr/2026-10-18-android-usb-over-webusb.md`)
+// (`docs/adr/2026-10-18-android-usb-over-webusb.ai.md`)
 // ---------------------------------------------------------------------------
 
 /// Put the installed boards behind Chrome-on-Android's facts (see
@@ -1351,7 +1351,7 @@ async fn hotplug_edges_arrive_from_a_re_enumeration() {
 /// generation once it goes back in — and reads.
 ///
 /// The 2026-09-24 walk's stuck card
-/// (`docs/defects/2026-09-24-emulated-replug-leaves-the-old-byte-channel-open.md`):
+/// (`docs/defects/2026-09-24-emulated-replug-leaves-the-old-byte-channel-open.ai.md`):
 /// `detach` errored the open port's stream but left the board's byte channel
 /// open underneath it, so the replugged port's `open()` met the old socket
 /// ("already open in this page") and the card sat at "Attached — not
@@ -1591,7 +1591,7 @@ async fn a_request_is_one_link_message_and_its_answer_comes_back_packed_on(board
     // No `M!` line: every byte the host wrote is in a link frame. Not a
     // search for the bytes `M!`, which the host's nonce and checksums hold
     // by chance about once in 3,000 runs
-    // (docs/defects/2026-10-09-a-conformance-test-matched-m-bang-in-a-random-crc.md).
+    // (docs/defects/2026-10-09-a-conformance-test-matched-m-bang-in-a-random-crc.ai.md).
     let preset = board.host_preset();
     let messages = host_proto_messages(bench.host_wrote(), &preset);
     assert!(
@@ -2212,7 +2212,7 @@ fn answer(reads: &[WireRead], id: u64) -> Option<&ReadFrame> {
 /// ACK, the request (id 41) and an ACK. Rebuilt from the panic's lossy
 /// Debug string, which it reproduces character for character: the nonce is
 /// the only one that fits both SYNs' checksums, and every other checksum
-/// follows from it (docs/defects/2026-10-09-a-conformance-test-matched-m-bang-in-a-random-crc.md).
+/// follows from it (docs/defects/2026-10-09-a-conformance-test-matched-m-bang-in-a-random-crc.ai.md).
 const HOST_WROTE_IN_CI: [u8; 212] = [
     0x00, 0x02, 0x03, 0x01, 0x01, 0x05, 0x42, 0xbb, 0xd4, 0xe7, 0x01, 0x01, 0x01, 0x01, 0x01, 0x07,
     0x01, 0x04, 0xdd, 0x5f, 0x4d, 0x21, 0x00, 0x00, 0x02, 0x03, 0x01, 0x01, 0x06, 0x42, 0xbb, 0xd4,

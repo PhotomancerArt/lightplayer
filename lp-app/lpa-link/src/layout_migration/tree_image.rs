@@ -14,7 +14,7 @@
 //! The reader mounts with `TreeStore::mount`, the firmware's own mount, over
 //! a **copy** of the bytes.
 //!
-//! **Directories are implicit in the tree store** (FORMAT.md "Files and
+//! **Directories are implicit in the tree store** (FORMAT.ai.md "Files and
 //! paths"): a directory exists while a file is under it. An empty littlefs
 //! directory is not carried; every file is.
 
@@ -159,7 +159,7 @@ pub fn used_sectors(image: &[u8]) -> Vec<u32> {
 /// it, and measure it — or refuse with nothing written.
 pub fn pack_tree(tree: &LpfsTree, geometry: LpfsGeometry) -> Result<PackedTree, Refusal> {
     // The reserved snapshot namespace is the snapshot feature's alone
-    // (FORMAT.md "The snapshot namespace"; `LpFsTree` refuses writes there
+    // (FORMAT.ai.md "The snapshot namespace"; `LpFsTree` refuses writes there
     // too): a littlefs file under it is refused by name, never carried.
     if let Some((path, _)) = tree
         .files()
@@ -186,7 +186,7 @@ pub fn pack_tree(tree: &LpfsTree, geometry: LpfsGeometry) -> Result<PackedTree, 
     let record_max = store.config().record_max;
     store.begin().map_err(|e| failed("begin", e))?;
     for (path, bytes) in tree.files() {
-        // A file and a folder never share a name (FORMAT.md "Files and
+        // A file and a folder never share a name (FORMAT.ai.md "Files and
         // paths"). littlefs cannot hold both either, so this never fires on
         // a board's own files; a backup made elsewhere could.
         if store.name_clash(path).map_err(|e| failed(path, e))? {

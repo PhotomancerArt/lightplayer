@@ -1070,7 +1070,7 @@ impl C6Ops {
 
     /// Republish `Systimer`'s `unit0_value.{lo,hi}` and arm the block — or
     /// leave it disarmed, when this run's configuration forbids the path
-    /// (M7b P3, plan.md BD3).
+    /// (M7b P3, plan.ai.md BD3).
     ///
     /// The three refusals here are the ones the entry rules do **not** already
     /// cover, and none of them is optional:
@@ -1171,7 +1171,7 @@ impl C6Ops {
     }
 
     /// **Polling point (c)**, run by the hart itself, from inside a stay
-    /// (M7b P2, plan.md BD2).
+    /// (M7b P2, plan.ai.md BD2).
     ///
     /// This is not a re-implementation and it is not a test of whether the
     /// poll *would* have mattered. It is the same three lines
@@ -2445,7 +2445,7 @@ impl TranslatedCore<SocBus> for JitCore {
         if hart.instruction_count() == instret {
             self.stats.exit_no_progress += 1;
         }
-        // M7b P4 / plan.md BD5. This `BTreeMap` lookup answers nothing the
+        // M7b P4 / plan.ai.md BD5. This `BTreeMap` lookup answers nothing the
         // stay needs — the module has already left, and its only consumers
         // are the two counters below. It is how a coverage shortfall names
         // itself, so it gets the same `LP_EMU_JIT_EXITS` switch `exit_sites`

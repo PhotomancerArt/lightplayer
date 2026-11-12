@@ -22,7 +22,7 @@
 //! flash-boot-protection watchdog (reset-armed, bootloader-disarmed — see
 //! [`super::timg`]) as the only thing that moves. Disassembled from
 //! the wedged board's own bootloader segment
-//! (`docs/defects/2026-09-06-c6-analog-master-wedges-the-bootloader.md`):
+//! (`docs/defects/2026-09-06-c6-analog-master-wedges-the-bootloader.ai.md`):
 //!
 //! ```asm
 //! 756: lui  a5, 0x600b2
@@ -83,7 +83,7 @@
 //!
 //! `{slave_addr, slave_reg_addr}` → the byte last written there, exactly as
 //! the HP master keeps it, and for the same reason
-//! (`docs/defects/2026-09-08-regi2c-is-one-data-register-not-a-register-file.md`:
+//! (`docs/defects/2026-09-08-regi2c-is-one-data-register-not-a-register-file.ai.md`:
 //! one shared `data` byte answers a read of any analog register with the
 //! last value written to any other). The store is **this block's own**, not
 //! shared with the HP master: the two apertures reach the same analog slaves

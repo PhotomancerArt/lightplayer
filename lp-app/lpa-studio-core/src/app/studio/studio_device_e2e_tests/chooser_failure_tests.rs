@@ -1,7 +1,7 @@
 //! Connect a board's USB or Bluetooth press, picked in the browser's
 //! chooser and then failed: the section says so under its squares, and the
 //! next press clears it. Before 2026-10-17 it was one console warning
-//! (`docs/defects/2026-10-17-an-android-phone-connecting-over-bluetooth-panics-the-c6.md`).
+//! (`docs/defects/2026-10-17-an-android-phone-connecting-over-bluetooth-panics-the-c6.ai.md`).
 //!
 //! The bench's transport has no Bluetooth of its own, so its chooser fails
 //! the way a browser's would (the trait's default answer).

@@ -23,7 +23,7 @@
 //! `step-shorter`/`step-longer`, `prev`/`next`) — this component decides
 //! nothing, and a verb core does not publish draws inert. While the panel holds the cycle or the switch
 //! set, those controls wear the engaged gold and a reset glyph releases
-//! them (panel.md P2: clear is always one obvious gesture).
+//! them (panel.ai.md P2: clear is always one obvious gesture).
 //!
 //! State changes are class swaps, never inline `style` writes (Dioxus
 //! whole-string style writes never remove properties).
@@ -41,7 +41,7 @@ use crate::app::module::PanelGesture;
 use crate::base::{StudioIcon, StudioIconName};
 use crate::core::use_offers;
 
-/// A squared block button: the discrete-control language (panel.md; the
+/// A squared block button: the discrete-control language (panel.ai.md; the
 /// stepped knob's blocks).
 const BLOCK_CLASS: &str = "tw:inline-flex tw:h-8 tw:min-w-8 tw:flex-none tw:cursor-pointer tw:appearance-none tw:items-center tw:justify-center tw:rounded-xs tw:border tw:border-border-strong tw:bg-card-raised tw:px-2 tw:font-mono tw:text-xs tw:text-strong-foreground tw:hover:border-muted-foreground";
 /// The same block with nothing to do: kept in place so the row never
@@ -418,7 +418,7 @@ fn ActionBlock(
     }
 }
 
-/// Release one held channel (panel.md P2): the gold revert glyph.
+/// Release one held channel (panel.ai.md P2): the gold revert glyph.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn ResetGlyph(

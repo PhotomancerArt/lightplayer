@@ -44,7 +44,7 @@ crate may depend on an AGPL workspace crate (`just lint-emu-fence`).
   must only trust a sector it finished erasing *and then marked*.
 - **`Calibrated`** (`calibrated_tear.rs`) — tears shaped and weighted the
   way a real part tore: 700 power cuts on CX1, a generic C6 board with flash
-  JEDEC `0x464016` (`docs/reports/2026-10-08-c6-nor-tear-calibration.md`;
+  JEDEC `0x464016` (`docs/reports/2026-10-08-c6-nor-tear-calibration.ai.md`;
   fitted on the first 200 aligned, re-fitted on 500 aligned, then on all
   700 when the 200 unaligned cuts showed two erase states it could not
   draw). A torn **program** lands a prefix of exactly what was asked, ending

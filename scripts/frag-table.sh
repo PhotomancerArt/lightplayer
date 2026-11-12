@@ -11,7 +11,7 @@ set -euo pipefail
 # The discounts are not optional: `fw-emu` runs a 256-resource board manifest,
 # so `VirtualWs281xDriver::endpoints` and the manifest's `Vec<HwResource>`
 # allocate amounts no firmware ever will and would dominate every row. See
-# docs/heap-budget-gate.md, "Discounting emulator-only artifacts".
+# docs/heap-budget-gate.ai.md, "Discounting emulator-only artifacts".
 #
 # ⚠️ `--mode startup` stops at the frame that contained the first shader
 # compile, and the staged reads are served in those same ticks — so what lands

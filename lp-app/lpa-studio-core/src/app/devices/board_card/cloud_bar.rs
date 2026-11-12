@@ -1,5 +1,5 @@
 //! The lightplayer.app row: the board reached through the cloud
-//! (`docs/ux/anatomy/board-card.md`, "lightplayer.app"). Its kind is the
+//! (`docs/ux/anatomy/board-card.ai.md`, "lightplayer.app"). Its kind is the
 //! link's name, "lightplayer.app"; signed in, its name is the account (its
 //! email) and its state says whether lightplayer.app can reach the board,
 //! and why not. It has its own row for privacy —

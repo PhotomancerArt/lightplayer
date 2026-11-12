@@ -34,7 +34,7 @@
 //!   key-pointer cache (keys are many and hashed).
 //! - **Async:** the crate's futures run on a null-waker `block_on` written
 //!   here — the flash is synchronous, so every poll completes (a test edge,
-//!   per AGENTS.md "Sans-IO core"). The flash newtype declares the C6's
+//!   per AGENTS.ai.md "Sans-IO core"). The flash newtype declares the C6's
 //!   4-byte word (as `esp-storage` does).
 
 use std::cell::RefCell;

@@ -366,7 +366,7 @@ timings come from the WS2811/WS2812B datasheets; the RMT item format from the
 ESP32 technical reference manuals.
 
 **No GPL source was consulted** — in particular not WLED, which implements the
-same idea. See `AGENTS.md` and
+same idea. See `AGENTS.ai.md` and
 [`docs/adr/2026-07-28-license-provenance-discipline.md`](../docs/adr/2026-07-28-license-provenance-discipline.md).
 
 ## Reconciliation against the experiment repo

@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 
 /// The only archive format this build reads and writes.
 ///
-/// Alpha posture (`docs/adr/2026-07-28-share-envelopes.md`'s house rule):
+/// Alpha posture (`docs/adr/2026-07-28-share-envelopes.ai.md`'s house rule):
 /// version and refuse, never migrate. v1 (July 2026) is refused.
 pub const BACKUP_FORMAT_VERSION: u32 = 2;
 

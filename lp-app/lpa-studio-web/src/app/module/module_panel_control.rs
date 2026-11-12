@@ -7,7 +7,7 @@
 //! control's detail popup instead, behind its label.
 //!
 //! State is carried entirely by color and by the presence of the reset
-//! glyph — the three states `docs/design/panel.md` P-Q2 requires to be
+//! glyph — the three states `docs/design/panel.ai.md` P-Q2 requires to be
 //! visibly distinct:
 //!
 //! | state | widget + label + value | reset glyph |
@@ -43,7 +43,7 @@
 //!
 //! **Walk hooks**, on the control wherever a panel draws it (the editor,
 //! the play page, the board card): `data-panel-scope` and
-//! `data-panel-channel` (its identity, panel.md P1) and `data-panel-state`
+//! `data-panel-channel` (its identity, panel.ai.md P1) and `data-panel-state`
 //! (`read-default`, `read-following`, `engaged`). A walk reads a control
 //! written in one session as held in the next — the board's own word, since
 //! a fresh session has no local echo.
@@ -113,7 +113,7 @@ pub fn ModulePanelControl(
     /// The channel's control view: widget payload plus panel state.
     view: UiPanelControlView,
     /// The scope this control lives in — the other half of its identity
-    /// (panel.md P1), what a reset gesture carries, and what the detail
+    /// (panel.ai.md P1), what a reset gesture carries, and what the detail
     /// popup names.
     scope: String,
     /// Play mode renders the same control at a roomier size.
@@ -130,7 +130,7 @@ pub fn ModulePanelControl(
     #[props(default = false)]
     detail_initially_open: bool,
     /// Widget value writes: a control carrying a `panel_target` dispatches
-    /// `PanelWriteOp` (panel.md P8); an unbound one falls back to the
+    /// `PanelWriteOp` (panel.ai.md P8); an unbound one falls back to the
     /// existing slot-edit path.
     #[props(default)]
     on_action: Option<EventHandler<UiAction>>,

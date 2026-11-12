@@ -125,7 +125,7 @@ interval_us latency timeout_ms [idle_after_ms idle_interval_us idle_latency]
 
 With no file, the board asks for the shipped 15 ms / latency 0 / 4 s. This
 is how the M4 runs K and L measured latency 4 against latency 0 (the plan's
-`spike-results.md`; ruling in `docs/adr/2026-09-24-ble-transport.md`,
+`spike-results.md`; ruling in `docs/adr/2026-09-24-ble-transport.ai.md`,
 Amendment).
 
 ## No phone, no human: the Mac's own Chrome as the central
@@ -467,7 +467,7 @@ host tests, the conformance suite and `?ble=emu` all stop short of it
    `no login within 10 s — closing` after a drop. If the page goes to
    Devices instead, that is a finding: note the time, keep the board's
    console and, if you can, record the session (`?record=`,
-   docs/recording-a-studio-session.md).
+   docs/recording-a-studio-session.ai.md).
 7. **Phone (optional, closest to a user)**: the same from Bluefy on iOS,
    over `tailscale serve --bg --https=8443 http://127.0.0.1:<studio port>`.
    iOS negotiates ATT MTU 185, so frames carry 174 B of payload instead of

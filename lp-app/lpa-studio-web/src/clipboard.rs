@@ -2,7 +2,7 @@
 //!
 //! Sharing has no cloud provider yet, so the clipboard and the filesystem
 //! are the whole distribution story (see
-//! `docs/adr/2026-07-28-share-envelopes.md`). This module is the one place
+//! `docs/adr/2026-07-28-share-envelopes.ai.md`). This module is the one place
 //! that touches `navigator.clipboard`; core stays sans-IO and deals only in
 //! envelope bytes.
 //!

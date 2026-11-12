@@ -12,7 +12,7 @@
 // once `/status` says no send the lab decided on is still in flight. Sleeping
 // 300 ms and counting lines is what the suite did before, and on a loaded
 // runner the stub sender's shell had not always run by then
-// (docs/defects/2026-09-25-emu-lab-cooldown-tests-measured-wall-clock.md).
+// (docs/defects/2026-09-25-emu-lab-cooldown-tests-measured-wall-clock.ai.md).
 'use strict';
 
 import { test } from 'node:test';

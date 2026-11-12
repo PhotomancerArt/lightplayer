@@ -244,7 +244,7 @@ thing whichever transcript is given to `replay` first, and a payload the `on`
 list omits is compared exactly, as before. The field is additive: an entry
 with no band behaves exactly as every entry did before it existed. See the
 hardware-validation ADR's 2026-09-08 amendment, and
-`docs/reports/2026-09-08-esp32c6-t3-calibration.md` §4 for the first one.
+`docs/reports/2026-09-08-esp32c6-t3-calibration.ai.md` §4 for the first one.
 
 A grade and a band are separate claims: `--strict` reads the grade,
 `--strict-timing` reads the band, and `lp-emu:esp32c6:t3` today states a band
@@ -257,7 +257,7 @@ imitated, not part of the name.
 
 ### Composite names: a configuration with an emulator seam
 
-An emulator seam (ADR `docs/adr/2026-10-05-emulator-seams.md`) changes what a
+An emulator seam (ADR `docs/adr/2026-10-05-emulator-seams.ai.md`) changes what a
 run may claim, so a run with one has its own name: the base configuration
 plus one atom per engaged seam, sorted — `lp-emu:esp32c6:t2+led=fast`.
 `ValidateConfig::configuration` resolves it: the first piece must be a

@@ -333,7 +333,7 @@ fn the_default_deflated_write_inflates_into_plain_bytes() {
     assert!(!fs.file_exists("/p/t.glsl".as_path()).unwrap());
 }
 
-/// The snapshot namespace is reserved (FORMAT.md "The snapshot namespace"):
+/// The snapshot namespace is reserved (FORMAT.ai.md "The snapshot namespace"):
 /// no write, append or deflated write lands under it, and nothing is
 /// written trying; a neighbour of it is an ordinary path.
 #[test]
@@ -363,7 +363,7 @@ fn nothing_but_a_snapshot_writes_under_the_snapshot_namespace() {
         .unwrap();
 }
 
-/// A file and a directory never share a name (FORMAT.md "Files and
+/// A file and a directory never share a name (FORMAT.ai.md "Files and
 /// paths"): a new file under a file, or where files are, is refused with
 /// nothing written — through every write, inside a batch too, and for hot
 /// paths — while rewriting a file, and writing where a deleted one was,
@@ -410,7 +410,7 @@ fn a_file_and_a_directory_never_share_a_name() {
 }
 
 /// A secret path's old version leaves the flash when it is replaced or
-/// deleted (FORMAT.md "Secret files"): no byte of it is anywhere in the
+/// deleted (FORMAT.ai.md "Secret files"): no byte of it is anywhere in the
 /// image after the write, the delete, or a batch's commit — while a
 /// non-secret file's old version stays as garbage, as it always has. The
 /// store reads the same after a remount.

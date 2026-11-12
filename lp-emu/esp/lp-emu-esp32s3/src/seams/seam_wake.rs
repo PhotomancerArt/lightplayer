@@ -23,7 +23,7 @@
 //! **G0 rule (a)** — whatever a wake wakes runs on the firmware's IO thread,
 //! never the main or render executor — is a *firmware* rule and nothing here
 //! can enforce it. The Bluetooth seam's plan builds the firmware API that
-//! does; the ADR (`docs/adr/2026-10-05-emulator-seams.md`, §7) records both
+//! does; the ADR (`docs/adr/2026-10-05-emulator-seams.ai.md`, §7) records both
 //! rules.
 //!
 //! A lost or doubled wake that this protocol cannot explain is the roadmap's

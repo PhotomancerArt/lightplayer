@@ -45,7 +45,7 @@ pub trait DeviceByteStream: Send {
     /// Must return in bounded time — the framing thread that owns the stream
     /// can only honor a shutdown between calls, so an implementation that
     /// blocks forever pins the thread and whatever OS resource it holds
-    /// (`docs/defects/2026-09-08-serial-close-leaks-the-port-on-a-wedged-device.md`).
+    /// (`docs/defects/2026-09-08-serial-close-leaks-the-port-on-a-wedged-device.ai.md`).
     /// Handing the bytes to the OS is the contract; WAITING for them to
     /// reach the wire is not, and on a serial port that wait (`tcdrain`) is
     /// exactly the unbounded call to avoid.

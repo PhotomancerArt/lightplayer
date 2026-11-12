@@ -7,7 +7,7 @@
 # the root's forks (ser-write-json, naga, pp-rs, esp-hal, …) from crates.io
 # instead — silently, until the fork's behaviour is needed and CI breaks with an
 # error pointing at the product crate. See
-# docs/debt/nested-workspaces-miss-root-patches.md.
+# docs/debt/nested-workspaces-miss-root-patches.ai.md.
 #
 # For every nested workspace root (a Cargo.toml git knows about with a
 # `[workspace]` table, outside target/ and dot-directories) not in EXCLUDED
@@ -308,7 +308,7 @@ if fail:
     print()
     print("A [patch] table applies only to its own workspace. Repeat the root's")
     print("entry in the nested workspace's Cargo.toml (see")
-    print("docs/debt/nested-workspaces-miss-root-patches.md), or, if that")
+    print("docs/debt/nested-workspaces-miss-root-patches.ai.md), or, if that")
     print("workspace should not be checked, add it to EXCLUDED in")
     print("scripts/check-nested-patches.sh with its reason.")
     sys.exit(1)

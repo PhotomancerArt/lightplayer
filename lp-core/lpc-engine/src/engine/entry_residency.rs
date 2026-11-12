@@ -7,7 +7,7 @@
 //! neither the filesystem nor a mutable registry (plan PD2). The top of a
 //! tick is a safe point: no render borrow is live and no node is
 //! `Executing`, the same point the compile window opens at
-//! (`docs/adr/2026-08-03-memory-pressure-at-compile-safe-points.md`).
+//! (`docs/adr/2026-08-03-memory-pressure-at-compile-safe-points.ai.md`).
 //!
 //! Per request, in this order:
 //!

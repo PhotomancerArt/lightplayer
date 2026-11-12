@@ -24,7 +24,7 @@ including the WS281x RMT refill interrupt on the classic ESP32's APP core —
 runs ~288 B of dispatch code from the flash cache before it reaches the
 registered handler. The ISR-in-RAM rule this repo follows (the full handler
 path in RAM unless it costs a lot of RAM) wants that 288 B in `.rwtext`.
-Filed as docs/debt/classic-iram-handlers-reach-flash.md, pay-down item 1;
+Filed as docs/debt/classic-iram-handlers-reach-flash.ai.md, pay-down item 1;
 the same note's jump-table item is handled on the firmware side by
 `lp-fw/fw-esp32v3/rwdata_hook.x`, not here.
 
@@ -54,7 +54,7 @@ Before this key it *guessed* the directory by scanning
 scan found nothing — which on a **cold** target dir is what happened, because
 its script could run first. The result was that build 1 and build 2 of one
 commit were different images, and a CI tree is always cold. See
-`docs/defects/2026-09-08-cold-target-dir-links-esp-hals-stock-rodata.md`.
+`docs/defects/2026-09-08-cold-target-dir-links-esp-hals-stock-rodata.ai.md`.
 
 ⚠️ **This diff must outlive the one above.** The `#[ram]` diff goes away when
 upstream takes it; the `links` key does not, because nothing upstream provides
@@ -80,7 +80,7 @@ Why: the handler cleared a TX edge it had not handled. A drain that raised
 `serial_in_empty` between the handler's `int_st` read (for an RX interrupt)
 and its `int_clr` write was lost, and the write future slept until the
 caller's 250 ms timeout with the send buffer already empty. See
-`docs/defects/2026-09-26-esp-hals-usb-isr-clears-a-tx-edge-it-did-not-handle.md`.
+`docs/defects/2026-09-26-esp-hals-usb-isr-clears-a-tx-edge-it-did-not-handle.ai.md`.
 
 Left out of 1.2.0's copy of the file on purpose: the `WakeLock` fields
 (1.2.0's light-sleep lock, which needs `rtc_cntl` changes this fork does not
@@ -112,7 +112,7 @@ codegen item and does not inherit the enclosing function's `link_section`;
 `#[inline]` would not help at `opt-level = "z"`. That cost lands on the
 WS281x refill, whose deadline is a 24-word RMT half (30 µs) on the C6's
 two-channel plan. See
-`docs/defects/2026-10-01-the-c6-choker-truncates-most-ws281x-frames-on-silicon.md`.
+`docs/defects/2026-10-01-the-c6-choker-truncates-most-ws281x-frames-on-silicon.ai.md`.
 
 After it, the whole path from `Trap15` through `handle_interrupts`,
 `change_current_runlevel`, `dispatch` and the first diff's three helpers to
@@ -184,7 +184,7 @@ right after rodata, espflash merges the two into one flash segment, and the
 gap is gone. Before, espflash filled that gap with the core's RAM segments
 (~45 KB) and, once rodata crossed a 64 KiB page, up to ~20 KB of zero
 padding on top: RAM research L2 (`lp2025/2026-10-09-1203-ram-research`,
-`docs/adr/2026-07-28-esp32c6-flash-budget.md`'s 2026-10-15 amendment).
+`docs/adr/2026-07-28-esp32c6-flash-budget.ai.md`'s 2026-10-15 amendment).
 
 Re-apply on a re-sync with `grep -n 'LP fork (sixth diff' ld/esp32c6/esp32c6.x`;
 `lp-fw-split`'s `both_passes_take_the_text_gap_out…` test fails if it is lost.

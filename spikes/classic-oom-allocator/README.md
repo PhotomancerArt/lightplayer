@@ -1,7 +1,7 @@
 # classic-oom-allocator
 
 Host replay of the classic ESP32 OOM in
-[`docs/defects/2026-08-02-classic-oom-retry-succeeds.md`](../../docs/defects/2026-08-02-classic-oom-retry-succeeds.md).
+[`docs/defects/2026-08-02-classic-oom-retry-succeeds.ai.md`](../../docs/defects/2026-08-02-classic-oom-retry-succeeds.ai.md).
 
 ```bash
 cd spikes/classic-oom-allocator && cargo test --release

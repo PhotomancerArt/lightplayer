@@ -1,6 +1,6 @@
 //! The `dimensionality` section both visual-side faces grow — one
 //! component, both sides of the two-sided space model (ADR
-//! `2026-08-09-dimensionality-authoring-surface.md`; spike
+//! `2026-08-09-dimensionality-authoring-surface.ai.md`; spike
 //! `spikes/dimensionality/index.html` §2/§3/§4B).
 //!
 //! **One component, two sides.** P3 made the mirror a data fact: a shader's
@@ -206,7 +206,7 @@ pub fn SpaceSection(
 
 /// The leading enum as a segmented row of squared blocks — a discrete
 /// choice between two named states, which is the shape
-/// `docs/style/ui.md`'s discrete-control language asks for (never a
+/// `docs/style/ui.ai.md`'s discrete-control language asks for (never a
 /// dropdown over two items).
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
@@ -1258,7 +1258,7 @@ fn segment_group_class(mismatched: bool) -> &'static str {
 }
 
 /// One tab of the segmented row — pressed reads as filled, the rest as
-/// quiet text (the discrete-control language, `docs/style/ui.md`), each
+/// quiet text (the discrete-control language, `docs/style/ui.ai.md`), each
 /// taking an equal share of the row.
 fn segment_class(selected: bool) -> &'static str {
     if selected {

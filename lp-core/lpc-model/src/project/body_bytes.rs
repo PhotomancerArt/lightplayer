@@ -8,7 +8,7 @@
 //! characters a byte: a 1,971 B shader was a ~7.1 KB request, and past
 //! ~4.7 KB of source an edit outgrew the board's message cap and was dropped
 //! unanswered
-//! (`docs/defects/2026-10-08-shader-edits-over-wi-fi-are-refused-board-memory-busy.md`).
+//! (`docs/defects/2026-10-08-shader-edits-over-wi-fi-are-refused-board-memory-busy.ai.md`).
 //!
 //! Every body the editors write is text, so text goes as itself — a shader
 //! costs its own length plus its escapes (a newline is two characters).

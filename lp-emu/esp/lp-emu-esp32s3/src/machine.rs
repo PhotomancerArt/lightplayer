@@ -2874,7 +2874,7 @@ impl Machine {
         // again, its cells (weak bits included) as the cut left them — as
         // the C6's restart does. Without it every program and erase after
         // the cycle was dropped, and the second boot read a chip it could not
-        // write (`docs/defects/2026-10-21-s3-littlefs-torn-first-format-mounts-full.md`).
+        // write (`docs/defects/2026-10-21-s3-littlefs-torn-first-format-mounts-full.ai.md`).
         self.flash.lock().expect("flash poisoned").restore_power();
         // The PSRAM is volatile: what `reboot` kept across the reset (a
         // reset does not take the chip's supply away) is gone, and its mode
@@ -2979,7 +2979,7 @@ impl Machine {
     /// the block refuses. `None` on a machine with no block.
     ///
     /// This is the mechanism counter for
-    /// `docs/defects/2026-09-13-the-s3-link-drops-the-io-tasks-next-chunk-on-a-stale-serial-in-empty.md`:
+    /// `docs/defects/2026-09-13-the-s3-link-drops-the-io-tasks-next-chunk-on-a-stale-serial-in-empty.ai.md`:
     /// a firmware that honours the one-buffer contract keeps it at 0 on
     /// every path, whatever the host does and whatever the timing, where
     /// [`usb_sj_tried`](Self::usb_sj_tried) also holds bytes a host merely
@@ -3944,7 +3944,7 @@ impl Machine {
                 // the old origin still stands and rebase it onto the new one,
                 // or the loop `continue`s against a bound the board's whole
                 // prior lifetime away and replays it inside one slice — which
-                // is `docs/defects/2026-09-11-a-reset-replays-the-boards-lifetime.md`,
+                // is `docs/defects/2026-09-11-a-reset-replays-the-boards-lifetime.ai.md`,
                 // measured on the C6 at exactly `old + budget`.
                 let remaining = stop
                     .stop_cycle

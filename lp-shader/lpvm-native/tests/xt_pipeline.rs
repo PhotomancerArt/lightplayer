@@ -304,7 +304,7 @@ fn mul_div_rem_use_the_mul32_div32_options() {
     assert_eq!(r, m / 7 + m % 7);
 }
 
-// ── Integer divide/remainder never trap (docs/design/lpir/02-core-ops.md) ────
+// ── Integer divide/remainder never trap (docs/design/lpir/02-core-ops.ai.md) ────
 //
 // Xtensa's QUOS/QUOU/REMS/REMU raise EXCCAUSE 6 on a zero divisor, so lowering
 // guards them ([`IsaTarget::integer_div_traps_on_zero`]). Without the guard
@@ -803,7 +803,7 @@ fn cross_function_call_via_literal_slot_callx8() {
 ///    staging move writes is read too late. First observable at **twelve**
 ///    arguments, where the values fill Xtensa's 12-register pool and the
 ///    overflow one is sitting in a staging target. Cases 12..=20 cover it;
-///    see `docs/defects/2026-07-30-xtensa-stack-arg-staged-over.md`.
+///    see `docs/defects/2026-07-30-xtensa-stack-arg-staged-over.ai.md`.
 ///
 /// The arguments are distinct powers of two and the callee sums them, so any
 /// dropped, duplicated or misplaced argument changes the total.

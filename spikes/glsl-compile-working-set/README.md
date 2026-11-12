@@ -37,7 +37,7 @@ vector owns it — a plain doubling `Vec<Token>` with no chunking. `Token` is
 **12 bytes on both** `riscv32imac` and the 64-bit host, so this figure transfers
 to the device unchanged: `projects/test/basic` asks the classic's allocator for a
 single 24,576 B block, 22 % of its 112,640 B arena and **8× the 3,072 B request
-that OOM'd** in `docs/defects/2026-08-02-classic-oom-retry-succeeds.md`.
+that OOM'd** in `docs/defects/2026-08-02-classic-oom-retry-succeeds.ai.md`.
 
 ⚠️ Absolute *peak* figures are 64-bit and over-estimate the device, since
 pointer-bearing types are smaller there. The scaling slope and the token-vector

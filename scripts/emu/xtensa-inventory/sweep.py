@@ -20,7 +20,7 @@ it *outside* any `.literal`/`.rodata` section? An address that fails either
 check is a byte a naive width-following sweep — seeded at that symbol and
 walking forward with no boundary information — would have wrongly decoded.
 
-Licence note (AGENTS.md): objdump is used here as a tool whose *output* is
+Licence note (AGENTS.ai.md): objdump is used here as a tool whose *output* is
 fact (disassembly addresses, section headers, symbol table). No binutils
 source, table, or logic is read or adapted.
 

@@ -4,7 +4,7 @@
 //! board wearing the derived "<board> · <Mon D>" is a few keystrokes from a
 //! name of its own. Submitting presses the offer with the typed name — the
 //! user-stream `NameBoard` the model persists to the registry and writes to
-//! the board (`docs/adr/2026-10-28-one-board-name.md`) — and closes the
+//! the board (`docs/adr/2026-10-28-one-board-name.ai.md`) — and closes the
 //! popover it sits in: a rename is a completed gesture.
 //!
 //! Drawn in the board card's hardware details (the Rename panel) and in the

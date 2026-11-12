@@ -1,7 +1,7 @@
 // test run
 
 // ============================================================================
-// isnan(): Is NaN function (Q32: always false — docs/design/q32.md §6)
+// isnan(): Is NaN function (Q32: always false — docs/design/q32.ai.md §6)
 // ============================================================================
 
 bool test_isnan_normal() {

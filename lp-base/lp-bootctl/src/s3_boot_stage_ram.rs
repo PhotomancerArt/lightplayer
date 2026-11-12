@@ -4,7 +4,7 @@
 //! The hazard is the C6's (`boot_stage_ram`): after a warm reset a radio's
 //! DMA can still be writing into buffers the previous app gave it, and a
 //! boot stage whose code, data or stack sits on one is corrupted mid-boot
-//! (`docs/defects/2026-10-05-a-requested-reboot-crashed-the-c6-bootloader.md`).
+//! (`docs/defects/2026-10-05-a-requested-reboot-crashed-the-c6-bootloader.ai.md`).
 //! The S3 has two boot stages before the core, in two places:
 //!
 //! - **the split image's loader**, [`S3_LOADER_RAM`]: code through the

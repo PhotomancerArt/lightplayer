@@ -4,7 +4,7 @@
 //! `ProjectController::module_face` derives, so the storybook stays
 //! deterministic instead of depending on a live engine. The content is not
 //! arbitrary — it reproduces the worked examples from
-//! `docs/design/modules.md`, so the stories judge the real shapes.
+//! `docs/design/modules.ai.md`, so the stories judge the real shapes.
 //!
 //! - **E3 (drop-in embed):** `plasma` embedded in a host that already has a
 //!   visual; the host's panel shows a plasma group.
@@ -13,7 +13,7 @@
 //!   detached while plasma_2 still follows the host.
 //! - **E2 (playlist meta-switching):** two entries binding one `speed`
 //!   channel with different meta — 0–1 "Drift" vs 0–10 "Whirl".
-//! - **The scarf (panel.md §3):** `brightness` held at a dim value while
+//! - **The scarf (panel.ai.md §3):** `brightness` held at a dim value while
 //!   the authored default is bright.
 
 use lpa_studio_core::{
@@ -503,7 +503,7 @@ pub(crate) fn root_panel() -> UiPanelGroup {
 /// The root scope's own channels, all in Read.
 pub(crate) fn root_controls() -> Vec<UiPanelControlView> {
     vec![
-        // The scarf (panel.md §3): authored bright; the stories hold it
+        // The scarf (panel.ai.md §3): authored bright; the stories hold it
         // dim, and P10 says it must come back dim without one bright frame.
         at_default(brightness(ROOT_SCOPE, 200.0), "authored 200"),
         // E4's host control: an authored control node writes this channel,
@@ -513,7 +513,7 @@ pub(crate) fn root_controls() -> Vec<UiPanelControlView> {
             "0.62",
             "control · Master speed",
         ),
-        // "Grab the LFO" (panel.md §3): the knob visibly rides the LFO.
+        // "Grab the LFO" (panel.ai.md §3): the knob visibly rides the LFO.
         following(
             knob(ROOT_SCOPE, "hue", "hue", 0.41, 0.0, 1.0, None),
             "0.41",
@@ -729,7 +729,7 @@ pub(crate) fn root_children() -> Vec<UiNodeChild> {
             plasma_children(6.5),
         ),
         // The fixture's brightness is the SAME (scope, channel) as the
-        // panel's — one control, two views (panel.md P1). Holding it on the
+        // panel's — one control, two views (panel.ai.md P1). Holding it on the
         // panel holds it here too, which is the multi-client rule made
         // visible across two cards in one column.
         controls_child(
@@ -1355,7 +1355,7 @@ pub(crate) fn three_state_panel() -> UiPanelGroup {
 /// [`PanelGesture`]s as clears.
 ///
 /// The whole view is the unit rather than the face, because a control's
-/// identity is `(scope, channel)` (panel.md P1) and the same control now
+/// identity is `(scope, channel)` (panel.ai.md P1) and the same control now
 /// genuinely appears on two different cards — the module's panel, and the
 /// leaf child's own face below it. Holding one has to move the other, and
 /// that only works if the walk covers the tree.
@@ -1401,7 +1401,7 @@ impl PanelWalk {
     }
 
     /// Apply a widget dispatch: the first touch of a control materializes
-    /// its panel writer and captures the channel (panel.md P2 — Latch, not
+    /// its panel writer and captures the channel (panel.ai.md P2 — Latch, not
     /// Touch), and every later drag just moves the held value.
     pub fn apply_action(&mut self, action: &UiAction) {
         let Some(SlotEditOp::SetValue { address, value }) = action.op_as::<SlotEditOp>() else {
@@ -1443,7 +1443,7 @@ impl PanelWalk {
                 });
             }
             // "Reset means reset": the clear descends into nested groups
-            // (panel.md P-Q4's lean), which is why a scope prefix match is
+            // (panel.ai.md P-Q4's lean), which is why a scope prefix match is
             // the right test rather than equality.
             PanelGesture::ClearScope { scope } => {
                 let scope = scope_display(&scope);
@@ -1472,7 +1472,7 @@ impl PanelWalk {
 }
 
 /// Engage one control everywhere it appears within one panel group tree.
-/// The same `(scope, channel)` is ONE control (panel.md P1).
+/// The same `(scope, channel)` is ONE control (panel.ai.md P1).
 fn engage_group(group: &mut UiPanelGroup, scope: &str, channel: &str, value: f32) {
     visit_group_controls(group, &mut |control_scope, view| {
         if control_scope == scope && view.channel == channel {

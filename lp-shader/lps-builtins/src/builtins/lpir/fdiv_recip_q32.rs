@@ -6,7 +6,7 @@
 //! small divisors).
 //!
 //! This is the shipped lowering for `LpirOp::Fdiv` on both `lpvm-native` and
-//! `lpvm-wasm` — it is not opt-in. See `docs/design/q32.md`.
+//! `lpvm-wasm` — it is not opt-in. See `docs/design/q32.ai.md`.
 //!
 //! ## Algorithm
 //!

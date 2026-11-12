@@ -1,5 +1,5 @@
 //! Emulator seams on the C6 machine: resolving, arming and answering
-//! (ADR `docs/adr/2026-10-05-emulator-seams.md`; the chip-neutral half is
+//! (ADR `docs/adr/2026-10-05-emulator-seams.ai.md`; the chip-neutral half is
 //! `lp_emu_esp_common::seam`).
 //!
 //! # A separate list from the ROM hooks

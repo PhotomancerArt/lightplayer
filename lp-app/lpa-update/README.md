@@ -208,7 +208,7 @@ it refuses an older project by name and keeps serving (`lpa-server`'s
 
 *(2026-10-28)* The decision, its one window and the alternatives are
 recorded in
-[`docs/adr/2026-10-28-firmware-updates-upgrade-the-boards-projects.md`](../../docs/adr/2026-10-28-firmware-updates-upgrade-the-boards-projects.md).
+[`docs/adr/2026-10-28-firmware-updates-upgrade-the-boards-projects.ai.md`](../../docs/adr/2026-10-28-firmware-updates-upgrade-the-boards-projects.ai.md).
 
 ```text
 ProjectStage::new(engine_format, tier)

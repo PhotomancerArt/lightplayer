@@ -5,7 +5,7 @@
 //! (sync access, unchanged `LpFs` semantics), and a driven flusher drains
 //! the change log to OPFS via `createWritable` (atomic per file).
 //!
-//! This is a **platform edge** crate per `docs/adr/2026-07-06-sans-io-core.md`
+//! This is a **platform edge** crate per `docs/adr/2026-07-06-sans-io-core.ai.md`
 //! — the executor coupling (`wasm-bindgen-futures`, timers) lives here so
 //! that `lpfs` and the core stay executor-free. The simulator never mounts
 //! this store: persistence belongs to the local project store, and the sim
@@ -15,7 +15,7 @@
 //! the typed model that provides it — an exclusive per-project Web Lock
 //! held while a project is open, plus a short-lived catalog lock for
 //! structural transactions (Project before Catalog, never the reverse).
-//! See `docs/adr/2026-07-08-per-project-library-locking.md`. The Web Locks
+//! See `docs/adr/2026-07-08-per-project-library-locking.ai.md`. The Web Locks
 //! mechanics under it are [`named_locks`], which Studio's board holds use
 //! too.
 

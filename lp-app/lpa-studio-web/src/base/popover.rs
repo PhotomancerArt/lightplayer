@@ -78,7 +78,7 @@ pub enum PopoverPlacement {
 /// Opening animates by
 /// interpolating the panel's input rect and re-unioning each frame
 /// (`prefers-reduced-motion` jumps to the settled shape). Decision record:
-/// `docs/adr/2026-07-15-popover-svg-merged-outline.md`.
+/// `docs/adr/2026-07-15-popover-svg-merged-outline.ai.md`.
 ///
 /// **Anchored mode** (`anchor_id` + `anchor_visual`, node-card P2c item 3:
 /// "the control IS the trigger"): the merged outline anchors on an EXTERNAL
@@ -769,7 +769,7 @@ fn measure_trigger_once(
 /// read. Holding the handles here (instead of `forget()`-ing the closure and
 /// losing the id) lets teardown cancel them, and frees the closure with
 /// them. Defect:
-/// `docs/defects/2026-09-13-a-stabilization-timer-outlived-the-popover.md`.
+/// `docs/defects/2026-09-13-a-stabilization-timer-outlived-the-popover.ai.md`.
 #[derive(Default)]
 struct ArmedMeasures {
     timers: Vec<ArmedTimer>,
@@ -1568,7 +1568,7 @@ fn panel_rect_at(t: f64, anchor: OutlineRect, fin: OutlineRect, side: PopoverSid
 /// content forever; a healthy entrance parks an invisible `opacity: 0.99x`,
 /// but an entrance whose frames were interrupted mid-flight settles with the
 /// content stuck ghost-faint (defect
-/// `docs/defects/2026-08-19-popover-entrance-parks-without-frames.md`).
+/// `docs/defects/2026-08-19-popover-entrance-parks-without-frames.ai.md`).
 fn panel_content_style(t: f64) -> String {
     let eased =
         ease_out_cubic(((t - CONTENT_FADE_DELAY) / (1.0 - CONTENT_FADE_DELAY)).clamp(0.0, 1.0));
@@ -1660,7 +1660,7 @@ struct AnimationTimeline {
     /// content, half-open clip) for as long as frames stay away. Timers keep
     /// firing where frames don't (hidden pages clamp them to ~1s), so the
     /// deadline jumps a stranded timeline straight to its target. Defect:
-    /// `docs/defects/2026-08-19-popover-entrance-parks-without-frames.md`.
+    /// `docs/defects/2026-08-19-popover-entrance-parks-without-frames.ai.md`.
     deadline_id: Cell<Option<i32>>,
 }
 
@@ -2371,7 +2371,7 @@ mod tests {
         // (size, display, border) alongside the paint-nothing override — an
         // emptied/bare button synthesizes its baseline at the bottom edge
         // and grows the surrounding line box, reflowing the page a few px
-        // (docs/defects/2026-07-23-popover-open-resizes-card.md).
+        // (docs/defects/2026-07-23-popover-open-resizes-card.ai.md).
         let class = popover_button_class(true, true, "rest", "open");
         assert_eq!(class, "open ux-popover-trigger-placeholder");
         assert_eq!(popover_button_class(true, false, "rest", "open"), "open");

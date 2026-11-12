@@ -4,7 +4,7 @@
 //! module owns everything about a radio link that is not a radio fact, so it
 //! is host-tested here and shared by any chip that grows one. Each radio
 //! connection is one lp-link session (plan `ble-on-lp-link`,
-//! `docs/adr/2026-09-27-lp-link-one-comms-layer.md`): Datagram framing, one
+//! `docs/adr/2026-09-27-lp-link-one-comms-layer.ai.md`): Datagram framing, one
 //! frame per ATT write or notification, never an ATT long write.
 //!
 //! - [`hci_connection_ledger`]: which BLE connections the controller holds
@@ -43,8 +43,8 @@
 //! - [`frame_buf_holder`]: a transport letting go of the shared frame buffer
 //!   before someone else serializes into it.
 //!
-//! See `docs/adr/2026-09-24-ble-transport.md`, and for channel 3
-//! `docs/adr/2026-10-06-ota-update-protocol.md`.
+//! See `docs/adr/2026-09-24-ble-transport.ai.md`, and for channel 3
+//! `docs/adr/2026-10-06-ota-update-protocol.ai.md`.
 
 #[cfg(feature = "radio-link")]
 pub mod core_only_links;

@@ -1,7 +1,7 @@
 //! Row-engine layout for board diagrams: every drawn coordinate in one place.
 //!
 //! The layout unit is `u` — the pin pitch, which is also the row height. Every
-//! other dimension derives from it (see `docs/design/board-diagrams.md`), so
+//! other dimension derives from it (see `docs/design/board-diagrams.ai.md`), so
 //! diagrams stay dense and collision-free at any scale. The renderer
 //! ([`crate::diagram::BoardDiagram`]) walks the computed [`BoardLayout`]
 //! without doing geometry of its own, and stories reuse the same layout to

@@ -400,16 +400,16 @@ impl EmitContext<'_> {
     ///   movt    a_dst, a_scr, b0      # movf for Ne
     /// ```
     ///
-    /// The mapping is fixed by `docs/design/float.md` §3, which makes NaN
+    /// The mapping is fixed by `docs/design/float.ai.md` §3, which makes NaN
     /// behavior *Guaranteed*: ordered compares are false when either operand
     /// is NaN, and `!=` is true. `Gt`/`Ge` swap the operands rather than
     /// inventing predicates the ISA does not have.
     ///
     /// **`Ne` is `oeq.s` consumed with `movf`**, i.e. `!oeq` — "unordered or
-    /// unequal", which is true on NaN as float.md requires. M7's plan (D5)
+    /// unequal", which is true on NaN as float.ai.md requires. M7's plan (D5)
     /// tabulated `ueq.s` with `movf` instead; that computes `!ueq` =
     /// "ordered and unequal", which is *false* on NaN and would have silently
-    /// broken the one comparison float.md singles out. The emulator caught it
+    /// broken the one comparison float.ai.md singles out. The emulator caught it
     /// (`fcmp_is_correct_when_an_operand_is_nan`), and the plan's table is the
     /// thing that was wrong, not this code. The `un.s` predicate the ISA also
     /// offers is not needed: no LPIR condition asks for unorderedness alone.
@@ -721,7 +721,7 @@ mod tests {
         }
     }
 
-    /// float.md §3, a Guaranteed row: `-1.0 * 0.0` is `-0.0` — the sign, not
+    /// float.ai.md §3, a Guaranteed row: `-1.0 * 0.0` is `-0.0` — the sign, not
     /// the magnitude, carries the information.
     #[test]
     fn arithmetic_preserves_signed_zero() {
@@ -738,9 +738,9 @@ mod tests {
     /// silicon. **M6-P6 closed the field** — vector family F2's 540 propagation
     /// rows all show the *last* NaN operand surviving with the quiet bit forced
     /// and the payload preserved (`NanRule::LastOperandQuieted`), recorded in
-    /// `docs/adr/2026-07-31-xtensa-fp-behavior-contract.md` — so the test runs.
+    /// `docs/adr/2026-07-31-xtensa-fp-behavior-contract.ai.md` — so the test runs.
     ///
-    /// It asserts only "still a NaN", which is `float.md`'s *Unspecified* class
+    /// It asserts only "still a NaN", which is `float.ai.md`'s *Unspecified* class
     /// being respected: the exact payload out of `add.s` is a measured fact
     /// about this silicon rather than a promise, and pinning it here would
     /// turn a Target-defined behaviour into a contract M7 never made. The
@@ -877,7 +877,7 @@ mod tests {
         }
     }
 
-    /// float.md §3, a *Guaranteed* row: every ordered comparison is false when
+    /// float.ai.md §3, a *Guaranteed* row: every ordered comparison is false when
     /// an operand is NaN, and `!=` is true. This is why `Ne` is its own
     /// condition rather than a negated `Eq` — the two differ exactly here.
     #[test]

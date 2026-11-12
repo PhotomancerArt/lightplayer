@@ -6,7 +6,7 @@
 //! from that release; each citation also names the section *title*, so it stays
 //! findable if a later release renumbers the chapters. No GPL implementation
 //! (QEMU, GDB, GCC) was consulted for code — see
-//! `docs/adr/2026-07-29-license-provenance-discipline.md`.
+//! `docs/adr/2026-07-29-license-provenance-discipline.ai.md`.
 //!
 //! ## FLEN is 32 here, so there is no NaN boxing
 //!
@@ -69,7 +69,7 @@ pub const CSR_FCSR: u16 = 0x003;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RoundingMode {
     /// `RNE` — round to nearest, ties to even. The IEEE-754 default, and the
-    /// only mode `docs/design/float.md` §2 lets the *shader* tier see. This
+    /// only mode `docs/design/float.ai.md` §2 lets the *shader* tier see. This
     /// emulator implements all five because RV32F machine code may name any of
     /// them, whatever the shader tier chooses to emit.
     Rne,

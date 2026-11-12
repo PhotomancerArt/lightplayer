@@ -528,7 +528,7 @@ fn run(args: RunArgs) -> Result<()> {
 /// (`attached-idle`). Draining from power-on with nobody connected would
 /// succeed every guest write and replay them all to a late client, which a
 /// board with no application on the port never does
-/// (`docs/defects/2026-09-23-emulated-usb-port-drains-with-no-client-attached.md`).
+/// (`docs/defects/2026-09-23-emulated-usb-port-drains-with-no-client-attached.ai.md`).
 /// `--monitor` declares a reader present from power-on, and with no socket
 /// on the port (no `--link`, or a UART0 one) the emulator itself is that
 /// reader: both are `attached`.

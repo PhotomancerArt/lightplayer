@@ -65,7 +65,7 @@ fn the_file_on_disk_is_the_same_file_that_is_embedded() {
 
 #[test]
 fn the_sha256_is_the_one_the_m0_report_independently_verified() {
-    // `docs/reports/2026-09-10-xtensa-firmware-isa-inventory.md` §6 verified
+    // `docs/reports/2026-09-10-xtensa-firmware-isa-inventory.ai.md` §6 verified
     // this value against a fresh fetch of the release's own checksum file,
     // before this crate existed. Pinning it here means a moved release or a
     // silently re-cut tarball fails a test rather than passing quietly

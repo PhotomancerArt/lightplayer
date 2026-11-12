@@ -21,7 +21,7 @@ use super::{GuestImage, NativeEmuModule};
 ///
 /// The ISA is a **runtime parameter**, not a type parameter and not a second
 /// engine: see this module's parent docs and
-/// `docs/adr/2026-07-30-isa-parameterized-host-emu-engine.md`.
+/// `docs/adr/2026-07-30-isa-parameterized-host-emu-engine.ai.md`.
 pub struct NativeEmuEngine {
     options: NativeCompileOptions,
     isa: IsaTarget,
@@ -41,7 +41,7 @@ impl NativeEmuEngine {
     ///
     /// The shared arena's guest base is per-ISA: each guest map places the host
     /// window somewhere unmapped in *that* map (see
-    /// `docs/adr/2026-07-30-xtensa-host-shared-memory.md`).
+    /// `docs/adr/2026-07-30-xtensa-host-shared-memory.ai.md`).
     pub fn new_for_isa(options: NativeCompileOptions, isa: IsaTarget) -> Self {
         let arena = match isa {
             #[cfg(feature = "isa-rv32")]

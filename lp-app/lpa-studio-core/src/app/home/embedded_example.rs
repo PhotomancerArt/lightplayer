@@ -367,7 +367,7 @@ mod tests {
 
     #[test]
     fn every_example_ships_the_two_container_files() {
-        // Mitosis (modules.md §1/§6): a package is unopenable without BOTH
+        // Mitosis (modules.ai.md §1/§6): a package is unopenable without BOTH
         // the container manifest and the root module. Found the hard way
         // when a fixture's mapping document was left out of the demo list.
         for example in embedded_examples() {

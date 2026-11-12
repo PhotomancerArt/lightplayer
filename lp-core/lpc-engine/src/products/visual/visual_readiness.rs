@@ -3,7 +3,7 @@
 //! A shader that has just been attached renders black until its first
 //! compile: the first render only asks for a compile window, and the compile
 //! runs in the next tick's window
-//! (`docs/adr/2026-08-03-memory-pressure-at-compile-safe-points.md`). A
+//! (`docs/adr/2026-08-03-memory-pressure-at-compile-safe-points.ai.md`). A
 //! consumer that must not show that black — the playlist holding its last
 //! frame across a switch — asks this after sampling the product, instead of
 //! guessing by frame count.

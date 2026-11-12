@@ -7,7 +7,7 @@
 //! the ordinary sense: they exist so that "the model disagrees with silicon"
 //! can be told apart from "the counter did something odd". Plan one lost a
 //! sitting to that ambiguity, and the answer turned out to be a link
-//! mismatch rather than a counter that paused (`notes.md` F3).
+//! mismatch rather than a counter that paused (`notes.ai.md` F3).
 //!
 //! This is the gate that keeps the claim honest. At 160 MHz,
 //! `cycles / 160e6` and `us / 1e6` must be the same span. **If they ever stop

@@ -631,7 +631,7 @@ impl ByteSource for ScriptedSource {
 /// UART0 always does (it has no host-open concept). USB-Serial-JTAG does only
 /// while its host is draining, so an unopened port — the default of `lp-cli
 /// emu serve` and of `emu run --link` — backs nothing up, as on silicon
-/// (`docs/defects/2026-09-23-emulated-usb-port-drains-with-no-client-attached.md`).
+/// (`docs/defects/2026-09-23-emulated-usb-port-drains-with-no-client-attached.ai.md`).
 pub const TCP_BACKLOG_CAP: usize = 4 << 20;
 
 /// A byte stream over one TCP socket: the emulator **listens**, one client at

@@ -830,7 +830,7 @@ where
         }
     }
 
-    /// Turn panel-state auto-save on or off (panel.md P11). The current
+    /// Turn panel-state auto-save on or off (panel.ai.md P11). The current
     /// value comes back on every project read as
     /// `ServerRuntimeStatus::panel_auto_save`, not from this response.
     pub async fn project_panel_auto_save(

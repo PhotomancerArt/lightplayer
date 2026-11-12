@@ -1,6 +1,6 @@
 //! [`CompactPanel`]: the board's whole panel at card size — what a
 //! connected board card draws in its eight rows' place (the board card ADR,
-//! §4 and its 2026-10-19 amendment; `docs/ux/anatomy/board-card.md`,
+//! §4 and its 2026-10-19 amendment; `docs/ux/anatomy/board-card.ai.md`,
 //! connected).
 //!
 //! Core laid out what it shows ([`UiBoardPanel`]: every control, in

@@ -69,7 +69,7 @@ def evaluate(js: str, timeout_ms: int) -> tuple[dict, list[str]]:
 # sends them: a 10-digit request id, the whole line written as ONE ATT write
 # with response when it fits in 244 bytes. `size` pads the line to an exact
 # length with JSON whitespace. See
-# docs/defects/2026-09-25-a-knob-jump-over-bluetooth-kills-the-c6-ble-host.md:
+# docs/defects/2026-09-25-a-knob-jump-over-bluetooth-kills-the-c6-ble-host.ai.md:
 # the C6 controller hands the host an ACL packet of 193–198 bytes (a write of
 # 182–187 bytes) as two mbufs, and esp-radio 0.18 passed on only the first.
 KNOB_JS = r"""

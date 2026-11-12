@@ -1,6 +1,6 @@
 //! The pattern you pick survives a power cut, on the emulated C6
 //! (playlists-on-the-bus plan `lp2025/2026-10-20-0001-playlists-on-the-bus`,
-//! AC2; ADR `docs/adr/2026-10-20-the-picked-pattern-is-a-bus-setting.md`).
+//! AC2; ADR `docs/adr/2026-10-20-the-picked-pattern-is-a-bus-setting.ai.md`).
 //!
 //! The PLAYFUL choker tryout (`catalog/projects/playful-choker-tryout`, 25
 //! entries, Soft Noise authored) goes on a ROM-up split-image C6 over its

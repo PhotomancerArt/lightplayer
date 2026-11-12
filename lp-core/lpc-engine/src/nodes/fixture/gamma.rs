@@ -6,7 +6,7 @@
 //! so gamma must be u16 → u16: an 8-bit table here quantizes the whole
 //! pipeline down to 8 bits and the wire-side temporal dithering cannot
 //! recover what gamma already destroyed (see
-//! docs/defects/2026-08-01-gamma-8bit-choke.md).
+//! docs/defects/2026-08-01-gamma-8bit-choke.ai.md).
 //!
 //! The curve is x^2.8, matching the exponent of the legacy 8-bit Adafruit
 //! table this replaced. It is evaluated by linear interpolation over a

@@ -572,7 +572,7 @@ fn bracket(x: f32, y1: f32, y2: f32, dir: f32) -> Element {
 
 #[story(
     label = "Anatomy",
-    description = "The design language drawn on a real board (QuinLED-Dig-Uno): unit, row, cell, rail, band, leader, pad, label — every callout anchor computed from the shared geometry module, not hand-positioned. Doc figure for docs/design/board-diagrams.md."
+    description = "The design language drawn on a real board (QuinLED-Dig-Uno): unit, row, cell, rail, band, leader, pad, label — every callout anchor computed from the shared geometry module, not hand-positioned. Doc figure for docs/design/board-diagrams.ai.md."
 )]
 pub(crate) fn anatomy() -> Element {
     let quinled = board("quinled/dig-uno");

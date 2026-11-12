@@ -12,7 +12,7 @@
 //! TrackingAlloc`, and each binary holds exactly ONE `#[test]`.
 //!
 //! `LIVE`/`PEAK` are `thread_local!`, counting only the bytes this thread
-//! allocates and frees (`docs/debt/process-wide-heap-counters-in-tests.md`):
+//! allocates and frees (`docs/debt/process-wide-heap-counters-in-tests.ai.md`):
 //! a process-wide counter also sees the libtest harness's own main thread —
 //! its `running_tests`/`timeout_queue` bookkeeping lands inside the
 //! measurement window on a loaded runner and inflates the figure with

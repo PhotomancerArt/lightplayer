@@ -13,7 +13,7 @@ substitutes a source, never a version. The sources were reformatted with
 
 `serialize_struct` recognizes serde_json's private `RawValue` marker and
 writes the contained JSON fragment as-is, the way serde_json does, instead of
-as a one-field object. See `docs/adr/2026-06-27-ser-write-json-raw-value.md`.
+as a one-field object. See `docs/adr/2026-06-27-ser-write-json-raw-value.ai.md`.
 
 ### The token hook (2026-09, plan `lp2025/2026-09-23-1701-lp-json-pack`, P2)
 

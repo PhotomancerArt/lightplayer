@@ -14,7 +14,7 @@
 //! session gate here would break the very flow the domain allows. The write
 //! is hash-verified and idempotent (same bytes, same address; nothing is
 //! ever overwritten), which bounds the damage to unmetered storage — a real
-//! surface, owned by `docs/debt/cloud-abuse-quota-posture.md` (quotas before
+//! surface, owned by `docs/debt/cloud-abuse-quota-posture.ai.md` (quotas before
 //! any public announcement), not by an auth check that would contradict the
 //! access model.
 //!

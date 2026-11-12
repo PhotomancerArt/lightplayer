@@ -190,7 +190,7 @@ const TRANSPORT_SCRUB_ROW: &str = "transport.scrub_offset_seconds";
 /// The tape's wiring: one [`crate::UiPanelWire`] per transport dimension,
 /// in anchor order (rate, play_state, scrub), each carrying its own
 /// target-or-address so a gesture on the card's tape dispatches on its own
-/// leaf (`2026-08-07-clock-transport-is-a-panel-instrument.md` §3: dispatch
+/// leaf (`2026-08-07-clock-transport-is-a-panel-instrument.ai.md` §3: dispatch
 /// is a per-leaf fact). A dimension with no panel-public wiring carries no
 /// target, and its gesture falls back to a slot edit.
 fn clock_transport_wires(sections: &[UiNodeSection]) -> Vec<crate::UiPanelWire> {
@@ -355,7 +355,7 @@ fn fixture_face(sections: &[UiNodeSection]) -> Option<UiFixtureFace> {
     // carries the wiring. The standard shape today: FixtureDef declares
     // `default_bind = "bus:brightness"` with the hint, so every fixture's
     // fader is channel-backed with zero authoring — brightness is the
-    // scarf's own control (panel.md P10).
+    // scarf's own control (panel.ai.md P10).
     let field = slot_field_name(&key).to_string();
     let wired = || rows.iter().filter(|row| row.key == field);
     if brightness.panel_target.is_none() {
@@ -1373,7 +1373,7 @@ fn panel_control_from_row(slot: &UiConfigSlot, widget: UiPanelWidget) -> Option<
 /// binding question now — a generic control reaches a module panel only by
 /// carrying a `panel_target` — and the one caller left is the fixture face,
 /// whose brightness fader is that face's OWN affordance rather than a panel
-/// entry (`docs/design/panel.md` P1: it still shows up on the module panel
+/// entry (`docs/design/panel.ai.md` P1: it still shows up on the module panel
 /// when, and only when, brightness is wired to a channel).
 fn panel_widget(slot: &UiConfigSlot) -> Option<UiPanelWidget> {
     let UiConfigSlotBody::Value(value) = &slot.body else {
@@ -1599,7 +1599,7 @@ mod tests {
 
     #[test]
     fn a_bus_wired_uniform_gets_a_panel_write_target() {
-        // panel.md P8: the knob for a uniform that CONSUMES a bus channel
+        // panel.ai.md P8: the knob for a uniform that CONSUMES a bus channel
         // writes that (scope, channel) down the command channel instead of
         // editing the authored default it can no longer affect.
         let sections = shader_sections_with(channel_endpoint("bus:glow", "glow", 3));
@@ -3082,7 +3082,7 @@ mod tests {
 
     #[test]
     fn a_bus_wired_brightness_fader_drives_the_channel() {
-        // The scarf's own control (panel.md P10): once brightness is wired
+        // The scarf's own control (panel.ai.md P10): once brightness is wired
         // to a channel, dimming it must engage a panel writer — that is
         // what persists across a replug. The fixture path derives its
         // target from the same binding-derived row the shader knobs use.

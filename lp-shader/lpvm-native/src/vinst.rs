@@ -280,7 +280,7 @@ impl FAluOp {
 /// Two-operand float ops: `dst = OP src`.
 ///
 /// `Abs` and `Neg` are sign-bit operations, **not** `0 - x` and `x < 0 ? -x : x`
-/// — they must stay exact on NaN and `-0.0` (`docs/design/float.md` §3). The
+/// — they must stay exact on NaN and `-0.0` (`docs/design/float.ai.md` §3). The
 /// hardware `abs.s`/`neg.s` are defined that way; the soft-float path spells
 /// the same thing as an integer mask.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -312,7 +312,7 @@ impl FAluRROp {
 
 /// IEEE-754 comparison predicate for [`VInst::Fcmp`].
 ///
-/// The NaN behavior is normative, not incidental (`docs/design/float.md` §3):
+/// The NaN behavior is normative, not incidental (`docs/design/float.ai.md` §3):
 /// every **ordered** comparison is false when either operand is NaN, and `Ne`
 /// is true. That is why [`FcmpCond::Ne`] is its own condition rather than a
 /// negated [`FcmpCond::Eq`] — the two differ exactly on NaN, which is the one

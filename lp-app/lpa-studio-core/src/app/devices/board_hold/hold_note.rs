@@ -15,7 +15,7 @@
 //! the note externally tagged (`{"holds":{"key":…,"level":…,"locked":true}}`,
 //! `"who"`):
 //! no internally tagged or flattened serde, which the repo's
-//! `lint-serde-content` keeps out (`docs/adr/2026-07-04-json-only-artifacts.md`).
+//! `lint-serde-content` keeps out (`docs/adr/2026-07-04-json-only-artifacts.ai.md`).
 //! [`HoldNote::decode`] ignores a note of another version, malformed text,
 //! and a note this tab sent itself. The version is not a compatibility
 //! promise: tabs of different builds share one browser (lightplayer.app

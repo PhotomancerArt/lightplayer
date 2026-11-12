@@ -100,10 +100,10 @@ handful of reads, a planner that turns the classification into an ordered
 `FlashPlan` (old filesystem retired, new one written, superblocks last,
 verified), and the device backup archive (format 2). The host and browser
 providers execute the plan (`InspectLayout`, `FlashFirmware { plan }`); see
-`docs/adr/2026-10-02-c6-repartition-and-layout-migration.md`.
+`docs/adr/2026-10-02-c6-repartition-and-layout-migration.ai.md`.
 
 The same inspection is the install's identification
-(`docs/adr/2026-10-28-install-identifies-the-board-first.md`). It takes a
+(`docs/adr/2026-10-28-install-identifies-the-board-first.ai.md`). It takes a
 `FlashBuild` (one build, or the chip table) and picks the package inside the
 session by the chip the bootloader's SYNC names. It reports the flash chip's
 JEDEC id (`flash_size_from_jedec_id` reads its size) and, after the layout's
@@ -336,7 +336,7 @@ preconfigured instance for the kind, so scripted state survives re-opens.
 | `browser-serial-esp32` | `providers::browser_serial_esp32::BrowserSerialEsp32Provider` | ESP32 over Web Serial | physical serial device | connect, provision firmware, erase to blank, reset, logs, diagnostics; future raw filesystem | implemented for browser Web Serial/probe/flash/erase ownership |
 | `browser-ble` | `providers::browser_ble` (`BleDevice`, `BleWire`, `BleClientIo`) | a board's BLE link through Web Bluetooth (Chrome, Brave, Bluefy on iPhone) | Bluetooth device, endpoint `ble:<Web Bluetooth device id>` | none: no reset, flash, erase, boot control or raw filesystem (`LinkProviderKind::BrowserBle`'s capabilities) | implemented (BLE M5); `lpa-client` conversations over the same wire |
 | `host-websocket` | future `providers::host_websocket::HostWebsocketProvider` | already-running server over host networking | remote endpoint | host-side discovery/connect/status; limited management | future |
-| `browser-websocket` | `providers::browser_websocket` (`LanSession`, `WsWire`, `WsClientIo`; keys and key walk in `providers::network_link`) | a board on the LAN (`ws://<board>/link`), or through lightplayer.app's relay (`wss://<page origin>/relay/board/<mac>`), through a browser WebSocket: a SECURE lp-link keyed with Studio's access keys (held keys only through the relay, `KeyWalk::held_only`) | network board, endpoint `lan:<socket url>` or `relay:<mac>` | none: no reset, flash, erase, boot control or raw filesystem (`LinkProviderKind::BrowserWebsocket`'s capabilities) | product link (Wi-Fi M6 P07; no flag since the network-transport plan's P01): installed in every browser with a WebSocket, reached at a remembered or typed address (`connect_and_settle` waits for the board's answer); the relay endpoint (PR B) is on for everyone since PR C, opened by a remembered board's "Connect through lightplayer.app" (`docs/adr/2026-10-08-studio-network-links.md`); `hold` keeps a relay session through an update's resets, `park`/`unpark` keep the page's own move onto the LAN from redialling it |
+| `browser-websocket` | `providers::browser_websocket` (`LanSession`, `WsWire`, `WsClientIo`; keys and key walk in `providers::network_link`) | a board on the LAN (`ws://<board>/link`), or through lightplayer.app's relay (`wss://<page origin>/relay/board/<mac>`), through a browser WebSocket: a SECURE lp-link keyed with Studio's access keys (held keys only through the relay, `KeyWalk::held_only`) | network board, endpoint `lan:<socket url>` or `relay:<mac>` | none: no reset, flash, erase, boot control or raw filesystem (`LinkProviderKind::BrowserWebsocket`'s capabilities) | product link (Wi-Fi M6 P07; no flag since the network-transport plan's P01): installed in every browser with a WebSocket, reached at a remembered or typed address (`connect_and_settle` waits for the board's answer); the relay endpoint (PR B) is on for everyone since PR C, opened by a remembered board's "Connect through lightplayer.app" (`docs/adr/2026-10-08-studio-network-links.ai.md`); `hold` keeps a relay session through an update's resets, `park`/`unpark` keep the page's own move onto the LAN from redialling it |
 | `host-webserver` | future `providers::host_webserver::HostWebserverProvider` | host service owning `fw-host` runtimes | service-managed runtime endpoint | create/stop runtimes, logs, diagnostics | future |
 
 ### What a browser-worker runtime is created as
@@ -380,7 +380,7 @@ Things to know before changing it:
   and per origin; the hello's base MAC is the device. A board on USB and on
   Bluetooth at once is one device.
 - **A Bluetooth link is untrusted.** The board grants it nothing but `Hello`
-  and the login messages until it unlocks (`docs/adr/2026-09-23-ble-access-model.md`);
+  and the login messages until it unlocks (`docs/adr/2026-09-23-ble-access-model.ai.md`);
   Studio's unlock runs above this crate.
 - **It cannot flash.** `LinkProviderKind::BrowserBle` carries no management
   capability, and the effects that need USB refuse by name.
@@ -390,7 +390,7 @@ Things to know before changing it:
   That polyfill proves the transport and the UI, not access and not the
   radio: it never runs the board's BLE controller.
 
-The decision record is `docs/adr/2026-09-24-ble-transport.md` (decisions 1–10
+The decision record is `docs/adr/2026-09-24-ble-transport.ai.md` (decisions 1–10
 for the firmware, S1–S7 for Studio).
 
 The ESP32 serial providers are intentionally ESP32-specific. Flashing,

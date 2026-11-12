@@ -28,7 +28,7 @@ disassembly of the matching functions so each hit can be read on the branch it
 sits on — every `l32r` is tagged with where its value points (flash rodata,
 flash text, RAM), and direct calls into flash `.text` are tagged too, because a
 `#[ram]` function calling a flash-resident helper is the same cache miss as a
-flash literal (docs/debt/classic-iram-handlers-reach-flash.md).
+flash literal (docs/debt/classic-iram-handlers-reach-flash.ai.md).
 
 ⚠️ The values come from objdump, which prints each `l32r`'s resolved literal in
 parentheses when the literal address falls inside a loaded section:

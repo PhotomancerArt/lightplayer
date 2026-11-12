@@ -114,7 +114,7 @@
 //! finds the buffer free. Yet the real C6 lost a few bytes inside ~0.3 % of
 //! its packed frames, silently, until PR #795's IN-endpoint gate
 //! (`fw-esp32-common/src/serial/in_endpoint.rs`) went in, and none after
-//! (`docs/defects/2026-09-24-the-real-c6-link-loses-bytes-inside-a-packed-frame.md`).
+//! (`docs/defects/2026-09-24-the-real-c6-link-loses-bytes-inside-a-packed-frame.ai.md`).
 //!
 //! [`UsbSerialJtag::set_in_free_lag_ns`] (`--usb-in-free-lag <ns>`, or the
 //! control verb `free-lag <ns>`) opens a gap between the two. The drain
@@ -2412,7 +2412,7 @@ mod tests {
 
     // ---- one send buffer, two writers (the 2026-09-13 defect) ---------------
     //
-    // `docs/defects/2026-09-13-the-s3-link-drops-the-io-tasks-next-chunk-on-a-stale-serial-in-empty.md`.
+    // `docs/defects/2026-09-13-the-s3-link-drops-the-io-tasks-next-chunk-on-a-stale-serial-in-empty.ai.md`.
     // The block has ONE send buffer, unwritable from a flush until the host
     // has read it all (ESP32-C3 TRM v1.3 §30.3.2, p. 767 — the same IP as the
     // C6's and the S3's; see the module docs).

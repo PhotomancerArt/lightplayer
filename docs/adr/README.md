@@ -16,7 +16,7 @@ unless they set a broader precedent.
 Use date-based filenames:
 
 ```text
-YYYY-MM-DD-short-title.md
+YYYY-MM-DD-short-title.ai.md
 ```
 
 Date-based names keep files sortable and reduce conflicts between parallel
@@ -146,7 +146,7 @@ holds the full context.
 | Symmetries beyond rotation (mirror; combined groups) | `2026-08-05-map2d-format-2-repeat-and-gaps` | A fixture that actually has one shows up |
 | `Map2dShape::Group(Vec<...>)` in the format (additive format 3, loud refusal; the editor path model is already arity-general) | `2026-08-05-map2d-editor-selection-tree-model` | A real grouping use case beyond rotational repeat shows up |
 | Node ids in the map2d document (stable selection across structural edits; positional paths + drop-on-dangle serve today) | `2026-08-05-map2d-editor-selection-tree-model` | Collaborative or long-lived selection state needs stability |
-| Share-envelope format migration — **partly closed 2026-08-04**: envelope-carried project *content* now gates-and-migrates via `lpa-upgrade` (`2026-08-04-project-format-migration-architecture`); the envelope's own `format` field and bare-node migration remain refuse-outright | `2026-07-28-share-envelopes`; `../debt/library-format-migration-gap.md` | Bare-node migration: the `artifact_format` stamp becomes universal enough to migrate against |
+| Share-envelope format migration — **partly closed 2026-08-04**: envelope-carried project *content* now gates-and-migrates via `lpa-upgrade` (`2026-08-04-project-format-migration-architecture`); the envelope's own `format` field and bare-node migration remain refuse-outright | `2026-07-28-share-envelopes`; `../debt/library-format-migration-gap.ai.md` | Bare-node migration: the `artifact_format` stamp becomes universal enough to migrate against |
 | `just test-browser-shader-frontend` joins CI's path-gated Validate job (local `test-rust` runs it; until then the only engine-level Naga-frontend coverage is local-gate-only) | `2026-08-05-sampler2d-authored-surface` | Shader-path CI budget is next reviewed, or a frontend-coupled regression reaches a PR unflagged |
 | Generated `palette_at(t)`-style helper becomes the documented palette API (pure generated GLSL over the standard spelling; zero new parser surface) | `2026-08-05-sampler2d-authored-surface` | M5's gate — the fyeah-sign port shows whether the `vec2(t, 0.0)` idiom reads acceptably |
 | Browser CPU tier converges onto `LpsGlsl` (`fw-browser/src/runtime.rs` reserves this; would shrink the combined-sampler bridge to the GPU tier's copy) | `2026-08-05-sampler2d-authored-surface` | Frontend convergence becomes a product priority |
@@ -167,16 +167,16 @@ holds the full context.
 | Surfacing link mode in the UI + the "waiting for a device in bootloader mode" confirmation that makes the BOOT-button ritual learnable | `2026-07-30-bootloader-mode-detection` | M5 of the device-recovery plan |
 | Flapping-device heuristic (enumeration-drop counting), deliberately offer-only — it must never trigger a probe, which would reboot a device that may just have a loose cable | `2026-07-30-bootloader-mode-detection` | M9 of the device-recovery plan |
 | Backup-format promotion to user-facing (external docs + per-version fixture archives) | `2026-07-31-device-backup-archive-format` | The format is promised outside the repo |
-| C6 migration to `lp-ws281x` (`docs/debt/c6-on-legacy-ws281x-driver.md`) | `2026-07-31-lp-ws281x-multi-channel-driver-adoption` | A second C6 channel is wanted, a `lp-ws281x` fix needs to reach the C6, or maintaining two drivers becomes its own tax |
-| `MAX_LEDS` silent truncation and duplication (`docs/debt/output-channel-led-cap-silent-truncation.md`) | `2026-07-31-lp-ws281x-multi-channel-driver-adoption` | A long strip is authored and the cap bites with no diagnostic |
+| C6 migration to `lp-ws281x` (`docs/debt/c6-on-legacy-ws281x-driver.ai.md`) | `2026-07-31-lp-ws281x-multi-channel-driver-adoption` | A second C6 channel is wanted, a `lp-ws281x` fix needs to reach the C6, or maintaining two drivers becomes its own tax |
+| `MAX_LEDS` silent truncation and duplication (`docs/debt/output-channel-led-cap-silent-truncation.ai.md`) | `2026-07-31-lp-ws281x-multi-channel-driver-adoption` | A long strip is authored and the cap bites with no diagnostic |
 | Float→int through the soft-float ABI (`__fixsfsi`/`__fixunssfsi` are skipped because the ABI leaves out-of-range and NaN undefined) | `2026-07-31-soft-float-via-compiler-builtins` | The C6 harness's probe data shows the ROM matching `compiler_builtins` at those edges |
 | Xtensa `F32Lowering` arm (`Unsupported` today — the S3 has an FPU, so soft float would be the wrong default) | `2026-07-31-soft-float-via-compiler-builtins` | The Xtensa FPU emulator and emitter land (roadmap M6/M7) |
 | Soft-float performance measurement on the C6 (nothing here says how slow Float mode is) | `2026-07-31-soft-float-via-compiler-builtins` | A perf surface exists to show it (roadmap D3) |
 | ~~`Debug` naming re-check (ratified as provisional — the corpus is all diagnostics, but the clock's `rate`/`scrub_offset_seconds` read as transport)~~ — **closed 2026-08-07**: the name stands; `Debug` names a persistence contract, not a rendering location (`2026-08-07-clock-transport-is-a-panel-instrument`) | `2026-08-01-debug-slots-taxonomy` (a) | Closed |
 | Debug indication on preview/play surfaces (D8 covered the workspace only; a running installation in test-pattern mode shows nothing outside the editor) | `2026-08-01-debug-slots-taxonomy` (b) | The panels/play-mode work defines its own chrome |
 | `TEST_PATTERN_RGB` is full white — the max-current case on long strips, deliberate for pin discovery | `2026-08-01-debug-slots-taxonomy` (c) | Someone runs it on a long strip and wants it dimmer |
-| Slew shaping on panel writers (emission is immediate; the seam is writer-side shaping) | `2026-08-02-panel-writers-and-state-persistence` | `panel.md` P-Q1 gets an answer, or a control visibly zippers |
-| Panel state encoded through `slot_codec` instead of a second serde codec (24,912 B of duplicate C6 flash) | `2026-08-02-panel-writers-and-state-persistence` | Flash headroom tightens again — `docs/debt/panel-state-serde-flash-cost.md` |
+| Slew shaping on panel writers (emission is immediate; the seam is writer-side shaping) | `2026-08-02-panel-writers-and-state-persistence` | `panel.ai.md` P-Q1 gets an answer, or a control visibly zippers |
+| Panel state encoded through `slot_codec` instead of a second serde codec (24,912 B of duplicate C6 flash) | `2026-08-02-panel-writers-and-state-persistence` | Flash headroom tightens again — `docs/debt/panel-state-serde-flash-cost.ai.md` |
 | A kind with no face publishes no panel controls (`ComputeShader`'s bound uniforms reach the wiring drawer, never a knob) | `2026-08-03-panel-visibility-is-derived` | A compute-driven module needs its knobs — `examples/meteor` already does |
 | Authored panel layouts: a curated promoted-control list per module, as an additive override on the derived default | `2026-08-03-panel-visibility-is-derived` | A published/vendored module needs a curated public API |
 | A minted `status-engaged` token family (engaged currently borrows `status-attention` amber; Yona leans maybe-blue) | `2026-08-03-panel-visibility-is-derived` | Yona settles the engaged treatment — do not change it before then |
@@ -186,7 +186,7 @@ holds the full context.
 | An LFO node for panel-reachable waveform/offset/modulation (the panel exposes a phasor's period ONLY) | `2026-08-04-time-is-a-product` | A module wants modulation the Speed knob cannot express |
 | ~~Transport UI over the breakpoint log (play/pause/scrub as a first-class surface)~~ — **closed 2026-08-07**: tape transport on the clock card and module panel (`2026-08-07-clock-transport-is-a-panel-instrument`) | `2026-08-04-time-is-a-product` | Closed |
 | v1–v3 project-format migration (below `lpa-upgrade`'s floor; types are deleted, corpus is `schemas/history/` snapshots only) | `2026-08-04-project-format-migration-architecture` | A real holder of pre-v4 project data appears |
-| Safe-mode board rescue hole (upload cannot reach a safe-mode board, so pull→migrate→push cannot run on one) | `2026-08-04-project-format-migration-architecture` | `docs/debt/safe-mode-board-rescue-hole.md` — first field occurrence |
+| Safe-mode board rescue hole (upload cannot reach a safe-mode board, so pull→migrate→push cannot run on one) | `2026-08-04-project-format-migration-architecture` | `docs/debt/safe-mode-board-rescue-hole.ai.md` — first field occurrence |
 | Server session-set switching (several concurrently-valid sessions per browser, switched without a re-auth round trip) | `2026-08-07-provider-based-auth` | Switch-account usage or complaints show the lean re-auth round trip is the friction point |
 | Local password method for self-host (the `local` connection's password method, sibling to the dev picker) | `2026-08-07-provider-based-auth` | A self-host deployment target is prioritized |
 | Identities link table `(connection, subject) → user` for multi-provider accounts on one user | `2026-08-07-provider-based-auth` | A second connection type ships and accounts need to merge across them |
@@ -194,7 +194,7 @@ holds the full context.
 | The Xtensa native default flips to f32 (the flip condition, written as a threshold: the synth-loop software-pipelining spike, or frame-floor headroom work) | `2026-08-08-float-semantics-per-target-representation` | Either lever measurably closes the ~19–20% dome-scale gap |
 | Build-time mode sets per image (a runtime-matched `FloatMode` keeps LTO from dropping the arm a board never enters — +63 KB on classic and S3 today) | `2026-08-08-float-semantics-per-target-representation`; `2026-08-01-float-mode-as-a-compiler-parameter` | Flash headroom tightens, or the first single-mode image is built |
 | Single-mode f32 image + whether it carries Q32 at all (lean: no) | `2026-08-08-float-semantics-per-target-representation` | ESP32-S31 silicon and toolchain arrive |
-| f32-native points-in frame ABI (~1 ms/1500 LEDs per `float.md` §4; deletes the Float arm of `Q16CoordDecoder`; output side stays integer in every design) | `2026-08-08-float-semantics-per-target-representation` | The first f32-native image lands — not worth a classic/S3 ABI churn on its own |
+| f32-native points-in frame ABI (~1 ms/1500 LEDs per `float.ai.md` §4; deletes the Float arm of `Q16CoordDecoder`; output side stays integer in every design) | `2026-08-08-float-semantics-per-target-representation` | The first f32-native image lands — not worth a classic/S3 ABI churn on its own |
 | What a pinned `Fixed` means on an f32-native image (it aliases native on every shipping backend today) | `2026-08-08-float-semantics-per-target-representation` | An image exists where native is not Q32 |
 | Per-device preview representation selection in a multi-device Studio | `2026-08-08-float-semantics-per-target-representation` | Two attached devices disagree on native representation |
 | Gate the `float_mode` pin on the firmware manifest so it is not offered where one representation exists (the compile-error backstop stays regardless) | `2026-08-08-float-semantics-per-target-representation`; `2026-08-01-float-mode-reaches-the-device` | The manifest can report a board's representation set |

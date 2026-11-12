@@ -1,6 +1,6 @@
 //! The **module** card's face — the one face worn at every depth.
 //!
-//! `docs/design/modules.md` §5: one face, three zoom levels. The root
+//! `docs/design/modules.ai.md` §5: one face, three zoom levels. The root
 //! module wears it as the single top-level workspace card (the flat-root
 //! reversal — the root now *does* something); an embedded module wears the
 //! same face as a child card inside its host; play mode renders the root
@@ -50,7 +50,7 @@ pub struct UiModuleFace {
     /// Compact provenance line ("Yona · v1 · CC0-1.0"); `None` when the
     /// module carries no provenance fields (§8).
     pub provenance: Option<String>,
-    /// Panel-state auto-save (panel.md P11 — on by default, with a user
+    /// Panel-state auto-save (panel.ai.md P11 — on by default, with a user
     /// toggle). `Some` only on the module that presents the toggle: panel
     /// state persists per project folder (`.lp/state.json`), so it is the
     /// project's root module that owns it, and an embedded module carries

@@ -34,7 +34,7 @@
 //!
 //!   This is the only Q32 arithmetic configuration the product ships. The
 //!   per-shader `Q32Options` mode selector that once chose saturating
-//!   alternatives here was removed with `GlslOpts`; see `docs/design/q32.md`.
+//!   alternatives here was removed with `GlslOpts`; see `docs/design/q32.ai.md`.
 //!
 //! * **`sym_call` (defer for review).** Non-trivial semantics
 //!   (saturation, rounding modes, clamping, multi-word arithmetic) that
@@ -416,8 +416,8 @@ fn const_divisor(func: &IrFunction, v: lpir::VReg) -> Option<i32> {
 /// **traps** on a zero divisor ([`IsaTarget::integer_div_traps_on_zero`]).
 ///
 /// LPIR requires integer division and remainder to never trap and to follow
-/// RV32M semantics (`docs/design/lpir/02-core-ops.md`,
-/// `docs/adr/2026-07-30-integer-division-never-traps.md`):
+/// RV32M semantics (`docs/design/lpir/02-core-ops.ai.md`,
+/// `docs/adr/2026-07-30-integer-division-never-traps.ai.md`):
 ///
 /// | op | divisor `0` | `i32::MIN` / `-1` |
 /// |---|---|---|

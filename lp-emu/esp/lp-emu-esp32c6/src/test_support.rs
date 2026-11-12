@@ -38,7 +38,7 @@
 //!
 //! **`LP_EMU_C6_IMAGE_DIR`** replaces rungs 2 and 3 with a directory of
 //! images someone else built — CI's own, fetched by `just fetch-ci-images`
-//! (`docs/ci-images.md`): `<dir>/tree/<SLUG>/fw-esp32c6` for a feature-set
+//! (`docs/ci-images.ai.md`): `<dir>/tree/<SLUG>/fw-esp32c6` for a feature-set
 //! ELF, `<dir>/tree/<SLUG>_SPLIT/{merged.bin,loader.elf,p2.elf,split.json}`
 //! for a split image, `<dir>/emu-ref/<commit>-<slug>/{fw-esp32c6,merged.bin}`
 //! for a reference image. With it set nothing is ever built, and an image the

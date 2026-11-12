@@ -487,7 +487,7 @@ fn PaletteRow(
                 // 20% on the palette and 70% on its label, which is backwards
                 // for a list you scan by eye — the search box is how you find
                 // one by name. A fuller rethink (full-width strip, text
-                // beneath) is banked: `docs/debt/palette-row-favours-the-name.md`.
+                // beneath) is banked: `docs/debt/palette-row-favours-the-name.ai.md`.
                 span { class: "tw:w-24 tw:flex-none",
                     GradientStripCanvas { gradient: choice.gradient.clone() }
                 }

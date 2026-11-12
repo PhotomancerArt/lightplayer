@@ -334,7 +334,7 @@ impl Esp32C6RmtWs281xDriver {
         // error was ever raised, and the strip held its last frame until a
         // reboot. A different GPIO is the case `with_pin` handles correctly:
         // connect the new pad, release the old one.
-        // (docs/defects/2026-09-02-same-gpio-rebind-disconnects-the-pad.md)
+        // (docs/defects/2026-09-02-same-gpio-rebind-disconnects-the-pad.ai.md)
         if slot.bound_gpio == Some(gpio) {
             slot.tx = Some(tx);
         } else {
@@ -519,7 +519,7 @@ impl Ws281xOutput for Esp32C6RmtWs281xOutput {
         let started = Instant::now();
         let mut timed_out = false;
         let result = DRIVER.send_blocking(self.channel, data, || {
-            // The LED performance seam (docs/adr/2026-10-05-emulator-seams.md):
+            // The LED performance seam (docs/adr/2026-10-05-emulator-seams.ai.md):
             // on silicon one call, one no-op hint and one return; under an
             // emulator that engaged `led=fast`, a park until the next
             // interrupt. The timeout check below runs either way.

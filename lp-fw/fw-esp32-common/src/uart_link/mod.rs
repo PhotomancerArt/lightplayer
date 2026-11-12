@@ -1,11 +1,11 @@
 //! The classic ESP32's UART0 host link on lp-link (plan
 //! `lp2025/2026-09-28-2015-classic-uart-on-lp-link`, milestone M5 of
-//! `docs/adr/2026-09-27-lp-link-one-comms-layer.md`).
+//! `docs/adr/2026-09-27-lp-link-one-comms-layer.ai.md`).
 //!
 //! lp-link runs where UART0's bytes enter and leave the board, as it does on
 //! the C6's USB (`crate::usb_link`), but across **two executors**, because
 //! the classic's UART is serviced from a preempting one
-//! (`docs/adr/2026-08-25-classic-uart-io-task-executor-isolation.md`):
+//! (`docs/adr/2026-08-25-classic-uart-io-task-executor-isolation.ai.md`):
 //!
 //! - the chip crate's **I/O task** (swi2 interrupt executor, 1 ms hardware
 //!   pacer) owns UART0 and only moves bytes, through

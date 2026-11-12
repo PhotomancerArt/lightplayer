@@ -27,5 +27,5 @@ lp-cli upload projects/test/quad-strips serial:auto
 
 The device resets on connect and auto-loads whatever is on flash from the
 *previous* upload; the freshly uploaded project takes effect on the next
-reload/boot. See `docs/defects/2026-07-30-deploy-compiles-previous-upload.md`
+reload/boot. See `docs/defects/2026-07-30-deploy-compiles-previous-upload.ai.md`
 for why the first compile line you see after an upload is not this one.

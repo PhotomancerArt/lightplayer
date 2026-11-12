@@ -1,6 +1,6 @@
-//! Play-mode stories (`docs/design/modules.md` §5, play mode).
+//! Play-mode stories (`docs/design/modules.ai.md` §5, play mode).
 //!
-//! `docs/design/panel.md` P12: play mode renders **panels only** — the root
+//! `docs/design/panel.ai.md` P12: play mode renders **panels only** — the root
 //! module's panel, recursively presenting its nested module groups (R8) —
 //! with no faces, no children, no wiring, no authoring surfaces at all.
 //! Reset and auto-save stay, because "anything play mode can do, an end

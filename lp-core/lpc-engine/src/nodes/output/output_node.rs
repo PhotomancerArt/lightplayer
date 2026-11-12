@@ -32,7 +32,7 @@
 //! (which runs the producers), renders every product into its runs, applies
 //! reversal and rotation, and paints the overlays. The name and `highlight`
 //! text are compared with last frame's and copied or re-parsed only when
-//! they change. See `docs/adr/2026-10-24-frame-plan-once-per-edit.md`.
+//! they change. See `docs/adr/2026-10-24-frame-plan-once-per-edit.ai.md`.
 //!
 //! # A fault is never black
 //!
@@ -220,7 +220,7 @@ impl OutputFragment {
     /// takes, and the one whose bytes the golden oracle pins. A partial run renders
     /// through a SCATTERED target instead: the producer still renders whole,
     /// and the target routes each sample to the run that claims it
-    /// (`docs/adr/2026-09-06-control-render-targets-scatter.md`).
+    /// (`docs/adr/2026-09-06-control-render-targets-scatter.ai.md`).
     #[must_use]
     fn covers_whole_product(&self) -> bool {
         self.source_offset_samples == 0
@@ -932,7 +932,7 @@ impl OutputNode {
     /// otherwise: the producer renders whole through a target that routes
     /// every sample to the run that claims it, straight into the buffer — no
     /// whole-product scratch, nothing copied
-    /// (`docs/adr/2026-09-06-control-render-targets-scatter.md`).
+    /// (`docs/adr/2026-09-06-control-render-targets-scatter.ai.md`).
     ///
     /// `None` when no fragment of the group fits the buffer: nothing is
     /// rendered, exactly as before. A run that fits the buffer but reaches
@@ -1824,7 +1824,7 @@ impl NodeRuntime for OutputNode {
         _ctx: &mut MemPressureCtx,
     ) -> Result<(), NodeError> {
         // The frame plan is rebuildable state: the next frame builds it
-        // again (docs/adr/2026-10-24-frame-plan-once-per-edit.md, D8).
+        // again (docs/adr/2026-10-24-frame-plan-once-per-edit.ai.md, D8).
         if level >= PressureLevel::High {
             self.frame_plan.clear();
         }
@@ -1835,9 +1835,9 @@ impl NodeRuntime for OutputNode {
         // compile runs (compiles happen at render time), so the drop frees
         // nothing at the compile instant and only re-does the allocation.
         // Removed in M6 P4; see
-        // `docs/defects/2026-08-04-compile-window-drops-rebuilt-before-compile.md`
+        // `docs/defects/2026-08-04-compile-window-drops-rebuilt-before-compile.ai.md`
         // and the 2026-08-04 amendment to
-        // `docs/adr/2026-08-03-memory-pressure-at-compile-safe-points.md`.
+        // `docs/adr/2026-08-03-memory-pressure-at-compile-safe-points.ai.md`.
         // The runtime buffer this node publishes into was never touched here
         // anyway — its lifecycle belongs to the sink registration path.
         Ok(())
@@ -2480,7 +2480,7 @@ mod tests {
     /// handler cleared the control samples; measurement showed the output's
     /// own `produce` resizes them back earlier in the same tick than the
     /// compile runs, so the drop freed nothing at the compile instant. See
-    /// `docs/defects/2026-08-04-compile-window-drops-rebuilt-before-compile.md`.
+    /// `docs/defects/2026-08-04-compile-window-drops-rebuilt-before-compile.ai.md`.
     /// The samples live in the channel buffer now; the established extent
     /// the node remembers must survive too.
     #[test]

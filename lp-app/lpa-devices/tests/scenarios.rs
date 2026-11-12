@@ -313,7 +313,7 @@ fn a_marker_from_an_evicted_effect_never_ends_the_activity_that_replaced_it() {
 #[test]
 fn mid_stream_attach_fixture() {
     // The shipped hello-gate defect
-    // (docs/defects/2026-08-21-hello-gate-assumes-fresh-boot.md) as a replay
+    // (docs/defects/2026-08-21-hello-gate-assumes-fresh-boot.ai.md) as a replay
     // test: heartbeats arrive before the hello answer, and nothing condemns
     // the device for it.
     run_fixture(include_str!("../fixtures/mid-stream-attach.json"));
@@ -1067,7 +1067,7 @@ fn flashing_a_blank_pending_link_adopts_joins_identity_and_lands_ready() {
 /// manifest load, the loader start and the baud change), never wiped by an
 /// esptool log line in the middle of the write — and the two waits after
 /// it have their own words instead of a bare spinner
-/// (`docs/defects/2026-10-25-install-progress-jumped-to-100-and-vanished.md`).
+/// (`docs/defects/2026-10-25-install-progress-jumped-to-100-and-vanished.ai.md`).
 #[test]
 fn an_install_counts_only_the_write_and_names_each_wait() {
     use lpa_devices::FlashStep;
@@ -2562,7 +2562,7 @@ fn reset_over_usb_still_pulses_the_lines() {
 /// reset identify sent "for the ROM banner" took the port away, the link
 /// came back as a new pending device with no memory of it, and its first
 /// `invalid header` line sent the reset again
-/// (docs/defects/2026-10-28-a-blank-board-that-re-enumerates-on-reset-identified-forever.md).
+/// (docs/defects/2026-10-28-a-blank-board-that-re-enumerates-on-reset-identified-forever.ai.md).
 ///
 /// Replayed as the board did it: each cycle the port opens mid boot loop,
 /// hears the flood and no banner, and drops off USB a moment later. Every

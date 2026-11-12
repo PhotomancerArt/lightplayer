@@ -5,7 +5,7 @@
 //! still fail: a Bluetooth board that drops the link before it answers, a
 //! port another program holds. Before 2026-10-17 that reached the person as
 //! nothing at all — a console warning, and the section as it was before the
-//! press (`docs/defects/2026-10-17-an-android-phone-connecting-over-bluetooth-panics-the-c6.md`).
+//! press (`docs/defects/2026-10-17-an-android-phone-connecting-over-bluetooth-panics-the-c6.ai.md`).
 //! Now the section says it under its squares (P4, loud when bad), with the
 //! way on (P7): press again, or connect it another way.
 //!

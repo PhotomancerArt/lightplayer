@@ -4,7 +4,7 @@
 # Compiles abi_probe.c for the ESP32-S3 at -O3, disassembles it, and reports
 # which FRs are spilled around the call — i.e. which ones the toolchain treats
 # as callee-saved. binutils/GCC *output* is fact and carries no license
-# obligation; their source is off limits (AGENTS.md).
+# obligation; their source is off limits (AGENTS.ai.md).
 #
 #   ./abi_probe.sh        summary
 #   ./abi_probe.sh -v     summary + the full disassembly

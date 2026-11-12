@@ -22,7 +22,7 @@ pub enum UiPanelWireRole {
 ///
 /// The tape on the clock's own card puts a speed fader, a run/pause button
 /// and a scrub strip on one faceplate, and each dimension dispatches on its
-/// own (`2026-08-07-clock-transport-is-a-panel-instrument.md` §3):
+/// own (`2026-08-07-clock-transport-is-a-panel-instrument.ai.md` §3):
 ///
 /// - the faceplate always renders whole (rendering is a shape fact);
 /// - a gesture on a wire carrying a [`Self::panel_target`] is a

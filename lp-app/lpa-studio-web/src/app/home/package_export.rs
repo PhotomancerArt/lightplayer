@@ -3,7 +3,7 @@
 //! Both forms hydrate a lock-free library snapshot through the host
 //! (read-only by design) and encode from the same file list — the M3 zip
 //! codec for the download, the `lp.package` share envelope for the
-//! clipboard (`docs/adr/2026-07-28-share-envelopes.md`). No actor
+//! clipboard (`docs/adr/2026-07-28-share-envelopes.ai.md`). No actor
 //! round-trip either way.
 //!
 //! **These read the SAVED bytes.** The library snapshot is what is on

@@ -150,7 +150,7 @@
 //! demanded — each an accept-and-remember [`lp_emu_esp_common::RegFile`]
 //! seeded from the PAC ([`crate::periph::accept`]), each a probe that lets
 //! the *next* stop become visible. The order is the ledger
-//! (`docs/reports/2026-09-10-esp32v3-strict-boot-inventory.md`), and it is
+//! (`docs/reports/2026-09-10-esp32v3-strict-boot-inventory.ai.md`), and it is
 //! a contract: the bus packs a peripheral's index into every scheduler event
 //! id, so a block a later phase adds goes in its place in the list, never on
 //! the end.

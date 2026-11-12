@@ -437,7 +437,7 @@
                     // On by default when this page runs on a Mac, because
                     // that is where the real path drops them: without it, a
                     // flash read that stalled on every Mac passed the walk
-                    // (G1-F2, docs/defects/2026-10-02-the-emulated-serial-path-never-drops-a-byte.md).
+                    // (G1-F2, docs/defects/2026-10-02-the-emulated-serial-path-never-drops-a-byte.ai.md).
                     const ttyFlag = new URLSearchParams(window.location.search).get("emu-tty");
                     const onMac = /mac/i.test(navigator.userAgentData?.platform ?? navigator.platform ?? "");
                     const hostTty = ttyFlag === "mac" ? "mac" : ttyFlag === "none" ? null : onMac ? "mac" : null;

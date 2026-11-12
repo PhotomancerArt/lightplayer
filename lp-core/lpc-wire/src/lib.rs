@@ -6,8 +6,8 @@
 //! The per-link choice ([`WireEncoding`], `wire_encoding` module), when to
 //! ask for it ([`PackOptIn`], `pack_opt_in` module), and the per-link learned
 //! table both ends keep in step (`wire_stream` module) are documented on
-//! those items; see `docs/adr/2026-09-24-json-pack-wire-encoding.md` and
-//! `docs/adr/2026-09-25-learned-wire-dictionary.md` for the decisions.
+//! those items; see `docs/adr/2026-09-24-json-pack-wire-encoding.ai.md` and
+//! `docs/adr/2026-09-25-learned-wire-dictionary.ai.md` for the decisions.
 
 #![no_std]
 

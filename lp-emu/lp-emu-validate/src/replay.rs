@@ -663,7 +663,7 @@ pub fn replay(
     // needs an instrument nobody has put on this bench. Asking silicon for one
     // made the first silicon capture of `rmt-chase` fail with 3,073 equal
     // structural comparisons underneath the red
-    // (`docs/defects/2026-09-08-a-pin-capture-is-a-property-of-the-configuration-not-the-payload.md`).
+    // (`docs/defects/2026-09-08-a-pin-capture-is-a-property-of-the-configuration-not-the-payload.ai.md`).
     //
     // Stated in `validate.toml`, never inferred from the configuration's name.
     let cfg = crate::config::ValidateConfig::embedded();

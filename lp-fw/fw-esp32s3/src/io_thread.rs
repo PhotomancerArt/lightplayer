@@ -12,7 +12,7 @@
 //! the doorbell) preempts the render at once. The server answers a tick's
 //! requests before it renders (`LpServer::set_messages_first`), so a reply is
 //! on the wire while the frame renders instead of after it; the two halves
-//! only move request latency together (M1, `docs/adr/2026-10-02-c6-link-io-thread.md`).
+//! only move request latency together (M1, `docs/adr/2026-10-02-c6-link-io-thread.ai.md`).
 //!
 //! - **Thread creation.** esp-rtos's own task creation is crate-private; the
 //!   public face is [`esp_radio_rtos_driver::task_create`], which esp-rtos

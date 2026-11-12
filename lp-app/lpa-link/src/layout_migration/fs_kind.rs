@@ -19,9 +19,9 @@ use lp_tree_store::SectorState;
 
 use super::lpfs_geometry::{LPFS_BLOCK_SIZE, has_superblock};
 
-/// The tree store's sector size on the C6 (FORMAT.md "The medium").
+/// The tree store's sector size on the C6 (FORMAT.ai.md "The medium").
 pub const TREE_SECTOR_SIZE: u32 = 4096;
-/// A tree-store sector header's length (FORMAT.md "Sector").
+/// A tree-store sector header's length (FORMAT.ai.md "Sector").
 pub const TREE_HEADER_LEN: u32 = 24;
 
 pub use crate::provider::fs_kind::FsKind;
@@ -52,7 +52,7 @@ pub fn image_fs_kind(merged: &[u8]) -> FsKind {
 /// Does the sector starting at `sector_start` (at least its 24 header bytes)
 /// carry a tree-store header a firmware would not format over: a trusted
 /// version-3 header, or the magic in front of a newer version or an
-/// unsupported layout (FORMAT.md "Sector", rules 0, 2 and 3 — a refused
+/// unsupported layout (FORMAT.ai.md "Sector", rules 0, 2 and 3 — a refused
 /// store is a store)?
 pub fn tree_header_present(sector_start: &[u8]) -> bool {
     let Some(head) = sector_start.get(..TREE_HEADER_LEN as usize) else {

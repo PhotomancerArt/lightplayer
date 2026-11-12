@@ -383,7 +383,7 @@ pub fn derive_flash_name(board_display: &str, taken: &[String]) -> String {
 /// never "… 2" because it collided with itself. Counting it is what let one
 /// misrouted rename flip a title between "… · Oct 2" and "… · Oct 2 2" on
 /// every settle (docs/defects/
-/// 2026-10-02-saved-records-sharing-a-device-id-misroute-the-board.md).
+/// 2026-10-02-saved-records-sharing-a-device-id-misroute-the-board.ai.md).
 pub fn taken_device_titles(devices: &[DeviceView], naming: DeviceId) -> Vec<String> {
     devices
         .iter()

@@ -1,0 +1,162 @@
+# Wire hello and protocol versioning
+
+Date: 2026-07-14
+Status: accepted
+
+## Context
+
+During heavy development, wire/protocol compatibility is deliberately not
+maintained (see AGENTS.ai.md, "Wire/protocol compatibility"): client, server,
+and firmware ship in lockstep, wire changes delete the old form outright,
+and there are no serde aliases, version shims, or dual-format decode paths.
+That policy always named its exit: once devices are fielded and can no
+longer be upgraded in lockstep, the mechanism would be "an explicit
+capability/version handshake negotiated at connect time — never error-text
+sniffing or silent format probing".
+
+Device management work (device-link architecture M2) needs that handshake
+now: Studio must be able to tell "this device speaks a different protocol"
+apart from "this device is broken", and offer the right remedy (reflash)
+instead of surfacing decode garbage.
+
+## Decision
+
+### The hello contract
+
+The protocol gets a self-describing bootstrap, `ServerHello`
+(`lp-core/lpc-wire/src/server/hello.rs`):
+
+```
+ServerHello {
+    proto: u32,            // compare against WIRE_PROTO_VERSION
+    fw: FwProvenance {     // package, commit, dirty, profile
+        package: String,   // "fw-esp32" | "fw-host" | "fw-browser" | …
+        commit: String,    // short git commit, or "unknown"
+        dirty: bool,
+        profile: String,   // cargo profile, e.g. "release-esp32"
+    },
+    device_uid: Option<String>,  // stamped "dev_…" identity, if any
+}
+```
+
+(Payload reshaped 2026-08-01, wire proto 5: `fw: FwProvenance` is gone —
+its four fields moved onto `build: BuildFacts` beside the build's
+`LpFeature` list, joined by `hardware: HardwareFacts`. The delivery
+contract, the bump rule, and the no-negotiation posture below are
+unchanged; capability reporting is orthogonal to versioning. See
+`docs/adr/2026-08-01-capability-reporting-on-hello.ai.md`.)
+
+It is delivered two ways, both mandatory for every lpa-server embedder:
+
+- **Unsolicited**: as the first id-0 frame the server loop sends when it
+  starts serving (before/with the first heartbeat, following the heartbeat
+  id-0 precedent).
+- **On request**: `ClientRequest::Hello` is answered with
+  `ServerMsgBody::Hello` at any time.
+
+The server is sans-IO: the hello payload is injected by the embedder
+(`LpServer::set_hello`) at construction time; the server never reads git,
+env, clocks, or ambient state to build it (the one non-ambient exception:
+`device_uid` is re-read from the injected base fs's root identity file
+when answering a hello request). Boot logs carry the same facts
+(`[INIT] fw-esp32 initialized, starting server loop... proto=1 commit=<c>
+dirty=<b>`) so a serial capture is self-describing even without a protocol
+client.
+
+### The hand-bumped integer rule
+
+`WIRE_PROTO_VERSION` (`lpc-wire`) is a single `u32`, hand-bumped on every
+breaking wire change: renamed/removed/retyped fields, changed variants,
+changed encodings, changed semantics of existing messages. There is no
+minor/patch structure and no capability list — one integer, compared for
+equality. Purely additive changes (a new message the other side never has
+to understand) need not bump it, but when in doubt, bump; versions are
+free, debugging silent misdecodes is not.
+
+### Absence is the mismatch signal
+
+Pre-hello firmware never sends a hello and errors on the `Hello` request.
+Therefore a connected, responding server that produces no hello IS the
+version-mismatch signal — no dual classifier, no format probing, no
+"legacy mode". This covers all pre-M2 firmware with zero compat surface.
+
+**Amended 2026-10-02 (G1-F1 of the C6 repartition):** a hello the host
+cannot DECODE is not an absent hello. Wire 34 (33 when this was written) made the hello's
+`hardware.fs` required, a wire-32 hello stopped decoding, and every
+fielded board read as pre-hello firmware. When the full decode fails, the
+host reads exactly one field — `msg.hello.proto`, which every hello since
+wire 1 carries in the same place (`lpc_wire::hello_proto`) — and treats
+the board as a LightPlayer on that wire (older: update the firmware).
+Nothing else of the other wire's hello is read, so this is the version
+check working, not a decoder for an old shape. See
+`docs/defects/2026-10-02-a-wire-32-board-reads-as-pre-hello-firmware.ai.md`.
+
+**Amended 2026-10-03 (G1 walk, Q6):** one more field, read the same way
+and only then: `msg.hello.hardware.boardId` (`lpc_wire::hello_board_id`),
+the board the stamped `/hardware.json` names. Without it the way forward
+for an older board — "update the firmware" — asked the user to pick the
+board from every board the catalog has, on a board that had said exactly
+what it is. It is read separately from `proto`, so a board field of
+another shape costs the board and never the version. That is the whole
+list: version and board, nothing else.
+
+### Conservative policy: always upgrade the firmware
+
+When versions differ (or the hello is absent), assume **nothing** works.
+No negotiation, no graceful degradation, no per-message compatibility
+matrix (explicitly rejected while the no-wire-compat policy holds). The
+one smooth path is always "upgrade the firmware to match the Studio/client
+in hand" — the client is never expected to speak old protocols. The UX
+consumer of this policy (the `Incompatible` device state, reflash
+affordance) is `DeviceSession` (device-link M4; see
+`docs/adr/2026-07-15-device-session-model.ai.md`); this ADR fixes the
+contract it consumes.
+
+The Studio firmware manifest records the wire version it would flash, so
+"manifest we'd flash" vs "device hello" is a pure integer comparison — no
+ELF parsing at comparison time. (Mechanism updated 2026-08-01: it was
+`build.wireProto`, `sed`-extracted from the const by the packaging recipe;
+it is now `core.wireProto` in `manifest.json` schemaVersion 2, extracted
+from the built image's embedded manifest core by `lp-cli firmware package`
+— see `docs/adr/2026-08-01-firmware-manifest-architecture.ai.md`. The
+comparison is unchanged.)
+
+## Future intent (recorded, not implemented)
+
+- **Project-data versioning** is a separate axis: a device can speak the
+  current protocol but hold project files written by an older format.
+  `ServerHello` deliberately does NOT carry a project-format field today —
+  fields are added when they become real, not speculatively. When
+  project-data upgrade work lands, the hello is where its version belongs.
+- **device_uid from firmware** — resolved by device-session M4/P4: the
+  stamped identity moved to `/.lp/device.json` at the DEVICE FS ROOT, so
+  firmware reads it at boot and `ClientRequest::Hello` answers re-read it
+  (the uid is now root-sourced, never `None` on a stamped device).
+
+## Consequences
+
+- lpc-wire carries `WIRE_PROTO_VERSION`, `ServerHello`, `FwProvenance`
+  (renamed to `BuildFacts` and given a feature list in 2026-08-01's
+  capability reshape), `ServerMsgBody::Hello`, `ClientRequest::Hello`.
+- All three embedders (fw-esp32, fw-host, fw-browser) inject provenance
+  and emit the boot hello; fw-esp32's comes from `build.rs`-captured git
+  state (`LP_BUILD_COMMIT`/`LP_BUILD_DIRTY`/`LP_BUILD_PROFILE`, falling
+  back to `unknown`/`false` when git is absent).
+- lpa-client exposes the last-seen hello and a typed `hello()` call; no
+  policy lives in the client.
+- The boot line keeps its marker substring, but string-grep readiness is
+  gone from the app layer: device-session M4 deleted the studio's
+  readiness-granting classifier and made the hello the only readiness
+  signal; boot-line classification survives in `lpa-link` as
+  DIAGNOSIS-ONLY (`BootLineClassifier` — see
+  `docs/adr/2026-07-15-device-session-model.ai.md`). The CLI's `fwcheck`
+  grep remains until the CLI adopts `DeviceSession` (device-link M5).
+
+## Amendment (2026-10-06): channel 3 is not this number's
+
+Wire proto 38 adds `ServerHello.firmware`: a split C6's board manifest
+(`lpc_update::BoardManifest`), `None` everywhere else. The over-the-air
+update protocol itself rides lp-link **channel 3**, and is not versioned by
+`WIRE_PROTO_VERSION`: it has its own `proto` byte and changes only by adding,
+and a host that cannot read a board's hello still sends `Q` on channel 3.
+See `docs/adr/2026-10-06-ota-update-protocol.ai.md`.

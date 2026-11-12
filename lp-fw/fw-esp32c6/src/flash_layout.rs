@@ -4,7 +4,7 @@
 //! The offsets come from the table the chip was flashed with, matched by
 //! label — the same pattern as `fw-esp32s3` and `fw-esp32v3`. Until 2026-10
 //! the C6 hardcoded `0x310000` / 240 blocks, transcribed by hand from
-//! `partitions.csv` (`docs/debt/firmware-partition-constants-transcribed.md`,
+//! `partitions.csv` (`docs/debt/firmware-partition-constants-transcribed.ai.md`,
 //! paid). A transcribed offset that drifts from the flashed table does not
 //! fail, it mounts across whatever is there — and the C6's table does move
 //! (the 2026-10 repartition), so there is one copy of the layout: the table

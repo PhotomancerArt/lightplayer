@@ -227,7 +227,7 @@ pub(crate) fn reset_docs_sim(sim: &DocsSim) {
 }
 
 /// The root module's panel from a docs sim's view: the workspace ROOT's
-/// group, the same one play mode renders (`docs/design/modules.md` R8),
+/// group, the same one play mode renders (`docs/design/modules.ai.md` R8),
 /// read through core's `ProjectEditorView::root_module_face`. `None` until
 /// the sim has deployed and synced.
 pub(crate) fn root_panel(studio_view: &UiStudioView) -> Option<UiPanelGroup> {

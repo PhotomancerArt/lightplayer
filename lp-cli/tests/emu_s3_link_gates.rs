@@ -84,7 +84,7 @@ fn the_ledger_triple_is_elicited_by_a_stop_all_over_the_link() {
     );
     // ESP-NOW is a default feature since 2026-10-23: the hello says the board
     // has a radio and the service, as its manifest does
-    // (docs/defects/2026-10-23-the-s3-espnow-image-gave-the-server-no-radio-service.md).
+    // (docs/defects/2026-10-23-the-s3-espnow-image-gave-the-server-no-radio-service.ai.md).
     let hello = hello.unwrap_or_default();
     assert!(
         hello.contains("\"radio\":true") && hello.contains("\"svc.radio-espnow\""),
@@ -546,7 +546,7 @@ const ORACLE_PAD: u8 = 9;
 /// light [`LIT_FRAMES`] whole frames. A ceiling, not a duration: the run
 /// stops as soon as it has its frames (checked every [`ORACLE_STEP_US`]),
 /// because rendering past them proves nothing more and costs the S3's CI
-/// job minutes it does not have (`docs/debt/emulator-ci-jobs-outgrow-their-time-budgets.md`).
+/// job minutes it does not have (`docs/debt/emulator-ci-jobs-outgrow-their-time-budgets.ai.md`).
 const ORACLE_US: u64 = 6_000_000;
 
 /// How often the run stops to count lit frames.

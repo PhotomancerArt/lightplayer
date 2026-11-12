@@ -49,7 +49,7 @@
 //! `j`/`call0-12` reach limit. The probe is a live test
 //! (`tests/imm_gas_lx6.rs`, skips loudly without the toolchain). The subset
 //! the emitter exercises also ran divergence-free on classic silicon via the
-//! P5 N-run corpus (FINDINGS.md, "LX6 conformance").
+//! P5 N-run corpus (FINDINGS.ai.md, "LX6 conformance").
 
 /// How an immediate operand is constrained.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

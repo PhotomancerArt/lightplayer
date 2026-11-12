@@ -15,7 +15,7 @@
 //!   the slots alone (2), the controller refused every advertising restart
 //!   once one central had connected (`[ble] advertising failed; retrying in
 //!   1 s`, FS3, 2026-10-21:
-//!   `docs/defects/2026-10-21-the-s3-stops-advertising-after-its-first-connection.md`).
+//!   `docs/defects/2026-10-21-the-s3-stops-advertising-after-its-first-connection.ai.md`).
 //! - **`task_cpu`** is core 0 by name (it is the default): this firmware never
 //!   starts core 1, so a controller task pinned there would never run.
 //!

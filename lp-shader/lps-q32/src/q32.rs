@@ -157,7 +157,7 @@ impl Q32 {
         Q32(self.0 & (ONE - 1))
     }
 
-    /// Integer part: floor toward −∞ (`raw >> 16`; see `docs/design/q32.md`).
+    /// Integer part: floor toward −∞ (`raw >> 16`; see `docs/design/q32.ai.md`).
     #[inline(always)]
     pub const fn to_i32(self) -> i32 {
         self.0 >> Self::SHIFT

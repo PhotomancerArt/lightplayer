@@ -5,7 +5,7 @@ use crate::{
     UiSlotAspectRow, UiSlotFieldState, UiSlotUnit, UiSlotValue,
 };
 
-/// The `(scope, channel)` a panel gesture writes (panel.md P1 identity),
+/// The `(scope, channel)` a panel gesture writes (panel.ai.md P1 identity),
 /// carried when the control's backing slot consumes a bus channel. Present
 /// = gestures dispatch `PanelWriteOp` down the runtime command channel (no
 /// overlay, no dirty); absent = the control has no channel to write (an
@@ -72,7 +72,7 @@ pub enum UiPanelEmit {
 /// Panel controls sit directly on the card (no box-in-box) and open the SAME
 /// detail popover as their slot row (hover-revealed corner ⓘ). A control
 /// with a [`Self::panel_target`] dispatches gestures as panel writes (the
-/// runtime command channel, panel.md P8); one without falls back to the
+/// runtime command channel, panel.ai.md P8); one without falls back to the
 /// standard slot write path (`SlotEditOp::SetValue` at [`Self::address`]).
 /// Both flood paths coalesce in the studio actor.
 #[derive(Clone, Debug, PartialEq)]

@@ -9,7 +9,7 @@
 //! The controller drops every connection on a reset and says nothing about
 //! it, so without this the host kept each dead connection open for good: its
 //! connection task never ended, its slot was never freed, and the board never
-//! advertised again (docs/defects/2026-09-25-a-knob-jump-over-bluetooth-kills-the-c6-ble-host.md).
+//! advertised again (docs/defects/2026-09-25-a-knob-jump-over-bluetooth-kills-the-c6-ble-host.ai.md).
 //! Here, every event that opens or closes a connection is recorded
 //! ([`HciConnectionLedger`]), and when the host writes a `Reset` the
 //! connections still open are handed back to it as `Disconnection Complete`

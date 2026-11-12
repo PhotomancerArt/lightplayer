@@ -33,7 +33,7 @@
 //! of `cmd` must be exactly 1.** A constant cannot be 1 and 0 at once, a
 //! `with_write_one_pulse` reads 0 on that first read, and there is nothing
 //! for a mirror to mirror — which is why P3 left the ROM path standing here
-//! and named this phase (`docs/reports/2026-09-10-esp32v3-strict-boot-inventory.md`
+//! and named this phase (`docs/reports/2026-09-10-esp32v3-strict-boot-inventory.ai.md`
 //! §1.2, §3.3). The command is a *completion*: set by the guest, cleared by
 //! the block when the read is done.
 //!

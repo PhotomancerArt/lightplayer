@@ -1,5 +1,5 @@
 //! A Bluetooth-on C6 keeps serving Studio's reads while shader edits
-//! fragment its heap (`docs/defects/2026-09-27-fragmented-heap-refuses-every-read.md`).
+//! fragment its heap (`docs/defects/2026-09-27-fragmented-heap-refuses-every-read.ai.md`).
 //!
 //! Each shader edit leaves a few 2–4 KB objects (the new compiled code, a
 //! copy of the shader's settings list, lookup tables) in the middle of the

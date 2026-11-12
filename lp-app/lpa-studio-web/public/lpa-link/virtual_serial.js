@@ -675,7 +675,7 @@ class VirtualSerial extends EventTarget {
     // completes: awaiting board by board closed c6-a's byte channel and then
     // stopped, and c6-b's and c6-c's control channels stayed held — every
     // later load of `?emu=` met a 409 until the browser itself went away
-    // (docs/defects/2026-09-24-a-departed-page-kept-the-doors-boards.md).
+    // (docs/defects/2026-09-24-a-departed-page-kept-the-doors-boards.ai.md).
     await Promise.all([...emulators].map((emulator) => emulator.dispose()));
   }
 }
@@ -812,7 +812,7 @@ class VirtualSerialPort {
   // (it answers "already closed"). Left open, the byte channel is shared by
   // the NEXT generation's `EmulatorPort`, whose `open()` then refuses with
   // "already open in this page" — the replugged card sat at "Attached — not
-  // listening" forever (docs/defects/2026-09-24-emulated-replug-leaves-the-old-byte-channel-open.md).
+  // listening" forever (docs/defects/2026-09-24-emulated-replug-leaves-the-old-byte-channel-open.ai.md).
   _releaseByteChannel() {
     this.emulator.close().catch((error) => {
       console.warn(`[emu] ${this.boardId}: closing the dead port's byte channel failed`, error);

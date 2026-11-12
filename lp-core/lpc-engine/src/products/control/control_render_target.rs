@@ -15,7 +15,7 @@
 //!   product, every frame, and the 35,700 B ask that halted the emulator on
 //!   `catalog/projects/small-dome`. The runtime buffer is the rendered product's one
 //!   home; nothing is materialized beside it
-//!   (`docs/adr/2026-09-06-control-render-targets-scatter.md`).
+//!   (`docs/adr/2026-09-06-control-render-targets-scatter.ai.md`).
 //!
 //! Placement is the target's business, not the producer's: reversal and
 //! rotation within a run stay post-passes the output applies in place, exactly

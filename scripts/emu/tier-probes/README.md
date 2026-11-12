@@ -3,7 +3,7 @@
 **These patches are not the product.** Nothing here is committed to the
 emulator's behaviour, nothing is behind a flag, nothing is default-off in the
 product path. They exist so that future-us can re-take the rows in
-[`docs/emulator-perf-ledger.md`](../../../docs/emulator-perf-ledger.md)
+[`docs/emulator-perf-ledger.ai.md`](../../../docs/emulator-perf-ledger.ai.md)
 without re-deriving the hacks.
 
 Written for the emu-loop-redesign milestone's phase **P1b** (gate

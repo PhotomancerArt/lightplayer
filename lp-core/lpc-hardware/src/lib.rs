@@ -15,7 +15,7 @@
 //! — so a caller that has been refused an endpoint should wait rather than ask
 //! again. [`HwRegistry::generation`] is the signal to wait on: it changes when
 //! ownership moves, which is the only thing that can turn a refusal into an
-//! acceptance. See `docs/adr/2026-07-31-output-sink-retry-policy.md`.
+//! acceptance. See `docs/adr/2026-07-31-output-sink-retry-policy.ai.md`.
 //!
 //! Rendering and protocol-adjacent color processing live above this crate. For
 //! example, [`Ws281xOutput`] accepts already-rendered RGB bytes; display

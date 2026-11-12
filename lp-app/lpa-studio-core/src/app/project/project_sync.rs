@@ -493,7 +493,7 @@ impl ProjectSync {
     /// Stage 1 of the staged initial sync: the skeleton — every query except
     /// per-node slot detail, and no probes. This shape is the one the
     /// classic's empirics matrix proves always fits
-    /// (`docs/defects/2026-08-26-project-read-assembly-oom-resets-classic.md`);
+    /// (`docs/defects/2026-08-26-project-read-assembly-oom-resets-classic.ai.md`);
     /// the monolithic everything-at-once initial read is the shape that
     /// always reset the board, and is deliberately no longer constructible.
     pub fn initial_skeleton_read_request(&mut self) -> ProjectReadRequest {

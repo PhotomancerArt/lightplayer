@@ -17,7 +17,7 @@ use super::ChannelMetaDef;
 /// The module carries the *technical spec* of its subtree. The project's
 /// workspace identity (`format`, `uid`, `name`) lives in the non-node
 /// `project.json` container manifest ([`crate::ProjectManifest`]) beside the
-/// root `module.json` — the mitosis of docs/design/modules.md §1/§6.
+/// root `module.json` — the mitosis of docs/design/modules.ai.md §1/§6.
 #[derive(Clone, Debug, Default, PartialEq, Slotted)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 pub struct ModuleDef {
@@ -37,7 +37,7 @@ pub struct ModuleDef {
     /// input lists in the module's host scope — through a playlist entry's
     /// sink, to the playlist's level — so the host's panel offers one
     /// control every module that declares it follows, until a module's own
-    /// value cuts it loose (modules.md R2/R7; playlists-on-the-bus D3–D5).
+    /// value cuts it loose (modules.ai.md R2/R7; playlists-on-the-bus D3–D5).
     /// Names only: label and range come from the slots bound to the
     /// channel (R9). Absent declares nothing.
     pub inputs: OptionSlot<ChannelNameListSlot>,

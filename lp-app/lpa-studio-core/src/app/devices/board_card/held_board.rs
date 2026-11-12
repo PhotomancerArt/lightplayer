@@ -1,5 +1,5 @@
 //! A board another tab of this browser holds, in the card's words
-//! (`docs/adr/2026-10-08-the-board-card-and-one-home-page.md`, section 5,
+//! (`docs/adr/2026-10-08-the-board-card-and-one-home-page.ai.md`, section 5,
 //! "Amendment: how a port gets one holder tab").
 //!
 //! The state, the facts and the verb exist already (`DeviceView.held_elsewhere`,

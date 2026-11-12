@@ -7,7 +7,7 @@ fixture+output chains are gone.
 
 Its reason to exist: frame cost on the desk ESP32-S3 was measured as flat
 ~8.4 ms *per fixture+output chain*, independent of render resolution and LED
-count (see `docs/debt/s3-frame-cost-scales-per-fixture.md`). Profiling one
+count (see `docs/debt/s3-frame-cost-scales-per-fixture.ai.md`). Profiling one
 chain against four is how that per-chain cost is attributed, so both
 workloads must stay comparable — **change one, change the other**.
 

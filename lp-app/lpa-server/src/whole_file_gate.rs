@@ -4,7 +4,7 @@
 //! A whole-file read is one allocation of the file's size, and on a board
 //! with a project loaded and a radio link open that is often more than the
 //! largest free block (a 10,240 B read reset the silicon C6, PR B's desk
-//! walk; `docs/defects/2026-10-06-a-message-the-heap-cannot-reassemble-resets-the-board.md`).
+//! walk; `docs/defects/2026-10-06-a-message-the-heap-cannot-reassemble-resets-the-board.ai.md`).
 //! `FsRequest::Read` (`handlers::fs_read_refusal`), Studio's pull,
 //! `FsRequest::ChangesSince`, and the package hash Studio's Edit press asks
 //! for first, `FsRequest::HashPackage` (both `file_sync`), read files whole,

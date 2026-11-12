@@ -37,7 +37,7 @@
 //!
 //! HMAC and PBKDF2 are written here from RFC 2104 and RFC 8018 over the
 //! workspace `sha2`; RustCrypto's `hmac` and `pbkdf2` are dev-dependency
-//! oracles only. Decision record: `docs/adr/2026-09-23-ble-access-model.md`.
+//! oracles only. Decision record: `docs/adr/2026-09-23-ble-access-model.ai.md`.
 
 #![no_std]
 extern crate alloc;

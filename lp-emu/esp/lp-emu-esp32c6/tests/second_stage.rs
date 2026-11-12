@@ -1,5 +1,5 @@
 //! The second stage at flash `0x0`, as the mask ROM sees it — LightPlayer's
-//! own (ADR `docs/adr/2026-10-17-the-c6-boots-through-our-own-bootloader.md`)
+//! own (ADR `docs/adr/2026-10-17-the-c6-boots-through-our-own-bootloader.ai.md`)
 //! held to what it promised, on the real ROM:
 //!
 //! - **The write audit.** From the ROM's `entry` to the core's first

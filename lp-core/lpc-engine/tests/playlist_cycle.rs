@@ -127,7 +127,7 @@ fn a_pick_while_cycling_jumps_and_the_cycle_carries_on_from_it() {
 /// bus vision D7): a pick stays put whatever its `duration`, and a trigger's
 /// excursion plays the entry's duration and comes back to the pick. Before
 /// this, a held cycle walked the entries by their durations and settled on
-/// idle (`docs/defects/2026-10-19-the-cycle-switch-off-does-not-hold.md`).
+/// idle (`docs/defects/2026-10-19-the-cycle-switch-off-does-not-hold.ai.md`).
 #[test]
 fn frozen_hold_and_absent_cycles_hold_the_pick() {
     let mut runs = Vec::new();
@@ -215,7 +215,7 @@ fn re_picking_the_same_entry_restarts_the_cycle_there() {
     );
 }
 
-/// A pick restored before the first tick (`.lp/panel.json`, panel.md P10)
+/// A pick restored before the first tick (`.lp/panel.json`, panel.ai.md P10)
 /// is settled into the playlist before it ever ticks, so the first tick's
 /// residency step swaps the authored entry out before anything renders:
 /// no frame ever shows the authored entry (playlists-on-the-bus Q3).

@@ -28,17 +28,17 @@ pub enum UiNodeFace {
     /// face's board facts — they arrive through a controller decoration
     /// pass rather than the section walk.
     Clock(UiClockFace),
-    /// Module card (`docs/design/modules.md` §5): output-mirror hero, the
+    /// Module card (`docs/design/modules.ai.md` §5): output-mirror hero, the
     /// scope's panel, and the bus-wiring drawer. Worn at every depth — root
     /// workspace card and embedded child card alike. Its children render
     /// below it as sibling cards via [`crate::UiNodeChild`], like every
     /// other kind.
     Module(UiModuleFace),
     /// A non-module node whose whole face is its bound slots, presented as
-    /// panel controls (`docs/design/modules.md` R3): the clock, the control
+    /// panel controls (`docs/design/modules.ai.md` R3): the clock, the control
     /// node, the fixture sitting under a module. The group carries the
     /// ENCLOSING scope, because a leaf introduces no scope of its own — so
     /// these controls share their `(scope, channel)` identity, and their
-    /// panel state, with the module panel above (`panel.md` P1).
+    /// panel state, with the module panel above (`panel.ai.md` P1).
     Controls(UiPanelGroup),
 }

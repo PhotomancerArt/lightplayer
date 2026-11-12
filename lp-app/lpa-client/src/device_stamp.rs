@@ -11,12 +11,12 @@
 //! scratch, the decoded `String` and `deserialize_smart`'s base64 attempt
 //! are about four copies of the payload, in one request — and the board
 //! soft-reset before any write ran
-//! (`docs/defects/2026-09-04-classic-ooms-decoding-the-manifest-write.md`).
+//! (`docs/defects/2026-09-04-classic-ooms-decoding-the-manifest-write.ai.md`).
 //!
 //! So the manifest travels as a run of `FsRequest::WriteChunk`s of
 //! [`MANIFEST_CHUNK_BYTES`] each — the wire the push already uses — and the
 //! project keeps running. The alternatives, and why not, are in
-//! `docs/adr/2026-09-04-the-manifest-stamp-streams-beside-a-running-project.md`:
+//! `docs/adr/2026-09-04-the-manifest-stamp-streams-beside-a-running-project.ai.md`:
 //! stopping the project frees the heap but leaves the board dark until a
 //! reboot, and a reboot re-enumerates a native-USB port after the flash
 //! activity has already settled; minifying the manifest takes a third off
@@ -26,7 +26,7 @@
 //! truncates), and a stamp that stops between chunks — a tab closed, a
 //! cable pulled, a board reset — used to leave `/hardware.json` torn, so
 //! the board lost its stamped manifest and booted on the compiled-in one
-//! (`docs/defects/2026-10-02-a-closed-tab-mid-stamp-leaves-hardware-json-truncated.md`).
+//! (`docs/defects/2026-10-02-a-closed-tab-mid-stamp-leaves-hardware-json-truncated.ai.md`).
 //! [`stamp_board_manifest`] is therefore journaled, with no new wire
 //! request: the whole manifest is written to
 //! [`lpc_hardware::HARDWARE_MANIFEST_NEXT_PATH`] first, then to

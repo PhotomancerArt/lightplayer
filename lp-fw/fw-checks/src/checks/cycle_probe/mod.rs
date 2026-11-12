@@ -16,7 +16,7 @@
 //! | `rodata_stride/<n>` | the *load* side of the cache, per stride |
 //! | `mmio_poll/<block>` | the APB access cost, per block |
 //! | `muldiv/{mul,div}` | the per-class costs the `t2` model already claims |
-//! | `slice_shape` | the ≈4,075-cycle per-slice term (`notes.md` F4) |
+//! | `slice_shape` | the ≈4,075-cycle per-slice term (`notes.ai.md` F4) |
 //!
 //! ## Two clocks, always
 //!
@@ -30,7 +30,7 @@
 //! "the counter pauses under X" story: if the two disagree about how long a
 //! kernel took, **that disagreement is the finding**, not a fixture problem.
 //! Plan one spent a sitting on exactly such a story and it turned out to be a
-//! link mismatch (`notes.md` F3).
+//! link mismatch (`notes.ai.md` F3).
 //!
 //! ## What stays outside this crate
 //!

@@ -1,5 +1,5 @@
 //! Fuel-check emission (mirrors the rv32 design in
-//! `docs/adr/2026-07-20-lpvm-native-fuel.md`).
+//! `docs/adr/2026-07-20-lpvm-native-fuel.ai.md`).
 //!
 //! Unit = loop back-edge executions. Placement: check-then-decrement
 //! immediately before each loop's single back-edge `br`, check-only after the

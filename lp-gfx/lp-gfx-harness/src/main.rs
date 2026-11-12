@@ -4,7 +4,7 @@
 //! ticks at server rates, and reports per-tick sample latency.
 //!
 //! Engine selection is explicit per the fidelity-tiers ADR
-//! (`docs/adr/2026-07-09-preview-fidelity-tiers.md`): `--engine gpu-f32`
+//! (`docs/adr/2026-07-09-preview-fidelity-tiers.ai.md`): `--engine gpu-f32`
 //! requires a native wgpu adapter and **fails** without one — it never
 //! falls back to the CPU tier silently; `--engine cpu-q32` is the
 //! embedded-parity tier (Q32 on the target LPVM engine).

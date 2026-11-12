@@ -391,7 +391,7 @@ const PROJECT = process.env.WALK_PROJECT ?? "Peach (1D)";
 /// slower than real time with Bluetooth and a project on, so its first
 /// heartbeat — what the card learns a project from after an update's last
 /// reboot — is minutes of wall time away
-/// (docs/debt/emulated-s3-runs-forty-times-slower-than-real-time.md).
+/// (docs/debt/emulated-s3-runs-forty-times-slower-than-real-time.ai.md).
 const STEP_MS = Number(process.env.WALK_STEP_MS ?? 180_000);
 /// A board booting ROM-up and joining the virtual LAN (a deadline, not a
 /// measurement).
@@ -1213,7 +1213,7 @@ async function main() {
   /// `timed: false` where no terminal is drawn to time them in: a restore
   /// runs on a core-only board's PENDING link (it says no hello), and a
   /// pending card draws no terminal (docs/defects/
-  /// 2026-10-06-a-restore-on-a-pending-link-narrates-to-no-terminal.md).
+  /// 2026-10-06-a-restore-on-a-pending-link-narrates-to-no-terminal.ai.md).
   const checkReconnects = (terminal, before, after, drops, { timed = true } = {}) => {
     if (!BLE) return null;
     const lines = reconnectLines(terminal);

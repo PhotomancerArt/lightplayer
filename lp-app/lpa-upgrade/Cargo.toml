@@ -30,7 +30,7 @@ libm = "0.2"
 
 [dev-dependencies]
 # The real reader, so a migrated project is proved loadable rather than
-# merely well-formed (docs/defects/2026-07-27-created-package-unloadable.md).
+# merely well-formed (docs/defects/2026-07-27-created-package-unloadable.ai.md).
 lpc-registry = { path = "../../lp-core/lpc-registry" }
 lpfs = { path = "../../lp-base/lpfs" }
 # (lpc-mapping, a dependency above, also checks the v11→v12 step's output

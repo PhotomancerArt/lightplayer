@@ -1,5 +1,5 @@
 //! The USB-Serial-JTAG host link on lp-link (plan `lp-link-usb-cutover`, P2;
-//! `docs/adr/2026-09-27-lp-link-one-comms-layer.md`).
+//! `docs/adr/2026-09-27-lp-link-one-comms-layer.ai.md`).
 //!
 //! lp-link runs exactly where USB bytes enter and leave the board (D1). One
 //! [`Link`](lp_link::Link) per boot, shared by two parties — on the one thread

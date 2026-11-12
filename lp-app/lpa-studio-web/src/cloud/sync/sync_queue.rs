@@ -20,7 +20,7 @@
 //! a backoff. Everything else in the library is fair game for the tick —
 //! that is how a project whose only trip was dropped, or that was installed
 //! before the account was known, still gets its first publish
-//! (`docs/defects/2026-08-28-auto-publish-outcomes-invisible.md`).
+//! (`docs/defects/2026-08-28-auto-publish-outcomes-invisible.ai.md`).
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -376,7 +376,7 @@ mod tests {
         assert_eq!(queue.take_due(3_000.0).len(), 1);
     }
 
-    /// The bug this pins (`docs/defects/2026-08-28-auto-publish-outcomes-invisible.md`,
+    /// The bug this pins (`docs/defects/2026-08-28-auto-publish-outcomes-invisible.ai.md`,
     /// 2026-09-06 finding): a freshly generated project's install-time trip
     /// is its ONLY trip, and a refusal used to forget the entry outright —
     /// the coarse timer only re-armed what was still tracked, so the

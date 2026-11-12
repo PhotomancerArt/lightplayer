@@ -47,7 +47,7 @@
 # and quote the load average with both. Wall-clock numbers taken hours apart,
 # or under another agent's build, are not speed results.
 #
-# Emulated microseconds never gate anything (AGENTS.md "The ESP32-C6
+# Emulated microseconds never gate anything (AGENTS.ai.md "The ESP32-C6
 # emulator"): transcripts decide, probes report.
 #
 # `--seams <atoms>` passes `--seams <atoms>` to every run (strict: an image
@@ -55,7 +55,7 @@
 # exit 64 rather than quietly measuring the seam-off machine). The four
 # pinned images predate the seam table, so point the `LP_EMU_C6_REF_*`
 # variables at images that carry it. A `led=fast` number is labelled
-# `…+led=fast` and is never a transcript (docs/adr/2026-10-05-emulator-seams.md).
+# `…+led=fast` and is never a transcript (docs/adr/2026-10-05-emulator-seams.ai.md).
 set -euo pipefail
 
 repo="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -203,7 +203,7 @@ echo
 for line in "${lines[@]}"; do echo "$line"; done
 echo
 echo "binary: $bin ($(wc -c <"$bin" | tr -d ' ') bytes), best of $runs runs per row"
-echo "These numbers are ORACLES, not gates — never gate on emulated microseconds (AGENTS.md)."
+echo "These numbers are ORACLES, not gates — never gate on emulated microseconds (AGENTS.ai.md)."
 
 if [[ -n "$json_out" ]]; then
     mkdir -p "$(dirname "$json_out")"

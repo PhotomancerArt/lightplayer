@@ -5,7 +5,7 @@
 //! tombstone behind for good, and dormant playlist entries — which remove
 //! and re-attach a subtree on every pattern switch — would have grown it
 //! without bound over a cycle
-//! (`docs/defects/2026-09-25-node-tree-tombstones-grow-per-reload.md`).
+//! (`docs/defects/2026-09-25-node-tree-tombstones-grow-per-reload.ai.md`).
 //!
 //! Here a removed entry is dropped with its slot, so storage tracks the live
 //! count. Lookup stays O(1) in the common case: ids are handed out in

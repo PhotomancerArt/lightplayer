@@ -156,7 +156,7 @@ fn PanelControlBody(
         .as_ref()
         .is_some_and(|target| target.engaged);
     // A panel-targeted control with an ENGAGED writer gets the clear
-    // affordance (panel.md P2): a small ↺ beside the readout releasing the
+    // affordance (panel.ai.md P2): a small ↺ beside the readout releasing the
     // held value back to the authored wiring.
     let clear = control
         .panel_target

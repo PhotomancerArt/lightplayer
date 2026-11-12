@@ -76,7 +76,7 @@ with no pairing code (2026-10-17).
 - **Every connect from the phone panicked the C6** until PR #1180: Android
   asks for connection parameters over the link layer, which no Mac or
   iPhone central had done
-  (`docs/defects/2026-10-17-an-android-phone-connecting-over-bluetooth-panics-the-c6.md`).
+  (`docs/defects/2026-10-17-an-android-phone-connecting-over-bluetooth-panics-the-c6.ai.md`).
   Fixed in the forks of bt-hci and trouble-host under `third_party/`.
 - **The board must let the phone in.** The phone is signed out and holds no
   key, so a board whose access is `open: nobody` (fixture-c6's) shows it as
@@ -89,7 +89,7 @@ with no pairing code (2026-10-17).
 ## The USB walk
 
 Chrome on Android had no wired Web Serial (before Chrome 148), so Studio's USB square speaks to
-a board over WebUSB there (`docs/adr/2026-10-18-android-usb-over-webusb.md`).
+a board over WebUSB there (`docs/adr/2026-10-18-android-usb-over-webusb.ai.md`).
 The board is plugged into the PHONE's USB-C port, not the desk hub, and is
 powered by the phone.
 
@@ -111,7 +111,7 @@ power is the phone's port.
 
 The flasher survives what the C6 drops on a phone (it reads in short,
 digest-checked segments it reads again, and proves each written image by
-its MD5): `docs/defects/2026-10-18-a-flash-over-webusb-on-a-phone-loses-the-boards-replies.md`.
+its MD5): `docs/defects/2026-10-18-a-flash-over-webusb-on-a-phone-loses-the-boards-replies.ai.md`.
 Its numbers are this phone's: a lab page measured them by driving esptool-js
 over the shipped port with `StudioDriver.evaluate` (the method is in the
 defect).

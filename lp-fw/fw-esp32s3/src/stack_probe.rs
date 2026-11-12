@@ -56,7 +56,7 @@ const PAINT_MARGIN: usize = 1024;
 /// override — confirmed on the shipped ELF, `__stack_chk_guard - _stack_end ==
 /// 0x3c`) and watches it, so painting over it is itself reported as an
 /// overflow — that is how the C6 port first failed
-/// (`docs/defects/2026-09-02-studio-flasher-cannot-recover-a-boot-looping-c6.md`).
+/// (`docs/defects/2026-09-02-studio-flasher-cannot-recover-a-boot-looping-c6.ai.md`).
 /// The high-water scan starts above it too; the 256 B it costs the measurement
 /// are noise against a 37 KB stack.
 const GUARD_SKIP: usize = 256;

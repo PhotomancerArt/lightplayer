@@ -1,4 +1,4 @@
-//! Panel command round-trips (panel.md P8/P9, roadmap P9): `PanelWrite` /
+//! Panel command round-trips (panel.ai.md P8/P9, roadmap P9): `PanelWrite` /
 //! `PanelClear` are runtime pokes on the playlist-activate pattern —
 //! engage a writer at `(scope, channel)`, shadow the channel's authored
 //! providers, touch NOTHING authored (no overlay entry, no dirty), and
@@ -117,7 +117,7 @@ fn panel_writes_touch_nothing_authored() {
 
 #[test]
 fn concurrent_writes_converge_on_the_last_writer() {
-    // Two clients fighting one knob (panel.md P9): both speak the same
+    // Two clients fighting one knob (panel.ai.md P9): both speak the same
     // command channel, the engine keeps ONE writer per (scope, channel),
     // and every probe pull reflects whoever moved last.
     let (mut server, project_path) = server_with_clock_project("panel-last-writer");
@@ -359,7 +359,7 @@ fn an_authored_bus_binding_on_a_uniform_reaches_the_probe_with_a_scope() {
     );
 
     // ...and the channel lists in that scope, which is what makes a control
-    // appear at all (modules.md R6: an unwritten channel still lists).
+    // appear at all (modules.ai.md R6: an unwritten channel still lists).
     assert!(
         graph.channels.iter().any(|c| c.name == "glow"),
         "bus:glow lists even with no writer: {:?}",
@@ -568,7 +568,7 @@ fn the_auto_save_toggle_round_trips_over_the_wire() {
     assert_eq!(
         read_panel_auto_save(&mut server, handle),
         Some(true),
-        "auto-save is on by default (panel.md P11) and the read says so"
+        "auto-save is on by default (panel.ai.md P11) and the read says so"
     );
 
     let response = command(

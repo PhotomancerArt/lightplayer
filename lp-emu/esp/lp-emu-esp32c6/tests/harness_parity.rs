@@ -330,7 +330,7 @@ fn two_t3_harness_runs_are_byte_identical() {
 ///   recordings the calibration record's §3 is stronger — not one of the 92
 ///   slices costs fewer cycles at `t3` than at `t1`. This test runs the
 ///   **spike UART0** reference image, where every logging slice is pinned by
-///   the 115,200-baud drain rather than by the clock (F3, `notes.md`), so
+///   the 115,200-baud drain rather than by the clock (F3, `notes.ai.md`), so
 ///   individual slices there move a fraction of a percent either way and only
 ///   the sum is a statement. That difference between the two links is the
 ///   point F3 makes, restated by a cycle model.

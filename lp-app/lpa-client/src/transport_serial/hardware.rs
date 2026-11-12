@@ -84,7 +84,7 @@ fn serial_thread_loop(mut pump: LinkPump) {
     // `ClientTransport::close` joins this thread precisely to observe that,
     // and the next management operation reopens the same port immediately
     // after — see
-    // `docs/defects/2026-09-08-serial-close-leaks-the-port-on-a-wedged-device.md`.
+    // `docs/defects/2026-09-08-serial-close-leaks-the-port-on-a-wedged-device.ai.md`.
     drop(stream);
 
     log::debug!("Serial thread: Exiting ({stream_label} released)");

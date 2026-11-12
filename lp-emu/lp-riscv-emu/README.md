@@ -84,7 +84,7 @@ renumbering:
 
 **No GPL implementation was read or transliterated.** QEMU, GDB, GCC and
 glibc's soft-float are behavioral references at most; nothing here is derived
-from their source. See `docs/adr/2026-07-29-license-provenance-discipline.md`.
+from their source. See `docs/adr/2026-07-29-license-provenance-discipline.ai.md`.
 
 `lp-riscv-inst` has no `F` support and does not gain any: `executor/float.rs`
 decodes the instruction word itself.
@@ -134,7 +134,7 @@ a digit-by-digit integer square root for `FSQRT.S`.
   `-(a*b - c)` / `-(a*b + c)`. The difference is observable in the sign of an
   exactly-zero result, and it is implemented as the spec words it.
 - **Subnormals are not flushed.** §21.4 requires full IEEE subnormal
-  arithmetic. `docs/design/float.md` §4 lists flush-to-zero as *target-defined*,
+  arithmetic. `docs/design/float.ai.md` §4 lists flush-to-zero as *target-defined*,
   but that latitude is about the **shader** tier on wasm/GPU/S3 — the same
   document records that "wasm and RV32F preserve denormals (their specs require
   it)". Do not add an FTZ mode here.

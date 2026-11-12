@@ -8,12 +8,12 @@
 // tty drops what does not fit. Bytes that are not `0xFF` never pass 1,020,
 // and for them the count is exact backpressure: the board's bytes wait in the
 // driver, nothing is lost. The whole mechanism, measured on silicon, is
-// `docs/defects/2026-09-26-web-serial-on-macos-drops-bytes-of-packed-frames.md`.
+// `docs/defects/2026-09-26-web-serial-on-macos-drops-bytes-of-packed-frames.ai.md`.
 //
 // The emulator's `navigator.serial` shim (`virtual_serial.js`) is a lossless
 // pipe without this, and that is how a flash read that stalls on every Mac
 // passed the emulator walk (G1-F2, 2026-10-02:
-// `docs/defects/2026-10-02-the-emulated-serial-path-never-drops-a-byte.md`).
+// `docs/defects/2026-10-02-the-emulated-serial-path-never-drops-a-byte.ai.md`).
 // With it, a burst of `0xFF`-heavy bytes that arrives while the page is not
 // reading loses bytes exactly where a Mac would.
 //

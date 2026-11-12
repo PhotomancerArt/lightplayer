@@ -23,10 +23,10 @@ watchdogs, brownout, the flash clocks and the ROM's flash descriptor,
 loader's job with the same code. `app.bin` is the same bytes under both.
 `tools/lp-fw-split` builds both and writes the second stage's image itself.
 The decision and the core entry contract (C1–C8) are
-[`docs/adr/2026-10-17-the-c6-boots-through-our-own-bootloader.md`](../../docs/adr/2026-10-17-the-c6-boots-through-our-own-bootloader.md).
+[`docs/adr/2026-10-17-the-c6-boots-through-our-own-bootloader.ai.md`](../../docs/adr/2026-10-17-the-c6-boots-through-our-own-bootloader.ai.md).
 
 The decisions, the byte layouts and the rules found on silicon are in
-[`docs/adr/2026-10-04-c6-split-link-firmware-loader-and-boot-records.md`](../../docs/adr/2026-10-04-c6-split-link-firmware-loader-and-boot-records.md).
+[`docs/adr/2026-10-04-c6-split-link-firmware-loader-and-boot-records.ai.md`](../../docs/adr/2026-10-04-c6-split-link-firmware-loader-and-boot-records.ai.md).
 The formats live in [`lp-bootctl`](../../lp-base/lp-bootctl/README.md), shared
 with the core, so the loader and the core cannot disagree about which record
 wins.

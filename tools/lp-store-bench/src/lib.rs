@@ -9,7 +9,7 @@
 //!
 //! Host tooling for the spike `lp2025/2026-10-07-1858-lpfs-fit-spike`; nothing
 //! here is linked into firmware. Async stores are driven with a null-waker
-//! `block_on` here only (a test edge, per AGENTS.md "Sans-IO core").
+//! `block_on` here only (a test edge, per AGENTS.ai.md "Sans-IO core").
 
 mod board_files;
 mod candidate;

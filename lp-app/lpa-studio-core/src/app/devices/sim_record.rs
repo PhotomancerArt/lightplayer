@@ -18,7 +18,7 @@
 //! **No format bump.** [`RuntimeKind::Sim`] serializes to the `"sim"` this
 //! field has always carried, so every sidecar already on disk round-trips
 //! byte for byte; the only new bytes are in files this change also creates.
-//! The persisted-format rule (`AGENTS.md`) bumps on a change to bytes a
+//! The persisted-format rule (`AGENTS.ai.md`) bumps on a change to bytes a
 //! reader could misread, and there is none here — a reader that predates
 //! `"emu"` treats an emu sidecar as a foreign kind and reports absence,
 //! which is the posture below.
@@ -146,7 +146,7 @@ pub const EMU_ENDPOINT_PREFIX: &str = "emu:";
 /// `navigator.bluetooth.getDevices()` returns the granted board with that
 /// same id, and a held `BluetoothDevice` survives both a page-caused drop
 /// and a board reboot. Desktop Chrome mints a base64 id instead. Neither is
-/// identity — the hello's base MAC is (device-identity.md §2) — which is why
+/// identity — the hello's base MAC is (device-identity.ai.md §2) — which is why
 /// a board seen over USB and over Bluetooth is one registry row.
 pub use lpa_devices::identity::BLE_ENDPOINT_PREFIX;
 

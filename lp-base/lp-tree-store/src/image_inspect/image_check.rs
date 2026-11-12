@@ -637,7 +637,7 @@ impl<H: ObjectHasher> Checker<'_, '_, H> {
         self.out.orphan_records = orphan_records;
         self.out.orphan_bytes = orphan_bytes;
 
-        // Copies of one id are byte-identical by construction (FORMAT.md
+        // Copies of one id are byte-identical by construction (FORMAT.ai.md
         // "Record"), a stored and a deflated chunk by their logical bytes.
         let mut copies = 0u32;
         let mut differing = Vec::new();

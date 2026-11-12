@@ -26,7 +26,7 @@ pub struct ValidateConfig {
     pub sets: Vec<PayloadSet>,
     #[serde(default, rename = "configuration")]
     pub configurations: Vec<ConfigurationEntry>,
-    /// Emulator seam overlays (ADR docs/adr/2026-10-05-emulator-seams.md):
+    /// Emulator seam overlays (ADR docs/adr/2026-10-05-emulator-seams.ai.md):
     /// what one seam implementation changes about a configuration's trust.
     /// `lp-emu:esp32c6:t2+led=fast` is the base configuration with each
     /// atom's overlay laid over it, in label order — nobody writes one table
@@ -158,7 +158,7 @@ pub struct ConfigurationEntry {
     /// right by accident and wrong the first time a configuration is a board
     /// with a logic analyser on it — which is exactly the capture the `pin`
     /// class is waiting for
-    /// (`docs/defects/2026-09-08-a-pin-capture-is-a-property-of-the-configuration-not-the-payload.md`).
+    /// (`docs/defects/2026-09-08-a-pin-capture-is-a-property-of-the-configuration-not-the-payload.ai.md`).
     #[serde(default)]
     pub records_pins: bool,
     #[serde(default)]

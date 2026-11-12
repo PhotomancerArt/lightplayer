@@ -5,7 +5,7 @@
 // builtin, matching `src/builtins/lpfn/generative/worley/worley3_q32.rs`.
 // noise-rs range-function lineage (MIT/Apache-2.0) with the integer
 // lpfn_hash for feature points
-// (see docs/reports/2026-03-31-lpfx-license-audit.md).
+// (see docs/reports/2026-03-31-lpfx-license-audit.ai.md).
 //
 // Returns the squared euclidean distance to the nearest feature point,
 // scaled/shifted to approximately [-1, 1].

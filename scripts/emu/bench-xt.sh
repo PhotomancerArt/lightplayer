@@ -189,7 +189,7 @@ for line in "${lines[@]}"; do echo "$line"; done
 echo
 echo "binary: $bin ($(wc -c <"$bin" | tr -d ' ') bytes), best of $runs runs per row"
 echo "CycleModel::InstructionCount — a cycle is an instruction; there is no emulated clock here."
-echo "These numbers are ORACLES, not gates — never gate on emulated microseconds (AGENTS.md)."
+echo "These numbers are ORACLES, not gates — never gate on emulated microseconds (AGENTS.ai.md)."
 
 if [[ -n "$json_out" ]]; then
     mkdir -p "$(dirname "$json_out")"

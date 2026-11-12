@@ -1,6 +1,6 @@
 //! Native f32 multiplication — the f32 sibling of [`super::fmul_q32`].
 //!
-//! `*` is a `docs/design/float.md` §3 Guaranteed row (correctly rounded, RNE).
+//! `*` is a `docs/design/float.ai.md` §3 Guaranteed row (correctly rounded, RNE).
 //! Unlike Q32 there is no scale correction: the whole i64-staging dance the
 //! fixed-point sibling performs exists only to undo the Q16.16 scale factor.
 

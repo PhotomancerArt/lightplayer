@@ -33,7 +33,7 @@
 //! On the C6 the same reuse crashed the bootloader on warm resets: the
 //! Bluetooth controller keeps running through an HP-system reset and its DMA
 //! wrote into the bootloader's code
-//! (`docs/defects/2026-10-05-a-requested-reboot-crashed-the-c6-bootloader.md`).
+//! (`docs/defects/2026-10-05-a-requested-reboot-crashed-the-c6-bootloader.ai.md`).
 //! This chip runs a radio too since S3 radio M3 (`ble`), so the rule is the
 //! C6's, and it is enforced by capability, not by this chip having nothing
 //! that DMAs: the region carries **no capability tag**, so only a request

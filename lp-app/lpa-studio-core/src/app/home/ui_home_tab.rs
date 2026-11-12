@@ -50,7 +50,7 @@ impl UiHomeTab {
         Self::ALL.into_iter().find(|tab| tab.key() == key)
     }
 
-    /// Whether this tab shows `section`. The table of `plan.md` ("Which tab
+    /// Whether this tab shows `section`. The table of `plan.ai.md` ("Which tab
     /// shows which section"), the only place it is written down:
     ///
     /// | Section | All | Boards | Projects | Patterns |

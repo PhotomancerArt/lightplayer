@@ -530,14 +530,14 @@ fn relay_walk(image: &BoardImage) {
     });
 
     // 5. A deploy: the board comes back by itself. The wall clock is only
-    // the net here (AGENTS.md: never gate on host wall-clock from an
+    // the net here (AGENTS.ai.md: never gate on host wall-clock from an
     // emulated run); the 15 s bound is the relay client's, pinned in
     // `lpc-relay`'s rules and on the host in `relay_link.rs`.
     let restarted = Instant::now();
     cloud.restart();
     // P5, as the account's board list amends it: a new hub has no cache,
     // but the old one wrote the board's last picture behind as it went away
-    // (docs/adr/2026-10-20-the-account-board-list.md), so until the board is
+    // (docs/adr/2026-10-20-the-account-board-list.ai.md), so until the board is
     // back the new hub answers that one, offline. A session does not
     // survive the deploy (the store keeps the accounts, not their
     // sessions), so Alice signs in again.

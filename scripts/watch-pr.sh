@@ -248,7 +248,7 @@ no checks registered for $tag after ${REGISTER_TIMEOUT}s. Likely causes:
   - path-filtered CI: no workflow job matches this diff (.github/workflows)
   - stacked PR: base '$base' — CI only runs against main; retarget the PR,
     then push a commit or close and reopen it (retargeting alone starts no
-    CI): docs/debt/stacked-pr-retarget-gets-no-ci.md
+    CI): docs/debt/stacked-pr-retarget-gets-no-ci.ai.md
   - the last push was made with GITHUB_TOKEN (e.g. story-baseline
     auto-commit), which never triggers workflows — push any commit to kick CI
 EOF

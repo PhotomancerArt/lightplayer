@@ -40,7 +40,7 @@
 //!
 //! - **From the ISA Reference Manual.** Six fields were closed this way in M6
 //!   P5, once the manual became readable. A manual citation names the section
-//!   and page; the text itself is never reproduced (AGENTS.md license rule), and
+//!   and page; the text itself is never reproduced (AGENTS.ai.md license rule), and
 //!   no binutils, GCC, or QEMU source was consulted.
 //! - **From silicon.** Anything the 2011 RM does not cover — NaN payload
 //!   choices, denormal flush, the estimate lookup ROMs, the `div0.s` helper
@@ -210,7 +210,7 @@ pub enum ScaleRule {
 /// What a float→int conversion does with a value it cannot represent.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum OutOfRangeRule {
-    /// Clamp to the destination's min/max. `docs/design/float.md` §3 makes this
+    /// Clamp to the destination's min/max. `docs/design/float.ai.md` §3 makes this
     /// the *product's* Guaranteed behavior; whether the instruction does it, or
     /// M7 owes a clamp, is the measurement.
     Saturate,
@@ -218,7 +218,7 @@ pub enum OutOfRangeRule {
     Wrap,
 }
 
-/// How `round.s` breaks an exact halfway case. `float.md` §4 files this under
+/// How `round.s` breaks an exact halfway case. `float.ai.md` §4 files this under
 /// target-defined, so both answers are legal and only one is true here.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum TiesRule {
@@ -309,7 +309,7 @@ pub struct DivideStepSemantics {
 /// can enumerate them; none has a default.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct FpPolicy {
-    /// Which NaN survives an operation with NaN operands. `float.md` §4 files
+    /// Which NaN survives an operation with NaN operands. `float.ai.md` §4 files
     /// NaN bit patterns under target-defined, so this is a real measurement and
     /// not a spec lookup.
     pub nan_propagation: Unknown<NanRule>,
@@ -333,7 +333,7 @@ pub struct FpPolicy {
     pub float_to_int_out_of_range: Unknown<OutOfRangeRule>,
     /// The **signed** integer a NaN converts to (`trunc.s`, `round.s`,
     /// `floor.s`, `ceil.s`). `utrunc.s` has its own answer and is not covered
-    /// here. `float.md` §5 leaves this unspecified at the product level, which
+    /// here. `float.ai.md` §5 leaves this unspecified at the product level, which
     /// is exactly why the *target's* answer has to be recorded.
     pub float_to_int_nan: Unknown<u32>,
     /// What `utrunc.s` produces for a negative input. Began life as the ISA

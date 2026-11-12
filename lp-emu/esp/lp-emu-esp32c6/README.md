@@ -54,7 +54,7 @@ Time comes in four grades. The first two are just the hart's cycle model:
 `t3` adds what an access's **address** costs — a 32 KiB 4-way cache of
 32-byte lines over the flash window at 338 cycles a fill, and 9 cycles of APB
 wait state on a peripheral load or store (`cache.rs`, and
-`docs/reports/2026-09-08-esp32c6-t3-calibration.md` for the kernel behind
+`docs/reports/2026-09-08-esp32c6-t3-calibration.ai.md` for the kernel behind
 every number) — and corrects the four class costs the `cycle-probe` payload
 measured on silicon. It is the first grade in which two instructions with the
 same opcode cost different amounts because they are at different addresses.
@@ -77,7 +77,7 @@ and on no other payload, replayed by `--strict-timing`. Measured: 85 of 92
 slices inside, aggregate 1.154. The grade is `documented` rather than
 `measured` — the compute residual is one-signed and `cycle-probe` is the
 calibration payload, so one independent workload stands behind it. The band's
-derivation is `docs/reports/2026-09-08-esp32c6-t3-calibration.md` §4; the
+derivation is `docs/reports/2026-09-08-esp32c6-t3-calibration.ai.md` §4; the
 mechanism is the hardware-validation ADR's 2026-09-08 amendment. A band is
 not a licence to gate anything on emulated microseconds (PD9/D13).
 
@@ -193,7 +193,7 @@ that.
 ### Emulator seams: a separate list, engaged only when asked
 
 The hook table above stays empty. **Emulator seams** are a named exception
-to it (ADR `docs/adr/2026-10-05-emulator-seams.md`): functions the shipped
+to it (ADR `docs/adr/2026-10-05-emulator-seams.ai.md`): functions the shipped
 firmware itself declares in a seam table (`lp-base/lp-seam`), which the
 machine answers only when a run asks. They are their own list
 (`src/seams/`), with their own counters (`seam_calls`, `seam_arms` in the
@@ -460,8 +460,8 @@ clock to finish it, and it spins at `0x4086ed7a` inside its own second load
 segment — *before* `bootloader_console_init()`, which is why there is no
 output and no clue. That is the first-flash bootloader hang, and the two
 defect entries it belongs to are
-`docs/defects/2026-09-06-c6-first-flash-bootloader-hang-lp-analog-i2c-clock.md`
-and `docs/defects/2026-09-06-c6-analog-master-wedges-the-bootloader.md`.
+`docs/defects/2026-09-06-c6-first-flash-bootloader-hang-lp-analog-i2c-clock.ai.md`
+and `docs/defects/2026-09-06-c6-analog-master-wedges-the-bootloader.ai.md`.
 `0x5f00_0000` is the value the bench induced by hand; `0x4100_0000` is what
 a factory ESP-IDF app had left on the board the defect was found on; the
 default `0x7f80_0000` is the PAC reset, and boots.
@@ -685,7 +685,7 @@ asserted, so a second gap would move them rather than hide in them.
 I2C0 is not mapped, because nobody has measured what that register reads on a
 part and mapping it would be the machine asserting the PAC's reset value as
 behaviour. Filed at
-`docs/defects/2026-09-09-the-esptool-stub-reads-i2c0-a-block-the-c6-boot-set-does-not-map.md`.
+`docs/defects/2026-09-09-the-esptool-stub-reads-i2c0-a-block-the-c6-boot-set-does-not-map.ai.md`.
 `--no-stub` is the path that works, and is what the recipe and the gate use.
 
 ### Reading it back, and the C6 repartition's migration
@@ -701,7 +701,7 @@ pre-2026-10 table). Both run non-strict: the stub reads one unmapped block.
 A `power-cycle` on the control channel samples the board's strapping pins,
 not the last reset's strap, so a cable pulled after a download dance comes
 back booting from flash. The record is
-`docs/reports/2026-10-02-c6-migration-emulator-walk.md`.
+`docs/reports/2026-10-02-c6-migration-emulator-walk.ai.md`.
 
 ## Flash, and the cache window
 
@@ -894,7 +894,7 @@ since M3, do not move.
 
 **How close it is.** Against every CX1 storage record with the firmware it
 was taken on — mount on four firmwares and eleven stores, `ft-timing`, saves
-and loads, first light — in `docs/reports/2026-10-17-c6-flash-timing-emulator.md`.
+and loads, first light — in `docs/reports/2026-10-17-c6-flash-timing-emulator.ai.md`.
 A grade, not a promise: never gate on its microseconds (PD9/D13).
 
 **What it does not model:** flash encryption, suspend/resume, erase time that
@@ -1501,7 +1501,7 @@ The blob's TX completion path (`lmacTxDone`) **is** entered, since M4 U1:
 a machine on an air schedules a completion 672 us after a strobed PLCP0
 write, and the `test_espnow` image's own `send` returns and it sends again a
 second later. See the air section's "The TX completion" below for which
-registers say what, and `docs/debt/emu-c6-radio-tx-never-completes.md` (now
+registers say what, and `docs/debt/emu-c6-radio-tx-never-completes.ai.md` (now
 retired) for how it was found. A machine that is **not** on an air still
 completes nothing, which is why every figure above is unchanged.
 
@@ -1539,7 +1539,7 @@ stated latency. A frame is never delivered back to its sender.
 retries, RSSI, channel occupancy, timing windows, encryption (ESP-NOW's CCMP
 when a peer key is set), and range — there is one medium and everyone on it
 hears everyone else. The C6's 28 % frame truncation under a WiFi scan
-(`docs/debt/c6-scan-truncation-accepted.md`) is a *timing* property of the
+(`docs/debt/c6-scan-truncation-accepted.ai.md`) is a *timing* property of the
 blob and the MAC during masked windows, not of frame delivery, and cannot
 reproduce here.
 
@@ -1666,7 +1666,7 @@ each item is something a reader would otherwise assume:
   and not a function of a frame's length.
 - **No encryption.** ESP-NOW's CCMP, when a peer key is set, is not modelled.
 - **No timing windows**, and in particular the C6's 28 % frame truncation
-  under a WiFi scan (`docs/debt/c6-scan-truncation-accepted.md`) — a *timing*
+  under a WiFi scan (`docs/debt/c6-scan-truncation-accepted.ai.md`) — a *timing*
   property of the blob and the MAC during masked windows, not of frame
   delivery. It cannot reproduce here.
 - **No FCS.** Four zero bytes stand where one would be.
@@ -1680,7 +1680,7 @@ each item is something a reader would otherwise assume:
 Everything above is the mechanism. This is the **claim**, written out so that
 a reader who stops here is not left to assemble it, and so that the sentence
 on the tin can be argued with. Its formal home is
-`docs/adr/2026-09-08-virtual-air-claim-policy.md`.
+`docs/adr/2026-09-08-virtual-air-claim-policy.ai.md`.
 
 **What it does.** It takes the bytes the WiFi blob hands the MAC — read
 verbatim out of guest RAM at the descriptor the blob itself programmed, not
@@ -1715,7 +1715,7 @@ cleared `owner`, the byte count we write into `[23:12]`, and 84 of the
 occupancy, no collisions, no retries, no range; RSSI a constant; no rate
 model; no ESP-NOW CCMP when a peer key is set; no timing windows, and in
 particular not the C6's 28 % frame truncation under a WiFi scan
-(`docs/debt/c6-scan-truncation-accepted.md`), which is a timing property of
+(`docs/debt/c6-scan-truncation-accepted.ai.md`), which is a timing property of
 the blob and the MAC and cannot reproduce here.
 
 **Every frame the air delivers reaches the application — and for a while it
@@ -1750,10 +1750,10 @@ regression;
 M4 P3's pin, inverted.
 
 **Grades.** Every one of these claims is `modeled`, and stays `modeled`. A
-grade moves only with a transcript (`docs/adr/2026-09-06-esp-soc-emulator-architecture.md`),
+grade moves only with a transcript (`docs/adr/2026-09-06-esp-soc-emulator-architecture.ai.md`),
 and the transcript that could move this one is a **two-board silicon
 capture**. That capture now exists —
-`docs/reports/2026-09-09-espnow-broadcast-two-board-silicon-replay.md`, two
+`docs/reports/2026-09-09-espnow-broadcast-two-board-silicon-replay.ai.md`, two
 XIAO C6s, `gap` 1 on every record and the four-rung payload ladder walked in
 full — and it is what says the alternation above was the emulator's and not
 the payload's. It is evidence weighed in a `because`, not a promotion.
@@ -2133,7 +2133,7 @@ with why the stay ended there and whether the module could have been entered
 at that pc at all. **It also switches on `exits known/unknown`** in the report
 line: those two counters cost a `BTreeMap` lookup per exit — 183 ms of a 6.4 s
 `render-basic` t2 run — and nothing but the counters consumes it (M7b P4,
-plan.md BD5). With the variable unset the line says `not counted (set
+plan.ai.md BD5). With the variable unset the line says `not counted (set
 LP_EMU_JIT_EXITS)` rather than printing `0/0`, which would read as "every exit
 was at a known pc".
 
@@ -2315,14 +2315,14 @@ It builds a firmware image, a merged image and a release `lp-cli`, then runs
 eight emulated seconds, so it costs minutes rather than seconds and belongs
 in a session rather than in a PR gate. What it proves per tick is
 `shader_oracle_pin`, which does run in `test-emu-c6`.
-`docs/reports/2026-09-08-esp32c6-emulator-walk.md` is its record — including
+`docs/reports/2026-09-08-esp32c6-emulator-walk.ai.md` is its record — including
 the list of what this machine does not cover, which is the part to read
 before quoting a number from it.
 
 `just heap-budget-check-chips` is the other thing that reads this machine for
 a gate: the shipped image's own first-heartbeat allocator figures, ratcheted
 into `scripts/heap-budget-record/chips/esp32c6.json` with silicon's beside them
-(`docs/heap-budget-gate.md`).
+(`docs/heap-budget-gate.ai.md`).
 
 `just bench-emu-c6` is the speed side of the same two images: both reference
 images at both grades, reported as user seconds, instructions/second and a
@@ -2338,7 +2338,7 @@ what it prints.
   `20260528`. See `../roms/README.md`.
 - The register-name tables in `src/regs/` are generated from the `esp32c6`
   PAC's svd2rust offset comments by `scripts/emu/pac-regnames.py` and carry
-  the provenance header `docs/adr/2026-07-29-license-provenance-discipline.md`
+  the provenance header `docs/adr/2026-07-29-license-provenance-discipline.ai.md`
   requires. Never hand-edit one; `just lint-emu-regnames` catches it.
 - The crate is MIT, as a unit with the rest of `lp-emu/`. See
   `../../README.md` and `just lint-emu-fence`.

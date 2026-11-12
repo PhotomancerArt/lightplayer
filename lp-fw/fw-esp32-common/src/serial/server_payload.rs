@@ -133,7 +133,7 @@ const REQUEST_FREE_MARGIN_BYTES: usize = 16 * 1024;
 /// ([`super::request_decode_block`]): measured as 3/4 of the whole message,
 /// Studio's shader edits (then byte arrays) were refused on a board that
 /// could decode them
-/// (`docs/defects/2026-10-08-shader-edits-over-wi-fi-are-refused-board-memory-busy.md`).
+/// (`docs/defects/2026-10-08-shader-edits-over-wi-fi-are-refused-board-memory-busy.ai.md`).
 /// The read gate's posture: refusal ("board memory busy"), never a reset.
 /// `None`: decode it (short, or the heap has room, or nothing probes the
 /// heap).

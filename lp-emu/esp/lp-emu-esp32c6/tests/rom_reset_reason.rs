@@ -215,7 +215,7 @@ fn run_rom_software_reset(machine: &mut Esp32C6Machine) -> lp_emu_esp32c6::Outco
     })
 }
 
-/// `docs/defects/2026-09-29-the-emulated-c6-does-not-perform-a-software-reset.md`:
+/// `docs/defects/2026-09-29-the-emulated-c6-does-not-perform-a-software-reset.ai.md`:
 /// the ROM's `software_reset` used to return (the `LP_AON` store was
 /// remembered and ignored) and the RTC watchdog rebooted the chip ~8 s later
 /// as `rst:0x10 (LP_WDT_SYS)`. Now the store resets the chip at once, and the

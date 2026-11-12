@@ -569,7 +569,7 @@ impl LpvmInstance for BrowserLpvmInstance {
         // Both modes. This refused Float by analogy to `rt_wasmtime`'s
         // one-count-low measurement; that measurement's cause was a wrong
         // scale constant in the **emitter both tiers share**
-        // (`docs/defects/2026-08-07-wasm-f32-unorm-scale-convention.md`), so
+        // (`docs/defects/2026-08-07-wasm-f32-unorm-scale-convention.ai.md`), so
         // fixing it fixed this tier too. What remains unmeasured here is only
         // what has always been: the browser's own wasm engine executes the
         // bytes, and no host test runs in it — the coverage is

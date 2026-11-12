@@ -7,7 +7,7 @@
  * the statics leave), and almost all of it belongs to code that never runs
  * from an interrupt: `lps_builtin_ids::BuiltinId::name` alone is two 1 KB
  * tables. Same lever, same shape as the classic's (`fw-esp32v3/rwdata_hook.x`,
- * docs/reports/2026-09-04-classic-ram-budget.md, lever 3).
+ * docs/reports/2026-09-04-classic-ram-budget.ai.md, lever 3).
  *
  * Turning the flag off wholesale would send `lp_ws281x`'s refill tables to
  * flash, which the ISR-in-RAM rule forbids (nothing on the RMT refill path

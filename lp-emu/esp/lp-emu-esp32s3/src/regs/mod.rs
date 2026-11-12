@@ -4,7 +4,7 @@
 //! PAC; one that says `EXTMEM+0x060 icache_ctrl` can be read. The tables are
 //! **generated** from the `esp32s3` PAC's svd2rust offset comments by
 //! `scripts/emu/pac-regnames.py --pac esp32s3`, carry the provenance header
-//! `docs/adr/2026-07-29-license-provenance-discipline.md` requires, and are
+//! `docs/adr/2026-07-29-license-provenance-discipline.ai.md` requires, and are
 //! checked by `just lint-emu-regnames` — which checks **all three** chips, so
 //! a hand edit here is caught the same way one in the C6's or the classic's
 //! tables is.
@@ -20,7 +20,7 @@
 //! # Which blocks are here, and why
 //!
 //! Every block M6 P01's MMIO census found the shipped `fw-esp32s3` image
-//! touching (`docs/reports/2026-09-11-esp32s3-firmware-inventory.md` §6),
+//! touching (`docs/reports/2026-09-11-esp32s3-firmware-inventory.ai.md` §6),
 //! plus the two the ROM-up path reaches that the application never does —
 //! [`UART0`] for the mask ROM's own console and [`SHA`] for the IDF
 //! second-stage bootloader's image hash — plus, from M6 P04, [`SENSITIVE`]:

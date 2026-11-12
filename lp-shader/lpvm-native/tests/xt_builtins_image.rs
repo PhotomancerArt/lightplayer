@@ -101,7 +101,7 @@ fn image_exports_every_builtin_and_they_execute() {
 /// modeled region would fetch-fault at run time rather than fail here, and a
 /// symbol back inside the code region would silently re-couple the largest
 /// compilable shader to the size of the builtins
-/// (`docs/defects/2026-08-01-xt-f32-builtins-exhaust-the-emulator-code-region.md`).
+/// (`docs/defects/2026-08-01-xt-f32-builtins-exhaust-the-emulator-code-region.ai.md`).
 #[test]
 fn builtins_land_in_flash_and_never_in_the_shader_code_region() {
     let Some((_emu, bytes)) = load_image() else {

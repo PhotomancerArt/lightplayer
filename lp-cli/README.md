@@ -52,7 +52,7 @@ establishes the session instead. See
 `HostSerialEsp32Provider::connect`
 (`lp-app/lpa-link/src/providers/host_serial_esp32/provider.rs`) for the
 implementation, and
-`docs/reports/2026-09-07-esp-emu-c6-spike.md` for where this came from.
+`docs/reports/2026-09-07-esp-emu-c6-spike.ai.md` for where this came from.
 
 ## Boards through the cloud relay: `relay:` and `serve --relay`
 
@@ -97,7 +97,7 @@ which is what `just walk-wifi-emu relay` does
 The pieces: `lp-cli/src/server/relay_host/` and
 `lp-app/lpa-client/src/transport_relay/`; the end-to-end test is
 `lp-cli/tests/relay_link.rs`; the decision is
-`docs/adr/2026-10-06-cloud-relay.md`.
+`docs/adr/2026-10-06-cloud-relay.ai.md`.
 
 ## Measuring a board's link: `lp-cli link rtt`
 

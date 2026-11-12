@@ -10,7 +10,7 @@
 //! (dimmed), or nothing. While an
 //! update holds the board's lights, the picture is their one colour. A
 //! board that runs nothing has no picture: a fresh install never shows the
-//! last project's lights (`docs/ux/anatomy/board-card.md`, "Corner").
+//! last project's lights (`docs/ux/anatomy/board-card.ai.md`, "Corner").
 //!
 //! Why there is no picture, or where it comes from, is the status corner's
 //! "Picture" fact ([`picture_line`]); how fast it moves and how old it is

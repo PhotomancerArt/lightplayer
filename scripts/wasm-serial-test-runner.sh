@@ -54,7 +54,7 @@ done
 # run from the files themselves, so it cannot go stale. The three files that
 # must not move at all were pinned by a content-hash lint while emulator plan
 # two was live; the lint was retired when the plan closed and the rule now
-# lives in `docs/adr/2026-09-09-studio-device-stack-over-a-virtual-serial-port.md`,
+# lives in `docs/adr/2026-09-09-studio-device-stack-over-a-virtual-serial-port.ai.md`,
 # rule 1.
 root="$repo_root/target/wasm-serial-test-root"
 rm -rf "$root"

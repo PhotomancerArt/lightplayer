@@ -28,7 +28,7 @@ the part that costs minutes to rebuild and is identical between runs.
 It does NOT remove third-party units left behind by an older Cargo.lock;
 the job keeps those out by restoring only an exact key on main, so the
 build that saves the entry starts from nothing old. See
-docs/debt/actions-cache-budget.md.
+docs/debt/actions-cache-budget.ai.md.
 
 `--report` prints the same table and deletes nothing.
 

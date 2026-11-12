@@ -4,7 +4,7 @@
 //! one that says `DPORT+0x040 pro_cache_ctrl` can be read. The tables are
 //! **generated** from the `esp32` PAC's svd2rust offset comments by
 //! `scripts/emu/pac-regnames.py --pac esp32`, carry the provenance header
-//! `docs/adr/2026-07-29-license-provenance-discipline.md` requires, and are
+//! `docs/adr/2026-07-29-license-provenance-discipline.ai.md` requires, and are
 //! checked by `just lint-emu-regnames` — which checks **both** chips, so a
 //! hand edit here is caught the same way one in the C6's tables is.
 //!

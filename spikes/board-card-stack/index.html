@@ -80,7 +80,7 @@ svg.i { width:14px; height:14px; flex:none; }
 .sicon.idle { width:8px; height:8px; border-radius:50%; border:1.5px solid var(--faint); margin:0 2px; }
 .sicon.warn { color:var(--st-attention-tx); }
 .sicon.err { color:var(--st-error-tx); }
-/* Studio's working vocabulary (docs/style/ui.md): the conic spinner, the iridescent fill */
+/* Studio's working vocabulary (docs/style/ui.ai.md): the conic spinner, the iridescent fill */
 .spin { width:11px; height:11px; border-radius:50%; flex:none; background:conic-gradient(from 0deg, var(--spectrum), #5fe08b);
   mask:radial-gradient(circle closest-side, transparent 52%, #000 60%); -webkit-mask:radial-gradient(circle closest-side, transparent 52%, #000 60%); animation:spin 1.1s linear infinite; }
 @keyframes spin { to { transform:rotate(360deg); } }
@@ -156,7 +156,7 @@ svg.i { width:14px; height:14px; flex:none; }
 .wo.quiet { color:var(--muted); background:transparent; }
 .wo.quiet:hover { color:var(--strong); background:rgba(255,255,255,.07); }
 
-/* control bars: a panel control as a bar. The fill is the value (bright neutral, ui.md:
+/* control bars: a panel control as a bar. The fill is the value (bright neutral, ui.ai.md:
    authored values glow neutral); touched, the grip turns gold (engaged) and ↺ lets go. */
 .cbar { position:relative; display:flex; align-items:center; gap:6px; height:28px; min-width:0; padding:0 10px; border-top:1px solid var(--bd); font-size:11.5px; color:var(--muted); user-select:none; -webkit-user-select:none; overflow:hidden; }
 .cbar.fader { cursor:ew-resize; touch-action:none; }
@@ -308,7 +308,7 @@ pre.shape { max-width:1000px; margin:10px 0 0; padding:12px 14px; border:1px sol
     <li><b>A1.</b> The panel on a card is the board’s own panel (vision: the board serves its panel), drawn with Studio’s existing panel widgets: as many of its controls as fit at the card’s height, in the board’s order. The rest are behind <b>All controls</b>, which opens the board’s own page (today’s play mode, <code>/device/…/play</code>).</li>
     <li><b>A2.</b> The play password (or a play share) is enough to connect and use the panel; Edit needs the edit password. That’s access as shipped.</li>
     <li><b>A3.</b> The card shows the board’s facts while it’s watched and its panel while it’s connected. <b>Done disconnects</b>: the board goes back to being watched, and its connection is free for someone else.</li>
-    <li><b>A4.</b> You can connect while someone else is editing: the panel is built for several phones at once (panel.md P9). Today a C6 has one network slot, so a second client over Wi‑Fi or the cloud is a firmware question this needs answered.</li>
+    <li><b>A4.</b> You can connect while someone else is editing: the panel is built for several phones at once (panel.ai.md P9). Today a C6 has one network slot, so a second client over Wi‑Fi or the cloud is a firmware question this needs answered.</li>
     <li><b>A5.</b> During an update you can’t connect; the panel comes back with the board. Notices that arrive while you’re connected show in the status corner.</li>
     <li><b>A6.</b> The project bar’s icon changes from ▶ to ✳, so a play triangle means one thing.</li>
   </ol></div>
@@ -327,7 +327,7 @@ pre.shape { max-width:1000px; margin:10px 0 0; padding:12px 14px; border:1px sol
 StackBar   { layer: Project | Connection | Access | Firmware | Hardware, icon, summary, aside,
              tone: Option&lt;Tone&gt;, action: Option&lt;Offer&gt;, work: Option&lt;Work&gt;, details }
 Work       { words, progress: Percent(64) | Unknown, ends: Done(words) | Failed { words, retry: Offer } }
-PanelControl = the panel's own control model (panel.md: (scope, channel), Read → Latch → Clear), unchanged</pre>
+PanelControl = the panel's own control model (panel.ai.md: (scope, channel), Read → Latch → Clear), unchanged</pre>
 </section>
 
 <section class="qsec" id="ref">

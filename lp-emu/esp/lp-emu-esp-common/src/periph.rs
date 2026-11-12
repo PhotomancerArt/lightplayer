@@ -108,7 +108,7 @@ pub enum ResetScope {
     Cpu,
     /// The high-power system — CPU and the HP peripherals. The LP/RTC
     /// domain survives, which is the whole of
-    /// `docs/defects/2026-09-06-c6-analog-master-wedges-the-bootloader.md`.
+    /// `docs/defects/2026-09-06-c6-analog-master-wedges-the-bootloader.ai.md`.
     Core,
     /// The widest a watchdog's own stage action can ask for — esp-hal's own
     /// name for it, and the scope a chip's RWDT `ResetSystem` action
@@ -150,7 +150,7 @@ pub enum Watchdog {
 /// Only removing power clears the LP domain.
 ///
 /// That one property is the whole of
-/// `docs/defects/2026-09-06-c6-analog-master-wedges-the-bootloader.md`: a
+/// `docs/defects/2026-09-06-c6-analog-master-wedges-the-bootloader.ai.md`: a
 /// board whose `LPPERI_CLK_EN` has the analog I2C master's clock gated hangs
 /// the second-stage bootloader, the flash-boot-protection watchdog (armed by
 /// a reset value, disarmed by the bootloader — never by the ROM) resets the

@@ -1,6 +1,6 @@
 //! A node card's UI VIEW-STATE — core-owned (the node arm of the #140
 //! CardUiState re-home; the device arm's ADR,
-//! `docs/adr/2026-07-26-card-view-state-ownership.md`, explicitly deferred
+//! `docs/adr/2026-07-26-card-view-state-ownership.ai.md`, explicitly deferred
 //! this slice).
 //!
 //! What a node card's face is disclosing: whether the code/advanced/debug
@@ -47,7 +47,7 @@ pub struct NodeCardUiState {
     pub advanced_open: bool,
     /// Whether the module face's **wiring** drawer is expanded — the
     /// bus-as-writers/readers view that replaced the sidebar bus pane
-    /// (`docs/design/modules.md` §5). Default `false`: wiring is an
+    /// (`docs/design/modules.ai.md` §5). Default `false`: wiring is an
     /// authoring diagnostic, and the panel above it is the product
     /// surface.
     pub wiring_open: bool,
@@ -232,7 +232,7 @@ impl UiPreviewSpaces {
 /// with.
 ///
 /// **Default is `Control`** (Yona's ruling, 2026-08-07, reversing the
-/// visual-first reading of `docs/design/modules.md` R7): a fixture
+/// visual-first reading of `docs/design/modules.ai.md` R7): a fixture
 /// project's output IS the lamps, so leading with the raster the shader
 /// painted shows the intermediate instead of the thing the project drives.
 /// The visual stays one gesture away — the hero's upper-right toggle

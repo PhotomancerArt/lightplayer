@@ -248,7 +248,7 @@ fn a_newer_store_header_is_refused_locked_and_untouched() {
     };
     let mut region = files_region();
     // The first trusted sector's version, made 4: a magic in front of a
-    // newer version refuses before any CRC (FORMAT.md "Sector").
+    // newer version refuses before any CRC (FORMAT.ai.md "Sector").
     let s = (0..region.len() / 4096)
         .find(|s| region[s * 4096..s * 4096 + 4] == 0x3153_544Cu32.to_le_bytes())
         .expect("a store sector");

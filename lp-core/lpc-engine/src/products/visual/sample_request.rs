@@ -36,7 +36,7 @@ pub struct TextureSampleBatch {
 /// is materialized on either side: the coordinates' home is the consumer's
 /// mapping, the samples' home is wherever `consume` writes them, and the
 /// window between is bounded by [`LpGraphics::sample_batch_capacity`]
-/// (`docs/adr/2026-09-06-direct-sampling-bounded-batches.md`).
+/// (`docs/adr/2026-09-06-direct-sampling-bounded-batches.ai.md`).
 ///
 /// `fill` writes at most `capacity` points in the packing `space` declares —
 /// `[x, y]` pairs for [`VisualSpace::TwoD`], single `[t]` words for

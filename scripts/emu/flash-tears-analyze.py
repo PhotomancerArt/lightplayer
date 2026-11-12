@@ -3,7 +3,7 @@
 
     scripts/emu/flash-tears-analyze.py                      # every committed transcript
     scripts/emu/flash-tears-analyze.py <transcript.txt>...  # just these
-    scripts/emu/flash-tears-analyze.py --write-report docs/reports/2026-10-08-c6-nor-tear-calibration.md
+    scripts/emu/flash-tears-analyze.py --write-report docs/reports/2026-10-08-c6-nor-tear-calibration.ai.md
     scripts/emu/flash-tears-analyze.py --json               # one JSON object per cut, for a notebook-free pipe
     scripts/emu/flash-tears-analyze.py --model-table        # lp-nor-sim's calibrated model, as Rust
     scripts/emu/flash-tears-analyze.py --check-model        # are lp-nor-sim's shares confirmed? (DD29, see --help)

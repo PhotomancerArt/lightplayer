@@ -33,7 +33,7 @@
 //! [`RADIO_INT_SOURCES`], [`MAC_INT_EVENT_OFFSET`] and
 //! [`PWR_INT_EVENT_OFFSET`] — but raising one never produced a TX
 //! completion, so **no TX completion is originated here** and
-//! `docs/debt/emu-c6-radio-tx-never-completes.md` still carries that
+//! `docs/debt/emu-c6-radio-tx-never-completes.ai.md` still carries that
 //! question.
 //!
 //! P2 raises **source 0 on a delivery into the RX ring**
@@ -537,7 +537,7 @@ pub const AIR_GRADES: &[(u32, RegGrade, &str)] = &[
 ///
 /// # Provenance
 ///
-/// Per `docs/adr/2026-07-29-license-provenance-discipline.md`. The field
+/// Per `docs/adr/2026-07-29-license-provenance-discipline.ai.md`. The field
 /// names, widths and bit offsets below are **derived from the public bit
 /// layout of `wifi_pkt_rx_ctrl_t`** (an alias of `esp_wifi_rxctrl_t`) in the
 /// **`esp-wifi-sys-esp32c6` crate, version 0.2.0, Apache-2.0**, whose
@@ -697,7 +697,7 @@ pub struct WifiStub {
     ///
     /// It is **state** rather than something re-derived per frame, and that
     /// distinction is the whole of
-    /// `docs/debt/emu-c6-air-delivers-every-other-frame.md`. The guest
+    /// `docs/debt/emu-c6-air-delivers-every-other-frame.ai.md`. The guest
     /// recycles a consumed descriptor by moving it to the **tail** of its
     /// chain and advancing [`RX_DMA_BASE_OFFSET`] one ISR **later**, so for
     /// the length of that window the base still names a descriptor the guest
@@ -821,7 +821,7 @@ impl WifiStub {
 
     /// Make a strobed PLCP0 write schedule a TX completion
     /// [`TX_DONE_DELAY_US`] later — the thing
-    /// `docs/debt/emu-c6-radio-tx-never-completes.md` was open on.
+    /// `docs/debt/emu-c6-radio-tx-never-completes.ai.md` was open on.
     ///
     /// # Why this is a switch
     ///
@@ -932,7 +932,7 @@ impl WifiStub {
     /// [`MAC_INT_EVENT_OFFSET`] or the PWR block's [`PWR_INT_EVENT_OFFSET`]
     /// — without touching the RX cursors.
     ///
-    /// **The experiment seam for `docs/debt/emu-c6-radio-tx-never-completes.md`,
+    /// **The experiment seam for `docs/debt/emu-c6-radio-tx-never-completes.ai.md`,
     /// and nothing in this emulator calls it.** A delivery into the RX ring
     /// goes through [`Self::raise_rx_interrupt`], which is gated on a frame
     /// actually landing in a descriptor; this one is gated on nothing, so it

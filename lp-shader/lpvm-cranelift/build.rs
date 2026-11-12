@@ -80,7 +80,7 @@ fn main() {
 /// exactly what wakes us. Treating the window as "not built" embedded an
 /// empty slice and surfaced minutes later as every `NativeEmuEngine` test
 /// failing instantly with "builtins ... not found at build time".
-/// See docs/defects/2026-07-29-builtins-elf-uplift-race.md.
+/// See docs/defects/2026-07-29-builtins-elf-uplift-race.ai.md.
 fn copy_builtins_exe(
     src: &std::path::Path,
     dst: &std::path::Path,

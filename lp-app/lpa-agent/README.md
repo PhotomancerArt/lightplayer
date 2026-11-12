@@ -19,7 +19,7 @@ and the dispatch:
 - **`ShaderToolset<H: AgentHost>`** — the shader agent exactly as it was
   before the seam: three tools, a system prompt rebuilt every turn from
   the host (it embeds the current source), no state block. Its prompt
-  snapshot (`src/prompt/system_prompt_snapshot.md`) is the regression
+  snapshot (`src/prompt/system_prompt_snapshot.ai.md`) is the regression
   guard. `AgentSession::new(provider, host)` builds one.
 - **`AppToolset<H: AppAgentHost>`** (`src/tool/app/`) — the app agent. Its
   system prompt (`src/prompt/app/`) is built once and is **byte-stable for
@@ -107,7 +107,7 @@ buckets stay disjoint). Cache pricing convention: write = 1.25× input
 rate, read = 0.1×. Known caveat (measured): the system prompt embeds the
 current shader source and is rebuilt per turn, so a staged edit
 invalidates the cached prefix for the following request — see the
-2026-07-27 addendum to `docs/adr/2026-07-25-studio-shader-agent-architecture.md`.
+2026-07-27 addendum to `docs/adr/2026-07-25-studio-shader-agent-architecture.ai.md`.
 
 ## Extended thinking
 

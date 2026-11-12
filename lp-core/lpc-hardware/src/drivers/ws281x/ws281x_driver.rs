@@ -9,7 +9,7 @@ use crate::{HardwareEndpointError, HwDriver, HwEndpoint, HwEndpointId};
 /// is a per-port buffer/latency bound imposed by the RMT drivers, not a
 /// protocol limit. This is deliberately the only definition — it used to be hand-copied
 /// into two firmware crates and drifted silently
-/// (docs/debt/output-channel-led-cap-silent-truncation.md).
+/// (docs/debt/output-channel-led-cap-silent-truncation.ai.md).
 ///
 /// Enforced once, identically, at the engine's output-flush seam
 /// (`lpc-engine`'s `wire_slice`) so host, emulator, and device all grant the

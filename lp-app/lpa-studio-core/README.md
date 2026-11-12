@@ -42,16 +42,16 @@ lpa-studio-web, future CLI, future desktop, tests, and agents
   pane/stack/activity/status view data, and UX node routing primitives.
 - `app/` contains the actual Studio product ownership areas: `studio`,
   `device`, `runtime_pool` (sessions + the editor lens — see
-  `docs/adr/2026-07-24-runtime-pool.md`), `server` (the per-session
+  `docs/adr/2026-07-24-runtime-pool.ai.md`), `server` (the per-session
   `StudioServerClient` and its ios), `project`, `home`/`roster`/`places`
   (the gallery, card vocabulary, and push/pull substrate), and
   `preview_host` (leased, pooled live project previews for gallery cards
   and future preview consumers — see
-  `docs/adr/2026-07-16-preview-host.md`; the browser-facing half is gated
+  `docs/adr/2026-07-16-preview-host.ai.md`; the browser-facing half is gated
   to `wasm32 + browser-worker` like the server client io, while its
   request/status/scheduling vocabulary stays target-neutral and
   unit-tested), and `share` (the `lp.package` / `lp.node` clipboard
-  envelope formats — see `docs/adr/2026-07-28-share-envelopes.md`; pure
+  envelope formats — see `docs/adr/2026-07-28-share-envelopes.ai.md`; pure
   byte functions, with the clipboard itself living in the web edge).
 - `app/graph/` is the **Graph** tab's state. The Graph is Studio's one
   project canvas and its mapping editor; a project's tabs are Nodes ·
@@ -216,7 +216,7 @@ it enqueues commands and renders change-gated snapshots. The pieces:
   the published delay counts down from the stamp, and an early tick bounces
   off the due gate as `ProjectRefreshOutcome::NotDue` without a wire op. See
   `refresh_cadence.rs` module docs and
-  `docs/adr/2026-07-27-completion-based-refresh-pacing.md`.
+  `docs/adr/2026-07-27-completion-based-refresh-pacing.ai.md`.
 - **The device card's frame feed is the second pull class.** While a card's ▶
   Play tab is up on a **Ready** device, that session pulls the frame the board
   has already published (`ProjectProbeRequest::OutputFrame` — a read, never a
@@ -239,7 +239,7 @@ it enqueues commands and renders change-gated snapshots. The pieces:
   no bolt-on network refresh.
 
 The client's single timeout/cancel/retry owner and the actor model are recorded
-in `docs/adr/2026-07-04-client-pull-loop-and-actor.md`.
+in `docs/adr/2026-07-04-client-pull-loop-and-actor.ai.md`.
 
 The client treats passive project refresh as lower priority than foreground
 device/server recovery. If a browser refresh is interrupted or times out, Studio
@@ -257,7 +257,7 @@ and asset editing are later milestones; the editing substrate itself is below.
 
 Slot editing state is core-owned end to end; UI field components are
 stateless views that dispatch ops and render DTOs. The model (recorded in
-`docs/adr/2026-07-04-studio-editing-model.md`) has four pieces:
+`docs/adr/2026-07-04-studio-editing-model.ai.md`) has four pieces:
 
 - **Ops.** `SlotEditOp { SetValue, EnsurePresent, RemoveValue, MoveEntry,
   Revert }`
@@ -319,7 +319,7 @@ stateless views that dispatch ops and render DTOs. The model (recorded in
   publish as `UiOffer`s into `UiStudioView.offers` (the offer tree,
   `core/offer/`), addressed by stable path (`project/save`,
   `project/demo.module/orbit.shader/revert`) — see
-  `docs/adr/2026-10-01-offer-tree-and-consequence-levels.md`. A card asks
+  `docs/adr/2026-10-01-offer-tree-and-consequence-levels.ai.md`. A card asks
   the tree for its own node's verbs with `verbs_of(its_path)`; there is no
   longer a `header_actions` DTO field to read instead.
   Each hierarchy DTO also projects status + dirty into its one chrome
@@ -593,7 +593,7 @@ An address's open (`RuntimeOp::OpenDeviceLens`, `/device/<uid>`, a project
 card) is not connected, and on the board a connected session already holds
 it does nothing: the user being on the session's address is what shows it
 in the editor. See
-`docs/adr/2026-10-02-board-ids-and-typed-offer-parameters.md`.
+`docs/adr/2026-10-02-board-ids-and-typed-offer-parameters.ai.md`.
 
 A board another tab of this browser holds offers `devices/<board
 ref>/take-over` (`take_over_offer.rs`; the controller decides when) instead
@@ -615,7 +615,7 @@ Signed in, the web edge (`lpa-studio-web/src/cloud/account_boards.rs`) asks
 lightplayer.app for the account's board list (`ListAccountBoards`, at load
 and every 30 s while the page is visible: every board that proved the
 account's key, online at the relay or not;
-`docs/adr/2026-10-20-the-account-board-list.md`) and hands it in as
+`docs/adr/2026-10-20-the-account-board-list.ai.md`) and hands it in as
 `StudioCommand::AccountBoards` (`None`: signed out, or no answer — keep
 nothing); core holds the rows by MAC (`AccountBoards`, sans-IO) and the
 controller joins them onto the roster (`studio_controller/account_boards_flow.rs`,
@@ -655,7 +655,7 @@ onto it in one step (`rebind_lens_onto`, shared with the held lens's
 resume) and the relay session is let go. A failure stays, in one log line.
 A moved board whose Wi‑Fi link goes is back through lightplayer.app after
 5 s, unless the link closed with 1000 or the list no longer names it
-(`docs/adr/2026-10-08-studio-network-links.md`, its 2026-10-21 amendment).
+(`docs/adr/2026-10-08-studio-network-links.ai.md`, its 2026-10-21 amendment).
 
 **The report and the two forgets** (`studio_controller/account_board_requests_flow.rs`,
 `AccountBoardRequest`): when the access controller reads a board's list (USB,
@@ -674,7 +674,7 @@ answers on core's own queue (`StudioCommand::AccountBoardAnswered`; a
 `StudioCommand::AccountBoardPictures` and draw as `PictureSource::Cloud`, one
 row of lamps per output (`cloud_board_picture.rs`). The card's state is
 `SurfaceState::OnlineAtCloud`: the picture, no words, Connect
-(`docs/ux/anatomy/board-card.md`).
+(`docs/ux/anatomy/board-card.ai.md`).
 
 All of this is walked end to end on the shipped C6 image through a local
 lp-cloud-server, in three lanes of `just walk-wifi-emu`: `studio-relay`
@@ -860,7 +860,7 @@ let the lock go announces `Holds { locked: false }` and claims again until
 the lock is its own; other tabs watch only a locked hold. A refusal from
 anyone else (1013, 4429) is a stranger's busy: no fact, no `take-over`, and
 the connect stays offered. See
-`docs/defects/2026-10-09-two-clients-with-one-key-take-a-boards-network-slot-from-each-other.md`
+`docs/defects/2026-10-09-two-clients-with-one-key-take-a-boards-network-slot-from-each-other.ai.md`
 for what stays open (another browser, lp-cli).
 
 ## Device Management UX

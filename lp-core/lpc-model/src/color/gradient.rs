@@ -1,6 +1,6 @@
 //! The [`Gradient`] value: stops in one authoring space, read one way.
 //!
-//! Storage is the ratified recipe from `docs/design/color.md` §5 —
+//! Storage is the ratified recipe from `docs/design/color.ai.md` §5 —
 //! `{ space: String token, method: String token, stops: String literal }` —
 //! metadata as structure, the part that scales with content as one compact
 //! [stops literal](super::stops_string). One representation on wire, disk,
@@ -34,7 +34,7 @@ pub const GRADIENT_SHAPE_NAME: &str = "lp::color::Gradient";
 /// Stops in a [`Gradient`]'s fixed `stops` array — the storage size, not the
 /// authored size.
 ///
-/// 24 rather than `color.md`'s original 16 (D2 of the palette spike): WLED
+/// 24 rather than `color.ai.md`'s original 16 (D2 of the palette spike): WLED
 /// gradients carry up to 18 stops and importing them must not truncate.
 /// Growing this is a one-constant change that widens every stored gradient;
 /// authored values above it are a load error, never silent truncation.
@@ -44,7 +44,7 @@ pub const MAX_GRADIENT_STOPS: u32 = 24;
 pub const MIN_GRADIENT_STOPS: u32 = 2;
 
 /// Space the stop colors are authored in, and the space interpolation happens
-/// in (`docs/design/color.md` §4, §6).
+/// in (`docs/design/color.ai.md` §4, §6).
 ///
 /// The `repr(i32)` values are serialized into [`LpValue`] storage: **stable,
 /// never renumbered**, new spaces append.
@@ -132,7 +132,7 @@ impl Colorspace {
     }
 }
 
-/// How a sample between two stops is taken (`docs/design/color.md` §6).
+/// How a sample between two stops is taken (`docs/design/color.ai.md` §6).
 ///
 /// Interpolation happens in the gradient's own [`Colorspace`], never in
 /// canonical — that is the point of authoring in Oklch.
@@ -306,7 +306,7 @@ pub struct GradientStop {
     /// Position along the ramp, `[0, 1]`.
     pub at: f32,
     /// Color coordinates in the gradient's [`Colorspace`]. Deliberately
-    /// unconstrained beyond `[0, 1]` per `color.md` §10 rule 6 — overshoot is
+    /// unconstrained beyond `[0, 1]` per `color.ai.md` §10 rule 6 — overshoot is
     /// meaningful.
     pub c: [f32; 3],
 }
@@ -380,7 +380,7 @@ impl Gradient {
     /// Enforced: stop count in `2..=24`, and every `at` finite and within
     /// `[0, 1]`. Authored *order* is deliberately not enforced — finite `at`
     /// values are enough to guarantee the list is sortable, and consumers
-    /// sort by `at` when they resolve. Stop colors are unchecked (`color.md`
+    /// sort by `at` when they resolve. Stop colors are unchecked (`color.ai.md`
     /// §10 rule 6: out-of-gamut and boosted coordinates are legal).
     pub fn validate(&self) -> Result<(), GradientError> {
         let count = self.stops.len();
@@ -425,7 +425,7 @@ pub enum GradientError {
     /// Fewer than [`MIN_GRADIENT_STOPS`] stops.
     TooFewStops(usize),
     /// More than [`MAX_GRADIENT_STOPS`] stops — a load error, never a
-    /// truncation (`color.md` §5).
+    /// truncation (`color.ai.md` §5).
     TooManyStops(usize),
     /// The stop at this index has a non-finite or out-of-`[0, 1]` position.
     StopPosition(usize),
@@ -483,7 +483,7 @@ impl core::error::Error for GradientError {}
 // --- Gradient: hand-rolled record over the stops literal.
 //
 // Positional field reads mirror `PhasorConfig` (`time/phasor_config.rs`);
-// the token/literal shapes are the `color.md` §5 recipe.
+// the token/literal shapes are the `color.ai.md` §5 recipe.
 
 impl ToLpValue for Gradient {
     fn to_lp_value(&self) -> LpValue {
@@ -560,7 +560,7 @@ pub(crate) const GRADIENT_STATIC_TYPE: StaticLpType = StaticLpType::Struct {
     ],
 };
 
-/// The canonical [`Gradient`] storage recipe (`docs/design/color.md` §5).
+/// The canonical [`Gradient`] storage recipe (`docs/design/color.ai.md` §5).
 ///
 /// [`crate::Kind::Gradient`]'s legacy `storage()` recipe delegates here so
 /// there is exactly one definition of the shape.
@@ -639,7 +639,7 @@ mod tests {
         assert_eq!(Colorspace::default(), Colorspace::LinearSrgb);
     }
 
-    /// `color.md` §4/§6 pin these integers; renumbering silently rewrites
+    /// `color.ai.md` §4/§6 pin these integers; renumbering silently rewrites
     /// every stored gradient.
     #[test]
     fn enum_integer_tags_are_the_ratified_ones() {
@@ -738,7 +738,7 @@ mod tests {
         );
     }
 
-    /// Storage is the `color.md` §5 recipe: string tokens for the
+    /// Storage is the `color.ai.md` §5 recipe: string tokens for the
     /// metadata, one compact stops literal for the payload. The Oklch ramp
     /// prints decimal triplets (hex is confined to the sRGB-shaped spaces).
     #[test]

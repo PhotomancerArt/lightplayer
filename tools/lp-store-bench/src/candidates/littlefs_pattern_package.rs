@@ -14,7 +14,7 @@
 //!   same `modules/` directory, so the rename is one metadata commit and never
 //!   crosses directories (littlefs-rust 0.1.0 loses a source-directory entry
 //!   when a cut lands late in a cross-directory rename,
-//!   `docs/defects/2026-10-08-littlefs-rust-cross-directory-rename-cut-loses-the-next-entry.md`).
+//!   `docs/defects/2026-10-08-littlefs-rust-cross-directory-rename-cut-loses-the-next-entry.ai.md`).
 //!   Each package is old-or-new as a whole; a step can touch several
 //!   packages and plain files, so the step is **not** atomic
 //!   (`step_atomic: false`).
@@ -29,11 +29,11 @@
 //!   erases in 30 simulated days). `f3@block_cycles=-1` runs it off, as the
 //!   firmware ships. At 100 littlefs runs its relocation path, which a cut can
 //!   leave unmountable
-//!   (`docs/defects/2026-10-08-littlefs-rust-relocation-cut-leaves-lpfs-unmountable.md`):
+//!   (`docs/defects/2026-10-08-littlefs-rust-relocation-cut-leaves-lpfs-unmountable.ai.md`):
 //!   a cut failure there is a result about littlefs-rust, not this adapter.
 //!   With overflow checks on (a debug build) littlefs-rust 0.1.0 panics on
 //!   any `block_cycles > 0` — its `lfs_dir_alloc` overflows where C wraps
-//!   (`docs/defects/2026-10-08-littlefs-rust-block-cycles-overflows-under-overflow-checks.md`)
+//!   (`docs/defects/2026-10-08-littlefs-rust-block-cycles-overflows-under-overflow-checks.ai.md`)
 //!   — so run F3 at its default from a release build (the bench's own
 //!   commands are); the unit tests run it at −1 there.
 //! - **Stale temporaries** (a cut mid-commit or mid-put) are removed at the

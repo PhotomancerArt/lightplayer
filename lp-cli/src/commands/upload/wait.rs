@@ -8,7 +8,7 @@
 //! *new* project — but if the CLI disconnects the instant `LoadProject` is acked,
 //! nothing has observed that reload actually settle. The compile line an
 //! operator associates with an upload ends up describing the previous one.
-//! See `docs/defects/2026-07-30-deploy-compiles-previous-upload.md`.
+//! See `docs/defects/2026-07-30-deploy-compiles-previous-upload.ai.md`.
 //!
 //! The fix polls `project.read` on the *same* connection the deploy used
 //! (the S3 serial port is exclusive — a second handle is not an option)

@@ -4,8 +4,8 @@
 # of origin/main 3fc9aa987). Never edit: a fielded board's flash is the fact,
 # and the tree-store migration recognizes it by these exact rows
 # (`lpa_link::layout_migration::legacy_layout`, which a test holds equal to
-# this file). See docs/adr/2026-10-02-c6-repartition-and-layout-migration.md
-# and docs/adr/2026-10-16-c6-tree-store-cutover-migration.md.
+# this file). See docs/adr/2026-10-02-c6-repartition-and-layout-migration.ai.md
+# and docs/adr/2026-10-16-c6-tree-store-cutover-migration.ai.md.
 #
 # Name,   Type,  SubType, Offset,   Size,     Flags
 nvs,      data,  nvs,     0x9000,   0x5000,

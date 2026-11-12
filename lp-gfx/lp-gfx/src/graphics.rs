@@ -77,7 +77,7 @@ pub trait LpGraphics: Send + Sync {
     /// The default is `native_semantics()` — correct for any backend with a
     /// single tier, and deliberately so for two of them: the GPU tier runs
     /// IEEE f32 whichever mode was authored (its documented latitude, see
-    /// `docs/adr/2026-07-09-preview-fidelity-tiers.md`), and
+    /// `docs/adr/2026-07-09-preview-fidelity-tiers.ai.md`), and
     /// [`crate::NullGraphics`] compiles nothing at all, so its answer is
     /// unreachable. A backend that implements both tiers overrides.
     ///
@@ -137,7 +137,7 @@ pub trait LpGraphics: Send + Sync {
     ///
     /// Defaulted to a refusal rather than a stub: a backend that cannot bind
     /// textures must say so on the uniform that needs one, not render
-    /// something wrong. See `docs/design/lp-shader-texture-access.md`.
+    /// something wrong. See `docs/design/lp-shader-texture-access.ai.md`.
     fn texture_uniform_value(&self, texture: &TextureHandle) -> Result<LpsValueF32, GfxError> {
         let _ = texture;
         Err(GfxError::Backend(String::from(
@@ -190,7 +190,7 @@ pub trait LpGraphics: Send + Sync {
     /// (the default). The browser GPU tier answers `false`: readback would
     /// require blocking on an async buffer map, so render products stay
     /// GPU-resident and per-tick byte consumers must run on the CPU tier
-    /// (`docs/adr/2026-07-09-preview-fidelity-tiers.md`); a preview reader
+    /// (`docs/adr/2026-07-09-preview-fidelity-tiers.ai.md`); a preview reader
     /// that can take last frame's bytes goes through a
     /// [`crate::LatentReadBackSource`] instead, when the host provides one.
     /// Render paths use
@@ -276,7 +276,7 @@ pub trait LpGraphics: Send + Sync {
     /// alloc+free (12 KB at zook scale, under an infallible allocator) is
     /// what reset the board whenever an inbound request's transients ate
     /// the headroom — see
-    /// `docs/defects/2026-08-29-flash-write-wedges-under-zook-playback.md`.
+    /// `docs/defects/2026-08-29-flash-write-wedges-under-zook-playback.ai.md`.
     fn read_sample_out_into(&self, out: &SampleOutHandle, dst: &mut [u16]) -> Result<(), GfxError>;
 
     /// Borrow all `count × 4` RGBA16 channels of `out` in place.
@@ -286,7 +286,7 @@ pub trait LpGraphics: Send + Sync {
     /// backend's is a CPU-side `Vec`), so a frame path that only *reads* the
     /// samples needs no copy at all — neither the per-tick memcpy of
     /// [`Self::read_sample_out_into`] nor the 8 B/lamp scratch it lands in
-    /// (`docs/reports/2026-09-02-per-lamp-memory-table.md`). The slice borrows
+    /// (`docs/reports/2026-09-02-per-lamp-memory-table.ai.md`). The slice borrows
     /// the handle, not the backend: the backing lives inside the handle until
     /// drop.
     ///
@@ -317,7 +317,7 @@ pub trait LpGraphics: Send + Sync {
     /// batching it costs more than it saves. CPU backends answer a small
     /// constant: a call there is a function call, and a bounded window keeps
     /// the consumer's residency at O(window) instead of O(points)
-    /// (`docs/adr/2026-09-06-direct-sampling-bounded-batches.md`).
+    /// (`docs/adr/2026-09-06-direct-sampling-bounded-batches.ai.md`).
     ///
     /// Decorators forward this. One that does not silently un-batches its
     /// inner backend — the bytes stay right, the memory does not.

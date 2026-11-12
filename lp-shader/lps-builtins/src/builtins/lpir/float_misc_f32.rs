@@ -5,7 +5,7 @@
 //! `fabs`, `fmin`, and `fmax`; these remain the authoritative semantics and the
 //! fallback for callers arriving through `sym_call`.
 //!
-//! Per `docs/design/float.md`:
+//! Per `docs/design/float.ai.md`:
 //!
 //! - `abs` is a §3 Guaranteed sign-bit operation — it must not normalize NaN or
 //!   ±0, which is why it is a bit mask and not `if x < 0.0 { -x }`.
@@ -24,13 +24,13 @@ pub extern "C" fn __lp_lpir_fabs_f32(v: f32) -> f32 {
     f32_math::abs(v)
 }
 
-/// `min(a, b)`. NaN behavior is float.md §5 Unspecified — target-native.
+/// `min(a, b)`. NaN behavior is float.ai.md §5 Unspecified — target-native.
 #[unsafe(no_mangle)]
 pub extern "C" fn __lp_lpir_fmin_f32(a: f32, b: f32) -> f32 {
     a.min(b)
 }
 
-/// `max(a, b)`. NaN behavior is float.md §5 Unspecified — target-native.
+/// `max(a, b)`. NaN behavior is float.ai.md §5 Unspecified — target-native.
 #[unsafe(no_mangle)]
 pub extern "C" fn __lp_lpir_fmax_f32(a: f32, b: f32) -> f32 {
     a.max(b)
@@ -79,7 +79,7 @@ mod tests {
 
     #[test]
     fn min_max_without_nan_are_ordinary() {
-        // float.md §5: the NaN cases are Unspecified and are deliberately
+        // float.ai.md §5: the NaN cases are Unspecified and are deliberately
         // NOT tested here.
         assert_eq!(__lp_lpir_fmin_f32(1.0, 2.0), 1.0);
         assert_eq!(__lp_lpir_fmax_f32(1.0, 2.0), 2.0);

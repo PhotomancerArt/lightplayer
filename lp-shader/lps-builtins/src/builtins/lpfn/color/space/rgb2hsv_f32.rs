@@ -6,7 +6,7 @@
 //! Algorithm: Sam Hocevar's branch-minimizing RGB→HSV
 //! (<http://lolengine.net/blog/2013/07/27/rgb-to-hsv-in-glsl>), a widely
 //! referenced standard formulation (see
-//! docs/reports/2026-03-31-lpfx-license-audit.md).
+//! docs/reports/2026-03-31-lpfx-license-audit.ai.md).
 //!
 //! **The epsilon is `1/65536`, not `1e-10`.** That is the smallest positive
 //! Q16.16 value, chosen so the canonical float semantics and the Q32 device
@@ -28,7 +28,7 @@
 // optimisation level. Selecting the integer bit patterns and bitcasting after
 // the fact keeps the constants out of the float constant pool.
 //
-// Defect: docs/defects/2026-08-01-xtensa-backend-cannot-select-float-constant-pool.md
+// Defect: docs/defects/2026-08-01-xtensa-backend-cannot-select-float-constant-pool.ai.md
 // Upstream: https://github.com/esp-rs/rust/issues/282 — this workaround's
 // expiry. When that closes and the toolchain is pinned past it, the literal
 // form below can come back.

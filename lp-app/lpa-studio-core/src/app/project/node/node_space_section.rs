@@ -1,7 +1,7 @@
 //! Derivation of the `dimensionality` section both visual-side faces carry
 //! ([`UiSpaceSection`]) — the two-sided space model lifted out of the
 //! advanced drawer and onto the card (ADR
-//! `2026-08-09-dimensionality-authoring-surface.md`).
+//! `2026-08-09-dimensionality-authoring-surface.ai.md`).
 //!
 //! One derivation, two sides. The shader's `space` enum
 //! (`TwoD { in_1d } | OneD { in_2d }`) and the fixture's `consume` enum

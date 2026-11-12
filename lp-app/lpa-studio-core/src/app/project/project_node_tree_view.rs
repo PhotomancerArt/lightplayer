@@ -124,7 +124,7 @@ pub enum ProjectNodeStatusTone {
     ///
     /// (Dimmed/neutral, then warning-yellow, were both tried and rejected
     /// at the M4 G1 gate — see
-    /// `docs/adr/2026-08-01-capability-reporting-on-hello.md`.)
+    /// `docs/adr/2026-08-01-capability-reporting-on-hello.ai.md`.)
     Disabled,
 }
 

@@ -19,7 +19,7 @@ set -euo pipefail
 # alloc_count, alloc_bytes (requests inside ONE opening, maximised across
 # openings — the worst frame), plus largest_free_at_close and holes_at_close
 # (the guest's own free-list shape at the window's close, MIN/MAX across
-# openings — see docs/heap-budget-gate.md). Every figure but
+# openings — see docs/heap-budget-gate.ai.md). Every figure but
 # largest_free_at_close is a RATCHET on GROWTH: the record holds today's
 # measured values (descriptive), and any growth beyond the margin fails.
 # largest_free_at_close inverts that: it fails when the measurement SHRANK
@@ -37,11 +37,11 @@ set -euo pipefail
 # chips or projects touch disjoint files and cannot conflict. It was one JSON
 # file until 2026-09-23, and 37 of its 67 commits were re-baselines that
 # conflicted with each other on the shared stamp
-# (docs/adr/2026-09-23-heap-budget-record-split-and-derived-stack.md,
-# docs/debt/heap-budget-record-churns-on-routine-changes.md).
+# (docs/adr/2026-09-23-heap-budget-record-split-and-derived-stack.ai.md,
+# docs/debt/heap-budget-record-churns-on-routine-changes.ai.md).
 #
 # Why deltas and not absolutes, and what this gate cannot see:
-# docs/heap-budget-gate.md
+# docs/heap-budget-gate.ai.md
 #
 # ## The second source: a whole chip, not an engine
 #
@@ -135,7 +135,7 @@ run_profile() {
     # free-list walk grows with the guest's free heap, and a startup run of
     # zook-dome crossed 200 M cycles mid-walk on 2026-09-06 (after the sample
     # window change freed ~21 KB), which silently drops the last window's
-    # free-list figures. See docs/heap-budget-gate.md "Cost". Meteor's startup
+    # free-list figures. See docs/heap-budget-gate.ai.md "Cost". Meteor's startup
     # capture never fit the default at all (`MAX_CYCLES` above); a session
     # that still hits the cap is refused by `budget_for`.
     "${LP_CLI_CMD[@]}" profile "$project" --collect alloc --mode "$mode" \
@@ -168,7 +168,7 @@ budget_for() {
 # alloc_bytes, largest_free_at_close?, holes_at_close?}}}`. The last two are
 # absent from a measurement with no guest free-list-shape rows (older
 # lp-cli), and the projection preserves that absence rather than writing a
-# `null` into the record — see docs/heap-budget-gate.md.
+# `null` into the record — see docs/heap-budget-gate.ai.md.
 project_windows() {
     local mode="$1" budget="$2"
     local keep='true'
@@ -197,7 +197,7 @@ engine_record() {
 
 # What a newly recorded project's file says about itself.
 # shellcheck disable=SC2016  # the backticks are prose, not expansions
-ENGINE_COMMENT='What this project costs TODAY on the RV32 ENGINE emulator (`lp-cli profile --collect alloc`), per profile mode; steady-render records only the frame window. A ratchet, not a target. The file'"'"'s path under scripts/heap-budget-record/engine/ IS the project path. Regenerate with `just heap-budget-baseline` (every project) or `just heap-budget-baseline <project>`; see docs/heap-budget-gate.md.'
+ENGINE_COMMENT='What this project costs TODAY on the RV32 ENGINE emulator (`lp-cli profile --collect alloc`), per profile mode; steady-render records only the frame window. A ratchet, not a target. The file'"'"'s path under scripts/heap-budget-record/engine/ IS the project path. Regenerate with `just heap-budget-baseline` (every project) or `just heap-budget-baseline <project>`; see docs/heap-budget-gate.ai.md.'
 
 # ---------------------------------------------------------------- the chips
 #
@@ -585,7 +585,7 @@ $dir/console.txt." >&2
     # The run's own configuration label: the base grade the machine printed
     # (`emu: esp32c6 direct boot, grade lp-emu:esp32c6:t1, …`) plus every
     # seam a chip start announced engaged (`SEAM net=lan engaged (…)`),
-    # sorted — the label rule of docs/adr/2026-10-05-emulator-seams.md §5.
+    # sorted — the label rule of docs/adr/2026-10-05-emulator-seams.ai.md §5.
     # Built from the announcements because a split image's seams engage when
     # the app first runs, after the boot line was printed. The C6 engages its
     # capability defaults (`net=lan`) whenever the image carries them, so the
@@ -642,7 +642,7 @@ chip_layout() {
 # recorded exact instead is `stackTop` — `_stack_start`, the one end that only
 # a memory-map change moves — and the heartbeat's `of <total> B` is graded
 # against what the ELF says it must be. See
-# docs/adr/2026-09-23-heap-budget-record-split-and-derived-stack.md.
+# docs/adr/2026-09-23-heap-budget-record-split-and-derived-stack.ai.md.
 chip_check() {
     chip_facts "$1" || return 1
     local margin="$2" fail=0
@@ -748,7 +748,7 @@ Re-baseline with 'just heap-budget-baseline-chips ${CHIP_ID}' in this PR ('just 
     if [ "$hw" -lt "$lo" ] || [ "$hw" -gt "$hi" ]; then
         echo "::error::heap-budget: ${CHIP_ID} stackHighWater ${hw} B is outside the recorded band \
 ${lo}..${hi} B. The band is wide on purpose (the image a CI runner builds is not this host's \
-binary — see docs/heap-budget-gate.md); leaving it is a real change in how deep an interrupt \
+binary — see docs/heap-budget-gate.ai.md); leaving it is a real change in how deep an interrupt \
 lands on the main task."
         fail=1
     else
@@ -777,7 +777,7 @@ runs on — a finding, not a re-baseline."
         echo "::error::heap-budget: ${CHIP_ID} stackTotal: ${gap} B lie between the end of \
 ${sect} and _stack_end. The main stack is no longer exactly the residual of RWDATA after the \
 statics, which is the premise the derived check rests on — read the linker script before \
-anything else (docs/adr/2026-09-23-heap-budget-record-split-and-derived-stack.md)."
+anything else (docs/adr/2026-09-23-heap-budget-record-split-and-derived-stack.ai.md)."
         fail=1
     elif [ "$st_rep" -le "$hi" ]; then
         echo "::error::heap-budget: ${CHIP_ID} stackTotal ${st_rep} B no longer exceeds the top \

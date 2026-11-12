@@ -13,7 +13,7 @@
 //!
 //! **A report — except one reading.** CI's first-light ratchet
 //! (`just first-light-measure`, `scripts/ci/first-light-ratchet.py`,
-//! docs/first-light-ratchet.md) runs this at `t4` with
+//! docs/first-light-ratchet.ai.md) runs this at `t4` with
 //! `LP_FIRST_LIGHT_NET=1` and gates the `basic+net` row's `[perf] first
 //! light at <ms> ms`: the one deliberate exception to "never gate on
 //! emulated time" (the emulator-first ADR's 2026-10-18 amendment). Every
@@ -32,7 +32,7 @@
 //!
 //! Emulated: `lp-emu:esp32c6:<grade>` (`LP_FIRST_LIGHT_GRADE`: `t1`, `t2`,
 //! the default, `t3` or `t4`), ROM-up. Never hardware-validated: the silicon
-//! figures are `docs/reports/2026-10-16-c6-time-to-first-light.md`'s.
+//! figures are `docs/reports/2026-10-16-c6-time-to-first-light.ai.md`'s.
 //! `LP_FIRST_LIGHT_DIR` writes `emu-first-light-<grade>.json` there;
 //! For a like-for-like reading of a silicon sitting: `LP_FIRST_LIGHT_MERGED`
 //! (`label=merged.bin,…`) boots that sitting's own chips instead of this
@@ -46,7 +46,7 @@
 //! address. The join's key derivation runs in esp-radio's Wi-Fi task on
 //! silicon and is not run under the seam, so this shows the boot's ORDER
 //! with a network saved, not the join's CPU cost
-//! (`docs/defects/2026-10-17-the-emulated-join-costs-no-cpu.md`).
+//! (`docs/defects/2026-10-17-the-emulated-join-costs-no-cpu.ai.md`).
 //!
 //! `#[ignore]`d: it needs the split build (`LP_EMU_BUILD_FW=1`, or
 //! `LP_EMU_C6_SPLIT_<SLUG>`).

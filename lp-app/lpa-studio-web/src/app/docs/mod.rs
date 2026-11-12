@@ -58,7 +58,7 @@ pub const PAGES: &[DocPage] = &[
     DocPage {
         slug: "guide",
         title: "Welcome",
-        markdown: include_str!("../../../../../docs/user-guide/README.md"),
+        markdown: include_str!("../../../../../docs/user-guide/README.ai.md"),
         sims: &[DocsSimSpec {
             name: "main",
             example_id: "catalog/plasma-duo",
@@ -67,7 +67,7 @@ pub const PAGES: &[DocPage] = &[
     DocPage {
         slug: "what-is-a-shader",
         title: "What's a shader?",
-        markdown: include_str!("../../../../../docs/user-guide/what-is-a-shader.md"),
+        markdown: include_str!("../../../../../docs/user-guide/what-is-a-shader.ai.md"),
         sims: &[DocsSimSpec {
             name: "main",
             example_id: "catalog/plasma-duo",
@@ -76,7 +76,7 @@ pub const PAGES: &[DocPage] = &[
     DocPage {
         slug: "the-peach",
         title: "The peach",
-        markdown: include_str!("../../../../../docs/user-guide/the-peach.md"),
+        markdown: include_str!("../../../../../docs/user-guide/the-peach.ai.md"),
         // Two sims, because the article's argument IS the pair: the same
         // artwork, the same wire, the same patch files, declared 1D and 2D.
         // A reader who cannot see them side by side has to take it on faith.
@@ -94,7 +94,7 @@ pub const PAGES: &[DocPage] = &[
     DocPage {
         slug: "patching-the-dome",
         title: "Patching the dome",
-        markdown: include_str!("../../../../../docs/user-guide/patching-the-dome.md"),
+        markdown: include_str!("../../../../../docs/user-guide/patching-the-dome.ai.md"),
         sims: &[DocsSimSpec {
             name: "main",
             example_id: "catalog/small-dome",
@@ -103,7 +103,7 @@ pub const PAGES: &[DocPage] = &[
     DocPage {
         slug: "brightness-and-smooth-fades",
         title: "Brightness & smooth fades",
-        markdown: include_str!("../../../../../docs/user-guide/brightness-and-smooth-fades.md"),
+        markdown: include_str!("../../../../../docs/user-guide/brightness-and-smooth-fades.ai.md"),
         sims: &[],
     },
 ];

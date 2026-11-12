@@ -377,7 +377,7 @@ impl<'r> SchemaCompiler<'r> {
             LpType::Mat4x4 => matrix_schema(4),
             // Fixed-size ARRAYS accept up to the declared length
             // (`read_lp_array`): the declared size is the type's maximum,
-            // and a shorter value's absent tail is type-default (color.md
+            // and a shorter value's absent tail is type-default (color.ai.md
             // §5 variable-length storage).
             LpType::Array(item, len) => json!({
                 "type": "array",
@@ -870,7 +870,7 @@ mod tests {
     #[test]
     fn array_and_list_value_leaves() {
         // A fixed Array's declared size is the maximum, not a required
-        // length (color.md §5 variable-length storage).
+        // length (color.ai.md §5 variable-length storage).
         check_value(
             LpType::Array(Box::new(LpType::F32), 3),
             &[r#"[1,2,3]"#, r#"[1,2]"#, r#"[]"#],

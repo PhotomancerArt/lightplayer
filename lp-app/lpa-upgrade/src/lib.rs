@@ -40,7 +40,7 @@
 //! is host/wasm studio tooling and is kept out of the firmware dependency
 //! graph by `scripts/check-upgrade-fw.sh`, wired into `just check-lint`.
 //!
-//! Sans-IO (`docs/adr/2026-07-06-sans-io-core.md`): the library reads no
+//! Sans-IO (`docs/adr/2026-07-06-sans-io-core.ai.md`): the library reads no
 //! files, no clock, and no randomness. Callers hand it bytes and take bytes
 //! back.
 

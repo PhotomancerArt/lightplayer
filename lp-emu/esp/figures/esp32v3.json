@@ -1,5 +1,5 @@
 {
-  "_about": "Firmware-derived figures the classic ESP32 (v3) emulator tests pin, read off THIS TREE's fw-esp32v3 image (esp32,server,float-f32). Exact: a moved figure fails its test, naming old -> new. Re-record with `just bless-chips esp32v3` and commit the diff with the change that moved it; never hand-edit. Figures read against silicon or the pinned 75486b114 reference image are NOT here (they stay literals, and a bless cannot reach them). See docs/chip-figures.md.",
+  "_about": "Firmware-derived figures the classic ESP32 (v3) emulator tests pin, read off THIS TREE's fw-esp32v3 image (esp32,server,float-f32). Exact: a moved figure fails its test, naming old -> new. Re-record with `just bless-chips esp32v3` and commit the diff with the change that moved it; never hand-edit. Figures read against silicon or the pinned 75486b114 reference image are NOT here (they stay literals, and a bless cannot reach them). See docs/chip-figures.ai.md.",
   "boot.init_chain.blank": [
     "[INIT] fw-esp32v3 boot",
     "[INIT] chip=esp32 arch=xtensa heap=15072+112640+98304+15536=241552 (ROM PRO stack + dram_seg arena + SRAM1 tail + ROM APP stack)",

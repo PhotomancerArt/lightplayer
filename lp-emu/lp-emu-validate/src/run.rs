@@ -322,7 +322,7 @@ impl ImageOverrides {
 }
 
 /// **Performance seams never make transcripts** (ADR
-/// docs/adr/2026-10-05-emulator-seams.md): a configuration composed with one
+/// docs/adr/2026-10-05-emulator-seams.ai.md): a configuration composed with one
 /// is for reading and replay, never for `run` or `record`. A capability
 /// seam's composite (`…+net=lan`) is allowed, on our own emulators only: a
 /// seam is something `lp-emu:*` answers, and a composite of silicon or

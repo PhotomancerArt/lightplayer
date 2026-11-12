@@ -1,5 +1,5 @@
 //! Host replay of the classic ESP32 OOM in
-//! `docs/defects/2026-08-02-classic-oom-retry-succeeds.md`.
+//! `docs/defects/2026-08-02-classic-oom-retry-succeeds.ai.md`.
 //!
 //! The board reported a 3,072-byte allocation failing with `free=3508`,
 //! `largest_free=3495` and `retry_ok=true`, which read as "the allocator

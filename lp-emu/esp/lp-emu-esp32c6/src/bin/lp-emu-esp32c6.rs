@@ -381,7 +381,7 @@ OPTIONS:
                             a hard error (exits 64). The run's label becomes
                             `<grade>+led=fast`, and each chip start prints
                             `SEAM <atom> engaged (…)`. ADR
-                            docs/adr/2026-10-05-emulator-seams.md
+                            docs/adr/2026-10-05-emulator-seams.ai.md
     --seams-prefer <atoms>  the same, SOFT: engage what the image allows,
                             else print `SEAM none engaged: <why>` and run on
                             with none (what Studio's boards ask)

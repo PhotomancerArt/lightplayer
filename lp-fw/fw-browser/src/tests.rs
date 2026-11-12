@@ -733,7 +733,7 @@ fn load_project_tolerates_library_artifacts() {
 /// `Error` naming the endpoint (`EngineServices::output_open_failure` →
 /// `TickContext` → `OutputNode::runtime_status`, one flush behind). Until
 /// 2026-10-01 that status read `Ok` here, pinned against
-/// `docs/debt/output-flush-refusal-is-log-only.md` (now retired).
+/// `docs/debt/output-flush-refusal-is-log-only.ai.md` (now retired).
 #[wasm_bindgen_test]
 fn board_manifest_boot_wears_the_board_and_survives_a_wire_it_lacks() {
     fw_browser_init_exports(wasm_bindgen::exports());

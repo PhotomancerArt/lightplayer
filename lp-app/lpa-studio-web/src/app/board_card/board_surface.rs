@@ -1,5 +1,5 @@
 //! [`BoardSurface`]: the top of the board card says what matters
-//! (`docs/ux/anatomy/board-card.md`, "Surface"; core's
+//! (`docs/ux/anatomy/board-card.ai.md`, "Surface"; core's
 //! [`lpa_studio_core::UiBoardSurface`]). Concept B of the 2026-10-17 spike,
 //! "the notice as an object": the state's icon in a circle, in the state's
 //! tone; then one or two plain sentences, centred — the tone is the icon's

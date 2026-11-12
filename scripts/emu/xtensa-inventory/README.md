@@ -92,7 +92,7 @@ lift through a raw-binary intermediate, so it does not reintroduce the bug
 above — `objcopy` copies the input ELF's header wholesale and only strips the
 named section.
 
-Licence note (AGENTS.md): binutils (`objdump`/`objcopy`) is used here as a
+Licence note (AGENTS.ai.md): binutils (`objdump`/`objcopy`) is used here as a
 tool whose *output* is fact — disassembly text and section headers — never as
 a source of tables or logic copied into this repo.
 

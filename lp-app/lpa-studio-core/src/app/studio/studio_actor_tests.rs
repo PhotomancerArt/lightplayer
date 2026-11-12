@@ -1101,7 +1101,7 @@ fn a_scrub_flood_coalesces_to_the_final_offset() {
     );
 }
 
-// P9 (panel.md P8): per-(scope, channel) PanelWrite coalescing — a knob
+// P9 (panel.ai.md P8): per-(scope, channel) PanelWrite coalescing — a knob
 // drag over the command path floods exactly like a SetValue drag and must
 // bound the same way.
 // ---------------------------------------------------------------------------

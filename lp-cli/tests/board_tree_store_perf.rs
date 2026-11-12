@@ -1,6 +1,6 @@
 //! The tree store's silicon perf on CX1 (plan
 //! `lp2025/2026-10-08-1017-tree-store-device-round`, M7 scope 2): what
-//! `docs/reports/2026-10-10-tree-store-emulator-walk.md` "On CX1" did not
+//! `docs/reports/2026-10-10-tree-store-emulator-walk.ai.md` "On CX1" did not
 //! measure — commit times (a save, a panel write, a 4 KiB append), the
 //! largest c40 file's read, a whole-project load, and the mount at empty and
 //! nearly full. **Silicon, not emulated.** The same operations as the

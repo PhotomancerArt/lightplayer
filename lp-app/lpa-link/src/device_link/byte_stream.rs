@@ -305,7 +305,7 @@ impl<S: DeviceByteStream> LinkCore<S> {
     /// A port that answers a peer that has stopped reading with
     /// `ByteStreamError::WriteStalled` dropped a frame, it did not fail: the
     /// link resends it, so the pass just ends (defect
-    /// `docs/defects/2026-09-08-serial-close-leaks-the-port-on-a-wedged-device.md`).
+    /// `docs/defects/2026-09-08-serial-close-leaks-the-port-on-a-wedged-device.ai.md`).
     fn write_frames(&mut self) {
         let now = (self.clock)();
         let Self {

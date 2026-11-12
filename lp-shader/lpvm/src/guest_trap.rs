@@ -5,7 +5,7 @@
 //! trapping invocation index as data. Hosts recover them through
 //! [`GuestTrapError`] — typed, no substring matching on `Display` output —
 //! so out-of-fuel traps can be routed into structured diagnostics (see the
-//! lpvm-native fuel ADR, `docs/adr/2026-07-20-lpvm-native-fuel.md`).
+//! lpvm-native fuel ADR, `docs/adr/2026-07-20-lpvm-native-fuel.ai.md`).
 
 /// A guest trap recovered from a backend call error.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

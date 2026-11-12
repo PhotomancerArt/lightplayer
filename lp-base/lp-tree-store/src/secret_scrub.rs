@@ -1,4 +1,4 @@
-//! Collecting a replaced secret promptly (FORMAT.md "Secret files"). A
+//! Collecting a replaced secret promptly (FORMAT.ai.md "Secret files"). A
 //! replaced or deleted file's records are garbage, and garbage stays on
 //! flash, readable in a dump of the partition, until GC happens to collect
 //! its sector — which on a store far from full can be never. For a

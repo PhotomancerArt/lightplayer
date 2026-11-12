@@ -34,7 +34,7 @@ use lpvm_native::xt_corpus::{CASES, XtCase};
 /// that do not get `Internal("Xtensa builtins image is empty or was not found
 /// at build time")` out of `compile()`, which reads as a codegen failure a long
 /// way from its cause. See
-/// `docs/defects/2026-08-01-xt-builtins-image-strands-just-test.md`.
+/// `docs/defects/2026-08-01-xt-builtins-image-strands-just-test.ai.md`.
 fn image_available(what: &str) -> bool {
     if lps_builtins_xt_image::is_available() {
         return true;
@@ -283,7 +283,7 @@ fn every_f32_corpus_golden_holds_on_the_emulator() {
 /// It is a stronger check here than there. rv32 reaches these values through
 /// M9's **soft float** — `compiler_builtins` symbols, no FPU — while Xtensa
 /// runs real `add.s`/`mul.s` on hardware. Agreement across two entirely
-/// different implementations of binary32 is what `docs/design/float.md`'s
+/// different implementations of binary32 is what `docs/design/float.ai.md`'s
 /// *Guaranteed* class asserts, and every value in this corpus was chosen to sit
 /// in that class (see the table's header note on the two exceptions).
 #[test]

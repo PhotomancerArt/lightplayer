@@ -14,7 +14,7 @@
 //! What is the S3's here and not the classic's: the chip is **8 MiB**
 //! ([`DEFAULT_FLASH_LEN`], the fourth mirror of `8mb`), so the JEDEC
 //! capacity byte is `0x17`, and `lpfs` is at `0x0061_0000` — past the end of
-//! a 4 MiB part on purpose (`docs/adr/2026-07-30-esp32s3-partition-floor.md`).
+//! a 4 MiB part on purpose (`docs/adr/2026-07-30-esp32s3-partition-floor.ai.md`).
 //!
 //! No firmware is needed: a rom-up machine with no `--elf` builds from the
 //! vendored ROM alone, so these run on every machine and in every CI job.

@@ -45,7 +45,7 @@
 #   frames   every decoded WS281x frame, timestamps and bytes.
 #
 # Every column must read `same`. DIFFERENT is a stop, not a tolerance: a fast
-# path that moves a cycle or a byte is a bug (AGENTS.md, "Never change what the
+# path that moves a cycle or a byte is a bug (AGENTS.ai.md, "Never change what the
 # guest observes"). `user s` is printed beside each leg for convenience and is
 # never compared — `bench-esp32s3.sh` is the speed probe.
 set -euo pipefail

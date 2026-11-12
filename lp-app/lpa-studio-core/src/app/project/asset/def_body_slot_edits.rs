@@ -9,7 +9,7 @@
 //! is pending, Studio first says the body as the slot edits that turn the
 //! file on disk into it ([`slot_edits_for_body`]); the board then holds
 //! both, and Save writes what the body said
-//! (docs/defects/2026-10-28-the-graph-names-an-output-the-board-keeps-it-unnamed.md).
+//! (docs/defects/2026-10-28-the-graph-names-an-output-the-board-keeps-it-unnamed.ai.md).
 //! [`materialize_def_text`] is the other direction: the file a set of slot
 //! edits makes, as the board's commit would write it.
 

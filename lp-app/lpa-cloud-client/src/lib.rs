@@ -6,7 +6,7 @@
 //! 1. [`CloudPort`] — the transport trait, one method per plane: `call` for
 //!    the control plane ([`lpc_cloud_api::CloudCall`] in,
 //!    [`lpc_cloud_api::CloudReply`] out) and blob/tree get/put for the
-//!    content plane. Futures are runtime-neutral (AGENTS.md sans-IO): no
+//!    content plane. Futures are runtime-neutral (AGENTS.ai.md sans-IO): no
 //!    spawning, no executor-flavored sleeps, drivable by any edge.
 //! 2. [`InProcessCloud`] — the transport that *is* the service: a real
 //!    [`lp_cloud_domain::CloudService`] over the in-memory adapters, behind

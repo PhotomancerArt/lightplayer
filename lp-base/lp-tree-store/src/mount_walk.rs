@@ -5,7 +5,7 @@
 //! to look ids up in. It goes level by level: the ids the last level named
 //! are looked for by one scan of record **headers** over the trusted
 //! sectors, newest sector first, and the first copy seen is the one kept —
-//! the copy in the sector with the highest sector seq (FORMAT.md "Record",
+//! the copy in the sector with the highest sector seq (FORMAT.ai.md "Record",
 //! mount step 2). Each record is visited where it is found (its header is
 //! not read again: only a payload is read, once), and what it names is the
 //! next level. An id no trusted sector holds makes the closure incomplete
@@ -330,7 +330,7 @@ mod tests {
     }
 
     /// Of two copies of a record the one in the later-opened sector is
-    /// indexed (FORMAT.md mount step 2): copy a sector's records into a
+    /// indexed (FORMAT.ai.md mount step 2): copy a sector's records into a
     /// blank sector under a newer header, and every record that was indexed
     /// in the old sector moves to the copy.
     #[test]
@@ -379,7 +379,7 @@ mod tests {
     /// A newer copy that does not check, over an older one that does: the
     /// fast mount adopts the newer copy, finds that multi's CRC wrong, and
     /// the whole reading (which closes the copy's sector at that record, as
-    /// FORMAT.md step 2 reads it) mounts the committed state from the older
+    /// FORMAT.ai.md step 2 reads it) mounts the committed state from the older
     /// copy. What `lp-store-bench`'s `shadowed_copy` fuzz images hold the
     /// store to.
     #[test]

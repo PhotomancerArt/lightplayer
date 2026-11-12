@@ -5,11 +5,11 @@
 //! `atan2(1, -1)` is `3pi/4`, not `-pi/4`, and `atan2(0, -1)` is `pi` rather
 //! than `0`. Those are the cases every naive implementation gets wrong.
 //!
-//! **Tolerance (`docs/design/float.md` §6):** `1e-6` relative with a `1e-6`
+//! **Tolerance (`docs/design/float.ai.md` §6):** `1e-6` relative with a `1e-6`
 //! absolute floor against the f64 reference.
 //!
 //! **Domain:** all finite inputs, including `x = 0` (gives `±pi/2`).
-//! `atan2(0, 0)` is GLSL-undefined (float.md §5) and returns `0` here without
+//! `atan2(0, 0)` is GLSL-undefined (float.ai.md §5) and returns `0` here without
 //! trapping; do not depend on it.
 
 /// GLSL `atan(y, x)`.
@@ -72,7 +72,7 @@ mod tests {
             for ix in -8..=8 {
                 let (y, x) = (iy as f32 * 0.5, ix as f32 * 0.5);
                 if y == 0.0 && x == 0.0 {
-                    // float.md §5: Unspecified — never asserted.
+                    // float.ai.md §5: Unspecified — never asserted.
                     continue;
                 }
                 let want = (y as f64).atan2(x as f64) as f32;

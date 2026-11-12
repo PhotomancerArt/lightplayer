@@ -2,7 +2,7 @@
 //! structured terminal error on the request id and leaves the connection
 //! (and the server) fully alive — it must never reach the infallible-alloc
 //! abort path that resets the board
-//! (`docs/defects/2026-08-26-project-read-assembly-oom-resets-classic.md`).
+//! (`docs/defects/2026-08-26-project-read-assembly-oom-resets-classic.ai.md`).
 
 extern crate alloc;
 
@@ -193,7 +193,7 @@ fn unset_probe_never_refuses() {
 /// 27,091 B mapping SVG loaded and LC6's largest block (2026-10-10), the
 /// hash is refused in words and the server keeps answering; a heap that
 /// holds the file hashes it.
-/// (`docs/defects/2026-10-10-the-edit-press-package-hash-reads-files-whole-ungated.md`)
+/// (`docs/defects/2026-10-10-the-edit-press-package-hash-reads-files-whole-ungated.ai.md`)
 #[test]
 fn a_package_hash_the_heap_cannot_hold_is_refused_and_the_server_stays_alive() {
     let (mut server, project_path) = server_with_clock_project("hash-refusal", Some(plenty_free));

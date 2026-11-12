@@ -4,8 +4,8 @@
 //! geodesic dome (16', 1" EMT struts) hoisted on a riser ring, glowing via
 //! 2'-tall triangular lucite panels — **50 of them, 119 LEDs each** —
 //! suspended inside the strut triangles, with one chevron door (a big
-//! triangle, no bottom edge). See `docs/use-cases/2026-08-09-mini-dome.md`
-//! ("The Small Dome, as built") and `docs/use-cases/2026-08-28-three-domes.md`.
+//! triangle, no bottom edge). See `docs/use-cases/2026-08-09-mini-dome.ai.md`
+//! ("The Small Dome, as built") and `docs/use-cases/2026-08-28-three-domes.ai.md`.
 //!
 //! The output is a **plan view** (azimuthal equidistant: azimuth preserved,
 //! radius proportional to polar angle from the zenith), the same projection
