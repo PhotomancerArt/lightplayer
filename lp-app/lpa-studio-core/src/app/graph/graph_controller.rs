@@ -83,8 +83,9 @@ pub struct GraphController {
     /// The files of nodes the Graph deleted, as they were (path, text), by
     /// node: what its undo writes back when the node returns (DD36).
     deleted: BTreeMap<NodeId, Vec<(String, String)>>,
-    /// The selection the board last breathed, while it breathes one.
-    pulsed: Option<Vec<lpa_graph::Target>>,
+    /// What the board was last told to show, and when (see
+    /// [`GraphController::highlight`]).
+    shown: Shown,
     /// The verbs that take values as last published, and what they were
     /// worked out from: the project's revision, the generation (port
     /// tables handed over move it) and the selection (which preselects
@@ -105,6 +106,35 @@ struct GraphOpened {
     /// The Graph's nodes, as Studio's.
     nodes: BTreeMap<NodeId, lpc_model::NodeId>,
 }
+
+/// What the board was last told to show for the Graph: each fixture's
+/// `selection` text and the outputs' pulse, each kept as it landed, so a
+/// part is sent again only when what it says changes.
+#[derive(Debug, Default)]
+struct Shown {
+    fixtures: Vec<(lpc_model::NodeId, String)>,
+    op: Option<crate::PatchPulseOp>,
+    /// When a draft was last sent (seconds), for a Bluetooth link's pace.
+    draft_at: Option<f64>,
+}
+
+/// How the board's link wants the Graph to send (see
+/// [`GraphController::settle`]).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct GraphPace {
+    /// Now, in seconds.
+    pub now: f64,
+    /// The link is Bluetooth: a draft moving under the pointer is sent at
+    /// most every [`DRAFT_GAP_BLUETOOTH`].
+    pub bluetooth: bool,
+}
+
+/// The least time between two of a moving draft's sends over Bluetooth:
+/// the card picture's gap there (`DEVICE_CARD_FEED_BLE_INTERVAL`), about
+/// seven a second, so the tail keeps up with the pointer without crowding
+/// the board's frames off the link. USB and Wi-Fi send each as the last
+/// one lands.
+const DRAFT_GAP_BLUETOOTH: f64 = 0.15;
 
 /// What the Graph's verbs that take values were worked out from.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -188,6 +218,7 @@ impl GraphController {
         project: &mut ProjectController,
         mut server: Option<&mut StudioServerClient>,
         wanted: bool,
+        pace: GraphPace,
     ) -> bool {
         let Some(key) = project.graph_files_key() else {
             // No project: nothing to show.
@@ -198,7 +229,7 @@ impl GraphController {
         let mut changed = false;
         if let Some(server) = server.as_deref_mut() {
             changed |= self.save(project, server).await;
-            self.highlight(project, server, wanted).await;
+            self.highlight(project, server, wanted, pace).await;
         }
         changed |= self.ask_for_pictures(project, wanted);
         if !wanted {
@@ -436,24 +467,31 @@ impl GraphController {
     /// stop when it isn't or nothing is selected: each fixture's
     /// `selection` slot for what is selected in fixtures (the Graph's rules,
     /// plan M4b), and the outputs' `highlight` slots — the Patch view's
-    /// pulse — for outputs, ports and pixels.
+    /// pulse — for outputs, ports and pixels. While a path or a circle is
+    /// drawn, the draft instead ([`board_draft`]).
+    ///
+    /// What is sent is keyed on what it says, not on the selection: an edit
+    /// that moves the selected lamps (a count, a start) changes the texts
+    /// with the selection the same, and the board follows. Each part (the
+    /// fixtures' texts, the outputs' pulse) goes only when it changed, so a
+    /// draft moving under the pointer sends its outputs' pulse alone — at
+    /// most every [`DRAFT_GAP_BLUETOOTH`] over Bluetooth, where a later
+    /// batch (the refresh tick) sends the last of it.
+    ///
+    /// [`board_draft`]: crate::app::graph::graph_highlight::board_draft
     async fn highlight(
         &mut self,
         project: &mut ProjectController,
         server: &mut StudioServerClient,
         wanted: bool,
+        pace: GraphPace,
     ) {
-        let selection = match (&self.opened, wanted) {
-            (Some(_), true) => self.handle.editor().borrow().selection.clone(),
-            _ => Vec::new(),
+        use crate::app::graph::graph_highlight::{board_draft, board_selection, highlight_of};
+        let none = || crate::PatchPulseOp {
+            subjects: Vec::new(),
         };
-        let want = (!selection.is_empty()).then_some(selection);
-        if self.pulsed == want {
-            return;
-        }
-        use crate::app::graph::graph_highlight::{board_selection, highlight_of};
-        let (fixtures, op) = match (&self.opened, &want) {
-            (Some(opened), Some(selection)) => {
+        let (fixtures, op, drawing) = match (&self.opened, wanted) {
+            (Some(opened), true) => {
                 let editor = self.handle.editor().borrow();
                 let p = &editor.project;
                 // The Graph's own rules when every fixture's firmware has the
@@ -464,28 +502,52 @@ impl GraphController {
                         .get(&n.id)
                         .is_some_and(|node| project.graph_fixture_has_selection(*node))
                 });
-                if has_slot {
-                    let b = board_selection(p, &opened.nodes, selection);
-                    (b.fixtures, b.outputs)
+                if editor.drawing() {
+                    let b = board_draft(p, editor.drafted().as_ref(), &opened.nodes, has_slot);
+                    (b.fixtures, b.outputs, true)
+                } else if editor.selection.is_empty() {
+                    (Vec::new(), none(), false)
+                } else if has_slot {
+                    let b = board_selection(p, &opened.nodes, &editor.selection);
+                    (b.fixtures, b.outputs, false)
                 } else {
-                    (Vec::new(), highlight_of(p, &opened.nodes, selection))
+                    let op = highlight_of(p, &opened.nodes, &editor.selection);
+                    (Vec::new(), op, false)
                 }
             }
-            _ => (
-                Vec::new(),
-                crate::PatchPulseOp {
-                    subjects: Vec::new(),
-                },
-            ),
+            _ => (Vec::new(), none(), false),
         };
-        // What didn't land is tried again with the next change.
-        let fixtures_landed = project
-            .apply_fixture_selection(server, fixtures)
-            .await
-            .is_ok();
-        if project.apply_patch_pulse(server, op).await.is_ok() && fixtures_landed {
-            self.pulsed = want;
+        // Nothing pulsing and nothing to pulse: nothing to clear either.
+        let op = (!op.subjects.is_empty() || self.shown.op.is_some()).then_some(op);
+        let fixtures_move = fixtures != self.shown.fixtures;
+        let op_moves = op.is_some() && op != self.shown.op;
+        if !fixtures_move && !op_moves {
+            return;
         }
+        if drawing
+            && pace.bluetooth
+            && self
+                .shown
+                .draft_at
+                .is_some_and(|at| pace.now - at < DRAFT_GAP_BLUETOOTH)
+        {
+            return;
+        }
+        // What didn't land is tried again with the next batch.
+        if fixtures_move
+            && project
+                .apply_fixture_selection(server, fixtures.clone())
+                .await
+                .is_ok()
+        {
+            self.shown.fixtures = fixtures;
+        }
+        if let (true, Some(op)) = (op_moves, op)
+            && project.apply_patch_pulse(server, op.clone()).await.is_ok()
+        {
+            self.shown.op = (!op.subjects.is_empty()).then_some(op);
+        }
+        self.shown.draft_at = drawing.then_some(pace.now);
     }
 
     /// Ask the lens for the pictures the Graph shows now (plan D11), and
@@ -631,7 +693,7 @@ impl GraphController {
         self.absent.clear();
         self.absent_root = None;
         self.checked = None;
-        self.pulsed = None;
+        self.shown = Shown::default();
         *self.frame.borrow_mut() = None;
     }
 }

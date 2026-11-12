@@ -64,6 +64,14 @@ pub enum PatchPulseLamps {
         node: NodeId,
         range: Option<(u32, u32)>,
     },
+    /// Runs on one output's wire, in the order the subject walks them:
+    /// `(first wire lamp, lamps, reversed)`, a reversed run walked from its
+    /// high end down. What a wire-space subject with a direction says: the
+    /// Graph's draft, which the board's fixtures don't hold yet.
+    OutputRuns {
+        node: NodeId,
+        runs: Vec<(u32, u32, bool)>,
+    },
 }
 
 impl PatchPulseLamps {
@@ -72,7 +80,7 @@ impl PatchPulseLamps {
     pub fn space(&self) -> PatchPulseSpace {
         match self {
             Self::Fixture { .. } => PatchPulseSpace::Fixture,
-            Self::Output { .. } => PatchPulseSpace::Wire,
+            Self::Output { .. } | Self::OutputRuns { .. } => PatchPulseSpace::Wire,
         }
     }
 }
@@ -276,7 +284,17 @@ pub(crate) fn pulse_highlights(
                     reversed: false,
                 }])
             }
-            PatchPulseLamps::Output { .. } => Vec::new(),
+            PatchPulseLamps::OutputRuns { node, runs } if *node == wire.node => runs
+                .iter()
+                .enumerate()
+                .map(|(i, (wire_start, lamps, reversed))| PulseSpan {
+                    source_lamp: i as u32,
+                    wire_start: *wire_start,
+                    lamps: *lamps,
+                    reversed: *reversed,
+                })
+                .collect(),
+            PatchPulseLamps::Output { .. } | PatchPulseLamps::OutputRuns { .. } => Vec::new(),
         };
         let text = match subject.language() {
             PatchPulseLanguage::Chase => chase_text(&spans),
@@ -551,6 +569,24 @@ mod tests {
         );
 
         assert_eq!(writes, Vec::from([(NodeId::new(1), String::from("40-55"))]));
+    }
+
+    /// The Graph's draft: runs on one wire in the order it walks them, a
+    /// reversed one written descending, and only its own wire's.
+    #[test]
+    fn output_runs_chase_in_the_order_they_are_given() {
+        let placements = peach();
+        let subject = PatchPulseSubject {
+            lamps: PatchPulseLamps::OutputRuns {
+                node: NodeId::new(1),
+                runs: vec![(70, 4, false), (60, 3, true)],
+            },
+            language: PatchPulseLanguage::Chase,
+        };
+        assert_eq!(
+            pulse_highlights(&subject, &wires(&placements)),
+            Vec::from([(NodeId::new(1), String::from("chase:70-73,62-60"))]),
+        );
     }
 
     #[test]
