@@ -1,3 +1,4 @@
+use alloc::string::String;
 use alloc::vec::Vec;
 
 use crate::hir::{HirBuildJob, HirBuildStepResult, HirModule};
@@ -59,7 +60,7 @@ pub struct CompileJob<'src> {
     options: CompileOptions,
     tokens: Option<alloc::vec::Vec<crate::Token>>,
     index: Option<TopLevelIndex>,
-    bodies: Option<Vec<ParsedFunctionBody<'src>>>,
+    bodies: Option<Vec<(String, ParsedFunctionBody<'src>)>>,
     hir_job: Option<HirBuildJob<'src>>,
     hir: Option<HirModule>,
     stage: CompileStage,
@@ -143,7 +144,7 @@ impl<'src> CompileJob<'src> {
                         function.body_span,
                         &index.structs,
                     ) {
-                        Ok(body) => bodies.push(body),
+                        Ok(body) => bodies.push((function.name.clone(), body)),
                         Err(err) => {
                             self.stage = CompileStage::Done;
                             return CompileStepResult::Failed(err);

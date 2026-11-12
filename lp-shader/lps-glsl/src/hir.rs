@@ -69,7 +69,7 @@ enum HirBuildState<'src> {
     /// resident under every function's typing.
     Header {
         tokens: Vec<Token>,
-        bodies: Vec<ParsedFunctionBody<'src>>,
+        bodies: Vec<(String, ParsedFunctionBody<'src>)>,
     },
     Functions(Box<HirBuildFunctionState<'src>>),
     ShaderInit(Box<HirBuildFunctionState<'src>>),
@@ -93,7 +93,7 @@ struct HirBuildFunctionState<'src> {
     globals: VecMap<String, GlobalConst>,
     /// Parsed bodies by function index (aligned with `functions_sigs`):
     /// overloads share a name, so a name cannot key them.
-    body_map: Vec<Option<ParsedFunctionBody<'src>>>,
+    body_map: Vec<(String, Option<ParsedFunctionBody<'src>>)>,
     functions: Vec<HirFunction>,
     /// Set when [`synthesize_shader_init`] produced the trailing synthetic
     /// function; the module signature is built from the sig table in
@@ -113,7 +113,7 @@ impl<'src> HirBuildJob<'src> {
         source: &'src str,
         tokens: Vec<Token>,
         index: TopLevelIndex,
-        bodies: Vec<ParsedFunctionBody<'src>>,
+        bodies: Vec<(String, ParsedFunctionBody<'src>)>,
         options: CompileOptions,
     ) -> Self {
         Self {
@@ -224,7 +224,12 @@ impl<'src> HirBuildJob<'src> {
         let parsed_body = state
             .body_map
             .get_mut(function_index)
-            .and_then(Option::take)
+            .and_then(|(name, body)| {
+                // Free the name with its body, as typing each function
+                // always has: the device heap's shape depends on it.
+                drop(core::mem::take(name));
+                body.take()
+            })
             .ok_or_else(|| Diagnostic::error(decl.body_span, "missing parsed function body"))?;
         let mut ctx = TypeCtx::new(
             sig,
@@ -367,7 +372,7 @@ pub fn build_hir<'src>(
     source: &'src str,
     tokens: &[Token],
     index: &TopLevelIndex,
-    bodies: Vec<ParsedFunctionBody<'src>>,
+    bodies: Vec<(String, ParsedFunctionBody<'src>)>,
     options: &CompileOptions,
 ) -> Result<HirModule, Diagnostic> {
     let (array_size_consts, const_init_cache) = build_array_size_consts(source, tokens, index)?;
@@ -422,7 +427,7 @@ pub fn build_hir<'src>(
         let decl = &index.functions[function_index];
         let parsed_body = body_map
             .get(function_index)
-            .and_then(Option::as_ref)
+            .and_then(|(_, body)| body.as_ref())
             .ok_or_else(|| Diagnostic::error(decl.body_span, "missing parsed function body"))?;
         let mut ctx = TypeCtx::new(
             sig,
@@ -917,10 +922,17 @@ struct GlobalInit<'src> {
 /// The parsed bodies in function-index order, each taken once as its
 /// function is typed. The body stage parses them in `index.functions` order,
 /// the same order the signature table is built in, so position is the key
-/// (overloads share a name). `Option` of a `Vec`-backed body has the body's
-/// size, so this collects in place instead of allocating a second list.
-fn function_body_map(bodies: Vec<ParsedFunctionBody<'_>>) -> Vec<Option<ParsedFunctionBody<'_>>> {
-    bodies.into_iter().map(Some).collect()
+/// (overloads share a name). Grown entry by entry and freed name by name,
+/// which is the allocation pattern the device heap budget was recorded
+/// against; collecting into a fresh list shifted the compile window's holes.
+fn function_body_map<'src>(
+    bodies: Vec<(String, ParsedFunctionBody<'src>)>,
+) -> Vec<(String, Option<ParsedFunctionBody<'src>>)> {
+    let mut body_map = Vec::new();
+    for (name, body) in bodies {
+        body_map.push((name, Some(body)));
+    }
+    body_map
 }
 
 fn build_global_vars<'src>(
