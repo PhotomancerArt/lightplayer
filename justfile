@@ -2935,7 +2935,7 @@ fmt-check:
 # Linting - Workspace-wide
 # ============================================================================
 
-# lp-gfx-wgpu, fw-browser, and naga-wasm-poc are excluded here: they pull the
+# lp-gfx-wgpu and fw-browser are excluded here: they pull the
 # heavy wgpu/naga dependency tree into an otherwise wgpu-free build graph.
 # They are covered by `clippy-gfx`, which CI runs in the gated Validate GFX job.
 #
@@ -2947,7 +2947,7 @@ fmt-check:
 # compile it for its real target. `fw-esp32-radio` (esp-hal, esp-radio) is
 # linted on the C6's target by `clippy-fw-esp32c6`.
 clippy-host:
-    cargo clippy --workspace --exclude lps-builtins-emu-app --exclude fw-esp32c6 --exclude fw-esp32-radio --exclude fw-esp32s3 --exclude fw-esp32v3 --exclude fw-emu --exclude lp-riscv-emu-guest-test-app --exclude lp-riscv-emu-guest --exclude lp-xt-fp-harness --exclude lp-gfx-wgpu --exclude fw-browser --exclude naga-wasm-poc -- --no-deps -D warnings
+    cargo clippy --workspace --exclude lps-builtins-emu-app --exclude fw-esp32c6 --exclude fw-esp32-radio --exclude fw-esp32s3 --exclude fw-esp32v3 --exclude fw-emu --exclude lp-riscv-emu-guest-test-app --exclude lp-riscv-emu-guest --exclude lp-xt-fp-harness --exclude lp-gfx-wgpu --exclude fw-browser -- --no-deps -D warnings
     # fw-esp32-common's usb_link/uart_link modules are behind non-default
     # features (`clippy-host`'s `--workspace` only lints its defaults), the
     # same gap `test-rust-features` closes below for the tests.
@@ -3011,7 +3011,7 @@ clippy-xt-jit:
 
 # The wgpu-tree workspace members excluded from clippy-host.
 clippy-gfx:
-    cargo clippy -p lp-gfx-wgpu -p fw-browser -p naga-wasm-poc -- --no-deps -D warnings
+    cargo clippy -p lp-gfx-wgpu -p fw-browser -- --no-deps -D warnings
 
 clippy-rv32: install-rv32-target clippy-fw-esp32c6 clippy-fw-esp32c6-harnesses clippy-rv32-emu-guest-test-app
 
