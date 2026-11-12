@@ -1,5 +1,5 @@
 //! P5 interp-f32 differential smoke: the same GLSL executed on the f32
-//! LPIR interpreter (`lps-frontend` → `lpir::interpret`, the float oracle)
+//! LPIR interpreter (`lps-glsl` → `lpir::interpret`, the float oracle)
 //! and on the GPU must agree tightly — this comparison isolates GPU defects
 //! from Q32 approximation error.
 //!
@@ -12,7 +12,7 @@ mod util;
 
 use lp_gfx::{LpGraphics, ShaderCompileOptions, ShaderSemantics};
 use lpir::{Value, interpret};
-use lps_frontend::std_math_handler::StdMathHandler;
+use lpir::StdMathHandler;
 use lps_shared::LpsValueF32;
 
 /// Number of probe evaluations per case (pixel x = 0..N-1).
@@ -166,7 +166,7 @@ fn logical_and_short_circuits_on_all_tiers() {
 fn gpu_probe_frame(graphics: &lp_gfx_wgpu::GpuGraphics, glsl: &str) -> Vec<u16> {
     let authored = format!("{glsl}\nvec4 render_2d(vec2 pos) {{ return probe(pos.x); }}\n");
     let options =
-        ShaderCompileOptions::new(ShaderSemantics::F32Gpu, lp_shader::ShaderFrontend::Naga);
+        ShaderCompileOptions::new(ShaderSemantics::F32Gpu, lp_shader::ShaderFrontend::LpsGlsl);
     let mut shader = graphics
         .compile_shader(&authored, &options)
         .expect("gpu probe compiles");
@@ -186,7 +186,7 @@ fn gpu_probe_frame(graphics: &lp_gfx_wgpu::GpuGraphics, glsl: &str) -> Vec<u16> 
 }
 
 /// Run `probe(x)` on the f32 LPIR interpreter (the float oracle path:
-/// `lps-frontend` → `lpir::interpret` with host-side libm imports).
+/// `lps-glsl` → `lpir::interpret` with host-side libm imports).
 /// `lpfn_*` calls compile as local canonical GLSL via the oracle's rename.
 fn interp_probe(glsl: &str, x: f32) -> Vec<f32> {
     let mut unit = String::new();
@@ -200,8 +200,9 @@ fn interp_probe(glsl: &str, x: f32) -> Vec<f32> {
     }
     unit.push_str(&rename_lpfn_prefix(glsl));
 
-    let naga = lps_frontend::compile(&unit).expect("interp compile");
-    let (ir, _meta) = lps_frontend::lower(&naga).expect("interp lower");
+    let ir = lps_glsl::compile(&unit, &lps_glsl::CompileOptions::default())
+        .unwrap_or_else(|e| panic!("interp compile: {}", e.render(&unit)))
+        .ir;
     let mut handler = StdMathHandler::default();
     let out = interpret(&ir, "probe", &[Value::F32(x)], &mut handler).expect("interpret");
     out.iter()
@@ -217,7 +218,7 @@ fn quantize_unorm16(v: f32) -> u16 {
 }
 
 /// Rename the `lpfn_` identifier prefix to `lpo_` at identifier boundaries
-/// (`lps-frontend` reserves `lpfn_` for builtin imports; the rename lets
+/// (`lps-glsl` reserves `lpfn_` for builtin imports; the rename lets
 /// the canonical sources compile as ordinary local GLSL — mirrors
 /// `lps-filetests::conformance::oracle`).
 fn rename_lpfn_prefix(src: &str) -> String {

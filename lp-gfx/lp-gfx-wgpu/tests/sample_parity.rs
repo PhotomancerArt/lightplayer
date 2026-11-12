@@ -20,7 +20,7 @@ mod util;
 use lp_gfx::{LpGraphics, LpShader, ShaderCompileOptions, ShaderSemantics};
 use lp_gfx_lpvm::TargetLpvmGraphics;
 use lpir::{Value, interpret};
-use lps_frontend::std_math_handler::StdMathHandler;
+use lpir::StdMathHandler;
 use lps_shared::LpsValueF32;
 use util::corpus::{CORPUS, CorpusShader};
 use util::diff::diff_frames;
@@ -92,7 +92,7 @@ fn gpu_sample_matches_the_cpu_tier_within_the_m2_envelope() {
         eprintln!("SKIP: no GPU adapter available");
         return;
     };
-    let cpu = TargetLpvmGraphics::new(lp_shader::ShaderFrontend::Naga);
+    let cpu = TargetLpvmGraphics::new(lp_shader::ShaderFrontend::LpsGlsl);
 
     // The authoritative CPU tier, compiled the way the device compiles:
     // naga frontend at default Q32 config; prototypes spliced for the same
@@ -106,7 +106,7 @@ fn gpu_sample_matches_the_cpu_tier_within_the_m2_envelope() {
         let points = grid_points_q16(width, height);
 
         let mut shader_gpu_options =
-            ShaderCompileOptions::new(ShaderSemantics::F32Gpu, lp_shader::ShaderFrontend::Naga);
+            ShaderCompileOptions::new(ShaderSemantics::F32Gpu, lp_shader::ShaderFrontend::LpsGlsl);
         shader_gpu_options.textures = util::palette::texture_specs(shader);
         let mut gpu_shader = gpu
             .compile_shader(shader.source, &shader_gpu_options)
@@ -120,7 +120,7 @@ fn gpu_sample_matches_the_cpu_tier_within_the_m2_envelope() {
         // naga frontend at default Q32 config; prototypes spliced for the same
         // declaration-order reason as the GPU path (see `util::reference`).
         let mut shader_cpu_options =
-            ShaderCompileOptions::new(ShaderSemantics::Q32, lp_shader::ShaderFrontend::Naga);
+            ShaderCompileOptions::new(ShaderSemantics::Q32, lp_shader::ShaderFrontend::LpsGlsl);
         shader_cpu_options.textures = util::palette::texture_specs(shader);
         let mut cpu_shader = cpu
             .compile_shader(&cpu_source, &shader_cpu_options)
@@ -209,7 +209,7 @@ fn gpu_sample_agrees_with_the_f32_interpreter() {
         return;
     };
     let options =
-        ShaderCompileOptions::new(ShaderSemantics::F32Gpu, lp_shader::ShaderFrontend::Naga);
+        ShaderCompileOptions::new(ShaderSemantics::F32Gpu, lp_shader::ShaderFrontend::LpsGlsl);
     // Fractional points in [0, 16)²: x carries .25, y carries .75.
     let points_q16: Vec<i32> = (0..16i32)
         .flat_map(|i| [(i << 16) + 16384, ((15 - i) << 16) + 49152])
@@ -253,7 +253,7 @@ fn gpu_sample_matches_gpu_render_at_integer_points() {
         return;
     };
     let options =
-        ShaderCompileOptions::new(ShaderSemantics::F32Gpu, lp_shader::ShaderFrontend::Naga);
+        ShaderCompileOptions::new(ShaderSemantics::F32Gpu, lp_shader::ShaderFrontend::LpsGlsl);
     let shader_src = &CORPUS[0]; // basic
     let (width, height) = (32u32, 32u32);
     let mut shader = gpu
@@ -290,7 +290,7 @@ fn gpu_sample_matches_gpu_render_at_integer_points() {
 }
 
 /// Run `render(x, y)` on the f32 LPIR interpreter (the float oracle:
-/// `lps-frontend` → `lpir::interpret` with host libm imports). `lpfn_*`
+/// `lps-glsl` → `lpir::interpret` with host libm imports). `lpfn_*`
 /// calls compile as local canonical GLSL via the oracle's rename, exactly
 /// like the M2 interp differential.
 fn interp_render(glsl: &str, x: f32, y: f32) -> Vec<f32> {
@@ -303,8 +303,9 @@ fn interp_render(glsl: &str, x: f32, y: f32) -> Vec<f32> {
     }
     unit.push_str(&rename_lpfn_prefix(glsl));
 
-    let naga = lps_frontend::compile(&unit).expect("interp compile");
-    let (ir, _meta) = lps_frontend::lower(&naga).expect("interp lower");
+    let ir = lps_glsl::compile(&unit, &lps_glsl::CompileOptions::default())
+        .unwrap_or_else(|e| panic!("interp compile: {}", e.render(&unit)))
+        .ir;
     let mut handler = StdMathHandler::default();
     let out = interpret(
         &ir,
@@ -326,7 +327,7 @@ fn quantize_unorm16(v: f32) -> u16 {
 }
 
 /// Rename the `lpfn_` identifier prefix to `lpo_` at identifier boundaries
-/// (`lps-frontend` reserves `lpfn_` for builtin imports; the rename lets the
+/// (`lps-glsl` reserves `lpfn_` for builtin imports; the rename lets the
 /// canonical sources compile as ordinary local GLSL).
 fn rename_lpfn_prefix(src: &str) -> String {
     let bytes = src.as_bytes();

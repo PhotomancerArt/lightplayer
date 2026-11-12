@@ -41,25 +41,21 @@ pub(crate) enum PosterCapture {
     Pending(core::pin::Pin<Box<dyn core::future::Future<Output = Result<Vec<u8>, String>>>>),
 }
 
-/// GLSL frontend for the browser runtime's CPU tier.
-///
-/// Naga: the browser CPU tier has compiled through naga since the GPU tier
-/// landed — kept as the explicit choice rather than an accident of feature
-/// unification. The `lp-shader/naga` frontend it needs is enabled explicitly
-/// via this crate's `lpa-server` dependency (`features = ["naga"]`); the
-/// naga *crate* that `lp-gfx-wgpu` compiles for the GPU tier does not enable
-/// it. The device constant is [`lpa_server::DEVICE_SHADER_FRONTEND`]
-/// (LpsGlsl); converging the browser tier onto it is a product decision to
-/// make deliberately, not here.
-const BROWSER_SHADER_FRONTEND: lpa_server::ShaderFrontend = lpa_server::ShaderFrontend::Naga;
+/// GLSL frontend for the browser runtime's CPU tier: the device's own,
+/// [`lpa_server::DEVICE_SHADER_FRONTEND`] (`lps-glsl`), so Studio's simulator
+/// compiles exactly what a board compiles. The tier compiled through naga
+/// until 2026-11-12, which let it render shaders a board refused (bitwise
+/// operators, hex literals). The GPU tier is separate: it forks at the GLSL
+/// source and translates with naga `glsl-in` → `wgsl-out` itself.
+const BROWSER_SHADER_FRONTEND: lpa_server::ShaderFrontend = lpa_server::DEVICE_SHADER_FRONTEND;
 
 // The sidecar builds this crate standalone (`cargo build -p fw-browser`), so
-// no workspace feature unification supplies the frontend: if the `naga`
-// feature chain breaks, every shader compile fails at runtime and Studio's
-// simulator renders black. Fail the build instead.
+// no workspace feature unification supplies the frontend: if it were not
+// compiled in, every shader compile would fail at runtime and Studio's
+// simulator would render black. Fail the build instead.
 const _: () = assert!(
     BROWSER_SHADER_FRONTEND.built_in(),
-    "the pinned shader frontend is not compiled in; keep `features = [\"naga\"]` on fw-browser's lpa-server dependency"
+    "the pinned shader frontend is not compiled in"
 );
 
 /// One in-browser LightPlayer firmware instance.

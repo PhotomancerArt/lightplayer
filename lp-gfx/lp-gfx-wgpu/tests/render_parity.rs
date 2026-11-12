@@ -73,7 +73,7 @@ fn corpus_parity_holds_or_beats_m3() {
 
         let gpu_compile_start = Instant::now();
         let mut shader_options =
-            ShaderCompileOptions::new(ShaderSemantics::F32Gpu, lp_shader::ShaderFrontend::Naga);
+            ShaderCompileOptions::new(ShaderSemantics::F32Gpu, lp_shader::ShaderFrontend::LpsGlsl);
         shader_options.textures = util::palette::texture_specs(shader);
         let mut compiled_gpu = graphics
             .compile_shader(shader.source, &shader_options)

@@ -60,7 +60,7 @@ fn uniforms(width: u32, height: u32) -> LpsValueF32 {
 
 fn compile(graphics: &impl LpGraphics, source: &str) -> Box<dyn LpShader> {
     let options =
-        ShaderCompileOptions::new(ShaderSemantics::F32Gpu, lp_shader::ShaderFrontend::Naga);
+        ShaderCompileOptions::new(ShaderSemantics::F32Gpu, lp_shader::ShaderFrontend::LpsGlsl);
     graphics.compile_shader(source, &options).expect("compiles")
 }
 

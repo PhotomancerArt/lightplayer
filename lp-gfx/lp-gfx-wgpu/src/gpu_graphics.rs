@@ -552,7 +552,7 @@ mod tests {
         Some(GpuGraphics::new(
             device,
             queue,
-            Box::new(TargetLpvmGraphics::new(lp_shader::ShaderFrontend::Naga)),
+            Box::new(TargetLpvmGraphics::new(lp_shader::ShaderFrontend::LpsGlsl)),
         ))
     }
 
@@ -576,7 +576,7 @@ mod tests {
             return;
         };
         let options =
-            ShaderCompileOptions::new(ShaderSemantics::Q32, lp_shader::ShaderFrontend::Naga);
+            ShaderCompileOptions::new(ShaderSemantics::Q32, lp_shader::ShaderFrontend::LpsGlsl);
         match graphics.compile_shader("vec4 render_2d(vec2 pos) { return vec4(0.0); }", &options) {
             Err(GfxError::Backend(message)) => {
                 assert!(message.contains("Q32"), "message names the tier: {message}");
@@ -638,7 +638,7 @@ void tick() {
             return;
         };
         let options =
-            ShaderCompileOptions::new(ShaderSemantics::F32Gpu, lp_shader::ShaderFrontend::Naga);
+            ShaderCompileOptions::new(ShaderSemantics::F32Gpu, lp_shader::ShaderFrontend::LpsGlsl);
         let mut shader = graphics
             .compile_shader(
                 "layout(binding = 0) uniform vec2 outputSize;\n\
@@ -676,7 +676,7 @@ void tick() {
             return;
         };
         let options =
-            ShaderCompileOptions::new(ShaderSemantics::F32Gpu, lp_shader::ShaderFrontend::Naga);
+            ShaderCompileOptions::new(ShaderSemantics::F32Gpu, lp_shader::ShaderFrontend::LpsGlsl);
         let mut shader = graphics
             .compile_shader(
                 "layout(binding = 0) uniform float time;\n\
@@ -703,7 +703,7 @@ void tick() {
             eprintln!("SKIP: no GPU adapter available");
             return;
         };
-        let cpu = TargetLpvmGraphics::new(lp_shader::ShaderFrontend::Naga);
+        let cpu = TargetLpvmGraphics::new(lp_shader::ShaderFrontend::LpsGlsl);
 
         // Deterministic pseudo-random u16 channels (2×2 RGBA16).
         let previous: Vec<u16> = (0..16u32)
@@ -769,7 +769,7 @@ void tick() {
             .expect("create");
 
         let mut options =
-            ShaderCompileOptions::new(ShaderSemantics::F32Gpu, lp_shader::ShaderFrontend::Naga);
+            ShaderCompileOptions::new(ShaderSemantics::F32Gpu, lp_shader::ShaderFrontend::LpsGlsl);
         options.textures.insert(
             String::from("inputColor"),
             lp_shader::texture_binding::texture2d(
@@ -814,7 +814,7 @@ void tick() {
             .expect("create");
 
         let mut options =
-            ShaderCompileOptions::new(ShaderSemantics::F32Gpu, lp_shader::ShaderFrontend::Naga);
+            ShaderCompileOptions::new(ShaderSemantics::F32Gpu, lp_shader::ShaderFrontend::LpsGlsl);
         options.textures.insert(
             String::from("t"),
             lp_shader::texture_binding::height_one(
@@ -900,7 +900,7 @@ void tick() {
         };
         // Declared sampler without a spec.
         let options =
-            ShaderCompileOptions::new(ShaderSemantics::F32Gpu, lp_shader::ShaderFrontend::Naga);
+            ShaderCompileOptions::new(ShaderSemantics::F32Gpu, lp_shader::ShaderFrontend::LpsGlsl);
         match graphics.compile_shader(
             "uniform sampler2D mystery;\n\
              vec4 render_2d(vec2 pos) { return vec4(0.0); }\n",
@@ -915,7 +915,7 @@ void tick() {
 
         // Spec naming a sampler the shader does not declare.
         let mut options =
-            ShaderCompileOptions::new(ShaderSemantics::F32Gpu, lp_shader::ShaderFrontend::Naga);
+            ShaderCompileOptions::new(ShaderSemantics::F32Gpu, lp_shader::ShaderFrontend::LpsGlsl);
         options.textures.insert(
             String::from("ghost"),
             lp_shader::texture_binding::texture2d(
@@ -1018,7 +1018,7 @@ void tick() {
             return;
         };
         let options =
-            ShaderCompileOptions::new(ShaderSemantics::F32Gpu, lp_shader::ShaderFrontend::Naga);
+            ShaderCompileOptions::new(ShaderSemantics::F32Gpu, lp_shader::ShaderFrontend::LpsGlsl);
         let mut shader = graphics
             .compile_shader(
                 "layout(binding = 0) uniform vec2 outputSize;\n\
@@ -1070,7 +1070,7 @@ void tick() {
             return;
         };
         let options =
-            ShaderCompileOptions::new(ShaderSemantics::F32Gpu, lp_shader::ShaderFrontend::Naga)
+            ShaderCompileOptions::new(ShaderSemantics::F32Gpu, lp_shader::ShaderFrontend::LpsGlsl)
                 .with_space(lp_shader::ShaderEntrySpace::OneD);
         let mut shader = graphics
             .compile_shader(
@@ -1109,7 +1109,7 @@ void tick() {
             return;
         };
         let options =
-            ShaderCompileOptions::new(ShaderSemantics::F32Gpu, lp_shader::ShaderFrontend::Naga)
+            ShaderCompileOptions::new(ShaderSemantics::F32Gpu, lp_shader::ShaderFrontend::LpsGlsl)
                 .with_space(lp_shader::ShaderEntrySpace::OneD);
         let mut shader = graphics
             .compile_shader(
@@ -1149,7 +1149,7 @@ void tick() {
             return;
         };
         let options =
-            ShaderCompileOptions::new(ShaderSemantics::F32Gpu, lp_shader::ShaderFrontend::Naga);
+            ShaderCompileOptions::new(ShaderSemantics::F32Gpu, lp_shader::ShaderFrontend::LpsGlsl);
         let mut shader = graphics
             .compile_shader("vec4 render_2d(vec2 pos) { return vec4(0.5); }", &options)
             .expect("compiles");
@@ -1172,7 +1172,7 @@ void tick() {
             return;
         };
         let options =
-            ShaderCompileOptions::new(ShaderSemantics::F32Gpu, lp_shader::ShaderFrontend::Naga);
+            ShaderCompileOptions::new(ShaderSemantics::F32Gpu, lp_shader::ShaderFrontend::LpsGlsl);
         let mut shader = graphics
             .compile_shader(
                 "vec4 render_2d(vec2 pos) { return vec4(pos.x / 16.0, 0.0, 0.0, 1.0); }",
@@ -1234,7 +1234,7 @@ void tick() {
             return;
         };
         let options =
-            ShaderCompileOptions::new(ShaderSemantics::F32Gpu, lp_shader::ShaderFrontend::Naga);
+            ShaderCompileOptions::new(ShaderSemantics::F32Gpu, lp_shader::ShaderFrontend::LpsGlsl);
         let mut shader = graphics
             .compile_shader(
                 "vec4 render_2d(vec2 pos) { return vec4(pos.x / 16.0, 0.0, 0.0, 1.0); }",

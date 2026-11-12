@@ -24,7 +24,7 @@ fn rocaille_renders_zero_non_finite_lanes() {
         .find(|s| s.name == "rocaille")
         .expect("corpus shader");
     let options =
-        ShaderCompileOptions::new(ShaderSemantics::F32Gpu, lp_shader::ShaderFrontend::Naga);
+        ShaderCompileOptions::new(ShaderSemantics::F32Gpu, lp_shader::ShaderFrontend::LpsGlsl);
     let mut shader = graphics
         .compile_shader(rocaille.source, &options)
         .expect("rocaille compiles");
