@@ -45,9 +45,12 @@ impl<'src, 'tok> BodyParser<'src, 'tok> {
                     break;
                 }
                 self.bump();
+                // GLSL ES 3.00 §5.8 / grammar: `logical-or ? expression :
+                // assignment-expression` — the middle may hold a comma, the
+                // last may not, so `f(c ? a : b, d)` passes two arguments.
                 let accept = self.parse_expr(0)?;
                 self.expect_punct(":")?;
-                let reject = self.parse_expr(0)?;
+                let reject = self.parse_expr(1)?;
                 let span = Span::new(lhs.span.start, reject.span.end);
                 lhs = ParsedExpr {
                     span,
