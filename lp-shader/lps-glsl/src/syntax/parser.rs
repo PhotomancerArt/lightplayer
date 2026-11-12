@@ -47,6 +47,19 @@ pub fn parse_expr_tokens<'src>(
     span: Span,
 ) -> Result<ParsedExpr<'src>, Diagnostic> {
     let expr_tokens = token_subslice(tokens, span);
+    if expr_tokens.is_empty() {
+        // `float x = ;` at global scope: point at where the expression
+        // belongs and name the token that stands there instead.
+        let found = tokens
+            .iter()
+            .find(|t| t.span.start >= span.end)
+            .map_or("end of input", |t| t.lexeme(source));
+        return Err(Diagnostic::expected(
+            Span::new(span.start, span.start),
+            "expression",
+            found,
+        ));
+    }
     let mut parser = BodyParser::new(source, expr_tokens, &[]);
     let expr = parser.parse_expr(0)?;
     if !parser.at_end() {

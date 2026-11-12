@@ -261,6 +261,16 @@ impl<'src, 'tok> BodyParser<'src, 'tok> {
     }
 
     pub(super) fn parse_primary(&mut self) -> Result<ParsedExpr<'src>, Diagnostic> {
+        // An expression slice can run out before its operand does — a global
+        // `float x = ;` hands the parser an empty initializer span — so the
+        // end of input is a diagnostic here, not a bump past the last token.
+        if self.at_end() {
+            return Err(Diagnostic::expected(
+                self.current_span(),
+                "expression",
+                self.current_text(),
+            ));
+        }
         let tok = self.bump();
         match tok.kind {
             TokenKind::FloatLiteral => {

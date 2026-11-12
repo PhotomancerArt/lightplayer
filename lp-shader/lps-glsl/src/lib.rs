@@ -76,6 +76,20 @@ mod tests {
     ];
 
     #[test]
+    fn an_empty_global_initializer_is_a_diagnostic_not_a_panic() {
+        let err = compile(
+            "float ok() { return 1.0; }\nfloat bad = ;\n",
+            &CompileOptions::default(),
+        )
+        .expect_err("empty initializer");
+        assert!(
+            err.message.contains("expected expression"),
+            "{}",
+            err.message
+        );
+    }
+
+    #[test]
     fn source_map_reports_line_col() {
         let map = SourceMap::new("one\ntwo\nthree");
         assert_eq!(map.line_col(0), Some((1, 1)));
