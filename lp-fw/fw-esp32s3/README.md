@@ -283,11 +283,11 @@ the pads, the RMT counts its guard trips (`[ws281x-check] driver=…`).
 | Encode | 651 µs at 5 × 124, 3,564 µs at 8 × 500 (FS3, 240 MHz); up to 5.5 ms when the radio pre-empts it |
 | RAM | before PSRAM (2026-10-22) the Bluetooth image's `Internal`-tagged heap was nearly full once a project loaded: a 2 × 310-LED project could not get one 23,070 B buffer (FS3), while the same project played on the RMT. PSRAM, on by default since 2026-10-23, moves Rust's heap out of internal RAM and frees the room. Two buffers when they fit, one when only one does |
 
-The silicon evidence and the harness are the LED-channels spike's:
+The silicon evidence is the LED-channels spike's: its harness,
 `test_lcd_ws281x` (LCD out, the CAM half of the same peripheral sampling the
-same pads as a CPU-free logic analyzer; build it without `ble`,
-`--no-default-features --features esp32s3,test_lcd_ws281x`, or its 8 × 500 case
-runs out of the radio image's arena). The same check on the product image,
+same pads as a CPU-free logic analyzer), recorded its result in
+`docs/adr/2026-10-22-s3-parallel-ws281x-output.md` and was deleted on
+2026-11-12 (in git at `0fa18f2b5`). The same check on the product image,
 beside Bluetooth and the server, is `ws281x_frame_check` (above).
 
 ## Input

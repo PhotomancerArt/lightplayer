@@ -141,7 +141,6 @@ mod hardware;
 #[cfg(any(
     not(fw_harness),
     feature = "test_loopback",
-    feature = "test_lcd_ws281x",
     feature = "test_lcd_backend"
 ))]
 mod output;
@@ -364,9 +363,6 @@ fn boot() -> ! {
     // presence of one).
     #[cfg(feature = "test_loopback")]
     tests::loopback::run(peripherals);
-
-    #[cfg(feature = "test_lcd_ws281x")]
-    tests::lcd_ws281x::run(peripherals);
 
     #[cfg(feature = "test_xt_jit_corpus")]
     {

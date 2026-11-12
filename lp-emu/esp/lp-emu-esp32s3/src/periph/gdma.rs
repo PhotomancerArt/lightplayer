@@ -30,7 +30,7 @@
 //!
 //! # What is not modelled, said so
 //!
-//! - **The IN half** (the CAM's capture side, `test_lcd_ws281x`'s analyzer):
+//! - **The IN half** (the CAM's capture side, `ws281x_frame_check`'s analyzer):
 //!   its registers are accept-and-remember, and an `inlink_start` is a
 //!   `log::warn!`, once. The CAM is silicon-only test equipment (M9 §6c).
 //! - **Reading as it goes.** The chain is read whole, at the boundary after

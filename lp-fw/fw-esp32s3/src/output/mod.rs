@@ -35,10 +35,6 @@ pub mod lcd;
 #[cfg(any(not(fw_harness), feature = "test_lcd_backend"))]
 pub mod ws281x_endpoints;
 
-/// The LED-channels spike's LCD_CAM rig (never shipped).
-#[cfg(feature = "test_lcd_ws281x")]
-pub mod lcd_spike;
-
 #[cfg(not(fw_harness))]
 pub use fw_esp32_common::output::provider::Esp32OutputProvider;
 
