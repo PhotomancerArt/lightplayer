@@ -13,16 +13,8 @@ use lpvm::{LpsValueF32, LpvmDataQ32, decode_q32_return, flatten_q32_arg, glsl_co
 use crate::error::WasmError;
 use crate::module::WasmExport;
 
-pub(crate) fn type_passed_as_aggregate_ptr(ty: &LpsType) -> bool {
-    matches!(ty, LpsType::Array { .. } | LpsType::Struct { .. })
-}
-
 pub(crate) fn export_needs_shadow_marshal(export: &WasmExport) -> bool {
-    export.uses_sret
-        || export
-            .param_types
-            .iter()
-            .any(|t| type_passed_as_aggregate_ptr(t))
+    export.uses_sret || export.param_by_ptr.iter().any(|by_ptr| *by_ptr)
 }
 
 pub(crate) fn q32_std430_bytes_are_dense(ty: &LpsType) -> bool {
