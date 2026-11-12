@@ -588,12 +588,8 @@ impl<'a> TypeCtx<'a> {
         name: &str,
         args: &[ParsedExpr<'_>],
     ) -> Result<ExprId, Diagnostic> {
-        if let Some((function, sig)) = self
-            .functions
-            .iter()
-            .enumerate()
-            .find(|(_, f)| f.name == name)
-        {
+        if let Some(function) = self.resolve_user_function(span, name, args)? {
+            let sig = &self.functions[function];
             if sig.params.len() != args.len() {
                 return Err(Diagnostic::error(
                     span,
@@ -964,6 +960,72 @@ impl<'a> TypeCtx<'a> {
                 out,
             },
         ))
+    }
+
+    /// The user function a call to `name` resolves to (GLSL 4.60 §6.1.1).
+    ///
+    /// A name with one definition resolves to it, and the call reports its
+    /// own arity and argument errors. Among overloads, the arguments are
+    /// typed once to choose: the definition whose parameters match them
+    /// exactly, else the only one every argument converts to implicitly
+    /// (`int` → `uint` → `float`, lane for lane). The chosen call types its
+    /// arguments again against that signature; the first typing's nodes are
+    /// never lowered.
+    fn resolve_user_function(
+        &mut self,
+        span: Span,
+        name: &str,
+        args: &[ParsedExpr<'_>],
+    ) -> Result<Option<usize>, Diagnostic> {
+        let mut candidates = self
+            .functions
+            .iter()
+            .enumerate()
+            .filter(|(_, f)| f.name == name)
+            .map(|(i, _)| i);
+        let Some(first) = candidates.next() else {
+            return Ok(None);
+        };
+        let Some(second) = candidates.next() else {
+            return Ok(Some(first));
+        };
+        let overloads: Vec<usize> = [first, second].into_iter().chain(candidates).collect();
+        let mut arg_tys = Vec::with_capacity(args.len());
+        for arg in args {
+            let id = self.type_expr(arg)?;
+            arg_tys.push(self.arena.expr_ty(id).clone());
+        }
+        let arity = |i: &usize| self.functions[*i].params.len() == arg_tys.len();
+        if let Some(exact) = overloads.iter().copied().filter(arity).find(|i| {
+            self.functions[*i]
+                .params
+                .iter()
+                .zip(&arg_tys)
+                .all(|(p, ty)| p.ty == *ty)
+        }) {
+            return Ok(Some(exact));
+        }
+        let mut converting = overloads.iter().copied().filter(arity).filter(|i| {
+            self.functions[*i]
+                .params
+                .iter()
+                .zip(&arg_tys)
+                .all(|(p, ty)| match p.qualifier {
+                    ParamQualifier::In => converts_implicitly(ty, &p.ty),
+                    ParamQualifier::Out | ParamQualifier::InOut => p.ty == *ty,
+                })
+        });
+        match (converting.next(), converting.next()) {
+            (Some(only), None) => Ok(Some(only)),
+            (Some(_), Some(_)) => Err(Diagnostic::error(
+                span,
+                format!("ambiguous call to overloaded function `{name}`"),
+            )),
+            (None, _) => Err(Diagnostic::error(
+                span,
+                format!("no overload of `{name}` takes arguments {arg_tys:?}"),
+            )),
+        }
     }
 
     fn type_binary(
@@ -1735,6 +1797,22 @@ fn matrix_vector_multiply_type(lhs: &LpsType, rhs: &LpsType) -> Option<LpsType> 
         return LpsType::vector_type(&LpsType::Float, cols);
     }
     None
+}
+
+/// GLSL's implicit conversions (4.60 §4.1.10) between same-width scalars
+/// and vectors: `int` → `uint`, `int`/`uint` → `float`.
+fn converts_implicitly(from: &LpsType, to: &LpsType) -> bool {
+    if from == to {
+        return true;
+    }
+    if from.is_matrix() || to.is_matrix() || scalar_lane_count(from) != scalar_lane_count(to) {
+        return false;
+    }
+    matches!(
+        (scalar_base_type(from), scalar_base_type(to)),
+        (Some(LpsType::Int), Some(LpsType::UInt | LpsType::Float))
+            | (Some(LpsType::UInt), Some(LpsType::Float))
+    )
 }
 
 /// `int`/`uint` scalars and vectors: the operands of `~ & | ^ << >>`.

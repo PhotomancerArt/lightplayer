@@ -6,20 +6,17 @@
 // function under its raw GLSL name — overloads produced duplicate export
 // names and the module failed wasm validation.
 //
-// The other backends still break on genuine overloads (verified 2026-07-09),
-// hence the @broken annotations:
+// lps-glsl gives each overload its own name in the IR (`pick(vec3)`), so
+// every backend sees distinct functions. Through lps-frontend (naga), which
+// keeps the shared name, the other backends still break (verified
+// 2026-07-09), hence the @broken annotations on the naga targets:
 // - rv32c.q32: cranelift `declare` keys functions by name, so the
 //   second overload is rejected as an incompatible redeclaration.
 // - rv32n.q32: lpvm-native hits a regalloc internal error
 //   (isa/rv32/emit.rs:850).
-// - rv32lpn.q32: the LpsGlsl frontend resolves overloads by name and loses
-//   the second definition's parameters ("unknown name `v`").
-// - xtn.f32 / xtlpn.f32 (added M8): the same overload confusion surfaces in
-//   the Xtensa return path — "3 direct return words exceed RET_REGS (wider
-//   returns use sret)" at isa/xt/emit.rs. It is NOT a vec3-return bug: vec3
-//   returns work on xtn.f32 everywhere else in the corpus (verified against
-//   operators/postinc-vec3, array/index-nested, lpfn/lp_saturate and
-//   uniform/struct). The sret decision is simply made from the wrong
+// - xtn.f32 (added M8): the same overload confusion surfaces in the Xtensa
+//   return path — "3 direct return words exceed RET_REGS (wider returns use
+//   sret)" at isa/xt/emit.rs. The sret decision is made from the wrong
 //   overload's signature.
 // ============================================================================
 
@@ -40,11 +37,11 @@ float test_overload_scalar_vs_vector() {
     return pick(2.0) + pick(vec3(1.0, 2.0, 3.0)).y + pick(vec4(1.0, 2.0, 3.0, 4.0)).z;
 }
 
-// genuine overloads work only on the wasm backend (see the header for each backend)
-// @broken(float_mode=q32, backend!=wasm)
+// through naga, genuine overloads work only on the wasm backend (see the header)
+// @broken(float_mode=q32, frontend!=lp, backend!=wasm)
 // the same backend limits as the q32 row above, in the other float mode
-// @broken(float_mode=f32, backend=rv32n)
-// @broken(float_mode=f32, backend=xtn)
+// @broken(float_mode=f32, frontend!=lp, backend=rv32n)
+// @broken(float_mode=f32, frontend!=lp, backend=xtn)
 // run: test_overload_scalar_vs_vector() ~= 22.0
 
 float combine(float a) {
@@ -61,9 +58,9 @@ float test_overload_arity_and_nested_call() {
     return combine(1.0) + combine(2.0, 3.0);
 }
 
-// genuine overloads work only on the wasm backend (see the header for each backend)
-// @broken(float_mode=q32, backend!=wasm)
+// through naga, genuine overloads work only on the wasm backend (see the header)
+// @broken(float_mode=q32, frontend!=lp, backend!=wasm)
 // the same backend limits as the q32 row above, in the other float mode
-// @broken(float_mode=f32, backend=rv32n)
-// @broken(float_mode=f32, backend=xtn)
+// @broken(float_mode=f32, frontend!=lp, backend=rv32n)
+// @broken(float_mode=f32, frontend!=lp, backend=xtn)
 // run: test_overload_arity_and_nested_call() ~= 8.0
