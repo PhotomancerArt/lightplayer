@@ -29,7 +29,7 @@ mod graph_port_tables;
 mod graph_source;
 mod ui_graph_view;
 
-pub use graph_controller::GraphController;
+pub use graph_controller::{GraphController, GraphPace};
 pub use graph_files_key::GraphFilesKey;
 pub use graph_handle::GraphHandle;
 pub use graph_note::GraphNote;

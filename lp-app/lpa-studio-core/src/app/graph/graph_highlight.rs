@@ -24,6 +24,12 @@
 //! chases, a lamp breathes, every other lamp in every fixture dims — and
 //! only an output, a port or a pixel goes through `highlight`. A board
 //! without the slot keeps [`highlight_of`].
+//!
+//! **While a path or a circle is drawn** ([`board_draft`]) the board shows
+//! the draft as if it were drawn, in the selection's pattern: it isn't in
+//! the board's fixtures yet (nothing is saved mid-drawing), so it chases on
+//! the output pixels it will land on, through `highlight`, and every
+//! fixture dims. Moving the pointer moves the red tail along the LEDs.
 
 use std::collections::BTreeMap;
 
@@ -231,6 +237,76 @@ pub(crate) fn board_selection(
     BoardSelection {
         fixtures,
         outputs: highlight_of(project, nodes, &output_side),
+    }
+}
+
+/// What the board shows while a draft is drawn: `drafted`, the project
+/// with the draft added and the part it became (`Editor::drafted`), chases
+/// on the pixels of `now` (the board as it is) its lamps will land on, in
+/// the draft's own order, through each output's `highlight`; with
+/// `has_slot`, every fixture dims. A draft that lands nowhere only dims.
+pub(crate) fn board_draft(
+    now: &Project,
+    drafted: Option<&(Project, lpa_graph::PartRef)>,
+    nodes: &BTreeMap<NodeId, lpc_model::NodeId>,
+    has_slot: bool,
+) -> BoardSelection {
+    let fixtures = if has_slot {
+        now.fixtures()
+            .iter()
+            .filter_map(|n| Some((*nodes.get(&n.id)?, "dim".to_string())))
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let mut subjects = Vec::new();
+    if let Some((p, draft)) = drafted {
+        let placed = p.placed();
+        let mut runs: Vec<(usize, u32, &lpa_graph::PixelRun)> = p
+            .effective_patch()
+            .pixel_runs
+            .iter()
+            .filter(|r| r.segment.part() == *draft)
+            .filter_map(|r| Some((placed.index_of(&r.segment)?, r.lamps.start, r)))
+            .collect();
+        runs.sort_by_key(|(i, first, _)| (*i, *first));
+        // Per output, in the order the draft walks them.
+        let mut wires: Vec<(NodeId, Vec<(u32, u32, bool)>)> = Vec::new();
+        for (_, _, r) in runs {
+            let (Some(start), count) = (
+                now.output(&r.output).and_then(|o| o.port_start(&r.port)),
+                now.port_pixels(&r.output, &r.port),
+            ) else {
+                continue;
+            };
+            // Only the pixels the board has now.
+            let lit: Vec<u32> = r
+                .lamps
+                .clone()
+                .map(|lamp| r.pixel(lamp))
+                .filter(|px| *px < count)
+                .collect();
+            let (Some(low), lamps) = (lit.iter().min(), lit.len() as u32) else {
+                continue;
+            };
+            let run = (start + low, lamps, r.reversed);
+            match wires.iter_mut().find(|(o, _)| *o == r.output) {
+                Some((_, list)) => list.push(run),
+                None => wires.push((r.output.clone(), vec![run])),
+            }
+        }
+        for (output, runs) in wires {
+            if let Some(&node) = nodes.get(&output) {
+                subjects.push(PatchPulseSubject {
+                    lamps: PatchPulseLamps::OutputRuns { node, runs },
+                    language: PatchPulseLanguage::Chase,
+                });
+            }
+        }
+    }
+    BoardSelection {
+        fixtures,
+        outputs: PatchPulseOp { subjects },
     }
 }
 

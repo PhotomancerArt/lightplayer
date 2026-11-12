@@ -10,4 +10,7 @@ pub struct GraphNote {
     pub edited: bool,
     /// The selection changed: the board's highlight follows it.
     pub selected: bool,
+    /// What is being drawn changed (the pointer moved a draft on): the
+    /// board shows the draft as it goes.
+    pub drafted: bool,
 }

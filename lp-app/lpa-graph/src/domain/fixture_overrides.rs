@@ -17,8 +17,12 @@
 //!   leaves, and which way it runs. A lamp selected on its own breathes
 //!   instead, like the product's `highlight`.
 //! - **Drawing** (a path being clicked out, a circle being dragged): the
-//!   draft counts as already drawn, its lamps full white and every other
-//!   lamp off, so its pixels show exactly where it will land.
+//!   draft counts as already drawn and shows as a selected object does,
+//!   in lp2014's pattern, with every other lamp dimmed: its pixels show
+//!   where it will land, and its blue head and red tail which way it runs.
+//!   The real board shows the same while you draw (Studio's
+//!   `graph_highlight.rs`), so moving the pointer moves the red tail along
+//!   the LEDs.
 //!
 //! A lamp outside its fixture's box has no colour at all (D4): no
 //! override gives it one.
@@ -52,8 +56,9 @@ pub enum FixtureOverrides {
     None,
     /// These fixture-side targets are selected.
     Selection(Vec<Target>),
-    /// A draft is being drawn: only its lamps light. `None` when it starts
-    /// outside every fixture, so it lands nowhere and nothing lights.
+    /// A draft is being drawn: its lamps in lp2014's pattern, every other
+    /// lamp dimmed. `None` when it starts outside every fixture, so it
+    /// lands nowhere and every lamp dims.
     Drawing(Option<PartRef>),
 }
 
@@ -96,11 +101,16 @@ impl FixtureOverrides {
         match self {
             FixtureOverrides::None => {}
             FixtureOverrides::Drawing(draft) => {
-                let lit = draft.as_ref() == Some(&object.id.part());
-                for (c, inside) in lamps.iter_mut().zip(inside) {
-                    if *inside {
-                        *c = Some(if lit { Rgb::WHITE } else { Rgb::BLACK });
+                let drawn = draft.as_ref() == Some(&object.id.part());
+                for (i, (c, inside)) in lamps.iter_mut().zip(inside).enumerate() {
+                    if !*inside {
+                        continue;
                     }
+                    *c = if drawn {
+                        Some(lp2014(i, n, time))
+                    } else {
+                        c.map(|c| c.scaled(DIM))
+                    };
                 }
             }
             FixtureOverrides::Selection(selected) => {

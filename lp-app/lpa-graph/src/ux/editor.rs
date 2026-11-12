@@ -1689,7 +1689,7 @@ impl Editor {
     /// outside every fixture. Finishing a drawing and the simulated board's
     /// preview of it (`board.rs`) both ask here, so the preview is
     /// exactly what finishing makes.
-    pub(crate) fn draft_into(&self) -> Option<(NodeId, PartKind)> {
+    pub fn draft_into(&self) -> Option<(NodeId, PartKind)> {
         if let Gesture::Drawing { start_world } = &self.gesture {
             let now = self.camera.to_world(self.pointer?);
             let fixture = self.project.fixture_at(*start_world)?;

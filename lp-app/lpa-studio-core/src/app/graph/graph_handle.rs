@@ -12,7 +12,7 @@
 //! the actor.
 //!
 //! Whatever an input changed that the rest of Studio must hear about (the
-//! project, the selection) goes onto the actor's queue as a
+//! project, the selection, a draft being drawn) goes onto the actor's queue as a
 //! [`GraphNote`](super::GraphNote), so saving and the board's highlight
 //! stay on the actor's one ordered path.
 //!
@@ -64,6 +64,7 @@ impl GraphHandle {
             let revision = e.project.revision();
             let selection: Vec<Target> = e.selection.clone();
             let busy = e.dragging() || e.drawing();
+            let draft = e.drawing().then(|| e.draft_into()).flatten();
             let used = e.input(input);
             let note = GraphNote {
                 // A drag or a drawing that just ended is an edit to save,
@@ -71,10 +72,11 @@ impl GraphHandle {
                 edited: e.project.revision() != revision
                     || (busy && !(e.dragging() || e.drawing())),
                 selected: e.selection != selection,
+                drafted: e.drawing().then(|| e.draft_into()).flatten() != draft,
             };
             (used, note)
         };
-        if note.edited || note.selected {
+        if note.edited || note.selected || note.drafted {
             self.note(note);
         }
         used

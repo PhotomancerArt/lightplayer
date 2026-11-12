@@ -5,6 +5,8 @@
 use crate::domain::board::BoardFrame;
 use crate::domain::fixture_overrides::FixtureOverrides;
 use crate::domain::output_overrides::OutputOverrides;
+use crate::domain::part_ref::PartRef;
+use crate::domain::project::Project;
 use crate::domain::rgb::Rgb;
 use crate::ux::editor::{Editor, Gesture, Tool};
 
@@ -26,24 +28,33 @@ impl Editor {
             || (self.tool == Tool::Path && !self.path_draft.is_empty())
     }
 
+    /// The draft as if it were already drawn: the project with it added,
+    /// and the part it became there. `None` while nothing is being drawn,
+    /// and for a draft that starts outside every fixture (it lands
+    /// nowhere). The simulated board's preview and the real board's
+    /// (Studio's `graph_highlight.rs`) both start here.
+    pub fn drafted(&self) -> Option<(Project, PartRef)> {
+        if !self.drawing() {
+            return None;
+        }
+        let (fixture, kind) = self.draft_into()?;
+        let mut p = self.project.clone();
+        let draft = p.add(&fixture, kind)?;
+        Some((p, draft))
+    }
+
     /// The draft as if it were already drawn, under its fixture's own
-    /// rules: only its lamps lit (a fixture override), on the pixels the
-    /// board has now. A draft that starts outside every fixture lands
-    /// nowhere, so nothing lights.
+    /// rules: its lamps in the selection's pattern and every other lamp
+    /// dimmed (a fixture override), on the pixels the board has now. A
+    /// draft that starts outside every fixture lands nowhere, so nothing
+    /// is shown in the pattern.
     fn draft_frame(&self, time: f64) -> BoardFrame {
-        let nowhere = || {
-            self.project.evaluate(
+        let Some((p, draft)) = self.drafted() else {
+            return self.project.evaluate(
                 FixtureOverrides::Drawing(None),
                 OutputOverrides::default(),
                 time,
-            )
-        };
-        let Some((fixture, kind)) = self.draft_into() else {
-            return nowhere();
-        };
-        let mut p = self.project.clone();
-        let Some(draft) = p.add(&fixture, kind) else {
-            return nowhere();
+            );
         };
         let mut frame = p.evaluate(
             FixtureOverrides::Drawing(Some(draft)),
