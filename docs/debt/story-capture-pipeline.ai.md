@@ -834,3 +834,8 @@ hours), and neither is an exit path on its own.
   `Validate story baselines` at `650fcbb5d` (a figures-only commit on top of
   a head whose capture had passed) died on `oxipng did not exit within
   180000 ms — killed.` Re-ran the failed job. Four hits since 2026-10-23.
+- 2026-11-12 — **`oxipng` hit its 180 s bound a fifth time.** #1338 (agent
+  markdown renamed to `.ai.md`; the in-app guide's pages moved, no story
+  touched) at `8e3870ac7`, run 43167898648 attempt 1: the capture finished,
+  then `oxipng did not exit within 180000 ms — killed.` The previous head
+  `9194cd7eb` passed the job. Re-ran the failed job. Five hits in twenty days.
