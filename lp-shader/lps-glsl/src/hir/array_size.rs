@@ -87,10 +87,8 @@ impl<'src, 'tok> ConstIntParser<'src, 'tok> {
         match tok.kind {
             TokenKind::IntLiteral | TokenKind::UintLiteral => {
                 self.bump();
-                tok.lexeme(self.source)
-                    .trim_end_matches(['u', 'U'])
-                    .parse::<i64>()
-                    .ok()
+                crate::token::int_literal_value(tok.lexeme(self.source))
+                    .and_then(|value| i64::try_from(value).ok())
             }
             TokenKind::Identifier => {
                 self.bump();

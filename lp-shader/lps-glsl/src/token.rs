@@ -72,3 +72,23 @@ impl Token {
         source.get(self.span.start..self.span.end).unwrap_or("")
     }
 }
+
+/// The value of an integer literal's spelling (GLSL ES 3.00 §4.1.3):
+/// decimal, octal (a leading `0`) or hexadecimal (`0x`/`0X`), with or without
+/// the `u`/`U` suffix. `None` when the digits do not fit the base or 64 bits;
+/// the caller checks its own range.
+pub fn int_literal_value(text: &str) -> Option<u64> {
+    let digits = text.trim_end_matches(['u', 'U']);
+    if let Some(hex) = digits
+        .strip_prefix("0x")
+        .or_else(|| digits.strip_prefix("0X"))
+    {
+        return u64::from_str_radix(hex, 16).ok();
+    }
+    if digits.len() > 1
+        && let Some(octal) = digits.strip_prefix('0')
+    {
+        return u64::from_str_radix(octal, 8).ok();
+    }
+    digits.parse::<u64>().ok()
+}

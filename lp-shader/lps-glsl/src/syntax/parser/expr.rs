@@ -3,6 +3,7 @@ use alloc::vec::Vec;
 
 use crate::index::StructDecl;
 use crate::syntax::{AssignOp, BinaryOp, IncDecOp, ParsedExpr, ParsedExprKind, UnaryOp};
+use crate::token::int_literal_value;
 use crate::{Diagnostic, Span, TokenKind};
 
 use super::BodyParser;
@@ -107,10 +108,9 @@ impl<'src, 'tok> BodyParser<'src, 'tok> {
                 .is_some_and(|t| matches!(t.kind, TokenKind::IntLiteral))
             {
                 let tok = self.bump();
-                let value = tok
-                    .lexeme(self.source)
-                    .parse::<i64>()
-                    .map_err(|_| Diagnostic::error(tok.span, "failed to parse int literal"))?;
+                let value = int_literal_value(tok.lexeme(self.source))
+                    .and_then(|value| i64::try_from(value).ok())
+                    .ok_or_else(|| Diagnostic::error(tok.span, "failed to parse int literal"))?;
                 let value = i32::try_from(-value)
                     .map_err(|_| Diagnostic::error(tok.span, "int literal is out of range"))?;
                 return Ok(ParsedExpr {
@@ -272,8 +272,12 @@ impl<'src, 'tok> BodyParser<'src, 'tok> {
             }
             TokenKind::IntLiteral => {
                 let text = tok.lexeme(self.source);
-                let value = parse_i32_literal(text)
-                    .map_err(|_| Diagnostic::error(tok.span, "failed to parse int literal"))?;
+                // Above `i32::MAX` up to `u32::MAX` wraps, as `4294967295`
+                // always has here: the bits are what a shader means.
+                let value = int_literal_value(text)
+                    .and_then(|value| u32::try_from(value).ok())
+                    .map(|value| value as i32)
+                    .ok_or_else(|| Diagnostic::error(tok.span, "failed to parse int literal"))?;
                 Ok(ParsedExpr {
                     span: tok.span,
                     kind: ParsedExprKind::IntLiteral(value),
@@ -281,10 +285,9 @@ impl<'src, 'tok> BodyParser<'src, 'tok> {
             }
             TokenKind::UintLiteral => {
                 let text = tok.lexeme(self.source);
-                let trimmed = text.trim_end_matches(['u', 'U']);
-                let value = trimmed
-                    .parse::<u32>()
-                    .map_err(|_| Diagnostic::error(tok.span, "failed to parse uint literal"))?;
+                let value = int_literal_value(text)
+                    .and_then(|value| u32::try_from(value).ok())
+                    .ok_or_else(|| Diagnostic::error(tok.span, "failed to parse uint literal"))?;
                 Ok(ParsedExpr {
                     span: tok.span,
                     kind: ParsedExprKind::UIntLiteral(value),
@@ -462,11 +465,6 @@ pub(super) fn is_assignment_target(expr: &ParsedExpr<'_>) -> bool {
         expr.kind,
         ParsedExprKind::Name(_) | ParsedExprKind::Swizzle { .. } | ParsedExprKind::Index { .. }
     )
-}
-
-fn parse_i32_literal(text: &str) -> Result<i32, core::num::ParseIntError> {
-    text.parse::<i32>()
-        .or_else(|_| text.parse::<u32>().map(|value| value as i32))
 }
 
 pub(super) fn array_constructor_name<'src>(
