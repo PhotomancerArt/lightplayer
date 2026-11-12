@@ -96,7 +96,7 @@ pub(in crate::lower) fn lower_texture_sample(
     if uv.lanes.len() != 2 {
         return Err(Diagnostic::error(span, "texture coordinate must be vec2"));
     }
-    let u_q32 = spill_f32_q32_lane_as_i32_vreg(ctx, uv.lanes[0]);
+    let u = uv.lanes[0];
     let filter_abi = iconst(ctx, filter_abi(spec.filter));
     let wrap_x_abi = iconst(ctx, wrap_abi(spec.wrap_x));
 
@@ -113,19 +113,19 @@ pub(in crate::lower) fn lower_texture_sample(
     args.push(desc.width);
     match spec.shape_hint {
         TextureShapeHint::General2D => {
-            let v_q32 = spill_f32_q32_lane_as_i32_vreg(ctx, uv.lanes[1]);
+            let v = uv.lanes[1];
             let wrap_y_abi = iconst(ctx, wrap_abi(spec.wrap_y));
             args.push(desc.height);
             args.push(desc.row_stride);
-            args.push(u_q32);
-            args.push(v_q32);
+            args.push(u);
+            args.push(v);
             args.push(filter_abi);
             args.push(wrap_x_abi);
             args.push(wrap_y_abi);
         }
         TextureShapeHint::HeightOne => {
             args.push(desc.row_stride);
-            args.push(u_q32);
+            args.push(u);
             args.push(filter_abi);
             args.push(wrap_x_abi);
         }
@@ -325,24 +325,6 @@ fn emit_unorm16_channel_load(ctx: &mut LowerCtx<'_>, texel_addr: VReg, channel_i
         src: raw,
     });
     converted
-}
-
-fn spill_f32_q32_lane_as_i32_vreg(ctx: &mut LowerCtx<'_>, f: VReg) -> VReg {
-    let slot = ctx.fb.alloc_slot(4);
-    let addr = ctx.fb.alloc_vreg(IrType::Pointer);
-    ctx.fb.push(LpirOp::SlotAddr { dst: addr, slot });
-    ctx.fb.push(LpirOp::Store {
-        base: addr,
-        offset: 0,
-        value: f,
-    });
-    let raw = ctx.fb.alloc_vreg(IrType::I32);
-    ctx.fb.push(LpirOp::Load {
-        dst: raw,
-        base: addr,
-        offset: 0,
-    });
-    raw
 }
 
 fn iconst(ctx: &mut LowerCtx<'_>, value: i32) -> VReg {
