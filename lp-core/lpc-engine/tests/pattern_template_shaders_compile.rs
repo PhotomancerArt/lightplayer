@@ -49,12 +49,10 @@ fn both_pattern_template_shaders_compile_on_the_cpu_tier() {
     // The tier the starter shaders are authored for: `FloatMode::Fixed` on
     // the CPU backend, which is what the editor sim and every classic
     // device run.
-    let graphics = lp_gfx_lpvm::TargetLpvmGraphics::new(lp_shader::ShaderFrontend::LpsGlsl);
+    let graphics = lp_gfx_lpvm::TargetLpvmGraphics::new();
 
     for (name, space, glsl) in templates {
-        let options =
-            ShaderCompileOptions::new(ShaderSemantics::Q32, lp_shader::ShaderFrontend::LpsGlsl)
-                .with_space(space);
+        let options = ShaderCompileOptions::new(ShaderSemantics::Q32).with_space(space);
         graphics
             .compile_shader(&glsl, &options)
             .unwrap_or_else(|error| {

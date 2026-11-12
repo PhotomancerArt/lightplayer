@@ -94,9 +94,7 @@ pub fn fs_landing(fs: &dyn LpFs, project_format: u64, label: &Path) -> ProjectLa
         Err(error) => return refused(format!("{error:?}")),
     };
     rt.engine_mut()
-        .set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new(
-            lp_shader::ShaderFrontend::LpsGlsl,
-        ))));
+        .set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new())));
     // A failed frame does not stop the server, so it does not stop this: only
     // a project whose LAST frame still fails is refused — its output never
     // published a plan to read.

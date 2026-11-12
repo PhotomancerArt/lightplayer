@@ -27,8 +27,7 @@ fn reboot_response(
 ) -> Result<lpc_wire::WireServerMessage, lpa_server::ServerError> {
     let output_provider: Rc<RefCell<dyn lpc_shared::output::OutputProvider>> =
         Rc::new(RefCell::new(MemoryOutputProvider::new()));
-    let graphics: Arc<dyn LpGraphics> =
-        Arc::new(TargetLpvmGraphics::new(lpa_server::DEVICE_SHADER_FRONTEND));
+    let graphics: Arc<dyn LpGraphics> = Arc::new(TargetLpvmGraphics::new());
     let mut server = LpServer::new(
         output_provider.clone(),
         Box::new(LpFsMemory::new()),

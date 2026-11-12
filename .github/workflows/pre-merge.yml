@@ -250,7 +250,7 @@ jobs:
       # ELF, built by scripts/build-builtins.sh) additionally pulls in lp-core.
       #
       # lp-xt is in the closure because lps-filetests enables lpvm-native's
-      # `emu-xt` (the Xtensa host engine, behind the xtn/xtlpn targets) and
+      # `emu-xt` (the Xtensa host engine, behind the xtn targets) and
       # because `isa-xt` is on by default, pulling lp-xt-inst into every host
       # build of lpvm-native. It is deliberately NOT in `gfx`/`browser`:
       # lp-gfx-lpvm selects its ISA per target_arch, so a host build of those
@@ -1201,7 +1201,7 @@ jobs:
   #
   # Scope note: this gates BOTH halves of the Xtensa host story — the
   # engine/emitter tests (`just test-xt-host`, differential against rv32) and
-  # the xtn.q32 / xtlpn.q32 filetest corpus targets. The corpus went green on
+  # the xtn.q32 filetest corpus targets. The corpus went green on
   # 2026-07-31 (851/851 files on each target), which is what the earlier
   # revision of this note was waiting for; gating it before that would only have
   # trained people to ignore the job.
@@ -1463,8 +1463,8 @@ jobs:
       - name: Xtensa filetest corpus (xtn.q32)
         run: cd lp2025 && scripts/filetests.sh -t xtn.q32 --summary
 
-      - name: Xtensa filetest corpus (xtlpn.q32)
-        run: cd lp2025 && scripts/filetests.sh -t xtlpn.q32 --summary
+      - name: Xtensa filetest corpus (xtn.q32)
+        run: cd lp2025 && scripts/filetests.sh -t xtn.q32 --summary
 
   # The esp32c6 app image must fit its 3.25 MB partition (3 MB until the
   # 2026-10 repartition, docs/adr/2026-10-02-c6-repartition-and-layout-migration.ai.md;

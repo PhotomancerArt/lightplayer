@@ -10,46 +10,6 @@ use crate::entry_space::ShaderEntrySpace;
 
 pub type TextureBindingSpecs = VecMap<String, TextureBindingSpec>;
 
-/// Frontend used for GLSL source before LPIR lowering.
-///
-/// Deliberately has no `Default`: which frontend compiles a shader is a
-/// product decision of the host that constructs the engine/backend. A
-/// `cfg!(feature = "naga")` default used to live here, which meant Cargo
-/// feature unification silently changed compile behavior depending on which
-/// packages shared the build graph.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ShaderFrontend {
-    /// Existing Naga GLSL frontend.
-    Naga,
-    /// LightPlayer-native GLSL frontend (`lps-glsl`).
-    LpsGlsl,
-}
-
-impl ShaderFrontend {
-    #[must_use]
-    pub fn name(self) -> &'static str {
-        match self {
-            Self::Naga => "naga",
-            Self::LpsGlsl => "lps-glsl",
-        }
-    }
-
-    /// Whether this frontend is compiled into the current binary.
-    ///
-    /// `Naga` is behind the `naga` feature; selecting it without the feature
-    /// fails every compile at runtime with "naga frontend was not built into
-    /// this binary". Hosts that pin a frontend as a const can const-assert
-    /// this so a build whose feature graph dropped the frontend fails at
-    /// compile time instead.
-    #[must_use]
-    pub const fn built_in(self) -> bool {
-        match self {
-            Self::Naga => cfg!(feature = "naga"),
-            Self::LpsGlsl => true,
-        }
-    }
-}
-
 /// GLSL source, output [`TextureStorageFormat`], compiler settings, and optional per-sampler
 /// [`TextureBindingSpec`] entries consumed by [`crate::LpsEngine::compile_px_desc`].
 pub struct CompilePxDesc<'a> {
@@ -57,7 +17,6 @@ pub struct CompilePxDesc<'a> {
     pub output_format: TextureStorageFormat,
     pub compiler_config: CompilerConfig,
     pub textures: TextureBindingSpecs,
-    pub frontend: ShaderFrontend,
     /// Numeric mode this shader compiles in — the authored `float_mode` slot,
     /// carried per compile because it lives per shader node.
     ///
@@ -87,14 +46,12 @@ impl<'a> CompilePxDesc<'a> {
         glsl: &'a str,
         output_format: TextureStorageFormat,
         compiler_config: CompilerConfig,
-        frontend: ShaderFrontend,
     ) -> Self {
         Self {
             glsl,
             output_format,
             compiler_config,
             textures: TextureBindingSpecs::new(),
-            frontend,
             float_mode: FloatMode::Q32,
             space: ShaderEntrySpace::TwoD,
         }

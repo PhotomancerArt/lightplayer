@@ -12,8 +12,8 @@ float test_round_half_up() {
 
 // GLSL leaves the direction of an exact .5 implementation-defined. lps-glsl
 // rounds half away from zero in both float modes, as the Q32 builtin a board
-// runs does; naga rounded half to even, so its targets still see 2.0.
-// @unsupported(frontend!=lp)
+// runs does; the GPU tier (naga) rounds half to even and sees 2.0, so it is excluded.
+// @unsupported(backend=wgpu)
 // run: test_round_half_up() ~= 3.0
 
 float test_round_half_down() {
@@ -32,8 +32,6 @@ float test_roundeven_half_up() {
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
 // @unsupported(xtn.q32)
-// @unsupported(rv32lpn.q32)
-// @unsupported(xtlpn.q32)
 // @unsupported(wasm.q32)
 // run[q32]: test_roundeven_half_up() ~= 3.0
 // run[f32]: test_roundeven_half_up() ~= 2.0
@@ -60,8 +58,6 @@ float test_large_number_precision() {
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
 // @unsupported(xtn.q32)
-// @unsupported(rv32lpn.q32)
-// @unsupported(xtlpn.q32)
 // @unsupported(wasm.q32)
 // run: test_large_number_precision() ~= 10000000000.0
 
@@ -80,8 +76,6 @@ vec2 test_vec_precision() {
 // @unsupported(rv32c.q32)
 // @unsupported(rv32n.q32)
 // @unsupported(xtn.q32)
-// @unsupported(rv32lpn.q32)
-// @unsupported(xtlpn.q32)
 // @unsupported(wasm.q32)
 // run: test_vec_precision() ~= vec2(1.0, 10000000000.0)
 

@@ -1,8 +1,7 @@
 //! Runtime tests: `lps-glsl` frontend → LPIR → WASM.
 //!
-//! The naga-based `lps-frontend` pre-registers the `@lpir`/`@glsl` helper
-//! imports that Q32 emission calls for `Fsqrt`/`Fnearest`, but `lps-glsl`
-//! emits those LPIR ops directly with no import decls. These tests cover the
+//! `lps-glsl` emits the LPIR `Fsqrt`/`Fnearest` ops directly with no
+//! `@lpir`/`@glsl` helper import decls, which Q32 emission calls. These tests cover the
 //! emitter synthesizing the missing helper imports (and the F32 path, which
 //! lowers to native WASM instructions and needs no imports).
 

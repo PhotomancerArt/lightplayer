@@ -139,9 +139,7 @@ fn zook_dome_load_and_tick_memory_phases() {
 
     run("set graphics (engine ctor)", &mut || {
         rt.engine_mut()
-            .set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new(
-                lp_shader::ShaderFrontend::LpsGlsl,
-            ))));
+            .set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new())));
     });
 
     let (mut engine, registry) = rt.into_parts();

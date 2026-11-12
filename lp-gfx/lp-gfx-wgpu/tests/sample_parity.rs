@@ -92,10 +92,10 @@ fn gpu_sample_matches_the_cpu_tier_within_the_m2_envelope() {
         eprintln!("SKIP: no GPU adapter available");
         return;
     };
-    let cpu = TargetLpvmGraphics::new(lp_shader::ShaderFrontend::LpsGlsl);
+    let cpu = TargetLpvmGraphics::new();
 
     // The authoritative CPU tier, compiled the way the device compiles:
-    // naga frontend at default Q32 config; prototypes spliced for the same
+    // lps-glsl frontend at default Q32 config; prototypes spliced for the same
     // declaration-order reason as the GPU path (see `util::reference`).
 
     println!("| shader | t (s) | mean |D| (8-bit) | max |D| (8-bit) | bound (mean) |");
@@ -105,8 +105,7 @@ fn gpu_sample_matches_the_cpu_tier_within_the_m2_envelope() {
         let (width, height) = frame_size(shader);
         let points = grid_points_q16(width, height);
 
-        let mut shader_gpu_options =
-            ShaderCompileOptions::new(ShaderSemantics::F32Gpu, lp_shader::ShaderFrontend::LpsGlsl);
+        let mut shader_gpu_options = ShaderCompileOptions::new(ShaderSemantics::F32Gpu);
         shader_gpu_options.textures = util::palette::texture_specs(shader);
         let mut gpu_shader = gpu
             .compile_shader(shader.source, &shader_gpu_options)
@@ -117,10 +116,9 @@ fn gpu_sample_matches_the_cpu_tier_within_the_m2_envelope() {
             shader.source
         );
         // The authoritative CPU tier, compiled the way the device compiles:
-        // naga frontend at default Q32 config; prototypes spliced for the same
+        // lps-glsl frontend at default Q32 config; prototypes spliced for the same
         // declaration-order reason as the GPU path (see `util::reference`).
-        let mut shader_cpu_options =
-            ShaderCompileOptions::new(ShaderSemantics::Q32, lp_shader::ShaderFrontend::LpsGlsl);
+        let mut shader_cpu_options = ShaderCompileOptions::new(ShaderSemantics::Q32);
         shader_cpu_options.textures = util::palette::texture_specs(shader);
         let mut cpu_shader = cpu
             .compile_shader(&cpu_source, &shader_cpu_options)
@@ -208,8 +206,7 @@ fn gpu_sample_agrees_with_the_f32_interpreter() {
         eprintln!("SKIP: no GPU adapter available");
         return;
     };
-    let options =
-        ShaderCompileOptions::new(ShaderSemantics::F32Gpu, lp_shader::ShaderFrontend::LpsGlsl);
+    let options = ShaderCompileOptions::new(ShaderSemantics::F32Gpu);
     // Fractional points in [0, 16)²: x carries .25, y carries .75.
     let points_q16: Vec<i32> = (0..16i32)
         .flat_map(|i| [(i << 16) + 16384, ((15 - i) << 16) + 49152])
@@ -252,8 +249,7 @@ fn gpu_sample_matches_gpu_render_at_integer_points() {
         eprintln!("SKIP: no GPU adapter available");
         return;
     };
-    let options =
-        ShaderCompileOptions::new(ShaderSemantics::F32Gpu, lp_shader::ShaderFrontend::LpsGlsl);
+    let options = ShaderCompileOptions::new(ShaderSemantics::F32Gpu);
     let shader_src = &CORPUS[0]; // basic
     let (width, height) = (32u32, 32u32);
     let mut shader = gpu

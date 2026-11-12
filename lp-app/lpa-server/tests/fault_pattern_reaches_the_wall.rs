@@ -38,16 +38,14 @@ fn workspace_dir() -> PathBuf {
 fn server_with_memory_provider(root: &str) -> (LpServer, Rc<RefCell<MemoryOutputProvider>>) {
     let memory = Rc::new(RefCell::new(MemoryOutputProvider::new_permissive()));
     let as_provider: Rc<RefCell<dyn OutputProvider>> = memory.clone();
-    let graphics: Arc<dyn LpGraphics> =
-        Arc::new(TargetLpvmGraphics::new(lpa_server::DEVICE_SHADER_FRONTEND));
+    let graphics: Arc<dyn LpGraphics> = Arc::new(TargetLpvmGraphics::new());
     let base_fs = Box::new(LpFsStd::new(workspace_dir().join(root)));
     let server = LpServer::new(as_provider, base_fs, "/".as_path(), None, None, graphics);
     (server, memory)
 }
 
 fn load(server: &mut LpServer, output: Rc<RefCell<dyn OutputProvider>>, name: &str) {
-    let graphics: Arc<dyn LpGraphics> =
-        Arc::new(TargetLpvmGraphics::new(lpa_server::DEVICE_SHADER_FRONTEND));
+    let graphics: Arc<dyn LpGraphics> = Arc::new(TargetLpvmGraphics::new());
     let server_ptr: *mut LpServer = server;
     unsafe {
         let pm = (*server_ptr).project_manager_mut();

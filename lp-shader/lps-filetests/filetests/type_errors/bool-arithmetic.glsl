@@ -3,7 +3,7 @@
 // GLSL defines no arithmetic over bool / bvecN (spec 5.9 "Expressions": the
 // arithmetic operators operate on float, int and uint only) and no implicit
 // conversion out of bool. `lps-glsl` accepted `bvec2 + bvec2` for a while
-// because its operand-join has `Bool` as the neutral element, so rv32lpn.q32
+// because its operand-join has `Bool` as the neutral element, so rv32n.q32
 // ran a shader every other target rejected with "unsupported bool binary Add".
 
 bool test_bvec_add() {

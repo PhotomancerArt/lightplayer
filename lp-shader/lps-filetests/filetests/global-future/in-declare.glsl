@@ -22,8 +22,7 @@ float test_declare_in_float() {
     return time + 1.0;
 }
 
-// @unsupported(wgpu.f32)
-// @unsupported(frontend=lp)
+// @unsupported(*)
 // run: test_declare_in_float() ~= 1.0
 
 int test_declare_in_int() {
@@ -31,8 +30,7 @@ int test_declare_in_int() {
     return vertex_id * 2;
 }
 
-// @unsupported(wgpu.f32)
-// @unsupported(frontend=lp)
+// @unsupported(*)
 // run: test_declare_in_int() == 0
 
 uint test_declare_in_uint() {
@@ -40,8 +38,7 @@ uint test_declare_in_uint() {
     return int(instance_id + 1u);
 }
 
-// @unsupported(wgpu.f32)
-// @unsupported(frontend=lp)
+// @unsupported(*)
 // run: test_declare_in_uint() == 1u
 
 bool test_declare_in_bool() {
@@ -49,8 +46,7 @@ bool test_declare_in_bool() {
     return selected;
 }
 
-// @unsupported(wgpu.f32)
-// @unsupported(frontend=lp)
+// @unsupported(*)
 // run: test_declare_in_bool() == false
 
 vec2 test_declare_in_vec2() {
@@ -58,8 +54,7 @@ vec2 test_declare_in_vec2() {
     return tex_coord + vec2(0.5, 0.5);
 }
 
-// @unsupported(wgpu.f32)
-// @unsupported(frontend=lp)
+// @unsupported(*)
 // run: test_declare_in_vec2() ~= vec2(0.5, 0.5)
 
 vec3 test_declare_in_vec3() {
@@ -67,8 +62,7 @@ vec3 test_declare_in_vec3() {
     return position * 2.0;
 }
 
-// @unsupported(wgpu.f32)
-// @unsupported(frontend=lp)
+// @unsupported(*)
 // run: test_declare_in_vec3() ~= vec3(0.0, 0.0, 0.0)
 
 vec4 test_declare_in_vec4() {
@@ -76,8 +70,7 @@ vec4 test_declare_in_vec4() {
     return color;
 }
 
-// @unsupported(wgpu.f32)
-// @unsupported(frontend=lp)
+// @unsupported(*)
 // run: test_declare_in_vec4() ~= vec4(0.0, 0.0, 0.0, 0.0)
 
 float test_declare_in_calculate() {
@@ -88,6 +81,5 @@ float test_declare_in_calculate() {
 }
 
 // wgpu.f32: naga validator rejects the assembled unit (std430 uniform blocks / unsized array constructors are invalid on the GPU tier)
-// @unsupported(wgpu.f32)
-// @unsupported(frontend=lp)
+// @unsupported(*)
 // run: test_declare_in_calculate() ~= 0.2

@@ -2373,8 +2373,7 @@ pub(crate) fn find_asset_editor(view: &UiStudioView) -> crate::UiAssetEditor {
 
 pub(crate) fn asset_e2e_server() -> LpServer {
     let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::new()));
-    let graphics: Arc<dyn LpGraphics> =
-        Arc::new(TargetLpvmGraphics::new(lpa_server::DEVICE_SHADER_FRONTEND));
+    let graphics: Arc<dyn LpGraphics> = Arc::new(TargetLpvmGraphics::new());
     let mut server = LpServer::new(
         output_provider,
         Box::new(LpFsMemory::new()),
@@ -2486,8 +2485,7 @@ const PROJECT_DIR: &str = "/projects/edit-e2e";
 /// the default storage slot, an empty one classifies Empty.
 pub(crate) fn device_e2e_server() -> LpServer {
     let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::new()));
-    let graphics: Arc<dyn LpGraphics> =
-        Arc::new(TargetLpvmGraphics::new(lpa_server::DEVICE_SHADER_FRONTEND));
+    let graphics: Arc<dyn LpGraphics> = Arc::new(TargetLpvmGraphics::new());
     LpServer::new(
         output_provider,
         Box::new(LpFsMemory::new()),

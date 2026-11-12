@@ -540,8 +540,7 @@ impl Board {
             "projects".as_path(),
             None,
             None,
-            Arc::new(TargetLpvmGraphics::new(lpa_server::DEVICE_SHADER_FRONTEND))
-                as Arc<dyn LpGraphics>,
+            Arc::new(TargetLpvmGraphics::new()) as Arc<dyn LpGraphics>,
         );
         let rebooted = Rc::new(Cell::new(false));
         let flag = Rc::clone(&rebooted);

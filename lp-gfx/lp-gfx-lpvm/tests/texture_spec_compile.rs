@@ -7,7 +7,7 @@
 
 use lp_gfx::{GfxError, LpGraphics, ShaderCompileOptions, ShaderSemantics};
 use lp_gfx_lpvm::TargetLpvmGraphics;
-use lp_shader::{ShaderFrontend, texture_binding};
+use lp_shader::texture_binding;
 use lps_shared::{TextureFilter, TextureStorageFormat, TextureWrap};
 
 const TEXTURE_SHADER: &str = "uniform sampler2D inputColor;\n\
@@ -15,9 +15,8 @@ const TEXTURE_SHADER: &str = "uniform sampler2D inputColor;\n\
 
 #[test]
 fn texture_shader_compiles_when_the_spec_map_matches() {
-    let frontend = ShaderFrontend::LpsGlsl;
-    let graphics = TargetLpvmGraphics::new(frontend);
-    let mut options = ShaderCompileOptions::new(ShaderSemantics::Q32, frontend);
+    let graphics = TargetLpvmGraphics::new();
+    let mut options = ShaderCompileOptions::new(ShaderSemantics::Q32);
     options.textures.insert(
         String::from("inputColor"),
         texture_binding::texture2d(
@@ -29,24 +28,21 @@ fn texture_shader_compiles_when_the_spec_map_matches() {
     );
     graphics
         .compile_shader(TEXTURE_SHADER, &options)
-        .unwrap_or_else(|e| {
-            panic!("sampler shader compiles with a matching spec ({frontend:?}): {e:?}")
-        });
+        .unwrap_or_else(|e| panic!("sampler shader compiles with a matching spec: {e:?}"));
 }
 
 #[test]
 fn texture_shader_fails_without_a_spec() {
-    let frontend = ShaderFrontend::LpsGlsl;
-    let graphics = TargetLpvmGraphics::new(frontend);
-    let options = ShaderCompileOptions::new(ShaderSemantics::Q32, frontend);
+    let graphics = TargetLpvmGraphics::new();
+    let options = ShaderCompileOptions::new(ShaderSemantics::Q32);
     match graphics.compile_shader(TEXTURE_SHADER, &options) {
         Err(GfxError::Compile(message)) => {
             assert!(
                 message.contains("inputColor"),
-                "error names the sampler ({frontend:?}): {message}"
+                "error names the sampler: {message}"
             );
         }
-        Err(other) => panic!("expected GfxError::Compile ({frontend:?}), got {other:?}"),
-        Ok(_) => panic!("missing spec must fail compilation ({frontend:?})"),
+        Err(other) => panic!("expected GfxError::Compile, got {other:?}"),
+        Ok(_) => panic!("missing spec must fail compilation"),
     }
 }

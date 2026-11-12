@@ -2,17 +2,12 @@
 
 // The compound assignments `&= |= ^= <<= >>=`.
 
-// lps-frontend (naga) rejects every shift ("binary operand kind mismatch":
-// naga's GLSL front end makes the shift count unsigned and the lowering wants
-// matching operand kinds), so the whole file fails to compile there.
-
 int test_and_assign() {
     int a = 15;
     a &= 6;
     return a;
 }
 
-// @unimplemented(frontend!=lp, backend!=wgpu)
 // run: test_and_assign() == 6
 
 int test_or_assign() {
@@ -21,7 +16,6 @@ int test_or_assign() {
     return a;
 }
 
-// @unimplemented(frontend!=lp, backend!=wgpu)
 // run: test_or_assign() == 11
 
 uint test_xor_assign() {
@@ -30,7 +24,6 @@ uint test_xor_assign() {
     return a;
 }
 
-// @unimplemented(frontend!=lp, backend!=wgpu)
 // run: test_xor_assign() == 9u
 
 int test_shl_assign() {
@@ -39,7 +32,6 @@ int test_shl_assign() {
     return a;
 }
 
-// @unimplemented(frontend!=lp, backend!=wgpu)
 // run: test_shl_assign() == 24
 
 uint test_shr_assign() {
@@ -48,7 +40,6 @@ uint test_shr_assign() {
     return a;
 }
 
-// @unimplemented(frontend!=lp, backend!=wgpu)
 // run: test_shr_assign() == 65535u
 
 ivec2 test_vector_assign() {
@@ -59,7 +50,6 @@ ivec2 test_vector_assign() {
     return a;
 }
 
-// @unimplemented(frontend!=lp, backend!=wgpu)
 // run: test_vector_assign() == ivec2(40, 76)
 
 int test_component_assign() {
@@ -68,7 +58,6 @@ int test_component_assign() {
     return a.y;
 }
 
-// @unimplemented(frontend!=lp, backend!=wgpu)
 // run: test_component_assign() == 5
 
 uint test_hash_round() {
@@ -80,5 +69,4 @@ uint test_hash_round() {
     return h & 65535u;
 }
 
-// @unimplemented(frontend!=lp, backend!=wgpu)
 // run: test_hash_round() == 39142u

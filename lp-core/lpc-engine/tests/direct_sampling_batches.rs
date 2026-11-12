@@ -89,10 +89,6 @@ impl LpGraphics for CappedGraphics {
         self.inner.float_semantics()
     }
 
-    fn glsl_frontend(&self) -> lp_shader::ShaderFrontend {
-        self.inner.glsl_frontend()
-    }
-
     fn create_render_target(&self, width: u32, height: u32) -> Result<TextureHandle, GfxError> {
         self.inner.create_render_target(width, height)
     }
@@ -289,7 +285,7 @@ fn workspace_dir() -> PathBuf {
 
 fn graphics(capacity: u32) -> Arc<dyn LpGraphics> {
     Arc::new(CappedGraphics {
-        inner: lp_gfx_lpvm::TargetLpvmGraphics::new(lp_shader::ShaderFrontend::LpsGlsl),
+        inner: lp_gfx_lpvm::TargetLpvmGraphics::new(),
         capacity,
     })
 }

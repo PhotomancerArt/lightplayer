@@ -215,7 +215,7 @@ fn emit_native_struct_if_needed(
 
 /// A buffer's element must be a builtin scalar/vector: per-cell state has
 /// no key field to carry, and a struct element would silently lose runtime
-/// indexability (struct arrays are constant-index-only on `Frontend::Lp`;
+/// indexability (struct arrays are constant-index-only in lps-glsl;
 /// scalar/vector arrays index dynamically — `lps-filetests
 /// filetests/uniform/array.glsl`, `filetests/global/type-array.glsl`).
 fn validate_buffer_element(
@@ -436,7 +436,7 @@ mod tests {
     }
 
     /// Per-cell state has no key field to carry, and struct arrays are
-    /// constant-index-only on `Frontend::Lp`, which would defeat the point
+    /// constant-index-only in lps-glsl, which would defeat the point
     /// of a buffer slot.
     #[test]
     fn buffer_slots_reject_struct_values() {

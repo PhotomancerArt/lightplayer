@@ -210,9 +210,7 @@ impl Project {
         let services = EngineServices::new(TreePath::parse("/project.show").expect("path"));
         let mut rt = ProjectLoader::load_from_root(&fs, services)
             .unwrap_or_else(|e| panic!("load {name}: {e:?}"));
-        rt.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new(
-            lp_shader::ShaderFrontend::LpsGlsl,
-        ))));
+        rt.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new())));
         for _ in 0..FRAMES {
             rt.tick(16).expect("tick");
         }

@@ -192,8 +192,7 @@ fn memory_server() -> (LpServer, Rc<RefCell<MemoryOutputProvider>>) {
     let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::with_hardware_manifest(
         default_esp32s3_hardware_manifest(),
     )));
-    let graphics: Arc<dyn LpGraphics> =
-        Arc::new(TargetLpvmGraphics::new(lpa_server::DEVICE_SHADER_FRONTEND));
+    let graphics: Arc<dyn LpGraphics> = Arc::new(TargetLpvmGraphics::new());
     let server = LpServer::new(
         output_provider.clone(),
         Box::new(LpFsMemory::new()),

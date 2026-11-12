@@ -41,23 +41,6 @@ pub(crate) enum PosterCapture {
     Pending(core::pin::Pin<Box<dyn core::future::Future<Output = Result<Vec<u8>, String>>>>),
 }
 
-/// GLSL frontend for the browser runtime's CPU tier: the device's own,
-/// [`lpa_server::DEVICE_SHADER_FRONTEND`] (`lps-glsl`), so Studio's simulator
-/// compiles exactly what a board compiles. The tier compiled through naga
-/// until 2026-11-12, which let it render shaders a board refused (bitwise
-/// operators, hex literals). The GPU tier is separate: it forks at the GLSL
-/// source and translates with naga `glsl-in` → `wgsl-out` itself.
-const BROWSER_SHADER_FRONTEND: lpa_server::ShaderFrontend = lpa_server::DEVICE_SHADER_FRONTEND;
-
-// The sidecar builds this crate standalone (`cargo build -p fw-browser`), so
-// no workspace feature unification supplies the frontend: if it were not
-// compiled in, every shader compile would fail at runtime and Studio's
-// simulator would render black. Fail the build instead.
-const _: () = assert!(
-    BROWSER_SHADER_FRONTEND.built_in(),
-    "the pinned shader frontend is not compiled in"
-);
-
 /// One in-browser LightPlayer firmware instance.
 ///
 /// The runtime owns the same major pieces as local firmware: server, filesystem,
@@ -159,7 +142,7 @@ impl BrowserFirmwareRuntime {
                     let graphics = Arc::new(GpuGraphics::new(
                         worker_gpu.device.clone(),
                         worker_gpu.queue.clone(),
-                        Box::new(TargetLpvmGraphics::new(BROWSER_SHADER_FRONTEND)),
+                        Box::new(TargetLpvmGraphics::new()),
                     ));
                     (
                         TierSelection::granted(RuntimeTier::Gpu),
@@ -175,7 +158,7 @@ impl BrowserFirmwareRuntime {
         };
         let graphics: Arc<dyn LpGraphics> = match &gpu {
             Some(state) => state.graphics.clone(),
-            None => Arc::new(TargetLpvmGraphics::new(BROWSER_SHADER_FRONTEND)),
+            None => Arc::new(TargetLpvmGraphics::new()),
         };
         let time = ManualTimeProvider::new();
         let time_provider: Rc<dyn TimeProvider> = Rc::new(time.clone());

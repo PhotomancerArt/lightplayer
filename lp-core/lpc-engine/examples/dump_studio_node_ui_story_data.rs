@@ -63,9 +63,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     services.set_radio_service(Some(radio_service));
 
     let mut runtime = ProjectLoader::load_from_root(&fs, services)?;
-    runtime.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new(
-        lp_shader::ShaderFrontend::LpsGlsl,
-    ))));
+    runtime.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new())));
     for _ in 0..102 {
         runtime.tick(33)?;
     }

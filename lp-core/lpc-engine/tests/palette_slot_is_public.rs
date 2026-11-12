@@ -84,9 +84,7 @@ fn probe_graph(panel: bool) -> lpc_wire::WireBindingGraph {
     let mut rt =
         ProjectLoader::load_from_root(&palette_fs(panel), services).expect("load palette project");
     rt.engine_mut()
-        .set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new(
-            lp_shader::ShaderFrontend::LpsGlsl,
-        ))));
+        .set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new())));
     for _ in 0..5 {
         rt.tick(33).expect("tick");
     }

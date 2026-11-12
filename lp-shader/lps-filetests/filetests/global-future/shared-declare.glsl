@@ -25,9 +25,7 @@ float test_declare_shared_float() {
     return workgroup_counter;
 }
 
-// @unimplemented(frontend!=lp, backend!=wgpu)
-// @unsupported(wgpu.f32)
-// @unsupported(frontend=lp)
+// @unsupported(*)
 // run: test_declare_shared_float() ~= 42.0
 
 int test_declare_shared_int() {
@@ -36,9 +34,7 @@ int test_declare_shared_int() {
     return workgroup_id;
 }
 
-// @unimplemented(frontend!=lp, backend!=wgpu)
-// @unsupported(wgpu.f32)
-// @unsupported(frontend=lp)
+// @unsupported(*)
 // run: test_declare_shared_int() == 123
 
 uint test_declare_shared_uint() {
@@ -47,9 +43,7 @@ uint test_declare_shared_uint() {
     return int(workgroup_size);
 }
 
-// @unimplemented(frontend!=lp, backend!=wgpu)
-// @unsupported(wgpu.f32)
-// @unsupported(frontend=lp)
+// @unsupported(*)
 // run: test_declare_shared_uint() == 256
 
 bool test_declare_shared_bool() {
@@ -58,9 +52,7 @@ bool test_declare_shared_bool() {
     return workgroup_flag;
 }
 
-// @unimplemented(frontend!=lp, backend!=wgpu)
-// @unsupported(wgpu.f32)
-// @unsupported(frontend=lp)
+// @unsupported(*)
 // run: test_declare_shared_bool() == true
 
 vec2 test_declare_shared_vec2() {
@@ -69,9 +61,7 @@ vec2 test_declare_shared_vec2() {
     return workgroup_position;
 }
 
-// @unimplemented(frontend!=lp, backend!=wgpu)
-// @unsupported(wgpu.f32)
-// @unsupported(frontend=lp)
+// @unsupported(*)
 // run: test_declare_shared_vec2() ~= vec2(10.0, 20.0)
 
 vec3 test_declare_shared_vec3() {
@@ -80,9 +70,7 @@ vec3 test_declare_shared_vec3() {
     return workgroup_normal;
 }
 
-// @unimplemented(frontend!=lp, backend!=wgpu)
-// @unsupported(wgpu.f32)
-// @unsupported(frontend=lp)
+// @unsupported(*)
 // run: test_declare_shared_vec3() ~= vec3(0.0, 1.0, 0.0)
 
 vec4 test_declare_shared_vec4() {
@@ -91,9 +79,7 @@ vec4 test_declare_shared_vec4() {
     return workgroup_color;
 }
 
-// @unimplemented(frontend!=lp, backend!=wgpu)
-// @unsupported(wgpu.f32)
-// @unsupported(frontend=lp)
+// @unsupported(*)
 // run: test_declare_shared_vec4() ~= vec4(1.0, 0.5, 0.0, 1.0)
 
 mat2 test_declare_shared_mat2() {
@@ -102,9 +88,7 @@ mat2 test_declare_shared_mat2() {
     return workgroup_transform;
 }
 
-// @unimplemented(frontend!=lp, backend!=wgpu)
-// @unsupported(wgpu.f32)
-// @unsupported(frontend=lp)
+// @unsupported(*)
 // run: test_declare_shared_mat2() ~= mat2(1.0, 0.0, 0.0, 1.0)
 
 float test_declare_shared_array() {
@@ -117,7 +101,5 @@ float test_declare_shared_array() {
 }
 
 // wgpu.f32: file does not compile through naga glsl-in
-// @unimplemented(frontend!=lp, backend!=wgpu)
-// @unsupported(wgpu.f32)
-// @unsupported(frontend=lp)
+// @unsupported(*)
 // run: test_declare_shared_array() ~= 6.0

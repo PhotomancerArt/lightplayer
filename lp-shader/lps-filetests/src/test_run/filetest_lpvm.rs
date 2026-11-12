@@ -19,7 +19,7 @@ use lpvm_wasm::{
     rt_wasmtime::{WasmLpvmEngine, WasmLpvmInstance, WasmLpvmModule},
 };
 
-use crate::targets::{Backend, FloatMode as TargetFloatMode, Frontend, Target};
+use crate::targets::{Backend, FloatMode as TargetFloatMode, Target};
 use crate::test_run::interp::{InterpInstance, InterpShader};
 use crate::test_run::wgpu_probe::{WgpuProbeInstance, WgpuProbeShader};
 
@@ -220,19 +220,6 @@ impl FiletestInstance {
     }
 }
 
-fn lower_glsl(
-    source: &str,
-    texture_specs: &VecMap<String, TextureBindingSpec>,
-    texel_fetch_bounds: lpir::TexelFetchBoundsMode,
-) -> anyhow::Result<(LpirModule, LpsModuleSig)> {
-    let naga = lps_frontend::compile(source).map_err(|e| anyhow::anyhow!("{e}"))?;
-    let options = lps_frontend::LowerOptions {
-        texture_specs: texture_specs.clone(),
-        texel_fetch_bounds,
-    };
-    lps_frontend::lower_with_options(&naga, &options).map_err(|e| anyhow::anyhow!("{e}"))
-}
-
 impl CompiledShader {
     pub(crate) fn compile_glsl(
         source: &str,
@@ -271,22 +258,13 @@ impl CompiledShader {
             )));
         }
 
-        let (ir, meta) = match target.frontend {
-            Frontend::Naga => lower_glsl(
-                source,
-                texture_specs,
-                compiler_config.texture.texel_fetch_bounds,
-            )?,
-            Frontend::Lp => {
-                let options = lps_glsl::CompileOptions {
-                    texture_specs: texture_specs.clone(),
-                    texel_fetch_bounds: compiler_config.texture.texel_fetch_bounds,
-                };
-                let output = lps_glsl::compile(source, &options)
-                    .map_err(|e| anyhow::anyhow!("{}", e.render(source)))?;
-                (output.ir, output.meta)
-            }
+        let options = lps_glsl::CompileOptions {
+            texture_specs: texture_specs.clone(),
+            texel_fetch_bounds: compiler_config.texture.texel_fetch_bounds,
         };
+        let output = lps_glsl::compile(source, &options)
+            .map_err(|e| anyhow::anyhow!("{}", e.render(source)))?;
+        let (ir, meta) = (output.ir, output.meta);
         lps_shared::validate_texture_binding_specs_against_module(&meta, texture_specs)
             .map_err(|e| anyhow::anyhow!("{e}"))?;
         let fm = match target.float_mode {

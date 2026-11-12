@@ -11,8 +11,6 @@ pub struct ShaderCompileOptions {
     pub semantics: ShaderSemantics,
     /// Maximum semantic errors from the GLSL → LPIR front-end.
     pub max_errors: Option<usize>,
-    /// GLSL frontend used before LPIR lowering.
-    pub frontend: lp_shader::ShaderFrontend,
     /// Compile-time texture binding contract: one [`lps_shared::TextureBindingSpec`]
     /// per `sampler2D` uniform leaf, keyed by canonical dotted uniform path
     /// (`docs/design/lp-shader-texture-access.ai.md`). Every backend validates
@@ -34,22 +32,18 @@ pub struct ShaderCompileOptions {
 }
 
 impl ShaderCompileOptions {
-    /// Build options from the two per-backend product decisions — semantics
-    /// tier and GLSL frontend — with neutral defaults for the rest (20 max
-    /// errors, no texture bindings, the default 2D declared space).
+    /// Build options from the per-backend semantics tier, with neutral
+    /// defaults for the rest (20 max errors, no texture bindings, the default
+    /// 2D declared space).
     ///
-    /// There is deliberately no `Default`: `frontend` used to fall back to a
-    /// `cfg!(feature = "naga")` default, which let Cargo feature unification
-    /// silently change compile behavior with the build graph. Render paths
-    /// take both values from the backend the host constructed
-    /// ([`crate::LpGraphics::native_semantics`] /
-    /// [`crate::LpGraphics::glsl_frontend`]).
+    /// There is deliberately no `Default`: the semantics tier is a product
+    /// decision the host makes when it constructs the backend, and render
+    /// paths take it from there ([`crate::LpGraphics::native_semantics`]).
     #[must_use]
-    pub fn new(semantics: ShaderSemantics, frontend: lp_shader::ShaderFrontend) -> Self {
+    pub fn new(semantics: ShaderSemantics) -> Self {
         Self {
             semantics,
             max_errors: Some(20),
-            frontend,
             textures: lp_shader::TextureBindingSpecs::new(),
             space: lp_shader::ShaderEntrySpace::TwoD,
         }

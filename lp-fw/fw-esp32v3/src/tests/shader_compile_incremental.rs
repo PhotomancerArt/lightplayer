@@ -44,7 +44,7 @@ use alloc::sync::Arc;
 use log::{info, warn};
 use lp_shader::{
     CompilePxDesc, LpsEngine, ShaderCompileBudget, ShaderCompileStageDetail,
-    ShaderCompileStepResult, ShaderFrontend, TextureStorageFormat,
+    ShaderCompileStepResult, TextureStorageFormat,
 };
 use lpvm_native::{BuiltinTable, NativeCompileOptions, NativeJitEngine};
 
@@ -91,14 +91,10 @@ static SHADER_COMPILE_CASES: &[ShaderCompileCase] = &[ShaderCompileCase {
 
 impl ShaderCompileCase {
     fn desc(&self) -> CompilePxDesc<'static> {
-        // `LpsGlsl`: the incremental (stepped) frontend path only exists for
-        // the device pipeline's native frontend; naga completes in one step,
-        // and a one-tick transcript measures nothing.
         CompilePxDesc::new(
             self.glsl,
             TextureStorageFormat::Rgba16Unorm,
             lpir::CompilerConfig::default(),
-            ShaderFrontend::LpsGlsl,
         )
     }
 }

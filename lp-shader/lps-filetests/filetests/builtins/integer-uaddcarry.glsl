@@ -13,8 +13,6 @@ uvec2 test_uaddcarry_uint_no_carry() {
     return uvec2(sum, carry);
 }
 
-// naga lowers uaddCarry to the wrong value; the lps-glsl frontend is correct
-// @broken(frontend!=lp, backend!=wgpu)
 // @unsupported(wgpu.f32)
 // run: test_uaddcarry_uint_no_carry() == uvec2(3u, 0u)
 
@@ -25,8 +23,6 @@ uvec2 test_uaddcarry_uint_with_carry() {
     return uvec2(sum, carry);
 }
 
-// naga lowers uaddCarry to the wrong value; the lps-glsl frontend is correct
-// @broken(frontend!=lp, backend!=wgpu)
 // @unsupported(wgpu.f32)
 // run: test_uaddcarry_uint_with_carry() == uvec2(0u, 1u)
 
@@ -37,8 +33,6 @@ uvec2 test_uaddcarry_uint_large_no_carry() {
     return uvec2(sum, carry);
 }
 
-// naga lowers uaddCarry to the wrong value; the lps-glsl frontend is correct
-// @broken(frontend!=lp, backend!=wgpu)
 // @unsupported(wgpu.f32)
 // run: test_uaddcarry_uint_large_no_carry() == uvec2(4000000000u, 0u)
 
@@ -49,8 +43,6 @@ uvec4 test_uaddcarry_uvec2() {
     return uvec4(sum.x, sum.y, carry.x, carry.y);
 }
 
-// naga lowers uaddCarry to the wrong value; the lps-glsl frontend is correct
-// @broken(frontend!=lp, backend!=wgpu)
 // @unsupported(wgpu.f32)
 // run: test_uaddcarry_uvec2() == uvec4(3u, 0u, 0u, 1u)
 
@@ -62,7 +54,6 @@ uvec4 test_uaddcarry_swizzle_out() {
 }
 
 // wgpu.f32: file does not compile through naga glsl-in (mirrors the interp.f32 frontend gap)
-// @broken(frontend!=lp, backend!=wgpu)
 // @unsupported(wgpu.f32)
 // run: test_uaddcarry_swizzle_out() == uvec4(3u, 0u, 0u, 1u)
 

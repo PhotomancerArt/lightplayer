@@ -450,7 +450,7 @@ float f() { return 1.0; }
     fn valid_predicate_parses_and_binds_to_the_next_run() {
         let tf = parse_source(
             "good_pred",
-            "// test run\nfloat f() { return 1.0; }\n// @unsupported(frontend!=lp)\n// run: f() ~= 1.0\n",
+            "// test run\nfloat f() { return 1.0; }\n// @unsupported(backend=wgpu)\n// run: f() ~= 1.0\n",
         )
         .unwrap();
         assert_eq!(tf.run_directives[0].annotations.len(), 1);
@@ -486,7 +486,7 @@ float f() { return 1.0; }
     fn reason_carries_through_a_stacked_block() {
         let tf = parse_source(
             "stacked",
-            "// test run\nfloat f() { return 1.0; }\n\n// naga miscompiles this builtin\n// @unsupported(wgpu.f32)\n// @broken(frontend!=lp)\n// run: f() ~= 1.0\n",
+            "// test run\nfloat f() { return 1.0; }\n\n// the interpreter miscompiles this builtin\n// @unsupported(wgpu.f32)\n// @broken(backend=interp)\n// run: f() ~= 1.0\n",
         )
         .unwrap();
         assert_eq!(tf.run_directives[0].annotations.len(), 2);

@@ -13,8 +13,6 @@ uvec2 test_usubborrow_uint_no_borrow() {
     return uvec2(diff, borrow);
 }
 
-// naga lowers usubBorrow to the wrong value; the lps-glsl frontend is correct
-// @broken(frontend!=lp, backend!=wgpu)
 // @unsupported(wgpu.f32)
 // run: test_usubborrow_uint_no_borrow() == uvec2(2u, 0u)
 
@@ -25,8 +23,6 @@ uvec2 test_usubborrow_uint_with_borrow() {
     return uvec2(diff, borrow);
 }
 
-// naga lowers usubBorrow to the wrong value; the lps-glsl frontend is correct
-// @broken(frontend!=lp, backend!=wgpu)
 // @unsupported(wgpu.f32)
 // run: test_usubborrow_uint_with_borrow() == uvec2(4294967294u, 1u)
 
@@ -37,8 +33,6 @@ uvec2 test_usubborrow_uint_zero() {
     return uvec2(diff, borrow);
 }
 
-// naga lowers usubBorrow to the wrong value; the lps-glsl frontend is correct
-// @broken(frontend!=lp, backend!=wgpu)
 // @unsupported(wgpu.f32)
 // run: test_usubborrow_uint_zero() == uvec2(0u, 0u)
 
@@ -49,8 +43,6 @@ uvec2 test_usubborrow_uint_equal() {
     return uvec2(diff, borrow);
 }
 
-// naga lowers usubBorrow to the wrong value; the lps-glsl frontend is correct
-// @broken(frontend!=lp, backend!=wgpu)
 // @unsupported(wgpu.f32)
 // run: test_usubborrow_uint_equal() == uvec2(0u, 0u)
 
@@ -61,8 +53,6 @@ uvec4 test_usubborrow_uvec2() {
     return uvec4(diff.x, diff.y, borrow.x, borrow.y);
 }
 
-// naga lowers usubBorrow to the wrong value; the lps-glsl frontend is correct
-// @broken(frontend!=lp, backend!=wgpu)
 // @unsupported(wgpu.f32)
 // run: test_usubborrow_uvec2() == uvec4(2u, 4294967294u, 0u, 1u)
 
@@ -74,7 +64,6 @@ uvec2 test_usubborrow_array_out() {
 }
 
 // wgpu.f32: file does not compile through naga glsl-in (mirrors the interp.f32 frontend gap)
-// @broken(frontend!=lp, backend!=wgpu)
 // @unsupported(wgpu.f32)
 // run: test_usubborrow_array_out() == uvec2(4294967294u, 1u)
 

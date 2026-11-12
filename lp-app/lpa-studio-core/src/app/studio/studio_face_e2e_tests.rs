@@ -2236,8 +2236,7 @@ pub(super) fn example_e2e_server(example: &crate::app::home::EmbeddedExample) ->
 /// project's directory), loaded as `/projects/<name>`.
 pub(super) fn files_e2e_server(name: &str, files: &[(String, Vec<u8>)]) -> LpServer {
     let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::new()));
-    let graphics: Arc<dyn LpGraphics> =
-        Arc::new(TargetLpvmGraphics::new(lpa_server::DEVICE_SHADER_FRONTEND));
+    let graphics: Arc<dyn LpGraphics> = Arc::new(TargetLpvmGraphics::new());
     let mut server = LpServer::new(
         output_provider,
         Box::new(LpFsMemory::new()),
@@ -2279,8 +2278,7 @@ const FACE_MAP2D: &str = r#"{
 
 fn face_e2e_server() -> LpServer {
     let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::new()));
-    let graphics: Arc<dyn LpGraphics> =
-        Arc::new(TargetLpvmGraphics::new(lpa_server::DEVICE_SHADER_FRONTEND));
+    let graphics: Arc<dyn LpGraphics> = Arc::new(TargetLpvmGraphics::new());
     let mut server = LpServer::new(
         output_provider,
         Box::new(LpFsMemory::new()),
@@ -2398,8 +2396,7 @@ const SINGLE_PRODUCT_PROJECT_DIR: &str = "/projects/single-product-e2e";
 /// nothing writes `visual.out`.
 fn single_product_e2e_server(visual_only: bool) -> LpServer {
     let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::new()));
-    let graphics: Arc<dyn LpGraphics> =
-        Arc::new(TargetLpvmGraphics::new(lpa_server::DEVICE_SHADER_FRONTEND));
+    let graphics: Arc<dyn LpGraphics> = Arc::new(TargetLpvmGraphics::new());
     let mut server = LpServer::new(
         output_provider,
         Box::new(LpFsMemory::new()),
@@ -2509,8 +2506,7 @@ const BOUND_GLOW_SHADER: &str = "layout(binding = 0) uniform float speed;\nlayou
 
 fn bound_glow_e2e_server() -> LpServer {
     let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::new()));
-    let graphics: Arc<dyn LpGraphics> =
-        Arc::new(TargetLpvmGraphics::new(lpa_server::DEVICE_SHADER_FRONTEND));
+    let graphics: Arc<dyn LpGraphics> = Arc::new(TargetLpvmGraphics::new());
     let mut server = LpServer::new(
         output_provider,
         Box::new(LpFsMemory::new()),
@@ -2620,8 +2616,7 @@ const PALETTE_E2E_SHADER: &str = "layout(binding = 0) uniform float speed;\nlayo
 /// by `default_bind: bus:palette` + `panel: "show"` — no authored binding.
 fn palette_e2e_server() -> LpServer {
     let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::new()));
-    let graphics: Arc<dyn LpGraphics> =
-        Arc::new(TargetLpvmGraphics::new(lpa_server::DEVICE_SHADER_FRONTEND));
+    let graphics: Arc<dyn LpGraphics> = Arc::new(TargetLpvmGraphics::new());
     let mut server = LpServer::new(
         output_provider,
         Box::new(LpFsMemory::new()),
@@ -2929,8 +2924,7 @@ const PLAYLIST_BOUND_GLOW_DIR: &str = "/projects/playlist-bound-glow-e2e";
 /// fyeah-sign's nesting: the bound-glow shader is playlist entry 1's node.
 fn playlist_bound_glow_e2e_server() -> LpServer {
     let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::new()));
-    let graphics: Arc<dyn LpGraphics> =
-        Arc::new(TargetLpvmGraphics::new(lpa_server::DEVICE_SHADER_FRONTEND));
+    let graphics: Arc<dyn LpGraphics> = Arc::new(TargetLpvmGraphics::new());
     let mut server = LpServer::new(
         output_provider,
         Box::new(LpFsMemory::new()),
@@ -3041,8 +3035,7 @@ const PLAYLIST_PROJECT_DIR: &str = "/projects/playlist-face-e2e";
 /// pass a key with no entry to exercise the unresolvable-ACTIVE fallback.
 fn playlist_e2e_server(idle_entry: u32) -> LpServer {
     let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::new()));
-    let graphics: Arc<dyn LpGraphics> =
-        Arc::new(TargetLpvmGraphics::new(lpa_server::DEVICE_SHADER_FRONTEND));
+    let graphics: Arc<dyn LpGraphics> = Arc::new(TargetLpvmGraphics::new());
     let mut server = LpServer::new(
         output_provider,
         Box::new(LpFsMemory::new()),
@@ -3142,8 +3135,7 @@ const OUTPUT_PROJECT_DIR: &str = "/projects/output-face-e2e";
 /// 6 lamps on IO18, 4 on IO16, and the rest on IO2.
 fn output_face_e2e_server() -> LpServer {
     let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::new()));
-    let graphics: Arc<dyn LpGraphics> =
-        Arc::new(TargetLpvmGraphics::new(lpa_server::DEVICE_SHADER_FRONTEND));
+    let graphics: Arc<dyn LpGraphics> = Arc::new(TargetLpvmGraphics::new());
     let mut server = LpServer::new(
         output_provider,
         Box::new(LpFsMemory::new()),

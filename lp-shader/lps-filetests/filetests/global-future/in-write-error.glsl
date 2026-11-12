@@ -27,8 +27,7 @@ float test_edge_in_write_error_read() {
     return vertex_time + 1.0;
 }
 
-// @unsupported(wgpu.f32)
-// @unsupported(frontend=lp)
+// @unsupported(*)
 // run: test_edge_in_write_error_read() ~= 1.0
 
 int test_edge_in_write_error_int() {
@@ -36,8 +35,7 @@ int test_edge_in_write_error_int() {
     return vertex_id + 10;
 }
 
-// @unsupported(wgpu.f32)
-// @unsupported(frontend=lp)
+// @unsupported(*)
 // run: test_edge_in_write_error_int() == 10
 
 vec2 test_edge_in_write_error_vec2() {
@@ -45,8 +43,7 @@ vec2 test_edge_in_write_error_vec2() {
     return tex_coord * 2.0;
 }
 
-// @unsupported(wgpu.f32)
-// @unsupported(frontend=lp)
+// @unsupported(*)
 // run: test_edge_in_write_error_vec2() ~= vec2(0.0, 0.0)
 
 vec3 test_edge_in_write_error_vec3() {
@@ -54,8 +51,7 @@ vec3 test_edge_in_write_error_vec3() {
     return vertex_position + vec3(0.0, 1.0, 0.0);
 }
 
-// @unsupported(wgpu.f32)
-// @unsupported(frontend=lp)
+// @unsupported(*)
 // run: test_edge_in_write_error_vec3() ~= vec3(0.0, 1.0, 0.0)
 
 vec4 test_edge_in_write_error_vec4() {
@@ -63,8 +59,7 @@ vec4 test_edge_in_write_error_vec4() {
     return vertex_color;
 }
 
-// @unsupported(wgpu.f32)
-// @unsupported(frontend=lp)
+// @unsupported(*)
 // run: test_edge_in_write_error_vec4() ~= vec4(0.0, 0.0, 0.0, 0.0)
 
 float test_edge_in_write_error_calculations() {
@@ -78,9 +73,7 @@ float test_edge_in_write_error_calculations() {
 }
 
 // interp.f32: in-qualified vertex inputs are not fed by the filetest harness
-// @unimplemented(frontend!=lp, backend!=wgpu)
-// @unsupported(wgpu.f32)
-// @unsupported(frontend=lp)
+// @unsupported(*)
 // run: test_edge_in_write_error_calculations() ~= 7.2
 
 vec4 test_edge_in_write_error_vertex_processing() {
@@ -97,6 +90,5 @@ vec4 test_edge_in_write_error_vertex_processing() {
 }
 
 // wgpu.f32: naga validator rejects the assembled unit (std430 uniform blocks / unsized array constructors are invalid on the GPU tier)
-// @unsupported(wgpu.f32)
-// @unsupported(frontend=lp)
+// @unsupported(*)
 // run: test_edge_in_write_error_vertex_processing() ~= vec4(0.0, 0.0, 0.0, 0.0)

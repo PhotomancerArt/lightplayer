@@ -50,7 +50,7 @@ pub use lpc_engine::products::visual::{
 };
 pub use lpc_engine::{
     ButtonService, LpGraphics, LpShader, PowerError, PowerOffRequest, PowerService, PowerWakeLevel,
-    RadioService, ShaderCompileOptions, ShaderFrontend,
+    RadioService, ShaderCompileOptions,
 };
 // Manifest-core inputs, re-exported so embedders that reach lpc-engine only
 // through this crate can assemble their firmware manifest (M2).
@@ -65,12 +65,3 @@ pub use server::{
     PROJECT_READ_MIN_HEADROOM_BYTES, ReadHeadroomProbe, RebootHook, RelayProbe, ScanProbe,
     StationProbe, read_frame_budget,
 };
-
-/// GLSL frontend that ships on LightPlayer devices — the product constant.
-///
-/// Device hosts (`fw-esp32c6`, `fw-emu`, and device-emulating hosts such as
-/// `fw-host` and `lp-cli`) pass this when constructing their CPU graphics
-/// backend. It is stated exactly once, here: frontend selection is an
-/// explicit host decision, never a Cargo-feature default, so feature
-/// unification can no longer flip which frontend a build compiles with.
-pub const DEVICE_SHADER_FRONTEND: ShaderFrontend = ShaderFrontend::LpsGlsl;

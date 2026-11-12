@@ -126,7 +126,7 @@ fn published_samples(fixtures: &[(&str, u32, f32)]) -> Vec<u16> {
     let fs = project_fs(fixtures);
     let mut rt = load(&fs);
     rt.engine_mut().set_graphics(Some(std::sync::Arc::new(
-        lp_gfx_lpvm::TargetLpvmGraphics::new(lp_shader::ShaderFrontend::LpsGlsl),
+        lp_gfx_lpvm::TargetLpvmGraphics::new(),
     )));
     for _ in 0..SETTLE_TICKS {
         rt.tick(16).expect("tick");
@@ -156,7 +156,7 @@ fn output_status(fixtures: &[(&str, u32, f32)]) -> Option<NodeRuntimeStatus> {
     let fs = project_fs(fixtures);
     let mut rt = load(&fs);
     rt.engine_mut().set_graphics(Some(std::sync::Arc::new(
-        lp_gfx_lpvm::TargetLpvmGraphics::new(lp_shader::ShaderFrontend::LpsGlsl),
+        lp_gfx_lpvm::TargetLpvmGraphics::new(),
     )));
     for _ in 0..SETTLE_TICKS {
         rt.tick(16).expect("tick");

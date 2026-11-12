@@ -3,7 +3,7 @@
 //! The example probes (`lpc-engine/tests/example_shader_compile_peak_memory.rs`,
 //! `lpvm-native/tests/xt_compile_peak_memory.rs`) measure what the product
 //! ships; this one measures what the language *allows*: every filetest that
-//! the lps-glsl frontend is expected to compile on `rv32lpn.q32` goes through
+//! the lps-glsl frontend is expected to compile on `rv32n.q32` goes through
 //! the staged frontend (lex → index → body → build-hir → lower-lpir) under
 //! the shared byte-tracking allocator (`lpvm-native/tests/support/peak_alloc.rs`),
 //! and the ranked table says which language shapes cost the most memory per
@@ -62,7 +62,7 @@ fn filetest_corpus_frontend_peaks() {
     const FRONTEND_CEILING_BYTES: usize = 189 * 1024;
 
     let dir = filetests_dir();
-    let target = Target::from_name("rv32lpn.q32").expect("lps-glsl device target");
+    let target = Target::from_name("rv32n.q32").expect("lps-glsl device target");
     let files = discover_test_files(&dir).expect("discover filetests");
     assert!(
         files.len() > 500,

@@ -888,9 +888,7 @@ void tick() {{
         );
 
         let mut engine = Engine::new(TreePath::parse("/compute.show").expect("path"));
-        engine.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new(
-            lp_shader::ShaderFrontend::LpsGlsl,
-        ))));
+        engine.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new())));
         let frame = lpc_model::Revision::new(1);
         let root = engine.tree().root();
         let node_id = engine

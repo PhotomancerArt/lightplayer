@@ -15,8 +15,7 @@
 //! The GPU preview tier (`lp-gfx-wgpu/src/wgsl_compile.rs`) renders naga's
 //! codespan diagnostics and its own unbounded-loop refusal behind a stage
 //! tag, with the marker already in authored coordinates (the producer
-//! shifts spans out of its assembled unit, as the CPU-tier naga frontend
-//! does):
+//! shifts spans out of its assembled unit, as the CPU tier does):
 //!
 //! ```text
 //! shader compile: naga glsl-in: error: Expected ';', found '}'
@@ -67,8 +66,8 @@ impl UiShaderError {
 /// Strip the wrapper prefixes down to the human message: the engine's
 /// `shader compile:` / `shader render:` context tags, generic
 /// `Error:`/`error:` wrappers, the `LpsError` stage tag (`parse:`,
-/// `lower:`, ...; see `lp-shader/src/error.rs`), and the naga frontend's
-/// `GLSL parse error:` (`lps-frontend`'s `CompileError::Parse` display).
+/// `lower:`, ...; see `lp-shader/src/error.rs`), and the retired naga CPU
+/// frontend's `GLSL parse error:` wrapper (still stripped).
 /// Observed live wrappings include
 /// `shader compile: Error: validation: ...`,
 /// `shader compile: parse: error: ...`,

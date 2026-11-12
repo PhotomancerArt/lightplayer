@@ -394,7 +394,7 @@ fn a_steady_frame_builds_no_plan() {
     let mut rt = crate::ProjectLoader::load_from_root(&fs, services).expect("load the project");
     rt.set_plan_mode(crate::frame_plan::PlanMode::Replay);
     rt.set_graphics(Some(alloc::sync::Arc::new(
-        lp_gfx_lpvm::TargetLpvmGraphics::new(lp_shader::ShaderFrontend::LpsGlsl),
+        lp_gfx_lpvm::TargetLpvmGraphics::new(),
     )));
     for _ in 0..3 {
         rt.tick(16).expect("warm-up");

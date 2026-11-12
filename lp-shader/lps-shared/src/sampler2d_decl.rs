@@ -2,19 +2,18 @@
 //! authored GLSL.
 //!
 //! Naga's glsl-in has no combined-sampler *type* — `sampler2D` exists only as
-//! the Vulkan-style constructor builtin `sampler2D(tex, samp)` — so both
-//! compiler tiers rewrite the combined declaration into separated form before
-//! parsing. The CPU tier (`lps-frontend::parse`) emits `texture2D` plus a
-//! synthesized companion `sampler`; the GPU tier (`lp-gfx-wgpu`) emits
-//! `texture2D` alone, because its `texture()` call sites lower to generated
-//! `texelFetch` helpers that never bind a sampler object.
+//! the Vulkan-style constructor builtin `sampler2D(tex, samp)` — so the GPU
+//! tier (`lp-gfx-wgpu`) rewrites the combined declaration into separated form
+//! before parsing, emitting `texture2D` alone: its `texture()` call sites
+//! lower to generated `texelFetch` helpers that never bind a sampler object.
+//! (The CPU tier's `lps-glsl` frontend parses `sampler2D` itself.)
 //!
-//! The two rewrites were once independent scanners and disagreed about *which*
-//! declarations to rewrite — the binding-only layout the engine's palette
-//! header generates was declined by one tier and died in naga
-//! (`docs/defects/2026-08-05-generated-palette-header-dies-on-naga.ai.md`). This
-//! module is the single recognizer both tiers consume; emission stays
-//! tier-specific, recognition cannot diverge again.
+//! The rewrite was once two independent scanners (the CPU tier's naga frontend
+//! had the other) that disagreed about *which* declarations to rewrite — the
+//! binding-only layout the engine's palette header generates was declined by
+//! one and died in naga
+//! (`docs/defects/2026-08-05-generated-palette-header-dies-on-naga.ai.md`).
+//! This module is the one recognizer; emission stays tier-specific.
 
 use alloc::string::String;
 use alloc::vec::Vec;

@@ -284,9 +284,7 @@ fn load(fs: LpFsMemory) -> Project {
     let services = EngineServices::new(TreePath::parse("/shader_timebase.show").expect("root"));
     let loaded = ProjectLoader::load_from_root(&fs, services).expect("load project");
     let (mut engine, registry) = loaded.into_parts();
-    engine.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new(
-        lp_shader::ShaderFrontend::LpsGlsl,
-    ))));
+    engine.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new())));
     Project {
         engine,
         registry,

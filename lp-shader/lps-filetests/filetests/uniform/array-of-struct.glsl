@@ -8,8 +8,8 @@
 // and `catalog/patterns/meteor` both carry.
 //
 // Regression origin (2026-07-29): the meteor effect shipped a helper that
-// indexed this array with a runtime parameter. It compiled on every
-// Naga-frontend target and failed only on `Frontend::Lp` lowering
+// indexed this array with a runtime parameter. It compiled through
+// the old naga frontend and failed only in lps-glsl lowering
 // ("AccessIndex: struct value behind Load: Access base has no uniform
 // element addr"), so both the engine render test and CI passed while the
 // browser sim failed.

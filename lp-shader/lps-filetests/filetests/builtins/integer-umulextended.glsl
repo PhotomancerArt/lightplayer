@@ -13,8 +13,6 @@ uvec4 test_umulextended_uint_small() {
     return uvec4(lsb, msb, 0u, 0u);
 }
 
-// naga lowers umulExtended to the wrong value; the lps-glsl frontend is correct
-// @broken(frontend!=lp, backend!=wgpu)
 // @unsupported(wgpu.f32)
 // run: test_umulextended_uint_small() == uvec4(6u, 0u, 0u, 0u)
 
@@ -25,8 +23,6 @@ uvec4 test_umulextended_uint_medium() {
     return uvec4(lsb, msb, 0u, 0u);
 }
 
-// naga lowers umulExtended to the wrong value; the lps-glsl frontend is correct
-// @broken(frontend!=lp, backend!=wgpu)
 // @unsupported(wgpu.f32)
 // run: test_umulextended_uint_medium() == uvec4(1410065408u, 2u, 0u, 0u)
 
@@ -37,8 +33,6 @@ uvec4 test_umulextended_uint_large() {
     return uvec4(lsb, msb, 0u, 0u);
 }
 
-// naga lowers umulExtended to the wrong value; the lps-glsl frontend is correct
-// @broken(frontend!=lp, backend!=wgpu)
 // @unsupported(wgpu.f32)
 // run: test_umulextended_uint_large() == uvec4(0u, 1u, 0u, 0u)
 
@@ -49,8 +43,6 @@ uvec4 test_umulextended_uint_max() {
     return uvec4(lsb, msb, 0u, 0u);
 }
 
-// naga lowers umulExtended to the wrong value; the lps-glsl frontend is correct
-// @broken(frontend!=lp, backend!=wgpu)
 // @unsupported(wgpu.f32)
 // run: test_umulextended_uint_max() == uvec4(1u, 4294967294u, 0u, 0u)
 
@@ -67,7 +59,6 @@ uvec2 test_umulextended_struct_field_out() {
 }
 
 // wgpu.f32: file does not compile through naga glsl-in (mirrors the interp.f32 frontend gap)
-// @broken(frontend!=lp, backend!=wgpu)
 // @unsupported(wgpu.f32)
 // run: test_umulextended_struct_field_out() == uvec2(0u, 1u)
 

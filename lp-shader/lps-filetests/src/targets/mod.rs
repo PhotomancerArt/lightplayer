@@ -30,15 +30,6 @@ pub enum Backend {
     Wgpu,
 }
 
-/// GLSL frontend used before LPIR backend compilation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Frontend {
-    /// Existing Naga-based frontend.
-    Naga,
-    /// New LightPlayer-shaped GLSL frontend.
-    Lp,
-}
-
 /// Instruction set architecture.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Isa {
@@ -76,8 +67,6 @@ pub enum FloatMode {
 /// Concrete target configuration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Target {
-    /// Frontend used to lower GLSL to LPIR.
-    pub frontend: Frontend,
     /// Backend to use.
     pub backend: Backend,
     /// Float representation.
@@ -90,13 +79,12 @@ pub struct Target {
 
 /// All supported targets (`Target::from_name` searches this list).
 ///
-/// The frontend: `lps-glsl` everywhere except `rv32n.*` and `xtn.*` (naga's
-/// `lps-frontend`, kept as the comparison point until it is deleted) and
-/// `wgpu.f32` (naga `glsl-in` → `wgsl-out` is the GPU tier itself).
-/// Order: wasm, rv32c, rv32n, rv32lpn, interp, wgpu, xtn, xtlpn, wasm.f32 — used
-/// for error messages and CLI.
+/// Every CPU target compiles GLSL with `lps-glsl`, the one frontend;
+/// `wgpu.f32` is the GPU tier itself (naga `glsl-in` → `wgsl-out`).
+/// Order: wasm.q32, rv32c, rv32n.q32, interp, wgpu, xtn.q32, wasm.f32,
+/// rv32n.f32, xtn.f32 — used for error messages and CLI.
 ///
-/// Everything after `rv32lpn.q32` is **appended**, deliberately: [`DEFAULT_TARGETS`]
+/// Everything after `wgpu.f32` is **appended**, deliberately: [`DEFAULT_TARGETS`]
 /// indexes into this list, so inserting anywhere else would silently repoint the
 /// defaults. `test_default_targets_order_matches_const` is the guard.
 ///
@@ -120,7 +108,7 @@ pub struct Target {
 /// measured correction. If you are about to write "wasm has no f32 builtin
 /// lowering" anywhere, it is false — check `wasm.f32` first.
 ///
-/// `xtn.f32` / `xtlpn.f32` are the **hardware-FPU** targets (roadmap M8): the
+/// `xtn.f32` is the **hardware-FPU** targets (roadmap M8): the
 /// same `lpvm-native` backend on `IsaTarget::Xtensa` in `FloatMode::F32`,
 /// emitting real `add.s`/`mul.s` on the LX7's float register file and executing
 /// them in `lp-xt-emu`. They need no new match arm anywhere — the compile path
@@ -134,101 +122,64 @@ pub struct Target {
 /// the f32 pair while `xtn.q32` stays on demand would be an inconsistency, not
 /// a decision.
 ///
-/// `rv32n.f32` / `rv32lpn.f32` are the **soft-float** rv32 targets (roadmap M9):
+/// `rv32n.f32` is the **soft-float** rv32 target (roadmap M9):
 /// the same `lpvm-native` backend, compiled in `FloatMode::F32`, where every
 /// float op is a call to `__addsf3` and friends inside `lp-riscv-emu`. Also
 /// deliberately **not** in [`DEFAULT_TARGETS`] (roadmap Q6: rv32 f32 variants run
 /// on demand). They are slow — each arithmetic op is a function call through the
 /// emulator — and they are not the shipping numeric mode for any rv32 board, so
 /// their cost belongs to a deliberate run, not to every `cargo test`. Select them
-/// explicitly: `-t rv32lpn.f32`.
+/// explicitly: `-t rv32n.f32`.
 pub const ALL_TARGETS: &[Target] = &[
     Target {
-        frontend: Frontend::Lp,
         backend: Backend::Wasm,
         float_mode: FloatMode::Q32,
         isa: Isa::Wasm32,
         exec_mode: ExecMode::Emulator,
     },
     Target {
-        frontend: Frontend::Lp,
         backend: Backend::Rv32,
         float_mode: FloatMode::Q32,
         isa: Isa::Riscv32,
         exec_mode: ExecMode::Emulator,
     },
     Target {
-        frontend: Frontend::Naga,
         backend: Backend::Rv32fa,
         float_mode: FloatMode::Q32,
         isa: Isa::Riscv32,
         exec_mode: ExecMode::Emulator,
     },
     Target {
-        frontend: Frontend::Lp,
-        backend: Backend::Rv32fa,
-        float_mode: FloatMode::Q32,
-        isa: Isa::Riscv32,
-        exec_mode: ExecMode::Emulator,
-    },
-    Target {
-        frontend: Frontend::Lp,
         backend: Backend::Interp,
         float_mode: FloatMode::F32,
         isa: Isa::Host,
         exec_mode: ExecMode::Interpreter,
     },
     Target {
-        frontend: Frontend::Naga,
         backend: Backend::Wgpu,
         float_mode: FloatMode::F32,
         isa: Isa::Host,
         exec_mode: ExecMode::Gpu,
     },
     Target {
-        frontend: Frontend::Naga,
         backend: Backend::Xtfa,
         float_mode: FloatMode::Q32,
         isa: Isa::Xtensa,
         exec_mode: ExecMode::Emulator,
     },
     Target {
-        frontend: Frontend::Lp,
-        backend: Backend::Xtfa,
-        float_mode: FloatMode::Q32,
-        isa: Isa::Xtensa,
-        exec_mode: ExecMode::Emulator,
-    },
-    Target {
-        frontend: Frontend::Lp,
         backend: Backend::Wasm,
         float_mode: FloatMode::F32,
         isa: Isa::Wasm32,
         exec_mode: ExecMode::Emulator,
     },
     Target {
-        frontend: Frontend::Naga,
         backend: Backend::Rv32fa,
         float_mode: FloatMode::F32,
         isa: Isa::Riscv32,
         exec_mode: ExecMode::Emulator,
     },
     Target {
-        frontend: Frontend::Lp,
-        backend: Backend::Rv32fa,
-        float_mode: FloatMode::F32,
-        isa: Isa::Riscv32,
-        exec_mode: ExecMode::Emulator,
-    },
-    Target {
-        frontend: Frontend::Naga,
-        backend: Backend::Xtfa,
-        float_mode: FloatMode::F32,
-        isa: Isa::Xtensa,
-        exec_mode: ExecMode::Emulator,
-    },
-    Target {
-        frontend: Frontend::Lp,
         backend: Backend::Xtfa,
         float_mode: FloatMode::F32,
         isa: Isa::Xtensa,
@@ -236,12 +187,11 @@ pub const ALL_TARGETS: &[Target] = &[
     },
 ];
 
-/// Default targets for local `cargo test` / app runs: rv32n (the last default
-/// on naga), rv32lpn (the on-device pipeline), rv32c (Cranelift), wasm (Q32),
-/// interp.f32 (the CI-runnable f32 gate — host LPIR interpretation; the
-/// whole corpus carries triaged f32 expectations via `run[q32]:`/`run[f32]:`
-/// channels and per-target annotations), plus **`wasm.f32`**. Every one but
-/// rv32n compiles through `lps-glsl` (since 2026-11-12).
+/// Default targets for local `cargo test` / app runs: rv32n (the on-device
+/// pipeline), rv32c (Cranelift), wasm (Q32), interp.f32 (the CI-runnable f32
+/// gate — host LPIR interpretation; the whole corpus carries triaged f32
+/// expectations via `run[q32]:`/`run[f32]:` channels and per-target
+/// annotations), plus **`wasm.f32`**.
 ///
 /// **`wasm.f32` joined the defaults 2026-08-02** (roadmap Q6's original intent,
 /// unblocked since M5). It is the only *native-code* f32 target that can run
@@ -251,19 +201,18 @@ pub const ALL_TARGETS: &[Target] = &[
 /// explanations than in CI seconds. The `xtn.*` and `rv32*.f32` targets stay on
 /// request for reasons that are still true (see [`ALL_TARGETS`]).
 ///
-/// **`xtn.q32` / `xtlpn.q32` are deliberately NOT here.** They are in
-/// [`ALL_TARGETS`] and run on request (`-t xtn.q32`). Two reasons: they need the
+/// **`xtn.q32` is deliberately NOT here.** It is in
+/// [`ALL_TARGETS`] and runs on request (`-t xtn.q32`). Two reasons: it needs the
 /// Xtensa builtins image, a cross-target artifact that requires the esp toolchain
-/// and is absent on a fresh clone; and defaulting them is a cost decision to make
+/// and is absent on a fresh clone; and defaulting it is a cost decision to make
 /// against a measured number, not by assumption. Select them explicitly until
 /// that measurement says otherwise.
 pub const DEFAULT_TARGETS: &[Target] = &[
     ALL_TARGETS[2],
-    ALL_TARGETS[3],
     ALL_TARGETS[1],
     ALL_TARGETS[0],
-    ALL_TARGETS[4],
-    ALL_TARGETS[8],
+    ALL_TARGETS[3],
+    ALL_TARGETS[6],
 ];
 
 /// Annotation kind for test directives.
@@ -487,12 +436,13 @@ mod tests {
         }
     }
 
-    /// The shape the corpus collapse relies on: a broad `@broken(frontend!=lp)`
-    /// with an exact `@unsupported(wgpu.f32)` carving out the GPU tier.
+    /// The shape the corpus collapse relies on: a broad
+    /// `@broken(backend!=interp)` with an exact `@unsupported(wgpu.f32)`
+    /// carving out the GPU tier.
     #[test]
     fn test_exact_name_carves_an_exception_out_of_a_negated_predicate() {
         let anns = vec![
-            predicate(AnnotationKind::Broken, &[("frontend", true, "lp")], 1),
+            predicate(AnnotationKind::Broken, &[("backend", true, "interp")], 1),
             named(AnnotationKind::Unsupported, "wgpu.f32", 2),
         ];
         assert_eq!(
@@ -504,7 +454,7 @@ mod tests {
             Disposition::Skip
         );
         assert_eq!(
-            directive_disposition(&anns, Target::from_name("rv32lpn.q32").unwrap()),
+            directive_disposition(&anns, Target::from_name("interp.f32").unwrap()),
             Disposition::ExpectSuccess
         );
     }
@@ -611,12 +561,11 @@ mod tests {
 
     #[test]
     fn test_default_targets_order_matches_const() {
-        assert_eq!(DEFAULT_TARGETS.len(), 6);
+        assert_eq!(DEFAULT_TARGETS.len(), 5);
         assert_eq!(DEFAULT_TARGETS[0].name(), "rv32n.q32");
-        assert_eq!(DEFAULT_TARGETS[1].name(), "rv32lpn.q32");
-        assert_eq!(DEFAULT_TARGETS[2].name(), "rv32c.q32");
-        assert_eq!(DEFAULT_TARGETS[3].name(), "wasm.q32");
-        assert_eq!(DEFAULT_TARGETS[4].name(), "interp.f32");
-        assert_eq!(DEFAULT_TARGETS[5].name(), "wasm.f32");
+        assert_eq!(DEFAULT_TARGETS[1].name(), "rv32c.q32");
+        assert_eq!(DEFAULT_TARGETS[2].name(), "wasm.q32");
+        assert_eq!(DEFAULT_TARGETS[3].name(), "interp.f32");
+        assert_eq!(DEFAULT_TARGETS[4].name(), "wasm.f32");
     }
 }

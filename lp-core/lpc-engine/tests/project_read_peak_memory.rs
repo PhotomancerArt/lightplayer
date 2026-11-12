@@ -211,9 +211,7 @@ fn load_mini_dome() -> (Engine, ProjectRegistry) {
     let services = EngineServices::new(TreePath::parse("/small_dome.show").expect("path"));
     let mut rt = ProjectLoader::load_from_root(&fs, services).expect("load small-dome");
     rt.engine_mut()
-        .set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new(
-            lp_shader::ShaderFrontend::LpsGlsl,
-        ))));
+        .set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new())));
     let (mut engine, registry) = rt.into_parts();
     for _ in 0..3 {
         engine.tick(&registry, 16).expect("tick");

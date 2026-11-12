@@ -13,8 +13,6 @@ uvec4 test_imulextended_int_small() {
     return uvec4(uint(lsb), uint(msb), 0u, 0u);
 }
 
-// naga lowers imulExtended to the wrong value; the lps-glsl frontend is correct
-// @broken(frontend!=lp, backend!=wgpu)
 // @unsupported(wgpu.f32)
 // run: test_imulextended_int_small() == uvec4(6u, 0u, 0u, 0u)
 
@@ -25,8 +23,6 @@ uvec4 test_imulextended_int_neg_pos() {
     return uvec4(uint(lsb), uint(msb), 0u, 0u);
 }
 
-// naga lowers imulExtended to the wrong value; the lps-glsl frontend is correct
-// @broken(frontend!=lp, backend!=wgpu)
 // @unsupported(wgpu.f32)
 // run: test_imulextended_int_neg_pos() == uvec4(4294967290u, 4294967295u, 0u, 0u)
 
@@ -37,8 +33,6 @@ uvec4 test_imulextended_int_neg_neg() {
     return uvec4(uint(lsb), uint(msb), 0u, 0u);
 }
 
-// naga lowers imulExtended to the wrong value; the lps-glsl frontend is correct
-// @broken(frontend!=lp, backend!=wgpu)
 // @unsupported(wgpu.f32)
 // run: test_imulextended_int_neg_neg() == uvec4(6u, 0u, 0u, 0u)
 
@@ -50,7 +44,6 @@ uvec4 test_imulextended_int_large() {
 }
 
 // wgpu.f32: file does not compile through naga glsl-in (mirrors the interp.f32 frontend gap)
-// @broken(frontend!=lp, backend!=wgpu)
 // @unsupported(wgpu.f32)
 // run: test_imulextended_int_large() == uvec4(1410065408u, 2u, 0u, 0u)
 

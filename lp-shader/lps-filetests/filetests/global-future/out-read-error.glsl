@@ -26,8 +26,7 @@ void test_edge_out_read_error_write() {
     fragment_color = vec4(1.0, 0.0, 0.0, 1.0);
 }
 
-// @unsupported(wgpu.f32)
-// @unsupported(frontend=lp)
+// @unsupported(*)
 // run: test_edge_out_read_error_write() == 0.0
 
 // These reads may or may not be allowed depending on GLSL version and shader stage:
@@ -47,8 +46,7 @@ float test_edge_out_read_error_indirect() {
     return 0.0;  // Placeholder
 }
 
-// @unsupported(wgpu.f32)
-// @unsupported(frontend=lp)
+// @unsupported(*)
 // run: test_edge_out_read_error_indirect() ~= 0.0
 
 void test_edge_out_read_error_multiple_writes() {
@@ -58,8 +56,7 @@ void test_edge_out_read_error_multiple_writes() {
     fragment_color = vec4(0.0, 0.0, 1.0, 1.0);  // Final value
 }
 
-// @unsupported(wgpu.f32)
-// @unsupported(frontend=lp)
+// @unsupported(*)
 // run: test_edge_out_read_error_multiple_writes() == 0.0
 
 void test_edge_out_read_error_fragment_output() {
@@ -72,6 +69,5 @@ void test_edge_out_read_error_fragment_output() {
 }
 
 // wgpu.f32: naga validator rejects the assembled unit (std430 uniform blocks / unsized array constructors are invalid on the GPU tier)
-// @unsupported(wgpu.f32)
-// @unsupported(frontend=lp)
+// @unsupported(*)
 // run: test_edge_out_read_error_fragment_output() == 0.0

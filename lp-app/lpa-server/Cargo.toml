@@ -21,8 +21,6 @@ default = [
     "resolver-payload-cache",
     "scrub-log",
 ]
-# Panic recovery via catch_unwind (shader compilation, node render)
-naga = ["lpc-engine/naga"]
 # `LpServer::set_latent_read_back`: hand a GPU-resident backend's latent
 # readback (`lp_gfx::LatentReadBackSource`) to every project's engine, so
 # texture previews read back one probe late instead of refusing. Only the
@@ -49,8 +47,7 @@ std = [
 # consumer taking lpa-server's defaults (the studio, `lp-cli`, tests) still
 # gets every node kind — nothing changes for them. A constrained firmware
 # build that opts out of lpa-server's defaults (`default-features = false`;
-# `fw-esp32c6` does this today) lists only the gates it wants, same shape as
-# `naga` above. This is the mechanism M3's `fw-esp32s3` uses to turn nodes
+# `fw-esp32c6` does this today) lists only the gates it wants. This is the mechanism M3's `fw-esp32s3` uses to turn nodes
 # off — `lpa-server` forcing every gate on unconditionally would make that
 # impossible from firmware.
 node-button = ["lpc-engine/node-button"]

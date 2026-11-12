@@ -3196,9 +3196,7 @@ mod tests {
         let services = EngineServices::new(TreePath::parse("/basic.show").expect("path"));
         let mut rt =
             ProjectLoader::load_from_root(&fs, services).expect("load projects/test/basic");
-        rt.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new(
-            lp_shader::ShaderFrontend::LpsGlsl,
-        ))));
+        rt.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new())));
         rt
     }
 
@@ -3442,9 +3440,7 @@ mod tests {
             &all_playlist_entries(fs),
         )
         .expect("load button playlist example");
-        rt.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new(
-            lp_shader::ShaderFrontend::LpsGlsl,
-        ))));
+        rt.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new())));
         let levels = attach_pressure_probe(&mut rt);
 
         // Boot: every shader asks for its window as it is created, so the
@@ -3749,9 +3745,7 @@ mod tests {
         let services = EngineServices::new(TreePath::parse("/phasor.show").expect("path"));
         let mut rt = ProjectLoader::load_from_root(&fs, services).expect("load");
         rt.engine_mut()
-            .set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new(
-                lp_shader::ShaderFrontend::LpsGlsl,
-            ))));
+            .set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new())));
         let compute = sibling(&rt, "compute");
 
         let read_wave = |rt: &mut LoadedProjectRuntime| {
@@ -4491,9 +4485,7 @@ mod tests {
         let root_path = TreePath::parse("/p.show").expect("path");
         let services = EngineServices::new(root_path);
         let mut rt = ProjectLoader::load_from_root(&fs, services).expect("load");
-        rt.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new(
-            lp_shader::ShaderFrontend::LpsGlsl,
-        ))));
+        rt.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new())));
         let node = node_for_def_path(&rt, "/compute.json").expect("compute node");
 
         // First resolve requests a compile window (deferral); the second
@@ -4534,9 +4526,7 @@ mod tests {
         let fs: &dyn LpFs = &fs;
         let services = EngineServices::new(TreePath::parse("/fluid.show").expect("path"));
         let mut rt = ProjectLoader::load_from_root(fs, services).expect("load fluid example");
-        rt.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new(
-            lp_shader::ShaderFrontend::LpsGlsl,
-        ))));
+        rt.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new())));
         let root = rt.tree().root();
         let fixture = rt
             .tree()
@@ -4567,9 +4557,7 @@ mod tests {
         let fs: &dyn LpFs = &fs;
         let services = EngineServices::new(TreePath::parse("/fluid.show").expect("path"));
         let mut rt = ProjectLoader::load_from_root(fs, services).expect("load fluid example");
-        rt.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new(
-            lp_shader::ShaderFrontend::LpsGlsl,
-        ))));
+        rt.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new())));
         let root = rt.tree().root();
 
         let compute = rt
@@ -4724,9 +4712,7 @@ mod tests {
         let fs: &dyn LpFs = &fs;
         let services = EngineServices::new(TreePath::parse("/events.show").expect("path"));
         let mut rt = ProjectLoader::load_from_root(fs, services).expect("load events example");
-        rt.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new(
-            lp_shader::ShaderFrontend::LpsGlsl,
-        ))));
+        rt.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new())));
         let root = rt.tree().root();
 
         let shader = rt
@@ -4785,9 +4771,7 @@ mod tests {
             &all_playlist_entries(fs),
         )
         .expect("load button playlist example");
-        rt.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new(
-            lp_shader::ShaderFrontend::LpsGlsl,
-        ))));
+        rt.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new())));
         let root = rt.tree().root();
         let playlist = rt
             .tree()
@@ -4874,9 +4858,7 @@ mod tests {
         services.set_radio_service(Some(radio_service));
         services.set_time_provider(Some(time_provider));
         let mut rt = ProjectLoader::load_from_root(fs, services).expect("load fyeah sign");
-        rt.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new(
-            lp_shader::ShaderFrontend::LpsGlsl,
-        ))));
+        rt.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new())));
         let playlist = rt
             .tree()
             .lookup_sibling(rt.tree().root(), NodeName::parse("playlist").unwrap())
@@ -5007,9 +4989,7 @@ mod tests {
         services.set_radio_service(Some(radio_service));
 
         let mut rt = ProjectLoader::load_from_root(fs, services).expect("load button sign example");
-        rt.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new(
-            lp_shader::ShaderFrontend::LpsGlsl,
-        ))));
+        rt.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new())));
 
         rt.tick(16).expect("tick button-sign without radio cycle");
     }
@@ -5027,9 +5007,7 @@ mod tests {
         services.set_radio_service(Some(radio_service));
 
         let mut rt = ProjectLoader::load_from_root(fs, services).expect("load fyeah sign example");
-        rt.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new(
-            lp_shader::ShaderFrontend::LpsGlsl,
-        ))));
+        rt.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new())));
 
         rt.tick(16).expect("tick fyeah-sign without radio cycle");
     }
@@ -5088,9 +5066,7 @@ mod tests {
 
             let mut rt = ProjectLoader::load_from_root(fs, services)
                 .unwrap_or_else(|e| panic!("load {label}: {e:?}"));
-            rt.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new(
-                lp_shader::ShaderFrontend::LpsGlsl,
-            ))));
+            rt.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new())));
 
             // Frame 1 defers the shader compile and requests a window;
             // frame 2 opens it, compiles, and renders for real.
@@ -5196,9 +5172,7 @@ mod tests {
 
         let mut rt =
             ProjectLoader::load_from_root(fs, services).expect("load fyeah button example");
-        rt.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new(
-            lp_shader::ShaderFrontend::LpsGlsl,
-        ))));
+        rt.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new())));
 
         rt.tick(16).expect("tick fyeah-button without radio cycle");
     }

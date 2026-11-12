@@ -19,7 +19,6 @@
 
 use lp_gfx::{GfxError, LpGraphics, ShaderCompileOptions, ShaderFloatImpl, ShaderSemantics};
 use lp_gfx_lpvm::TargetLpvmGraphics;
-use lp_shader::ShaderFrontend;
 
 const SHADER: &str = "vec4 render_2d(vec2 pos) { return vec4(pos.x, 0.0, 0.0, 1.0); }";
 
@@ -29,7 +28,7 @@ const SHADER: &str = "vec4 render_2d(vec2 pos) { return vec4(pos.x, 0.0, 0.0, 1.
 /// and this one is held to `docs/design/float.ai.md` exactly.
 #[test]
 fn the_cpu_backend_names_f32cpu_as_its_float_tier() {
-    let graphics = TargetLpvmGraphics::new(ShaderFrontend::LpsGlsl);
+    let graphics = TargetLpvmGraphics::new();
     assert_eq!(graphics.float_semantics(), ShaderSemantics::F32Cpu);
     assert_eq!(graphics.native_semantics(), ShaderSemantics::Q32);
 }
@@ -37,8 +36,8 @@ fn the_cpu_backend_names_f32cpu_as_its_float_tier() {
 /// Fixed compiles on every CPU backend — the shipped mode, unchanged.
 #[test]
 fn the_fixed_tier_still_compiles() {
-    let graphics = TargetLpvmGraphics::new(ShaderFrontend::LpsGlsl);
-    let options = ShaderCompileOptions::new(ShaderSemantics::Q32, ShaderFrontend::LpsGlsl);
+    let graphics = TargetLpvmGraphics::new();
+    let options = ShaderCompileOptions::new(ShaderSemantics::Q32);
     graphics
         .compile_shader(SHADER, &options)
         .expect("Q32 is the shipped tier on every CPU backend");
@@ -63,8 +62,8 @@ fn the_fixed_tier_still_compiles() {
 ///   otherwise have named.
 #[test]
 fn float_either_compiles_as_float_or_is_refused_legibly() {
-    let graphics = TargetLpvmGraphics::new(ShaderFrontend::LpsGlsl);
-    let options = ShaderCompileOptions::new(ShaderSemantics::F32Cpu, ShaderFrontend::LpsGlsl);
+    let graphics = TargetLpvmGraphics::new();
+    let options = ShaderCompileOptions::new(ShaderSemantics::F32Cpu);
 
     match graphics.compile_shader(SHADER, &options) {
         Ok(shader) => {
@@ -100,8 +99,8 @@ fn float_either_compiles_as_float_or_is_refused_legibly() {
 /// that the caller asked a different backend.
 #[test]
 fn the_gpu_tier_is_not_a_synonym_for_the_cpu_float_tier() {
-    let graphics = TargetLpvmGraphics::new(ShaderFrontend::LpsGlsl);
-    let options = ShaderCompileOptions::new(ShaderSemantics::F32Gpu, ShaderFrontend::LpsGlsl);
+    let graphics = TargetLpvmGraphics::new();
+    let options = ShaderCompileOptions::new(ShaderSemantics::F32Gpu);
 
     match graphics.compile_shader(SHADER, &options) {
         Err(GfxError::Backend(message)) => assert!(

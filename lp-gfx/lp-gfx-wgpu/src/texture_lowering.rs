@@ -74,8 +74,7 @@ pub fn lower_texture_calls(
     specs: &TextureBindingSpecs,
 ) -> Result<TextureLowering, GfxError> {
     // Pass 1: `uniform sampler2D name;` → `layout(...) uniform texture2D
-    // name;`. naga glsl-in has no `sampler2D` type (same constraint the CPU
-    // frontend works around in `lps-frontend::parse`); the separated
+    // name;`. naga glsl-in has no `sampler2D` type; the separated
     // texture2D global is exactly the WGSL-side shape we bind.
     let declared = rewrite_sampler_declarations(authored)?;
 
@@ -252,9 +251,7 @@ fn sample_helper(entry: &UsedHelper) -> (String, String) {
 /// (function parameter, struct member, array, multi-declarator) is a
 /// compile error — samplers are uniforms in this dialect.
 ///
-/// Recognition is `lps_shared::scan_uniform_sampler2d_decls`, shared with
-/// the CPU tier (`lps-frontend::parse`) so the two can never disagree about
-/// which declarations are rewritten
+/// Recognition is `lps_shared::scan_uniform_sampler2d_decls`
 /// (docs/defects/2026-08-05-generated-palette-header-dies-on-naga.ai.md). No
 /// companion sampler is synthesized on this tier: `texture()` sites lower
 /// to generated `texelFetch` helpers (see the module docs), so no sampler

@@ -35,7 +35,7 @@ fn gpu_and_cpu_see_the_same_pattern_space() {
         eprintln!("SKIP: no GPU adapter available");
         return;
     };
-    let cpu = TargetLpvmGraphics::new(lp_shader::ShaderFrontend::LpsGlsl);
+    let cpu = TargetLpvmGraphics::new();
 
     // A 40 × 10 px lamp box inside a 64 × 16 request, sampled on a texel grid
     // that overhangs it: pattern x runs past ±1, y spans ±0.25, y up.
@@ -102,7 +102,7 @@ fn sample_on(
     points_q16: &[i32],
     uniforms: &LpsValueF32,
 ) -> Vec<u16> {
-    let options = ShaderCompileOptions::new(semantics, lp_shader::ShaderFrontend::LpsGlsl);
+    let options = ShaderCompileOptions::new(semantics);
     let mut shader: Box<dyn LpShader> = graphics.compile_shader(PROBE, &options).expect("compile");
     let count = (points_q16.len() / 2) as u32;
     let mut points = graphics.create_sample_points(count).expect("points");

@@ -27,7 +27,7 @@
 //! (`lps-builtins`' `unorm_conv_f32` / `unorm_conv_q32`). So the two builds are
 //! asserted against one shared table, and against each other.
 
-use lp_shader::{CompilePxDesc, LpsEngine, LpsPxShader, ShaderFrontend, TextureBuffer};
+use lp_shader::{CompilePxDesc, LpsEngine, LpsPxShader, TextureBuffer};
 use lpir::{CompilerConfig, FloatMode};
 use lps_shared::{LpsValueF32, TextureStorageFormat};
 use lpvm_native::{NativeCompileOptions, NativeEmuEngine};
@@ -46,7 +46,6 @@ fn compile(engine: &LpsEngine<NativeEmuEngine>, glsl: &str, float_mode: FloatMod
                 glsl,
                 TextureStorageFormat::Rgba16Unorm,
                 CompilerConfig::default(),
-                ShaderFrontend::LpsGlsl,
             )
             .with_float_mode(float_mode),
         )

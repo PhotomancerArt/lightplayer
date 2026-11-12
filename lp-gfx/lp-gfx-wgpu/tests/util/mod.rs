@@ -37,6 +37,6 @@ pub fn test_graphics() -> Option<GpuGraphics> {
     Some(GpuGraphics::new(
         device,
         queue,
-        Box::new(TargetLpvmGraphics::new(lp_shader::ShaderFrontend::LpsGlsl)),
+        Box::new(TargetLpvmGraphics::new()),
     ))
 }

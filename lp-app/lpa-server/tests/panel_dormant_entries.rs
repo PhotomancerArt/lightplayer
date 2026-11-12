@@ -431,8 +431,7 @@ impl NodeRuntime for StandInOwner {
 
 fn build_server(base_fs: Rc<RefCell<dyn LpFs>>) -> LpServer {
     let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::new()));
-    let graphics: Arc<dyn LpGraphics> =
-        Arc::new(TargetLpvmGraphics::new(lpa_server::DEVICE_SHADER_FRONTEND));
+    let graphics: Arc<dyn LpGraphics> = Arc::new(TargetLpvmGraphics::new());
     LpServer::new(
         output_provider,
         Box::new(LpFsView::new(base_fs, LpPath::new("/"))),

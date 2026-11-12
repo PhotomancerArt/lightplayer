@@ -28,9 +28,7 @@ float test_edge_multiple_qualifiers_error_const() {
     return valid_const * 2.0;
 }
 
-// @unimplemented(frontend!=lp, backend!=wgpu)
-// @unsupported(wgpu.f32)
-// @unsupported(frontend=lp)
+// @unsupported(*)
 // run: test_edge_multiple_qualifiers_error_const() ~= 6.28
 
 float test_edge_multiple_qualifiers_error_uniform() {
@@ -38,9 +36,7 @@ float test_edge_multiple_qualifiers_error_uniform() {
     return valid_uniform + 1.0;
 }
 
-// @unimplemented(frontend!=lp, backend!=wgpu)
-// @unsupported(wgpu.f32)
-// @unsupported(frontend=lp)
+// @unsupported(*)
 // run: test_edge_multiple_qualifiers_error_uniform() ~= 1.0
 
 vec2 test_edge_multiple_qualifiers_error_in() {
@@ -48,9 +44,7 @@ vec2 test_edge_multiple_qualifiers_error_in() {
     return valid_in + vec2(1.0, 1.0);
 }
 
-// @unimplemented(frontend!=lp, backend!=wgpu)
-// @unsupported(wgpu.f32)
-// @unsupported(frontend=lp)
+// @unsupported(*)
 // run: test_edge_multiple_qualifiers_error_in() ~= vec2(1.0, 1.0)
 
 void test_edge_multiple_qualifiers_error_out() {
@@ -58,9 +52,7 @@ void test_edge_multiple_qualifiers_error_out() {
     valid_out = vec3(1.0, 0.0, 0.0);
 }
 
-// @unimplemented(frontend!=lp, backend!=wgpu)
-// @unsupported(wgpu.f32)
-// @unsupported(frontend=lp)
+// @unsupported(*)
 // run: test_edge_multiple_qualifiers_error_out() == 0.0
 
 float test_edge_multiple_qualifiers_error_buffer() {
@@ -69,9 +61,7 @@ float test_edge_multiple_qualifiers_error_buffer() {
     return valid_buffer;
 }
 
-// @unimplemented(frontend!=lp, backend!=wgpu)
-// @unsupported(wgpu.f32)
-// @unsupported(frontend=lp)
+// @unsupported(*)
 // run: test_edge_multiple_qualifiers_error_buffer() ~= 42.0
 
 float test_edge_multiple_qualifiers_error_combined() {
@@ -87,7 +77,5 @@ float test_edge_multiple_qualifiers_error_combined() {
 }
 
 // wgpu.f32: file does not compile through naga glsl-in
-// @unimplemented(frontend!=lp, backend!=wgpu)
-// @unsupported(wgpu.f32)
-// @unsupported(frontend=lp)
+// @unsupported(*)
 // run: test_edge_multiple_qualifiers_error_combined() ~= 8.28

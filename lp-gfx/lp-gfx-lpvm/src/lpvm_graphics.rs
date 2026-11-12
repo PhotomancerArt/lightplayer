@@ -28,7 +28,6 @@ use crate::lpvm_shader::LpvmShader;
 pub struct LpvmGraphics<B: LpvmEngine> {
     shared: Arc<SharedEngine<B>>,
     backend_name: &'static str,
-    frontend: lp_shader::ShaderFrontend,
 }
 
 impl<B> LpvmGraphics<B>
@@ -37,20 +36,13 @@ where
     B::Module: 'static,
 {
     /// Wrap an LPVM engine. `backend_name` is the log label
-    /// (e.g. `"lpvm-wasm::rt_wasmtime"`); `frontend` is the GLSL frontend
-    /// this backend advertises via [`LpGraphics::glsl_frontend`] — the
-    /// host's product decision, made here once.
-    pub fn from_engine(
-        backend: B,
-        backend_name: &'static str,
-        frontend: lp_shader::ShaderFrontend,
-    ) -> Self {
+    /// (e.g. `"lpvm-wasm::rt_wasmtime"`).
+    pub fn from_engine(backend: B, backend_name: &'static str) -> Self {
         Self {
             shared: Arc::new(SharedEngine {
                 engine: LpsEngine::new(backend),
             }),
             backend_name,
-            frontend,
         }
     }
 
@@ -97,14 +89,10 @@ where
             )));
         }
         let cfg = options.to_compiler_config();
-        let mut desc = CompilePxDesc::new(
-            source,
-            lps_shared::TextureStorageFormat::Rgba16Unorm,
-            cfg,
-            options.frontend,
-        )
-        .with_float_mode(float_mode)
-        .with_space(options.space);
+        let mut desc =
+            CompilePxDesc::new(source, lps_shared::TextureStorageFormat::Rgba16Unorm, cfg)
+                .with_float_mode(float_mode)
+                .with_space(options.space);
         desc.textures = options.textures.clone();
         let px = self
             .shared
@@ -131,10 +119,6 @@ where
 
     fn backend_name(&self) -> &'static str {
         self.backend_name
-    }
-
-    fn glsl_frontend(&self) -> lp_shader::ShaderFrontend {
-        self.frontend
     }
 
     /// This backend implements both CPU tiers, so an authored `Float` shader

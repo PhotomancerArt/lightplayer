@@ -381,7 +381,7 @@ impl ShaderNode {
             // validates (CPU) or splices (GPU) `render_2d` / `render_1d`
             // against it rather than sniffing the source.
             space: self.space,
-            ..ShaderCompileOptions::new(semantics, graphics.glsl_frontend())
+            ..ShaderCompileOptions::new(semantics)
         };
 
         let compile_start_ms = ctx.now_ms();
@@ -3150,9 +3150,7 @@ mod tests {
     {
         let mut engine = Engine::new(TreePath::parse("/show.t").expect("path"));
         let mut registry = ProjectRegistry::new();
-        engine.set_graphics(Some(Arc::new(TargetLpvmGraphics::new(
-            lp_shader::ShaderFrontend::LpsGlsl,
-        ))));
+        engine.set_graphics(Some(Arc::new(TargetLpvmGraphics::new())));
         let frame = Revision::new(1);
         let root = engine.tree().root();
         let tex_invocation = NodeInvocation::new(ArtifactSpec::path("tex.toml"));
@@ -3266,9 +3264,7 @@ mod tests {
         let source = "layout(binding = 0) uniform float time;\nvec4 render_2d(vec2 pos) { return vec4(fract(time), 0.0, 0.0, 1.0); }";
         let mut engine = Engine::new(TreePath::parse("/show.t").expect("path"));
         let mut registry = ProjectRegistry::new();
-        engine.set_graphics(Some(Arc::new(TargetLpvmGraphics::new(
-            lp_shader::ShaderFrontend::LpsGlsl,
-        ))));
+        engine.set_graphics(Some(Arc::new(TargetLpvmGraphics::new())));
         let frame = Revision::new(1);
         let root = engine.tree().root();
         let sh_id = engine
@@ -3343,9 +3339,7 @@ mod tests {
         let source = "layout(binding = 0) uniform float time;\nlayout(binding = 1) uniform float speed;\nvec4 render_2d(vec2 pos) { return vec4(fract(time * speed), 0.0, 0.0, 1.0); }";
         let mut engine = Engine::new(TreePath::parse("/show.t").expect("path"));
         let mut registry = ProjectRegistry::new();
-        engine.set_graphics(Some(Arc::new(TargetLpvmGraphics::new(
-            lp_shader::ShaderFrontend::LpsGlsl,
-        ))));
+        engine.set_graphics(Some(Arc::new(TargetLpvmGraphics::new())));
         let frame = Revision::new(1);
         let root = engine.tree().root();
         let sh_id = engine
@@ -3415,9 +3409,7 @@ mod tests {
         let source = "layout(binding = 0) uniform float time;\nlayout(binding = 1) uniform float speed;\nvec4 render_2d(vec2 pos) { return vec4(speed, 0.0, 0.0, 1.0); }";
         let mut engine = Engine::new(TreePath::parse("/show.t").expect("path"));
         let mut registry = ProjectRegistry::new();
-        engine.set_graphics(Some(Arc::new(TargetLpvmGraphics::new(
-            lp_shader::ShaderFrontend::LpsGlsl,
-        ))));
+        engine.set_graphics(Some(Arc::new(TargetLpvmGraphics::new())));
         let frame = Revision::new(1);
         let root = engine.tree().root();
         let sh_id = engine
@@ -3608,7 +3600,7 @@ mod tests {
 
     #[test]
     fn shader_direct_sampling_uses_requested_output_size_uniform() {
-        let graphics = Arc::new(TargetLpvmGraphics::new(lp_shader::ShaderFrontend::LpsGlsl));
+        let graphics = Arc::new(TargetLpvmGraphics::new());
         let source = String::from(
             "layout(binding = 0) uniform vec2 outputSize;\n\
              vec4 render_2d(vec2 pos) { return vec4(pos.x / outputSize.x, pos.y / outputSize.y, 0.0, 1.0); }",
@@ -3646,7 +3638,7 @@ mod tests {
 
     #[test]
     fn shader_direct_sampling_matches_rendered_texture_pixel_center() {
-        let graphics = Arc::new(TargetLpvmGraphics::new(lp_shader::ShaderFrontend::LpsGlsl));
+        let graphics = Arc::new(TargetLpvmGraphics::new());
         let source = String::from(
             "layout(binding = 0) uniform vec2 outputSize;\n\
              vec4 render_2d(vec2 pos) { return vec4(pos.x / outputSize.x, pos.y / outputSize.y, 0.0, 1.0); }",
@@ -4300,7 +4292,7 @@ mod tests {
     impl CountingGraphics {
         fn new() -> Self {
             Self {
-                inner: TargetLpvmGraphics::new(lp_shader::ShaderFrontend::LpsGlsl),
+                inner: TargetLpvmGraphics::new(),
                 compile_count: AtomicU32::new(0),
                 fail_compile: AtomicBool::new(false),
                 refuse_float: AtomicBool::new(false),
@@ -4384,11 +4376,7 @@ mod tests {
             "counting-test"
         }
 
-        fn glsl_frontend(&self) -> lp_shader::ShaderFrontend {
-            self.inner.glsl_frontend()
-        }
-
-        /// Forwarded like `glsl_frontend`: this stub counts and fails compiles,
+        /// Forwarded like `native_semantics`: this stub counts and fails compiles,
         /// it does not redefine which tiers a CPU backend offers. Without the
         /// forward it would inherit the one-tier default and quietly answer
         /// Q32 for a Float request — which is precisely the bug the tier

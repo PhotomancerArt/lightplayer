@@ -3,16 +3,11 @@
 // GLSL ES 3.00 §5.9 `<<`: the result has the left operand's type; the shift
 // count is int or uint, scalar or of the same width.
 
-// lps-frontend (naga) rejects every shift ("binary operand kind mismatch":
-// naga's GLSL front end makes the shift count unsigned and the lowering wants
-// matching operand kinds), so the whole file fails to compile there.
-
 int test_shl_int() {
     int a = 3;
     return a << 4;
 }
 
-// @unimplemented(frontend!=lp, backend!=wgpu)
 // run: test_shl_int() == 48
 
 int test_shl_into_sign() {
@@ -20,7 +15,6 @@ int test_shl_into_sign() {
     return a << 31;
 }
 
-// @unimplemented(frontend!=lp, backend!=wgpu)
 // run: test_shl_into_sign() == -2147483648
 
 uint test_shl_uint_int_count() {
@@ -29,7 +23,6 @@ uint test_shl_uint_int_count() {
     return a << n;
 }
 
-// @unimplemented(frontend!=lp, backend!=wgpu)
 // run: test_shl_uint_int_count() == 2147483648u
 
 ivec3 test_shl_ivec3_scalar() {
@@ -37,7 +30,6 @@ ivec3 test_shl_ivec3_scalar() {
     return a << 2;
 }
 
-// @unimplemented(frontend!=lp, backend!=wgpu)
 // run: test_shl_ivec3_scalar() == ivec3(4, 8, 12)
 
 uvec2 test_shl_uvec2_ivec2() {
@@ -46,7 +38,6 @@ uvec2 test_shl_uvec2_ivec2() {
     return a << n;
 }
 
-// @unimplemented(frontend!=lp, backend!=wgpu)
 // run: test_shl_uvec2_ivec2() == uvec2(8u, 256u)
 
 int test_shl_precedence() {
@@ -55,7 +46,6 @@ int test_shl_precedence() {
     return a << 2 + 1;
 }
 
-// @unimplemented(frontend!=lp, backend!=wgpu)
 // run: test_shl_precedence() == 8
 
 bool test_shl_vs_less() {
@@ -64,12 +54,10 @@ bool test_shl_vs_less() {
     return a < 5 && a <= 4;
 }
 
-// @unimplemented(frontend!=lp, backend!=wgpu)
 // run: test_shl_vs_less() == true
 
 int test_shl_const_fold() {
     return 5 << 3;
 }
 
-// @unimplemented(frontend!=lp, backend!=wgpu)
 // run: test_shl_const_fold() == 40

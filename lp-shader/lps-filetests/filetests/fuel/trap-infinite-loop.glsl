@@ -2,7 +2,7 @@
 
 // =============================================================================
 // Fuel trap: an unbounded loop exhausts the armed tank and aborts with a trap
-// instead of hanging. rv32n/rv32lpn: the back-edge fuel check observes 0,
+// instead of hanging. rv32n/rv32n: the back-edge fuel check observes 0,
 // writes trap code 1 to the vmctx trap slot, and jumps to the epilogue; the
 // host reads the slot and reports "native trap: fuel exhausted (invocation N)".
 // wasm: the emitted back-edge check writes the trap code and executes

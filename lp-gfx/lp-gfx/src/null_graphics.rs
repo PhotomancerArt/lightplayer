@@ -97,29 +97,20 @@ impl LpGraphics for NullGraphics {
         NULL_BACKEND_NAME
     }
 
-    // `native_semantics` and `glsl_frontend` are the two per-backend product
-    // decisions render paths read *before* compiling. A backend that never
-    // compiles has no meaningful choice to state, and both answers here are
-    // unreachable-by-construction: every path that consults them feeds
-    // `compile_shader`, which always fails first. Both are stated anyway,
-    // and stated as fixed constants rather than `cfg!`/feature expressions,
-    // because the contract those two methods exist to enforce is "the value
-    // does not vary with the build graph" (Cargo feature unification must
-    // not change compile behaviour). A constant honours that contract; a
-    // panic or a `cfg!` would not.
+    // `native_semantics` is the per-backend product decision render paths
+    // read *before* compiling. A backend that never compiles has no
+    // meaningful choice to state, and the answer here is
+    // unreachable-by-construction: every path that consults it feeds
+    // `compile_shader`, which always fails first. It is stated anyway, as a
+    // fixed constant rather than a `cfg!`/feature expression, because the
+    // contract the method exists to enforce is "the value does not vary with
+    // the build graph" (Cargo feature unification must not change compile
+    // behaviour). A constant honours that contract; a panic or a `cfg!`
+    // would not.
     fn native_semantics(&self) -> ShaderSemantics {
         // Q32 is the on-device product tier, so this backend does not look
         // like a preview/GPU tier in any log or UI that reads it.
         ShaderSemantics::Q32
-    }
-
-    fn glsl_frontend(&self) -> lp_shader::ShaderFrontend {
-        // `LpsGlsl` rather than `Naga` specifically because
-        // `ShaderFrontend::built_in()` is unconditionally true for it,
-        // whereas `Naga` is true only under the `naga` feature. A host that
-        // const-asserts `backend.glsl_frontend().built_in()` must not trip
-        // over this placeholder as a side effect of the feature graph.
-        lp_shader::ShaderFrontend::LpsGlsl
     }
 
     fn create_render_target(&self, _width: u32, _height: u32) -> Result<TextureHandle, GfxError> {
@@ -247,8 +238,7 @@ mod tests {
     #[test]
     fn compile_shader_errors_rather_than_panicking_or_returning_a_program() {
         let graphics = NullGraphics::new();
-        let options =
-            ShaderCompileOptions::new(ShaderSemantics::Q32, lp_shader::ShaderFrontend::LpsGlsl);
+        let options = ShaderCompileOptions::new(ShaderSemantics::Q32);
 
         let error = graphics
             .compile_shader("void main() {}", &options)
@@ -331,16 +321,11 @@ mod tests {
     }
 
     #[test]
-    fn states_a_fixed_frontend_and_tier_that_no_feature_can_move() {
+    fn states_a_fixed_tier_that_no_feature_can_move() {
         let graphics = NullGraphics::new();
 
         assert_eq!(graphics.backend_name(), NULL_BACKEND_NAME);
         assert_eq!(graphics.native_semantics(), ShaderSemantics::Q32);
-        assert_eq!(graphics.glsl_frontend(), lp_shader::ShaderFrontend::LpsGlsl);
-        // The reason `LpsGlsl` is the stated placeholder: it is built in
-        // regardless of the `naga` feature, so a host that const-asserts
-        // `built_in()` on the backend's answer never trips over it.
-        assert!(graphics.glsl_frontend().built_in());
         assert!(graphics.supports_read_back());
     }
 

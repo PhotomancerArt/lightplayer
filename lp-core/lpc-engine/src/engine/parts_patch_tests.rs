@@ -757,9 +757,7 @@ impl Rig {
 
         let services = EngineServices::new(TreePath::parse("/parts.show").expect("path"));
         let mut rt = ProjectLoader::load_from_root(&fs, services).expect("load");
-        rt.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new(
-            lp_shader::ShaderFrontend::LpsGlsl,
-        ))));
+        rt.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new())));
         for fixture in fixtures {
             let Fix::Parts(node, mapping) = fixture else {
                 continue;

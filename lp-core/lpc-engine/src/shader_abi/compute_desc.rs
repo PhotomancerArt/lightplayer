@@ -285,7 +285,7 @@ void tick() {{
         let desc =
             compute_desc_from_model_def(&glsl, &def, &registry, lpir::CompilerConfig::default())
                 .expect("compute desc");
-        let graphics = LpvmGraphics::new(lp_shader::ShaderFrontend::LpsGlsl);
+        let graphics = LpvmGraphics::new();
         let mut shader = graphics
             .compile_compute_shader(desc)
             .expect("compile compute");
@@ -367,7 +367,7 @@ void tick() {{
         let desc =
             compute_desc_from_model_def(&glsl, &def, &registry, lpir::CompilerConfig::default())
                 .expect("compute desc");
-        let graphics = LpvmGraphics::new(lp_shader::ShaderFrontend::LpsGlsl);
+        let graphics = LpvmGraphics::new();
         let mut shader = graphics
             .compile_compute_shader(desc)
             .expect("compile compute");
@@ -389,7 +389,7 @@ void tick() {{
     /// The fire2012 shape: per-cell scalar state in buffer slots on both
     /// sides, indexed at RUNTIME — a loop over the consumed buffer and a
     /// uniform-derived index into the produced global. This is exactly what
-    /// sentinel struct arrays cannot do on `Frontend::Lp` (constant-index
+    /// sentinel struct arrays cannot do in lps-glsl (constant-index
     /// -only), and the reason the buffer slot kind exists.
     #[test]
     fn compute_desc_executes_buffer_slots_with_runtime_indexing() {
@@ -437,7 +437,7 @@ void tick() {{
         let desc =
             compute_desc_from_model_def(&glsl, &def, &registry, lpir::CompilerConfig::default())
                 .expect("compute desc");
-        let graphics = LpvmGraphics::new(lp_shader::ShaderFrontend::LpsGlsl);
+        let graphics = LpvmGraphics::new();
         let mut shader = graphics
             .compile_compute_shader(desc)
             .expect("compile compute");

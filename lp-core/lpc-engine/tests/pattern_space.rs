@@ -526,10 +526,6 @@ impl LpGraphics for RecordingGraphics {
         self.inner.float_semantics()
     }
 
-    fn glsl_frontend(&self) -> lp_shader::ShaderFrontend {
-        self.inner.glsl_frontend()
-    }
-
     fn create_render_target(&self, width: u32, height: u32) -> Result<TextureHandle, GfxError> {
         self.inner.create_render_target(width, height)
     }
@@ -740,9 +736,7 @@ impl Frame {
 fn render_last_frame(dir: &Path) -> Frame {
     let log = Arc::new(Mutex::new(Log::default()));
     let graphics: Arc<dyn LpGraphics> = Arc::new(RecordingGraphics {
-        inner: Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new(
-            lp_shader::ShaderFrontend::LpsGlsl,
-        )),
+        inner: Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new()),
         log: Arc::clone(&log),
     });
     let fs = LpFsStd::new(dir.to_path_buf());

@@ -72,9 +72,9 @@ const SAMPLE_POS_IN: &str = "lp_gfx_sample_pos";
 /// stripped declarations blanked with newlines preserved), so line N of
 /// `authored` is authored line N and [`Self::to_authored`] is a shift.
 /// Columns match too, except on a line whose sampler declaration or
-/// `texture()` call was rewritten. The CPU tier's naga frontend does the
-/// same remap over its own prefix (`lps-frontend/src/parse.rs`); the wire
-/// carries one string in authored coordinates, and the Studio parser
+/// `texture()` call was rewritten. The CPU tier's `lps-glsl` frontend reports
+/// authored coordinates too; the wire carries one string in authored
+/// coordinates, and the Studio parser
 /// (`ui_shader_error.rs`) learns no offset.
 #[derive(Clone, Debug)]
 pub struct AssembledGlsl {

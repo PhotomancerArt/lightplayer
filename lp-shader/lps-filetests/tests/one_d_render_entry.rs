@@ -18,9 +18,7 @@
 //! fractions representable in Q16.16 and in binary32, and `FtoUnorm16` uses
 //! one `floor(v * 65536)` convention in both.
 
-use lp_shader::{
-    CompilePxDesc, LpsEngine, LpsPxShader, ShaderEntrySpace, ShaderFrontend, TextureBuffer,
-};
+use lp_shader::{CompilePxDesc, LpsEngine, LpsPxShader, ShaderEntrySpace, TextureBuffer};
 use lpir::{CompilerConfig, FloatMode};
 use lps_shared::{LpsValueF32, TextureStorageFormat};
 use lpvm_native::{NativeCompileOptions, NativeEmuEngine};
@@ -43,7 +41,6 @@ fn compile_1d(
                 glsl,
                 TextureStorageFormat::Rgba16Unorm,
                 CompilerConfig::default(),
-                ShaderFrontend::LpsGlsl,
             )
             .with_float_mode(float_mode)
             .with_space(ShaderEntrySpace::OneD),

@@ -87,7 +87,7 @@ struct CountingGraphics {
 impl CountingGraphics {
     fn new() -> Self {
         Self {
-            inner: TargetLpvmGraphics::new(lp_shader::ShaderFrontend::LpsGlsl),
+            inner: TargetLpvmGraphics::new(),
             output_alloc_count: AtomicU32::new(0),
         }
     }
@@ -108,10 +108,6 @@ impl LpGraphics for CountingGraphics {
 
     fn backend_name(&self) -> &'static str {
         self.inner.backend_name()
-    }
-
-    fn glsl_frontend(&self) -> lp_shader::ShaderFrontend {
-        self.inner.glsl_frontend()
     }
 
     fn create_render_target(&self, width: u32, height: u32) -> Result<TextureHandle, GfxError> {
@@ -579,9 +575,7 @@ fn engine_output_idle_registered_sink_skips_second_pin() {
     services.set_output_provider(Some(Box::new(RcMemoryOutput(Rc::clone(&mem)))));
     let mut rt = Engine::with_services(path, services);
     let registry = ProjectRegistry::new();
-    rt.set_graphics(Some(Arc::new(TargetLpvmGraphics::new(
-        lp_shader::ShaderFrontend::LpsGlsl,
-    ))));
+    rt.set_graphics(Some(Arc::new(TargetLpvmGraphics::new())));
 
     let ticks = Arc::new(AtomicU32::new(0));
     let frame = Revision::new(1);
@@ -702,9 +696,7 @@ fn output_demand_marks_output_buffer_dirty_same_frame_before_flush() {
     services.set_output_provider(Some(Box::new(RcMemoryOutput(Rc::clone(&mem)))));
     let mut rt = Engine::with_services(path, services);
     let registry = ProjectRegistry::new();
-    rt.set_graphics(Some(Arc::new(TargetLpvmGraphics::new(
-        lp_shader::ShaderFrontend::LpsGlsl,
-    ))));
+    rt.set_graphics(Some(Arc::new(TargetLpvmGraphics::new())));
 
     let ticks = Arc::new(AtomicU32::new(0));
     let frame = Revision::new(1);

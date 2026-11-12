@@ -11,8 +11,7 @@
 //! | catchall (host)                | `lpvm_wasm::rt_wasmtime`              | `lpvm-wasm::rt_wasmtime` |
 //!
 //! Construct the per-target backend with [`TargetLpvmGraphics::new`] (or name
-//! the type via [`TargetLpvmEngine`] / [`TargetLpvmGraphics`]), passing the
-//! host's explicit [`lp_shader::ShaderFrontend`] product decision.
+//! the type via [`TargetLpvmEngine`] / [`TargetLpvmGraphics`]).
 //!
 //! This is the **guaranteed** CPU backend of the lp-gfx doctrine: always
 //! present on every target, always able to compile Q32 shaders. It refuses

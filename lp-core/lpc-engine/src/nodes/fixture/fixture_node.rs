@@ -2748,9 +2748,8 @@ mod tests {
             }
         }
 
-        let graphics: Arc<dyn lp_gfx::LpGraphics> = Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new(
-            lp_shader::ShaderFrontend::LpsGlsl,
-        ));
+        let graphics: Arc<dyn lp_gfx::LpGraphics> =
+            Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new());
         let mut services = NoServices;
         let ctx = ControlRenderContext::new(
             lpc_model::NodeId::new(1),
@@ -2861,9 +2860,7 @@ mod tests {
     fn direct_sampled_fixture_engine() -> (Engine, ProjectRegistry, lpc_model::NodeId) {
         let mut engine = Engine::new(TreePath::parse("/show.t").unwrap());
         let registry = ProjectRegistry::new();
-        engine.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new(
-            lp_shader::ShaderFrontend::LpsGlsl,
-        ))));
+        engine.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new())));
         let frame = Revision::new(1);
         let root = engine.tree().root();
         let spine = test_placeholder_spine();
@@ -3539,9 +3536,7 @@ mod tests {
         let ticks = Arc::new(AtomicU32::new(0));
         let mut engine = Engine::new(TreePath::parse("/show.t").unwrap());
         let registry = ProjectRegistry::new();
-        engine.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new(
-            lp_shader::ShaderFrontend::LpsGlsl,
-        ))));
+        engine.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new())));
         let frame = Revision::new(1);
         let root = engine.tree().root();
         let spine = test_placeholder_spine();
@@ -3682,9 +3677,7 @@ mod tests {
         let ticks = Arc::new(AtomicU32::new(0));
         let mut engine = Engine::new(TreePath::parse("/show.t").unwrap());
         let registry = ProjectRegistry::new();
-        engine.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new(
-            lp_shader::ShaderFrontend::LpsGlsl,
-        ))));
+        engine.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new())));
         let frame = Revision::new(1);
         let root = engine.tree().root();
         let spine = test_placeholder_spine();
@@ -3872,9 +3865,7 @@ mod tests {
         let ticks = Arc::new(AtomicU32::new(0));
         let mut engine = Engine::new(TreePath::parse("/show.t").unwrap());
         let registry = ProjectRegistry::new();
-        engine.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new(
-            lp_shader::ShaderFrontend::LpsGlsl,
-        ))));
+        engine.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new())));
         let frame = Revision::new(1);
         let root = engine.tree().root();
         let spine = test_placeholder_spine();
@@ -4423,9 +4414,7 @@ vec4 render_2d(vec2 pos) { return vec4(pos.x / outputSize.x, pos.y / outputSize.
     }
 
     fn graphics() -> Arc<dyn lp_gfx::LpGraphics> {
-        Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new(
-            lp_shader::ShaderFrontend::LpsGlsl,
-        ))
+        Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new())
     }
 
     fn shader_def(space: ShaderSpace) -> ShaderDef {

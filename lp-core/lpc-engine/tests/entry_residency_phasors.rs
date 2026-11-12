@@ -43,7 +43,7 @@ fn an_unloaded_entry_leaves_no_phasor_behind() {
     let services = EngineServices::new(TreePath::parse("/phasors.show").expect("path"));
     let mut rt = ProjectLoader::load_from_root(&fs, services).expect("load project");
     rt.engine_mut().set_graphics(Some(std::sync::Arc::new(
-        lp_gfx_lpvm::TargetLpvmGraphics::new(lp_shader::ShaderFrontend::LpsGlsl),
+        lp_gfx_lpvm::TargetLpvmGraphics::new(),
     )));
 
     let first = cycle_until_pulse_unloads(&mut rt, &fs);

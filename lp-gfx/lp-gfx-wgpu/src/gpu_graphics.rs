@@ -229,9 +229,8 @@ impl LpGraphics for GpuGraphics {
     /// implements [`ShaderSemantics::F32Gpu`] only. An explicit
     /// [`ShaderSemantics::Q32`] request is rejected with
     /// [`GfxError::Backend`] — Q32 options are never silently dropped onto
-    /// float GPU arithmetic. (`options.frontend` selects a GLSL → LPIR
-    /// frontend and does not apply here: the GPU tier forks at the GLSL
-    /// source and always translates through naga glsl-in.)
+    /// float GPU arithmetic. (The GPU tier forks at the GLSL source and
+    /// always translates through naga glsl-in; it has no GLSL → LPIR frontend.)
     fn compile_shader(
         &self,
         source: &str,
@@ -265,13 +264,6 @@ impl LpGraphics for GpuGraphics {
 
     fn native_semantics(&self) -> ShaderSemantics {
         ShaderSemantics::F32Gpu
-    }
-
-    /// The GPU tier forks at the GLSL source and always translates through
-    /// naga glsl-in (`compile_shader` ignores `options.frontend`), so the
-    /// advertised frontend is a constant, not a construction-time choice.
-    fn glsl_frontend(&self) -> lp_shader::ShaderFrontend {
-        lp_shader::ShaderFrontend::Naga
     }
 
     fn create_render_target(&self, width: u32, height: u32) -> Result<TextureHandle, GfxError> {
@@ -552,7 +544,7 @@ mod tests {
         Some(GpuGraphics::new(
             device,
             queue,
-            Box::new(TargetLpvmGraphics::new(lp_shader::ShaderFrontend::LpsGlsl)),
+            Box::new(TargetLpvmGraphics::new()),
         ))
     }
 
@@ -575,8 +567,7 @@ mod tests {
             eprintln!("SKIP: no GPU adapter available");
             return;
         };
-        let options =
-            ShaderCompileOptions::new(ShaderSemantics::Q32, lp_shader::ShaderFrontend::LpsGlsl);
+        let options = ShaderCompileOptions::new(ShaderSemantics::Q32);
         match graphics.compile_shader("vec4 render_2d(vec2 pos) { return vec4(0.0); }", &options) {
             Err(GfxError::Backend(message)) => {
                 assert!(message.contains("Q32"), "message names the tier: {message}");
@@ -637,8 +628,7 @@ void tick() {
             eprintln!("SKIP: no GPU adapter available");
             return;
         };
-        let options =
-            ShaderCompileOptions::new(ShaderSemantics::F32Gpu, lp_shader::ShaderFrontend::LpsGlsl);
+        let options = ShaderCompileOptions::new(ShaderSemantics::F32Gpu);
         let mut shader = graphics
             .compile_shader(
                 "layout(binding = 0) uniform vec2 outputSize;\n\
@@ -675,8 +665,7 @@ void tick() {
             eprintln!("SKIP: no GPU adapter available");
             return;
         };
-        let options =
-            ShaderCompileOptions::new(ShaderSemantics::F32Gpu, lp_shader::ShaderFrontend::LpsGlsl);
+        let options = ShaderCompileOptions::new(ShaderSemantics::F32Gpu);
         let mut shader = graphics
             .compile_shader(
                 "layout(binding = 0) uniform float time;\n\
@@ -703,7 +692,7 @@ void tick() {
             eprintln!("SKIP: no GPU adapter available");
             return;
         };
-        let cpu = TargetLpvmGraphics::new(lp_shader::ShaderFrontend::LpsGlsl);
+        let cpu = TargetLpvmGraphics::new();
 
         // Deterministic pseudo-random u16 channels (2×2 RGBA16).
         let previous: Vec<u16> = (0..16u32)
@@ -768,8 +757,7 @@ void tick() {
             .create_texture(2, 1, TextureStorageFormat::Rgba16Unorm, &texels)
             .expect("create");
 
-        let mut options =
-            ShaderCompileOptions::new(ShaderSemantics::F32Gpu, lp_shader::ShaderFrontend::LpsGlsl);
+        let mut options = ShaderCompileOptions::new(ShaderSemantics::F32Gpu);
         options.textures.insert(
             String::from("inputColor"),
             lp_shader::texture_binding::texture2d(
@@ -813,8 +801,7 @@ void tick() {
             .create_texture(1, 1, TextureStorageFormat::Rgba16Unorm, &texels)
             .expect("create");
 
-        let mut options =
-            ShaderCompileOptions::new(ShaderSemantics::F32Gpu, lp_shader::ShaderFrontend::LpsGlsl);
+        let mut options = ShaderCompileOptions::new(ShaderSemantics::F32Gpu);
         options.textures.insert(
             String::from("t"),
             lp_shader::texture_binding::height_one(
@@ -899,8 +886,7 @@ void tick() {
             return;
         };
         // Declared sampler without a spec.
-        let options =
-            ShaderCompileOptions::new(ShaderSemantics::F32Gpu, lp_shader::ShaderFrontend::LpsGlsl);
+        let options = ShaderCompileOptions::new(ShaderSemantics::F32Gpu);
         match graphics.compile_shader(
             "uniform sampler2D mystery;\n\
              vec4 render_2d(vec2 pos) { return vec4(0.0); }\n",
@@ -914,8 +900,7 @@ void tick() {
         }
 
         // Spec naming a sampler the shader does not declare.
-        let mut options =
-            ShaderCompileOptions::new(ShaderSemantics::F32Gpu, lp_shader::ShaderFrontend::LpsGlsl);
+        let mut options = ShaderCompileOptions::new(ShaderSemantics::F32Gpu);
         options.textures.insert(
             String::from("ghost"),
             lp_shader::texture_binding::texture2d(
@@ -1017,8 +1002,7 @@ void tick() {
             eprintln!("SKIP: no GPU adapter available");
             return;
         };
-        let options =
-            ShaderCompileOptions::new(ShaderSemantics::F32Gpu, lp_shader::ShaderFrontend::LpsGlsl);
+        let options = ShaderCompileOptions::new(ShaderSemantics::F32Gpu);
         let mut shader = graphics
             .compile_shader(
                 "layout(binding = 0) uniform vec2 outputSize;\n\
@@ -1069,9 +1053,8 @@ void tick() {
             eprintln!("SKIP: no GPU adapter available");
             return;
         };
-        let options =
-            ShaderCompileOptions::new(ShaderSemantics::F32Gpu, lp_shader::ShaderFrontend::LpsGlsl)
-                .with_space(lp_shader::ShaderEntrySpace::OneD);
+        let options = ShaderCompileOptions::new(ShaderSemantics::F32Gpu)
+            .with_space(lp_shader::ShaderEntrySpace::OneD);
         let mut shader = graphics
             .compile_shader(
                 "layout(binding = 0) uniform vec2 outputSize;\n\
@@ -1108,9 +1091,8 @@ void tick() {
             eprintln!("SKIP: no GPU adapter available");
             return;
         };
-        let options =
-            ShaderCompileOptions::new(ShaderSemantics::F32Gpu, lp_shader::ShaderFrontend::LpsGlsl)
-                .with_space(lp_shader::ShaderEntrySpace::OneD);
+        let options = ShaderCompileOptions::new(ShaderSemantics::F32Gpu)
+            .with_space(lp_shader::ShaderEntrySpace::OneD);
         let mut shader = graphics
             .compile_shader(
                 "layout(binding = 0) uniform vec2 outputSize;\n\
@@ -1148,8 +1130,7 @@ void tick() {
             eprintln!("SKIP: no GPU adapter available");
             return;
         };
-        let options =
-            ShaderCompileOptions::new(ShaderSemantics::F32Gpu, lp_shader::ShaderFrontend::LpsGlsl);
+        let options = ShaderCompileOptions::new(ShaderSemantics::F32Gpu);
         let mut shader = graphics
             .compile_shader("vec4 render_2d(vec2 pos) { return vec4(0.5); }", &options)
             .expect("compiles");
@@ -1171,8 +1152,7 @@ void tick() {
             eprintln!("SKIP: no GPU adapter available");
             return;
         };
-        let options =
-            ShaderCompileOptions::new(ShaderSemantics::F32Gpu, lp_shader::ShaderFrontend::LpsGlsl);
+        let options = ShaderCompileOptions::new(ShaderSemantics::F32Gpu);
         let mut shader = graphics
             .compile_shader(
                 "vec4 render_2d(vec2 pos) { return vec4(pos.x / 16.0, 0.0, 0.0, 1.0); }",
@@ -1233,8 +1213,7 @@ void tick() {
             eprintln!("SKIP: no GPU adapter available");
             return;
         };
-        let options =
-            ShaderCompileOptions::new(ShaderSemantics::F32Gpu, lp_shader::ShaderFrontend::LpsGlsl);
+        let options = ShaderCompileOptions::new(ShaderSemantics::F32Gpu);
         let mut shader = graphics
             .compile_shader(
                 "vec4 render_2d(vec2 pos) { return vec4(pos.x / 16.0, 0.0, 0.0, 1.0); }",

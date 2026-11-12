@@ -1,6 +1,6 @@
 //! High-level shader compilation and texture API.
 //!
-//! Wraps GLSL frontends + `lpvm` so consumers do not duplicate the
+//! Wraps the GLSL frontend (`lps-glsl`) + `lpvm` so consumers do not duplicate the
 //! compile → lower → `LpvmEngine::compile` pipeline.
 //!
 //! Helpers [`texture_binding`], [`CompilePxDesc::with_texture_spec`], and
@@ -34,7 +34,7 @@ pub use compile_job::{
     ShaderCompileBudget, ShaderCompileJob, ShaderCompileStage, ShaderCompileStageDetail,
     ShaderCompileStepResult,
 };
-pub use compile_px_desc::{CompilePxDesc, ShaderFrontend, TextureBindingSpecs, texture_binding};
+pub use compile_px_desc::{CompilePxDesc, TextureBindingSpecs, texture_binding};
 pub use compile_stats::{FloatImpl, LpsCompileStats};
 pub use compute_abi::{ComputeAbi, ComputeOutputAbi};
 pub use compute_shader::LpsComputeShader;

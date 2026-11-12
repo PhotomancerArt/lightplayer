@@ -63,8 +63,7 @@ fn a_refused_old_startup_project_ends_its_load_record() {
         "projects".as_path(),
         None,
         None,
-        Arc::new(TargetLpvmGraphics::new(lpa_server::DEVICE_SHADER_FRONTEND))
-            as Arc<dyn LpGraphics>,
+        Arc::new(TargetLpvmGraphics::new()) as Arc<dyn LpGraphics>,
     );
     let error = server
         .load_startup_project("/projects/eaves".as_path())

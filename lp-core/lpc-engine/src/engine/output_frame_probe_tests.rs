@@ -534,9 +534,7 @@ impl Harness {
     fn build_with_lamps(color: [u16; 4], lamps: u32) -> Self {
         let mut engine = Engine::new(TreePath::parse("/show.t").expect("root path"));
         let registry = ProjectRegistry::new();
-        engine.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new(
-            lp_shader::ShaderFrontend::LpsGlsl,
-        ))));
+        engine.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new())));
         let frame = Revision::new(1);
         let root = engine.tree().root();
         let spine = test_placeholder_spine();

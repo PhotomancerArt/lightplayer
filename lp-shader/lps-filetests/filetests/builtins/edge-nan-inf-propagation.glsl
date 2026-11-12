@@ -15,14 +15,11 @@
 //
 // The wildcard replaces per-target enumerations that had drifted. Two targets
 // were executing the first two assertions purely because a line was missing
-// from their block, and that is not coverage: `rv32lpn.q32` differs from
-// `xtlpn.q32` only in the ISA, was excluded by hand, and passes identically
+// from their block, and that is not coverage: `rv32n.q32` differs from
+// `xtn.q32` only in the ISA, was excluded by hand, and passes identically
 // when you strip the exclusion. Which of the two ends up asserting behaviour
 // its numeric model cannot represent is an accident of list maintenance. A
 // wildcard cannot drift.
-//
-// (The naga frontend cannot compile this file; the lps-glsl frontend can.
-// Earlier notes here said no target compiled it, which was never true.)
 
 bool test_isnan_inf() {
     // isnan with positive infinity should be false
