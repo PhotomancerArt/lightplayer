@@ -107,6 +107,12 @@ Stacked PRs feel it first, because they carry several features' tests at once.
   and Wi‑Fi 3.4. Split, not bumped: the Wi‑Fi and relay cells are
   `Emulator ESP32-S3 Wi-Fi and relay (x64)`, their own job, which also pays
   down 2026-10-28's note above (the ratchet had never completed there).
+- 2026-11-12 — PR #1338 (markdown renamed to `.ai.md`, no emulator code
+  touched), run 43163616638: `Emulator C6 (x64)` cancelled at its 35-minute
+  budget, the second after `an_emulated_c6_reaches_lightplayer_app_through_the_lans_uplink`
+  passed (235.8 s for its three-test binary, one test past 60 s) and every
+  test before it green. main's last two runs of the job took 19 and 28
+  minutes, so a slow runner alone now crosses the budget.
 
 **Exit criteria** — each emulator job's budget sits at 2–3× its measured max
 with room to spare, and adding a device test names the job it lands in and that
