@@ -1,8 +1,9 @@
 # lp-nor-sim
 
 A deterministic, sans-IO model of SPI NOR flash that loses power on demand.
-It is the ground the storage testbed (`tools/lp-store-bench`) runs every
-candidate store on, so its own correctness matters more than its speed.
+It is the ground `lp-tree-store`'s cut tests run on (and the storage
+testbed, `tools/lp-store-bench`, raced every candidate store on before it
+was deleted on 2026-11-12), so its own correctness matters more than its speed.
 `no_std` + `alloc`, no dependencies beyond `embedded-storage`'s traits.
 Nothing here is linked into firmware. The emulated ESP32-C6's flash chip
 also tears with these models: `lp-emu-esp-common`'s `engine::flash_cut`

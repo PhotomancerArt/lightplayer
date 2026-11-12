@@ -19,8 +19,9 @@
 //! believe the record it re-programs, and a verify-after-write miss its
 //! record; a stale line after an erase makes the erase check retire a good
 //! sector. The `mutants` feature's `ReadsWithoutInvalidate` breaks it, and
-//! `lp-store-bench` runs its drivers over [`SimLineCache`] (which serves
-//! stale lines as a real cache does) to show they catch it.
+//! [`SimLineCache`] serves stale lines as a real cache does, so a driver
+//! run over it shows the store catches it (`lp-store-bench` (deleted 2026-11-12; in git at `0fa18f2b5`) ran its drivers
+//! that way).
 //!
 //! The window's side ([`ReadWindow`]) is the platform's: the C6's MMU
 //! window and the ROM's range invalidate (`fw-esp32c6`'s `tree_flash.rs`),

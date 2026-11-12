@@ -23,11 +23,12 @@ host-deflate = ["deflate-plan", "soft-sha"]
 lpfs = ["dep:lpfs"]
 # `impl Flash for lp_nor_sim::NorFlashSim`.
 nor-sim = ["dep:lp-nor-sim"]
-# `TreeStore::stats`: counters and RAM-peak accounting (tests, the bench).
+# `TreeStore::stats`: counters and RAM-peak accounting (tests).
 # Off in firmware: ~0.7 KB of RV32 code for numbers nothing on a device reads.
 stats = []
 # Test-only mutation switches (`mutants::set_mutant`): each breaks one
-# guarantee on purpose, for `lp-store-bench mutants`. Never in a product build.
+# guarantee on purpose. Its user was `lp-store-bench mutants` (deleted
+# 2026-11-12; in git at `0fa18f2b5`). Never in a product build.
 mutants = []
 # `StoreImage`: the read-only inspector over a raw image of the partition
 # (`lp-cli hardware tree inspect|check|extract`). Host tooling; never on a
