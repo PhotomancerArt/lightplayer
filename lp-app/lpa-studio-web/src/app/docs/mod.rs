@@ -45,6 +45,11 @@ pub struct DocPage {
     pub title: &'static str,
     /// The article body, compiled in from `docs/user-guide/`.
     pub markdown: &'static str,
+    /// The article's file is `.ai.md`: an agent wrote it and no person has
+    /// rewritten it yet, and the page says so above the article. `build.rs`
+    /// fails the build when this disagrees with the file name, so renaming
+    /// the rewritten file to `.md` is what takes the note away.
+    pub agent_written: bool,
     /// Sims this article's embeds may reference, empty for static pages.
     /// Every `sim=` argument in the article must name one of these — the
     /// generated checks in [`docs_checks`] enforce it, and
@@ -59,6 +64,7 @@ pub const PAGES: &[DocPage] = &[
         slug: "guide",
         title: "Welcome",
         markdown: include_str!("../../../../../docs/user-guide/README.ai.md"),
+        agent_written: true,
         sims: &[DocsSimSpec {
             name: "main",
             example_id: "catalog/plasma-duo",
@@ -68,6 +74,7 @@ pub const PAGES: &[DocPage] = &[
         slug: "what-is-a-shader",
         title: "What's a shader?",
         markdown: include_str!("../../../../../docs/user-guide/what-is-a-shader.ai.md"),
+        agent_written: true,
         sims: &[DocsSimSpec {
             name: "main",
             example_id: "catalog/plasma-duo",
@@ -77,6 +84,7 @@ pub const PAGES: &[DocPage] = &[
         slug: "the-peach",
         title: "The peach",
         markdown: include_str!("../../../../../docs/user-guide/the-peach.ai.md"),
+        agent_written: true,
         // Two sims, because the article's argument IS the pair: the same
         // artwork, the same wire, the same patch files, declared 1D and 2D.
         // A reader who cannot see them side by side has to take it on faith.
@@ -95,6 +103,7 @@ pub const PAGES: &[DocPage] = &[
         slug: "patching-the-dome",
         title: "Patching the dome",
         markdown: include_str!("../../../../../docs/user-guide/patching-the-dome.ai.md"),
+        agent_written: true,
         sims: &[DocsSimSpec {
             name: "main",
             example_id: "catalog/small-dome",
@@ -104,6 +113,7 @@ pub const PAGES: &[DocPage] = &[
         slug: "brightness-and-smooth-fades",
         title: "Brightness & smooth fades",
         markdown: include_str!("../../../../../docs/user-guide/brightness-and-smooth-fades.ai.md"),
+        agent_written: true,
         sims: &[],
     },
 ];
