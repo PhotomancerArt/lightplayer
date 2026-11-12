@@ -339,14 +339,14 @@ def render(summaries, args):
             "",
             "then commit the records with the change that moved them and push. If only the *emulator* "
             "changed, a moved figure is a finding: do not apply it. "
-            f"([docs/chip-figures.ai.md](https://github.com/{args.repo}/blob/main/docs/chip-figures.md))",
+            f"([docs/chip-figures.ai.md](https://github.com/{args.repo}/blob/main/docs/chip-figures.ai.md))",
             "",
         ]
         if any(s["job"] == "c6-first-light" for s in patched):
             out += [
                 "The first-light ratchet's record is the exception: a drop, or a move on a PR that "
                 "does not change the image, is CI's to re-record and yours to apply "
-                f"([docs/first-light-ratchet.ai.md](https://github.com/{args.repo}/blob/main/docs/first-light-ratchet.md)).",
+                f"([docs/first-light-ratchet.ai.md](https://github.com/{args.repo}/blob/main/docs/first-light-ratchet.ai.md)).",
                 "",
             ]
         for s in patched:
@@ -435,7 +435,7 @@ def first_light_section(s, args):
         "**No patch, and `just apply-ci-figures` refuses one.** A rise is Yona's call: "
         "`just bless-first-light <ms>` on the branch (writes `recorded_by: yona`), commit, put the "
         "label `first-light-blessed` on this PR and re-run the job. "
-        f"([docs/first-light-ratchet.ai.md](https://github.com/{args.repo}/blob/main/docs/first-light-ratchet.md))",
+        f"([docs/first-light-ratchet.ai.md](https://github.com/{args.repo}/blob/main/docs/first-light-ratchet.ai.md))",
         "",
     ]
     return out

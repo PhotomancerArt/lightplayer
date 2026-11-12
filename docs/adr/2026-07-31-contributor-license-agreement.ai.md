@@ -34,7 +34,7 @@ recorded formalization as an open follow-up.
 
 **1. Grant-style Individual CLA, adapted from the Apache ICLA.** Outside
 contributors sign the LightPlayer Individual Contributor License Agreement
-(`docs/cla/individual-cla.ai.md`) once, before their first PR merges. Its
+(`docs/cla/individual-cla.md`) once, before their first PR merges. Its
 substance:
 
 - perpetual, worldwide, irrevocable, royalty-free copyright license including
@@ -51,7 +51,7 @@ substance:
   material disclosure, tied to the provenance ADR's rules.
 
 **2. Corporate CLA variant for employer-owned work.**
-`docs/cla/corporate-cla.ai.md` mirrors the individual agreement but is executed
+`docs/cla/corporate-cla.md` mirrors the individual agreement but is executed
 by the employing entity with a schedule of designated contributors. Work made
 for hire is owned by the employer, so an individual signature alone is not
 sufficient for it — this is the most common way relicensing chains break, and

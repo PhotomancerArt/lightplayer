@@ -19,7 +19,7 @@ Agreement.
 The deal, in plain terms: **you keep ownership of your work**, it will always
 remain available under an OSI-approved open-source license, and you grant the
 maintainer the right to also license it commercially. The full text is short
-and worth reading: [docs/cla/individual-cla.ai.md](docs/cla/individual-cla.ai.md).
+and worth reading: [docs/cla/individual-cla.md](docs/cla/individual-cla.md).
 
 Signing is automatic — on your first pull request, the CLA bot will prompt
 you, and you sign by posting a comment. The signature is recorded once against
@@ -27,7 +27,7 @@ your GitHub account and covers future contributions.
 
 If you are contributing as part of your job (your employer owns the rights to
 your work), your employer needs to execute the
-[Corporate CLA](docs/cla/corporate-cla.ai.md) instead — contact
+[Corporate CLA](docs/cla/corporate-cla.md) instead — contact
 <photomancerart@gmail.com>.
 
 Additionally, sign off each commit (`git commit -s`) to certify, per the
