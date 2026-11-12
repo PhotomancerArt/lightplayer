@@ -1,7 +1,7 @@
 //! System prompt assembly from [`ShaderContext`] + a static template.
 //!
 //! Rebuilt every turn so the injected current source tracks staged edits.
-//! Snapshot-tested against `system_prompt_snapshot.ai.md` (regenerate with
+//! Snapshot-tested against `system_prompt_snapshot.md` (regenerate with
 //! `LPA_AGENT_UPDATE_SNAPSHOTS=1 cargo test -p lpa-agent`).
 
 use std::fmt::Write as _;

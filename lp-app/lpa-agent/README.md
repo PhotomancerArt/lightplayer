@@ -19,7 +19,7 @@ and the dispatch:
 - **`ShaderToolset<H: AgentHost>`** — the shader agent exactly as it was
   before the seam: three tools, a system prompt rebuilt every turn from
   the host (it embeds the current source), no state block. Its prompt
-  snapshot (`src/prompt/system_prompt_snapshot.ai.md`) is the regression
+  snapshot (`src/prompt/system_prompt_snapshot.md`) is the regression
   guard. `AgentSession::new(provider, host)` builds one.
 - **`AppToolset<H: AppAgentHost>`** (`src/tool/app/`) — the app agent. Its
   system prompt (`src/prompt/app/`) is built once and is **byte-stable for
