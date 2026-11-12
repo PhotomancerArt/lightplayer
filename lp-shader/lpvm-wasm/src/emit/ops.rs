@@ -544,7 +544,10 @@ pub(crate) fn emit_op(
         }
         LpirOp::FconstF32 { dst, value } => match fm {
             FloatMode::Q32 => {
-                let q = q32::f32_to_q16_16(*value);
+                // Round to nearest, as the native and Cranelift backends
+                // encode constants: truncating gave `π/180` one quantum less
+                // than the device, and `radians(90.0)` 1.5697 for 1.5710.
+                let q = lps_q32::q32_encode(*value);
                 sink.i32_const(q).local_set(dst.0);
             }
             FloatMode::F32 => {
@@ -690,7 +693,7 @@ pub(crate) fn emit_op(
         },
         LpirOp::Fnearest { dst, src } => match fm {
             FloatMode::Q32 => {
-                let callee = imports::import_callee(ir, "glsl", "round")?;
+                let callee = imports::import_callee(ir, "lpir", "fnearest")?;
                 let idx = wasm_func_index(fctx, callee)?;
                 sink.local_get(src.0).call(idx).local_set(dst.0);
             }
