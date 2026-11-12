@@ -6,5 +6,5 @@ pub(super) use super::coerce::{
     has_bool_lanes, vector_dominant_type, zero_expr,
 };
 pub(super) use super::place::access_lanes;
-pub(super) use super::scalar::{binary_op_token, glsl_param_token, is_comparison, is_logical};
+pub(super) use super::scalar::{binary_op_token, glsl_param_token, is_bitwise, is_comparison, is_logical};
 pub use super::scalar::{scalar_base_type, scalar_ir_types, scalar_lane_count};

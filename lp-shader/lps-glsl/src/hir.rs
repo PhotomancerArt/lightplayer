@@ -752,6 +752,11 @@ fn eval_parsed_const_int(expr: &ParsedExpr<'_>, consts: &ArraySizeConsts) -> Opt
                 BinaryOp::Mul => lhs.checked_mul(rhs),
                 BinaryOp::Div => lhs.checked_div(rhs),
                 BinaryOp::Mod => lhs.checked_rem(rhs),
+                BinaryOp::BitAnd => Some(lhs & rhs),
+                BinaryOp::BitOr => Some(lhs | rhs),
+                BinaryOp::BitXor => Some(lhs ^ rhs),
+                BinaryOp::Shl => lhs.checked_shl(u32::try_from(rhs).ok()?),
+                BinaryOp::Shr => lhs.checked_shr(u32::try_from(rhs).ok()?),
                 _ => None,
             }
         }

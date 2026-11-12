@@ -136,11 +136,22 @@ impl<'src> Lexer<'src> {
     fn lex_punct(&mut self) -> Result<TokenKind, Diagnostic> {
         let start = self.pos;
         let b = self.bump().expect("punct byte");
+        // Shifts first: `<<` / `>>`, then an optional `=` for `<<=` / `>>=`.
+        if matches!(b, b'<' | b'>') && self.peek() == Some(b) {
+            self.bump();
+            if self.peek() == Some(b'=') {
+                self.bump();
+            }
+            return Ok(TokenKind::Punct);
+        }
         let two_char = matches!(
             (b, self.peek()),
             (b'+', Some(b'+' | b'='))
                 | (b'-', Some(b'-' | b'='))
-                | (b'*' | b'/' | b'%' | b'=' | b'!' | b'<' | b'>', Some(b'='))
+                | (
+                    b'*' | b'/' | b'%' | b'=' | b'!' | b'<' | b'>' | b'&' | b'|' | b'^',
+                    Some(b'=')
+                )
                 | (b'&', Some(b'&'))
                 | (b'|', Some(b'|'))
                 | (b'^', Some(b'^'))
@@ -169,6 +180,9 @@ impl<'src> Lexer<'src> {
                 | b'='
                 | b'!'
                 | b'^'
+                | b'&'
+                | b'|'
+                | b'~'
                 | b'<'
                 | b'>'
         ) {

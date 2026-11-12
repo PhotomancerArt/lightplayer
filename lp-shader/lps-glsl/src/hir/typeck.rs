@@ -26,7 +26,7 @@ use super::types::{
 use super::typing::builtin_has_out_args;
 use super::typing::{
     access_lanes, binary_op_token, builtin_kind, coerce_arithmetic_pair, coerce_comparison_pair,
-    coerce_constructor_args, coerce_expr, glsl_param_token, has_bool_lanes, is_comparison,
+    coerce_constructor_args, coerce_expr, glsl_param_token, has_bool_lanes, is_bitwise, is_comparison,
     is_glsl_import, is_logical, scalar_base_type, scalar_ir_types, scalar_lane_count,
     type_builtin_args, type_glsl_import_args, vector_dominant_type, zero_expr,
 };
@@ -442,6 +442,13 @@ impl<'a> TypeCtx<'a> {
                         inner_ty
                     }
                     UnaryOp::Not => LpsType::Bool,
+                    UnaryOp::BitNot if is_integer_lanes(&inner_ty) => inner_ty,
+                    UnaryOp::BitNot => {
+                        return Err(Diagnostic::error(
+                            expr.span,
+                            format!("'~' expects int or uint lanes, got {inner_ty:?}"),
+                        ));
+                    }
                     _ => {
                         return Err(Diagnostic::error(
                             expr.span,
@@ -1022,6 +1029,9 @@ impl<'a> TypeCtx<'a> {
                 .arena
                 .push_expr(span, ty, HirExprKind::Binary { op, lhs, rhs }));
         }
+        if is_bitwise(op) {
+            return self.type_bitwise(span, op, lhs, rhs);
+        }
         if op == BinaryOp::Mul
             && let Some(ty) =
                 matrix_vector_multiply_type(self.arena.expr_ty(lhs), self.arena.expr_ty(rhs))
@@ -1050,6 +1060,51 @@ impl<'a> TypeCtx<'a> {
         if op == BinaryOp::Mod && scalar_base_type(&ty) == Some(LpsType::Float) {
             return Err(Diagnostic::error(span, "modulo requires integer operands"));
         }
+        Ok(self
+            .arena
+            .push_expr(span, ty, HirExprKind::Binary { op, lhs, rhs }))
+    }
+
+    /// `& | ^ << >>` (GLSL ES 3.00 §5.9): integer lanes only, no matrices.
+    ///
+    /// `& | ^` take a common type like arithmetic (a scalar broadcasts over a
+    /// vector). A shift's result is its left operand's type; the shift count
+    /// may differ in signedness, and is a scalar or a vector of the same
+    /// width, so the lowering reads it lane by lane without a coercion.
+    fn type_bitwise(
+        &mut self,
+        span: Span,
+        op: BinaryOp,
+        lhs: ExprId,
+        rhs: ExprId,
+    ) -> Result<ExprId, Diagnostic> {
+        let lhs_ty = self.arena.expr_ty(lhs).clone();
+        let rhs_ty = self.arena.expr_ty(rhs).clone();
+        if !is_integer_lanes(&lhs_ty) || !is_integer_lanes(&rhs_ty) {
+            return Err(Diagnostic::error(
+                span,
+                format!(
+                    "'{}' expects int or uint lanes, got {lhs_ty:?} and {rhs_ty:?}",
+                    binary_op_token(op)
+                ),
+            ));
+        }
+        if matches!(op, BinaryOp::Shl | BinaryOp::Shr) {
+            let rhs_lanes = scalar_lane_count(&rhs_ty);
+            if rhs_lanes != 1 && rhs_lanes != scalar_lane_count(&lhs_ty) {
+                return Err(Diagnostic::error(
+                    span,
+                    format!(
+                        "'{}' shift count must be a scalar or match {lhs_ty:?}, got {rhs_ty:?}",
+                        binary_op_token(op)
+                    ),
+                ));
+            }
+            return Ok(self
+                .arena
+                .push_expr(span, lhs_ty, HirExprKind::Binary { op, lhs, rhs }));
+        }
+        let (lhs, rhs, ty) = coerce_arithmetic_pair(&mut self.arena, span, lhs, rhs)?;
         Ok(self
             .arena
             .push_expr(span, ty, HirExprKind::Binary { op, lhs, rhs }))
@@ -1106,6 +1161,11 @@ impl<'a> TypeCtx<'a> {
             AssignOp::Mul => BinaryOp::Mul,
             AssignOp::Div => BinaryOp::Div,
             AssignOp::Mod => BinaryOp::Mod,
+            AssignOp::BitAnd => BinaryOp::BitAnd,
+            AssignOp::BitOr => BinaryOp::BitOr,
+            AssignOp::BitXor => BinaryOp::BitXor,
+            AssignOp::Shl => BinaryOp::Shl,
+            AssignOp::Shr => BinaryOp::Shr,
         };
         let lhs = self
             .arena
@@ -1675,4 +1735,11 @@ fn matrix_vector_multiply_type(lhs: &LpsType, rhs: &LpsType) -> Option<LpsType> 
         return LpsType::vector_type(&LpsType::Float, cols);
     }
     None
+}
+
+/// `int`/`uint` scalars and vectors: the operands of `~ & | ^ << >>`.
+fn is_integer_lanes(ty: &LpsType) -> bool {
+    !ty.is_matrix()
+        && !matches!(ty, LpsType::Array { .. })
+        && matches!(scalar_base_type(ty), Some(LpsType::Int | LpsType::UInt))
 }

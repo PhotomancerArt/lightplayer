@@ -600,6 +600,20 @@ fn lower_expr(ctx: &mut LowerCtx<'_>, expr: ExprId) -> Result<LowerValue, Diagno
                         .collect::<Lanes>();
                     Ok(LowerValue { ty, lanes })
                 }
+                (UnaryOp::BitNot, ty)
+                    if matches!(scalar_base_type(&ty), Some(LpsType::Int | LpsType::UInt)) =>
+                {
+                    let lanes = inner
+                        .lanes
+                        .iter()
+                        .map(|src| {
+                            let dst = ctx.fb.alloc_vreg(IrType::I32);
+                            ctx.fb.push(LpirOp::Ibnot { dst, src: *src });
+                            dst
+                        })
+                        .collect::<Lanes>();
+                    Ok(LowerValue { ty, lanes })
+                }
                 (UnaryOp::Not, LpsType::Bool) => {
                     let src = single_lane(expr.span, &inner)?;
                     let one = ctx.fb.alloc_vreg(IrType::I32);

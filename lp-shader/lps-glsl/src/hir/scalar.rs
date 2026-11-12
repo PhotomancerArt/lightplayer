@@ -19,6 +19,14 @@ pub(super) fn is_logical(op: BinaryOp) -> bool {
     )
 }
 
+/// The integer-only operators: `& | ^ << >>`.
+pub(super) fn is_bitwise(op: BinaryOp) -> bool {
+    matches!(
+        op,
+        BinaryOp::BitAnd | BinaryOp::BitOr | BinaryOp::BitXor | BinaryOp::Shl | BinaryOp::Shr
+    )
+}
+
 /// Source spelling of a binary operator, for diagnostics.
 pub(super) fn binary_op_token(op: BinaryOp) -> &'static str {
     match op {
@@ -31,6 +39,11 @@ pub(super) fn binary_op_token(op: BinaryOp) -> &'static str {
         BinaryOp::LogicalAnd => "&&",
         BinaryOp::LogicalOr => "||",
         BinaryOp::LogicalXor => "^^",
+        BinaryOp::BitAnd => "&",
+        BinaryOp::BitOr => "|",
+        BinaryOp::BitXor => "^",
+        BinaryOp::Shl => "<<",
+        BinaryOp::Shr => ">>",
         BinaryOp::Lt => "<",
         BinaryOp::Le => "<=",
         BinaryOp::Gt => ">",

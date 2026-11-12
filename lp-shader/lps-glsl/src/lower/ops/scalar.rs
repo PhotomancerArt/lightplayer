@@ -284,6 +284,36 @@ pub(in crate::lower) fn lower_binary(
                         lhs: l,
                         rhs: r,
                     },
+                    BinaryOp::BitAnd => LpirOp::Iand {
+                        dst,
+                        lhs: l,
+                        rhs: r,
+                    },
+                    BinaryOp::BitOr => LpirOp::Ior {
+                        dst,
+                        lhs: l,
+                        rhs: r,
+                    },
+                    BinaryOp::BitXor => LpirOp::Ixor {
+                        dst,
+                        lhs: l,
+                        rhs: r,
+                    },
+                    BinaryOp::Shl => LpirOp::Ishl {
+                        dst,
+                        lhs: l,
+                        rhs: r,
+                    },
+                    BinaryOp::Shr if base_ty == LpsType::UInt => LpirOp::IshrU {
+                        dst,
+                        lhs: l,
+                        rhs: r,
+                    },
+                    BinaryOp::Shr => LpirOp::IshrS {
+                        dst,
+                        lhs: l,
+                        rhs: r,
+                    },
                     _ => return Err(Diagnostic::error(span, "unsupported integer binary op")),
                 };
                 ctx.fb.push(op);

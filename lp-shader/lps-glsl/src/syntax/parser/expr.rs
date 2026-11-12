@@ -8,6 +8,10 @@ use crate::{Diagnostic, Span, TokenKind};
 use super::BodyParser;
 use super::ty::token_text_is_type_name;
 
+/// Binding power of a prefix operator's operand: tighter than every binary
+/// operator in [`BodyParser::current_binary_op`].
+const UNARY_BINDING_POWER: u8 = 23;
+
 impl<'src, 'tok> BodyParser<'src, 'tok> {
     pub(super) fn parse_expr(
         &mut self,
@@ -114,7 +118,7 @@ impl<'src, 'tok> BodyParser<'src, 'tok> {
                     kind: ParsedExprKind::IntLiteral(value),
                 });
             }
-            let expr = self.parse_expr(15)?;
+            let expr = self.parse_expr(UNARY_BINDING_POWER)?;
             return Ok(ParsedExpr {
                 span: Span::new(start, expr.span.end),
                 kind: ParsedExprKind::Unary {
@@ -125,15 +129,20 @@ impl<'src, 'tok> BodyParser<'src, 'tok> {
         }
         if self.at_punct("+") {
             self.bump();
-            return self.parse_expr(15);
+            return self.parse_expr(UNARY_BINDING_POWER);
         }
-        if self.at_punct("!") {
-            let start = self.bump().span.start;
-            let expr = self.parse_expr(15)?;
+        if self.at_punct("!") || self.at_punct("~") {
+            let op_tok = self.bump();
+            let op = if op_tok.lexeme(self.source) == "!" {
+                UnaryOp::Not
+            } else {
+                UnaryOp::BitNot
+            };
+            let expr = self.parse_expr(UNARY_BINDING_POWER)?;
             return Ok(ParsedExpr {
-                span: Span::new(start, expr.span.end),
+                span: Span::new(op_tok.span.start, expr.span.end),
                 kind: ParsedExprKind::Unary {
-                    op: UnaryOp::Not,
+                    op,
                     expr: alloc::boxed::Box::new(expr),
                 },
             });
@@ -403,18 +412,28 @@ impl<'src, 'tok> BodyParser<'src, 'tok> {
             "&&" => BinaryOp::LogicalAnd,
             "||" => BinaryOp::LogicalOr,
             "^^" => BinaryOp::LogicalXor,
+            "&" => BinaryOp::BitAnd,
+            "|" => BinaryOp::BitOr,
+            "^" => BinaryOp::BitXor,
+            "<<" => BinaryOp::Shl,
+            ">>" => BinaryOp::Shr,
             "," => BinaryOp::Comma,
             _ => return None,
         };
+        // GLSL ES 3.00 §5.1 precedence, loosest first.
         let bp = match op {
             BinaryOp::Comma => (0, 1),
             BinaryOp::LogicalOr => (1, 2),
             BinaryOp::LogicalXor => (3, 4),
             BinaryOp::LogicalAnd => (5, 6),
-            BinaryOp::Eq | BinaryOp::Ne => (7, 8),
-            BinaryOp::Lt | BinaryOp::Le | BinaryOp::Gt | BinaryOp::Ge => (9, 10),
-            BinaryOp::Add | BinaryOp::Sub => (11, 12),
-            BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => (13, 14),
+            BinaryOp::BitOr => (7, 8),
+            BinaryOp::BitXor => (9, 10),
+            BinaryOp::BitAnd => (11, 12),
+            BinaryOp::Eq | BinaryOp::Ne => (13, 14),
+            BinaryOp::Lt | BinaryOp::Le | BinaryOp::Gt | BinaryOp::Ge => (15, 16),
+            BinaryOp::Shl | BinaryOp::Shr => (17, 18),
+            BinaryOp::Add | BinaryOp::Sub => (19, 20),
+            BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => (21, 22),
         };
         Some((op, bp.0, bp.1))
     }
@@ -427,6 +446,11 @@ impl<'src, 'tok> BodyParser<'src, 'tok> {
             "*=" => AssignOp::Mul,
             "/=" => AssignOp::Div,
             "%=" => AssignOp::Mod,
+            "&=" => AssignOp::BitAnd,
+            "|=" => AssignOp::BitOr,
+            "^=" => AssignOp::BitXor,
+            "<<=" => AssignOp::Shl,
+            ">>=" => AssignOp::Shr,
             _ => return None,
         };
         Some(op)

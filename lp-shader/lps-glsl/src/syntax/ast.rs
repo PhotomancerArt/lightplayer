@@ -150,6 +150,8 @@ pub enum ParsedExprKind<'src> {
 pub enum UnaryOp {
     Neg,
     Not,
+    /// `~`: one's complement of an int/uint scalar or vector.
+    BitNot,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -163,6 +165,11 @@ pub enum BinaryOp {
     LogicalAnd,
     LogicalOr,
     LogicalXor,
+    BitAnd,
+    BitOr,
+    BitXor,
+    Shl,
+    Shr,
     Lt,
     Le,
     Gt,
@@ -179,6 +186,11 @@ pub enum AssignOp {
     Mul,
     Div,
     Mod,
+    BitAnd,
+    BitOr,
+    BitXor,
+    Shl,
+    Shr,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
