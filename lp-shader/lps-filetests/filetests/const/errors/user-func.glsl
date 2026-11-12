@@ -4,9 +4,9 @@
 // User-defined function cannot form constant expression.
 
 float get_val() { return 1.0; }
-const float BAD = get_val();  // expected-error {{unknown constructor or non-const function}}
+const float BAD = get_val();  // expected-error {{not a constant expression: calls a user function}}
 
-// Naga stops after the const initializer error; `BAD` is never bound for a follow-up diagnostic.
+// Compilation stops at the const initializer error; `BAD` is never bound for a follow-up diagnostic.
 float probe() {
     return BAD;
 }

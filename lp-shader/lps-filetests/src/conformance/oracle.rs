@@ -3,26 +3,26 @@
 // re-imported here to keep the filetests oracle self-contained (anyhow-based
 // Oracle stays filetests-only).
 
-//! Float oracle: canonical GLSL → `lps-frontend` (naga) → LPIR → f32
+//! Float oracle: canonical GLSL → `lps-glsl` → LPIR → f32
 //! interpretation (`lpir::interpret`).
 //!
-//! `lps-frontend` reserves the `lpfn_` name prefix: every call to an
+//! `lps-glsl` reserves the `lpfn_` name prefix: every call to an
 //! `lpfn_*` function is lowered to an `@lpfn::` builtin import, even when
 //! the module defines a body for it. To compile the canonical sources as
 //! ordinary local GLSL functions, the assembly step renames the `lpfn_`
 //! identifier prefix to `lpo_` ("lp oracle") before handing the unit to the
 //! frontend. Probe functions (unique, un-prefixed names) are appended and
 //! serve as `interpret` entry points, so GLSL overload resolution still
-//! happens in naga.
+//! happens in the front end (overloaded canonicals take signature names in
+//! the IR; the probes are never overloaded).
 //!
 //! Transcendental imports (`@glsl::sin` etc., `@lpir::sqrt`) are evaluated
-//! host-side in f32 by `lps_frontend::std_math_handler::StdMathHandler`
+//! host-side in f32 by `lpir::StdMathHandler`
 //! (libm) — the interpreter itself delegates all imports to the caller.
 
 use anyhow::Context;
-use lpir::{LpirModule, Value, interpret};
+use lpir::{LpirModule, StdMathHandler, Value, interpret};
 use lps_builtins::canonical_glsl::CANONICAL_GLSL;
-use lps_frontend::std_math_handler::StdMathHandler;
 
 /// Compiled oracle module: all canonical sources (renamed) + probes.
 pub struct Oracle {
@@ -59,11 +59,9 @@ impl Oracle {
     /// calls `lpfn_*` functions; it is renamed alongside the canonicals.
     pub fn build(probes: &str) -> anyhow::Result<Self> {
         let src = canonical_unit_source(probes);
-        let naga = lps_frontend::compile(&src)
-            .map_err(|e| anyhow::anyhow!("oracle GLSL compile: {e:?}"))?;
-        let (ir, _meta) =
-            lps_frontend::lower(&naga).map_err(|e| anyhow::anyhow!("oracle lower: {e}"))?;
-        Ok(Self { ir })
+        let output = lps_glsl::compile(&src, &lps_glsl::CompileOptions::default())
+            .map_err(|e| anyhow::anyhow!("oracle GLSL compile: {}", e.render(&src)))?;
+        Ok(Self { ir: output.ir })
     }
 
     /// Run a probe entry point; returns the flattened scalar results.

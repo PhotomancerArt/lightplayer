@@ -4,6 +4,10 @@
 // Global Variable Read Access: Reading from global variables
 // ============================================================================
 
+// Unsupported by design on the lps-glsl targets: LightPlayer shaders have no
+// pipeline stage and no storage, so lps-glsl rejects `in`/`out` globals,
+// `buffer` blocks and `shared` variables at global scope.
+
 float global_float = 42.0;
 int global_int = -123;
 uint global_uint = 987u;
@@ -24,14 +28,8 @@ float test_access_read_float() {
 }
 
 // @unimplemented(frontend!=lp, backend!=wgpu)
-// @unsupported(rv32lpn.q32)
-// @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
-// wasm.f32: shader does not compile on any target (frontend gap) — same cause
-// as the @unsupported entries above, not an f32-specific failure.
-// @unsupported(wasm.f32)
-// @unsupported(rv32lpn.f32)
-// @unsupported(xtlpn.f32)
+// @unsupported(frontend=lp)
 // run: test_access_read_float() ~= 42.0
 
 int test_access_read_int() {
@@ -40,12 +38,8 @@ int test_access_read_int() {
 }
 
 // @unimplemented(frontend!=lp, backend!=wgpu)
-// @unsupported(rv32lpn.q32)
-// @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
-// @unsupported(wasm.f32)
-// @unsupported(rv32lpn.f32)
-// @unsupported(xtlpn.f32)
+// @unsupported(frontend=lp)
 // run: test_access_read_int() == -123
 
 uint test_access_read_uint() {
@@ -54,12 +48,8 @@ uint test_access_read_uint() {
 }
 
 // @unimplemented(frontend!=lp, backend!=wgpu)
-// @unsupported(rv32lpn.q32)
-// @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
-// @unsupported(wasm.f32)
-// @unsupported(rv32lpn.f32)
-// @unsupported(xtlpn.f32)
+// @unsupported(frontend=lp)
 // run: test_access_read_uint() == 987
 
 bool test_access_read_bool() {
@@ -68,12 +58,8 @@ bool test_access_read_bool() {
 }
 
 // @unimplemented(frontend!=lp, backend!=wgpu)
-// @unsupported(rv32lpn.q32)
-// @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
-// @unsupported(wasm.f32)
-// @unsupported(rv32lpn.f32)
-// @unsupported(xtlpn.f32)
+// @unsupported(frontend=lp)
 // run: test_access_read_bool() == true
 
 vec2 test_access_read_vec2() {
@@ -82,12 +68,8 @@ vec2 test_access_read_vec2() {
 }
 
 // @unimplemented(frontend!=lp, backend!=wgpu)
-// @unsupported(rv32lpn.q32)
-// @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
-// @unsupported(wasm.f32)
-// @unsupported(rv32lpn.f32)
-// @unsupported(xtlpn.f32)
+// @unsupported(frontend=lp)
 // run: test_access_read_vec2() ~= vec2(1.0, 2.0)
 
 vec3 test_access_read_vec3() {
@@ -96,12 +78,8 @@ vec3 test_access_read_vec3() {
 }
 
 // @unimplemented(frontend!=lp, backend!=wgpu)
-// @unsupported(rv32lpn.q32)
-// @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
-// @unsupported(wasm.f32)
-// @unsupported(rv32lpn.f32)
-// @unsupported(xtlpn.f32)
+// @unsupported(frontend=lp)
 // run: test_access_read_vec3() ~= vec3(1.0, 2.0, 3.0)
 
 vec4 test_access_read_vec4() {
@@ -110,12 +88,8 @@ vec4 test_access_read_vec4() {
 }
 
 // @unimplemented(frontend!=lp, backend!=wgpu)
-// @unsupported(rv32lpn.q32)
-// @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
-// @unsupported(wasm.f32)
-// @unsupported(rv32lpn.f32)
-// @unsupported(xtlpn.f32)
+// @unsupported(frontend=lp)
 // run: test_access_read_vec4() ~= vec4(1.0, 2.0, 3.0, 4.0)
 
 mat2 test_access_read_mat2() {
@@ -124,12 +98,8 @@ mat2 test_access_read_mat2() {
 }
 
 // @unimplemented(frontend!=lp, backend!=wgpu)
-// @unsupported(rv32lpn.q32)
-// @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
-// @unsupported(wasm.f32)
-// @unsupported(rv32lpn.f32)
-// @unsupported(xtlpn.f32)
+// @unsupported(frontend=lp)
 // run: test_access_read_mat2() ~= mat2(1.0, 2.0, 3.0, 4.0)
 
 float test_access_read_const() {
@@ -138,12 +108,8 @@ float test_access_read_const() {
 }
 
 // @unimplemented(frontend!=lp, backend!=wgpu)
-// @unsupported(rv32lpn.q32)
-// @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
-// @unsupported(wasm.f32)
-// @unsupported(rv32lpn.f32)
-// @unsupported(xtlpn.f32)
+// @unsupported(frontend=lp)
 // run: test_access_read_const() ~= 6.28
 
 float test_access_read_uniform() {
@@ -152,12 +118,8 @@ float test_access_read_uniform() {
 }
 
 // @unimplemented(frontend!=lp, backend!=wgpu)
-// @unsupported(rv32lpn.q32)
-// @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
-// @unsupported(wasm.f32)
-// @unsupported(rv32lpn.f32)
-// @unsupported(xtlpn.f32)
+// @unsupported(frontend=lp)
 // run: test_access_read_uniform() ~= 1.0
 
 vec3 test_access_read_in() {
@@ -166,12 +128,8 @@ vec3 test_access_read_in() {
 }
 
 // @unimplemented(frontend!=lp, backend!=wgpu)
-// @unsupported(rv32lpn.q32)
-// @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
-// @unsupported(wasm.f32)
-// @unsupported(rv32lpn.f32)
-// @unsupported(xtlpn.f32)
+// @unsupported(frontend=lp)
 // run: test_access_read_in() ~= vec3(1.0, 1.0, 1.0)
 
 float test_access_read_buffer() {
@@ -181,12 +139,8 @@ float test_access_read_buffer() {
     return buffer_data[0] + buffer_data[1];
 }
 
-// wgpu.f32: file does not compile through naga glsl-in (mirrors the interp.f32 frontend gap)
+// wgpu.f32: file does not compile through naga glsl-in
 // @unimplemented(frontend!=lp, backend!=wgpu)
-// @unsupported(rv32lpn.q32)
-// @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
-// @unsupported(wasm.f32)
-// @unsupported(rv32lpn.f32)
-// @unsupported(xtlpn.f32)
+// @unsupported(frontend=lp)
 // run: test_access_read_buffer() ~= 15.0

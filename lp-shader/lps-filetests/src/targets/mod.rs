@@ -89,6 +89,10 @@ pub struct Target {
 }
 
 /// All supported targets (`Target::from_name` searches this list).
+///
+/// The frontend: `lps-glsl` everywhere except `rv32n.*` and `xtn.*` (naga's
+/// `lps-frontend`, kept as the comparison point until it is deleted) and
+/// `wgpu.f32` (naga `glsl-in` → `wgsl-out` is the GPU tier itself).
 /// Order: wasm, rv32c, rv32n, rv32lpn, interp, wgpu, xtn, xtlpn, wasm.f32 — used
 /// for error messages and CLI.
 ///
@@ -140,14 +144,14 @@ pub struct Target {
 /// explicitly: `-t rv32lpn.f32`.
 pub const ALL_TARGETS: &[Target] = &[
     Target {
-        frontend: Frontend::Naga,
+        frontend: Frontend::Lp,
         backend: Backend::Wasm,
         float_mode: FloatMode::Q32,
         isa: Isa::Wasm32,
         exec_mode: ExecMode::Emulator,
     },
     Target {
-        frontend: Frontend::Naga,
+        frontend: Frontend::Lp,
         backend: Backend::Rv32,
         float_mode: FloatMode::Q32,
         isa: Isa::Riscv32,
@@ -168,7 +172,7 @@ pub const ALL_TARGETS: &[Target] = &[
         exec_mode: ExecMode::Emulator,
     },
     Target {
-        frontend: Frontend::Naga,
+        frontend: Frontend::Lp,
         backend: Backend::Interp,
         float_mode: FloatMode::F32,
         isa: Isa::Host,
@@ -196,7 +200,7 @@ pub const ALL_TARGETS: &[Target] = &[
         exec_mode: ExecMode::Emulator,
     },
     Target {
-        frontend: Frontend::Naga,
+        frontend: Frontend::Lp,
         backend: Backend::Wasm,
         float_mode: FloatMode::F32,
         isa: Isa::Wasm32,
@@ -232,11 +236,12 @@ pub const ALL_TARGETS: &[Target] = &[
     },
 ];
 
-/// Default targets for local `cargo test` / app runs: rv32n, rv32lpn (lps-glsl
-/// frontend — the primary on-device pipeline), rv32c (Cranelift), wasm (Q32),
+/// Default targets for local `cargo test` / app runs: rv32n (the last default
+/// on naga), rv32lpn (the on-device pipeline), rv32c (Cranelift), wasm (Q32),
 /// interp.f32 (the CI-runnable f32 gate — host LPIR interpretation; the
 /// whole corpus carries triaged f32 expectations via `run[q32]:`/`run[f32]:`
-/// channels and per-target annotations), plus **`wasm.f32`**.
+/// channels and per-target annotations), plus **`wasm.f32`**. Every one but
+/// rv32n compiles through `lps-glsl` (since 2026-11-12).
 ///
 /// **`wasm.f32` joined the defaults 2026-08-02** (roadmap Q6's original intent,
 /// unblocked since M5). It is the only *native-code* f32 target that can run
@@ -491,7 +496,7 @@ mod tests {
             named(AnnotationKind::Unsupported, "wgpu.f32", 2),
         ];
         assert_eq!(
-            directive_disposition(&anns, Target::from_name("wasm.q32").unwrap()),
+            directive_disposition(&anns, Target::from_name("rv32n.q32").unwrap()),
             Disposition::ExpectFailure(AnnotationKind::Broken)
         );
         assert_eq!(

@@ -15,9 +15,6 @@ int test_bitfieldextract_int_simple() {
 // naga lowers bitfieldExtract to the wrong value; the lps-glsl frontend is correct
 // @broken(frontend!=lp, backend!=wgpu)
 // @unsupported(wgpu.f32)
-// wasm.f32: shader does not compile on any target (frontend gap) — same cause
-// as the @unsupported entries above, not an f32-specific failure.
-// @unsupported(wasm.f32)
 // run: test_bitfieldextract_int_simple() == 15
 
 int test_bitfieldextract_int_lsb() {
@@ -28,7 +25,6 @@ int test_bitfieldextract_int_lsb() {
 // naga lowers bitfieldExtract to the wrong value; the lps-glsl frontend is correct
 // @broken(frontend!=lp, backend!=wgpu)
 // @unsupported(wgpu.f32)
-// @unsupported(wasm.f32)
 // run: test_bitfieldextract_int_lsb() == 10
 
 int test_bitfieldextract_int_msb() {
@@ -39,7 +35,6 @@ int test_bitfieldextract_int_msb() {
 // naga lowers bitfieldExtract to the wrong value; the lps-glsl frontend is correct
 // @broken(frontend!=lp, backend!=wgpu)
 // @unsupported(wgpu.f32)
-// @unsupported(wasm.f32)
 // run: test_bitfieldextract_int_msb() == 10
 
 uint test_bitfieldextract_uint_simple() {
@@ -50,7 +45,6 @@ uint test_bitfieldextract_uint_simple() {
 // naga lowers bitfieldExtract to the wrong value; the lps-glsl frontend is correct
 // @broken(frontend!=lp, backend!=wgpu)
 // @unsupported(wgpu.f32)
-// @unsupported(wasm.f32)
 // run: test_bitfieldextract_uint_simple() == 15u
 
 uint test_bitfieldextract_uint_single_bit() {
@@ -61,7 +55,6 @@ uint test_bitfieldextract_uint_single_bit() {
 // naga lowers bitfieldExtract to the wrong value; the lps-glsl frontend is correct
 // @broken(frontend!=lp, backend!=wgpu)
 // @unsupported(wgpu.f32)
-// @unsupported(wasm.f32)
 // run: test_bitfieldextract_uint_single_bit() == 1u
 
 ivec2 test_bitfieldextract_ivec2() {
@@ -72,7 +65,6 @@ ivec2 test_bitfieldextract_ivec2() {
 // wgpu.f32: file does not compile through naga glsl-in (mirrors the interp.f32 frontend gap)
 // @broken(frontend!=lp, backend!=wgpu)
 // @unsupported(wgpu.f32)
-// @unsupported(wasm.f32)
 // run: test_bitfieldextract_ivec2() == ivec2(15, 10)
 
 

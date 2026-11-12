@@ -4,6 +4,10 @@
 // Edge In Write Error: Writing to input globals is a compile error
 // ============================================================================
 
+// Unsupported by design on the lps-glsl targets: LightPlayer shaders have no
+// pipeline stage and no storage, so lps-glsl rejects `in`/`out` globals,
+// `buffer` blocks and `shared` variables at global scope.
+
 in float vertex_time;
 in int vertex_id;
 in vec2 tex_coord;
@@ -23,11 +27,8 @@ float test_edge_in_write_error_read() {
     return vertex_time + 1.0;
 }
 
-// @unsupported(rv32lpn.q32)
-// @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
-// @unsupported(rv32lpn.f32)
-// @unsupported(xtlpn.f32)
+// @unsupported(frontend=lp)
 // run: test_edge_in_write_error_read() ~= 1.0
 
 int test_edge_in_write_error_int() {
@@ -35,11 +36,8 @@ int test_edge_in_write_error_int() {
     return vertex_id + 10;
 }
 
-// @unsupported(rv32lpn.q32)
-// @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
-// @unsupported(rv32lpn.f32)
-// @unsupported(xtlpn.f32)
+// @unsupported(frontend=lp)
 // run: test_edge_in_write_error_int() == 10
 
 vec2 test_edge_in_write_error_vec2() {
@@ -47,11 +45,8 @@ vec2 test_edge_in_write_error_vec2() {
     return tex_coord * 2.0;
 }
 
-// @unsupported(rv32lpn.q32)
-// @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
-// @unsupported(rv32lpn.f32)
-// @unsupported(xtlpn.f32)
+// @unsupported(frontend=lp)
 // run: test_edge_in_write_error_vec2() ~= vec2(0.0, 0.0)
 
 vec3 test_edge_in_write_error_vec3() {
@@ -59,11 +54,8 @@ vec3 test_edge_in_write_error_vec3() {
     return vertex_position + vec3(0.0, 1.0, 0.0);
 }
 
-// @unsupported(rv32lpn.q32)
-// @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
-// @unsupported(rv32lpn.f32)
-// @unsupported(xtlpn.f32)
+// @unsupported(frontend=lp)
 // run: test_edge_in_write_error_vec3() ~= vec3(0.0, 1.0, 0.0)
 
 vec4 test_edge_in_write_error_vec4() {
@@ -71,11 +63,8 @@ vec4 test_edge_in_write_error_vec4() {
     return vertex_color;
 }
 
-// @unsupported(rv32lpn.q32)
-// @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
-// @unsupported(rv32lpn.f32)
-// @unsupported(xtlpn.f32)
+// @unsupported(frontend=lp)
 // run: test_edge_in_write_error_vec4() ~= vec4(0.0, 0.0, 0.0, 0.0)
 
 float test_edge_in_write_error_calculations() {
@@ -90,12 +79,8 @@ float test_edge_in_write_error_calculations() {
 
 // interp.f32: in-qualified vertex inputs are not fed by the filetest harness
 // @unimplemented(frontend!=lp, backend!=wgpu)
-// @unsupported(rv32lpn.q32)
-// @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
-// @unimplemented(wasm.f32)
-// @unsupported(rv32lpn.f32)
-// @unsupported(xtlpn.f32)
+// @unsupported(frontend=lp)
 // run: test_edge_in_write_error_calculations() ~= 7.2
 
 vec4 test_edge_in_write_error_vertex_processing() {
@@ -112,9 +97,6 @@ vec4 test_edge_in_write_error_vertex_processing() {
 }
 
 // wgpu.f32: naga validator rejects the assembled unit (std430 uniform blocks / unsized array constructors are invalid on the GPU tier)
-// @unsupported(rv32lpn.q32)
-// @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
-// @unsupported(rv32lpn.f32)
-// @unsupported(xtlpn.f32)
+// @unsupported(frontend=lp)
 // run: test_edge_in_write_error_vertex_processing() ~= vec4(0.0, 0.0, 0.0, 0.0)

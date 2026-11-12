@@ -4,6 +4,10 @@
 // Edge Multiple Qualifiers Error: Multiple storage qualifiers are not allowed
 // ============================================================================
 
+// Unsupported by design on the lps-glsl targets: LightPlayer shaders have no
+// pipeline stage and no storage, so lps-glsl rejects `in`/`out` globals,
+// `buffer` blocks and `shared` variables at global scope.
+
 // Valid declarations with single qualifiers
 const float valid_const = 3.14;
 uniform float valid_uniform;
@@ -25,14 +29,8 @@ float test_edge_multiple_qualifiers_error_const() {
 }
 
 // @unimplemented(frontend!=lp, backend!=wgpu)
-// @unsupported(rv32lpn.q32)
-// @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
-// wasm.f32: shader does not compile on any target (frontend gap) — same cause
-// as the @unsupported entries above, not an f32-specific failure.
-// @unsupported(wasm.f32)
-// @unsupported(rv32lpn.f32)
-// @unsupported(xtlpn.f32)
+// @unsupported(frontend=lp)
 // run: test_edge_multiple_qualifiers_error_const() ~= 6.28
 
 float test_edge_multiple_qualifiers_error_uniform() {
@@ -41,12 +39,8 @@ float test_edge_multiple_qualifiers_error_uniform() {
 }
 
 // @unimplemented(frontend!=lp, backend!=wgpu)
-// @unsupported(rv32lpn.q32)
-// @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
-// @unsupported(wasm.f32)
-// @unsupported(rv32lpn.f32)
-// @unsupported(xtlpn.f32)
+// @unsupported(frontend=lp)
 // run: test_edge_multiple_qualifiers_error_uniform() ~= 1.0
 
 vec2 test_edge_multiple_qualifiers_error_in() {
@@ -55,12 +49,8 @@ vec2 test_edge_multiple_qualifiers_error_in() {
 }
 
 // @unimplemented(frontend!=lp, backend!=wgpu)
-// @unsupported(rv32lpn.q32)
-// @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
-// @unsupported(wasm.f32)
-// @unsupported(rv32lpn.f32)
-// @unsupported(xtlpn.f32)
+// @unsupported(frontend=lp)
 // run: test_edge_multiple_qualifiers_error_in() ~= vec2(1.0, 1.0)
 
 void test_edge_multiple_qualifiers_error_out() {
@@ -69,12 +59,8 @@ void test_edge_multiple_qualifiers_error_out() {
 }
 
 // @unimplemented(frontend!=lp, backend!=wgpu)
-// @unsupported(rv32lpn.q32)
-// @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
-// @unsupported(wasm.f32)
-// @unsupported(rv32lpn.f32)
-// @unsupported(xtlpn.f32)
+// @unsupported(frontend=lp)
 // run: test_edge_multiple_qualifiers_error_out() == 0.0
 
 float test_edge_multiple_qualifiers_error_buffer() {
@@ -84,12 +70,8 @@ float test_edge_multiple_qualifiers_error_buffer() {
 }
 
 // @unimplemented(frontend!=lp, backend!=wgpu)
-// @unsupported(rv32lpn.q32)
-// @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
-// @unsupported(wasm.f32)
-// @unsupported(rv32lpn.f32)
-// @unsupported(xtlpn.f32)
+// @unsupported(frontend=lp)
 // run: test_edge_multiple_qualifiers_error_buffer() ~= 42.0
 
 float test_edge_multiple_qualifiers_error_combined() {
@@ -104,12 +86,8 @@ float test_edge_multiple_qualifiers_error_combined() {
     return result;
 }
 
-// wgpu.f32: file does not compile through naga glsl-in (mirrors the interp.f32 frontend gap)
+// wgpu.f32: file does not compile through naga glsl-in
 // @unimplemented(frontend!=lp, backend!=wgpu)
-// @unsupported(rv32lpn.q32)
-// @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
-// @unsupported(wasm.f32)
-// @unsupported(rv32lpn.f32)
-// @unsupported(xtlpn.f32)
+// @unsupported(frontend=lp)
 // run: test_edge_multiple_qualifiers_error_combined() ~= 8.28

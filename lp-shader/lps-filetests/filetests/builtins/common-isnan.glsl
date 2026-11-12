@@ -24,7 +24,6 @@ bool test_isnan_inf() {
     return isnan(a / b);
 }
 
-// @unsupported(wasm.q32)
 // @unsupported(wgpu.f32)
 // run: test_isnan_inf() == false
 
@@ -34,7 +33,6 @@ bool test_isnan_neg_inf() {
     return isnan(a / b);
 }
 
-// @unsupported(wasm.q32)
 // @unsupported(wgpu.f32)
 // run: test_isnan_neg_inf() == false
 

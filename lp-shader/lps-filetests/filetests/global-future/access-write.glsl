@@ -4,6 +4,10 @@
 // Global Variable Write Access: Writing to global variables
 // ============================================================================
 
+// Unsupported by design on the lps-glsl targets: LightPlayer shaders have no
+// pipeline stage and no storage, so lps-glsl rejects `in`/`out` globals,
+// `buffer` blocks and `shared` variables at global scope.
+
 float global_float;
 int global_int;
 uint global_uint;
@@ -23,14 +27,8 @@ void test_access_write_float() {
 }
 
 // @unimplemented(frontend!=lp, backend!=wgpu)
-// @unsupported(rv32lpn.q32)
-// @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
-// wasm.f32: shader does not compile on any target (frontend gap) — same cause
-// as the @unsupported entries above, not an f32-specific failure.
-// @unsupported(wasm.f32)
-// @unsupported(rv32lpn.f32)
-// @unsupported(xtlpn.f32)
+// @unsupported(frontend=lp)
 // run: test_access_write_float() == 0.0
 
 void test_access_write_int() {
@@ -39,12 +37,8 @@ void test_access_write_int() {
 }
 
 // @unimplemented(frontend!=lp, backend!=wgpu)
-// @unsupported(rv32lpn.q32)
-// @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
-// @unsupported(wasm.f32)
-// @unsupported(rv32lpn.f32)
-// @unsupported(xtlpn.f32)
+// @unsupported(frontend=lp)
 // run: test_access_write_int() == 0.0
 
 void test_access_write_uint() {
@@ -53,12 +47,8 @@ void test_access_write_uint() {
 }
 
 // @unimplemented(frontend!=lp, backend!=wgpu)
-// @unsupported(rv32lpn.q32)
-// @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
-// @unsupported(wasm.f32)
-// @unsupported(rv32lpn.f32)
-// @unsupported(xtlpn.f32)
+// @unsupported(frontend=lp)
 // run: test_access_write_uint() == 0.0
 
 void test_access_write_bool() {
@@ -67,12 +57,8 @@ void test_access_write_bool() {
 }
 
 // @unimplemented(frontend!=lp, backend!=wgpu)
-// @unsupported(rv32lpn.q32)
-// @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
-// @unsupported(wasm.f32)
-// @unsupported(rv32lpn.f32)
-// @unsupported(xtlpn.f32)
+// @unsupported(frontend=lp)
 // run: test_access_write_bool() == 0.0
 
 void test_access_write_vec2() {
@@ -81,12 +67,8 @@ void test_access_write_vec2() {
 }
 
 // @unimplemented(frontend!=lp, backend!=wgpu)
-// @unsupported(rv32lpn.q32)
-// @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
-// @unsupported(wasm.f32)
-// @unsupported(rv32lpn.f32)
-// @unsupported(xtlpn.f32)
+// @unsupported(frontend=lp)
 // run: test_access_write_vec2() == 0.0
 
 void test_access_write_vec3() {
@@ -95,12 +77,8 @@ void test_access_write_vec3() {
 }
 
 // @unimplemented(frontend!=lp, backend!=wgpu)
-// @unsupported(rv32lpn.q32)
-// @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
-// @unsupported(wasm.f32)
-// @unsupported(rv32lpn.f32)
-// @unsupported(xtlpn.f32)
+// @unsupported(frontend=lp)
 // run: test_access_write_vec3() == 0.0
 
 void test_access_write_vec4() {
@@ -109,12 +87,8 @@ void test_access_write_vec4() {
 }
 
 // @unimplemented(frontend!=lp, backend!=wgpu)
-// @unsupported(rv32lpn.q32)
-// @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
-// @unsupported(wasm.f32)
-// @unsupported(rv32lpn.f32)
-// @unsupported(xtlpn.f32)
+// @unsupported(frontend=lp)
 // run: test_access_write_vec4() == 0.0
 
 void test_access_write_mat2() {
@@ -123,12 +97,8 @@ void test_access_write_mat2() {
 }
 
 // @unimplemented(frontend!=lp, backend!=wgpu)
-// @unsupported(rv32lpn.q32)
-// @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
-// @unsupported(wasm.f32)
-// @unsupported(rv32lpn.f32)
-// @unsupported(xtlpn.f32)
+// @unsupported(frontend=lp)
 // run: test_access_write_mat2() == 0.0
 
 void test_access_write_out() {
@@ -137,12 +107,8 @@ void test_access_write_out() {
 }
 
 // @unimplemented(frontend!=lp, backend!=wgpu)
-// @unsupported(rv32lpn.q32)
-// @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
-// @unsupported(wasm.f32)
-// @unsupported(rv32lpn.f32)
-// @unsupported(xtlpn.f32)
+// @unsupported(frontend=lp)
 // run: test_access_write_out() == 0.0
 
 void test_access_write_buffer() {
@@ -154,12 +120,8 @@ void test_access_write_buffer() {
 }
 
 // @unimplemented(frontend!=lp, backend!=wgpu)
-// @unsupported(rv32lpn.q32)
-// @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
-// @unsupported(wasm.f32)
-// @unsupported(rv32lpn.f32)
-// @unsupported(xtlpn.f32)
+// @unsupported(frontend=lp)
 // run: test_access_write_buffer() == 0.0
 
 void test_access_write_shared() {
@@ -168,12 +130,8 @@ void test_access_write_shared() {
 }
 
 // @unimplemented(frontend!=lp, backend!=wgpu)
-// @unsupported(rv32lpn.q32)
-// @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
-// @unsupported(wasm.f32)
-// @unsupported(rv32lpn.f32)
-// @unsupported(xtlpn.f32)
+// @unsupported(frontend=lp)
 // run: test_access_write_shared() == 0.0
 
 float test_access_write_read() {
@@ -185,12 +143,8 @@ float test_access_write_read() {
     return global_float + float(global_int) + global_vec2.x + global_vec2.y;
 }
 
-// wgpu.f32: file does not compile through naga glsl-in (mirrors the interp.f32 frontend gap)
+// wgpu.f32: file does not compile through naga glsl-in
 // @unimplemented(frontend!=lp, backend!=wgpu)
-// @unsupported(rv32lpn.q32)
-// @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
-// @unsupported(wasm.f32)
-// @unsupported(rv32lpn.f32)
-// @unsupported(xtlpn.f32)
+// @unsupported(frontend=lp)
 // run: test_access_write_read() ~= 157.0

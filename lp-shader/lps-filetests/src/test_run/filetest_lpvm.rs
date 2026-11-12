@@ -252,14 +252,16 @@ impl CompiledShader {
         }
 
         if target.backend == Backend::Wgpu {
-            // Signature comes from the naga lowering (arg/return types for
-            // the probe wrapper + decode); the render pipeline is compiled
-            // per directive from the authored source on the GPU.
-            let (_ir, meta) = lower_glsl(
-                source,
-                texture_specs,
-                compiler_config.texture.texel_fetch_bounds,
-            )?;
+            // Signature comes from lps-glsl (arg/return types for the probe
+            // wrapper + decode); the render pipeline is compiled per
+            // directive from the authored source on the GPU (naga glsl-in).
+            let options = lps_glsl::CompileOptions {
+                texture_specs: texture_specs.clone(),
+                texel_fetch_bounds: compiler_config.texture.texel_fetch_bounds,
+            };
+            let meta = lps_glsl::compile(source, &options)
+                .map_err(|e| anyhow::anyhow!("{}", e.render(source)))?
+                .meta;
             lps_shared::validate_texture_binding_specs_against_module(&meta, texture_specs)
                 .map_err(|e| anyhow::anyhow!("{e}"))?;
             return Ok(Self::WgpuProbe(WgpuProbeShader::new(

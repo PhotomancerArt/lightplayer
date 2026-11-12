@@ -8,19 +8,26 @@ Filetest infrastructure for validating GLSL compilation and execution across all
 
 | target | semantics | how it runs | in `DEFAULT_TARGETS` |
 |---|---|---|---|
-| `rv32n.q32` | Q32 fixed-point | `lpvm-native` → RV32 emulator + linked builtins | yes |
-| `rv32lpn.q32` | Q32 fixed-point | `lps-glsl` frontend → `lpvm-native` → RV32 emulator | yes |
+Every target compiles through **`lps-glsl`**, the on-device frontend, except
+the three marked *naga*: `rv32n.*` and `xtn.*` stay on `lps-frontend` until the
+one-frontend switch deletes it, and `wgpu.f32` *is* naga (the GPU tier's
+`glsl-in` → `wgsl-out`).
+
+| target | semantics | how it runs | in `DEFAULT_TARGETS` |
+|---|---|---|---|
+| `rv32n.q32` | Q32 fixed-point | *naga* → `lpvm-native` → RV32 emulator + linked builtins | yes |
+| `rv32lpn.q32` | Q32 fixed-point | `lpvm-native` → RV32 emulator | yes |
 | `rv32c.q32` | Q32 fixed-point | Cranelift → RV32 emulator + linked builtins | yes |
 | `wasm.q32` | Q32 fixed-point | wasmtime | yes |
 | `interp.f32` | IEEE f32 | host LPIR interpreter (`lpir::interpret`) — the CI f32 gate | yes |
-| `wgpu.f32` | IEEE f32 (GPU) | per-directive fragment probe on a wgpu device | no — explicit `--target wgpu.f32`; needs a GPU adapter |
-| `xtn.q32` | Q32 fixed-point | `lpvm-native` → **Xtensa** emulator + linked builtins (ESP32-S3 board profile) | no — explicit `--target xtn.q32`; needs the Xtensa builtins image |
-| `xtlpn.q32` | Q32 fixed-point | `lps-glsl` frontend → `lpvm-native` → Xtensa emulator | no — as above |
-| `xtn.f32` | IEEE f32 | `lpvm-native` → Xtensa **hardware FPU** (`add.s`/`mul.s` on the LX7 float file) in the emulator | no — as above |
-| `xtlpn.f32` | IEEE f32 | `lps-glsl` frontend → the same hardware-FPU path | no — as above |
+| `wgpu.f32` | IEEE f32 (GPU) | *naga* — per-directive fragment probe on a wgpu device | no — explicit `--target wgpu.f32`; needs a GPU adapter |
+| `xtn.q32` | Q32 fixed-point | *naga* → `lpvm-native` → **Xtensa** emulator + linked builtins (ESP32-S3 board profile) | no — explicit `--target xtn.q32`; needs the Xtensa builtins image |
+| `xtlpn.q32` | Q32 fixed-point | `lpvm-native` → Xtensa emulator | no — as above |
+| `xtn.f32` | IEEE f32 | *naga* → `lpvm-native` → Xtensa **hardware FPU** (`add.s`/`mul.s` on the LX7 float file) in the emulator | no — as above |
+| `xtlpn.f32` | IEEE f32 | the same hardware-FPU path | no — as above |
 | `wasm.f32` | IEEE f32 | `lpvm-wasm`'s f32 emit path → wasmtime | yes — promoted 2026-08-02; see below |
-| `rv32n.f32` | IEEE f32 (soft) | `lpvm-native` f32 lowering → RV32 emulator, float ops as soft-float calls | no — explicit `--target rv32n.f32`; see below |
-| `rv32lpn.f32` | IEEE f32 (soft) | `lps-glsl` frontend → the same soft-float path | no — as above |
+| `rv32n.f32` | IEEE f32 (soft) | *naga* → `lpvm-native` f32 lowering → RV32 emulator, float ops as soft-float calls | no — explicit `--target rv32n.f32`; see below |
+| `rv32lpn.f32` | IEEE f32 (soft) | the same soft-float path | no — as above |
 
 **Q32 is the primary tier**: the four Q32 targets assert exact on-device
 semantics and their expectations are the ground truth. `interp.f32` asserts
@@ -444,7 +451,7 @@ int add_int(int a, int b) {
 
 - `// test run` — marks an execution test file (required for run tests).
 - `// test error` — the file must fail to compile; see
-  [Error tests](#error-tests--test-error-cover-both-frontends).
+  [Error tests](#error-tests--test-error).
 - `// target <backend>.<format>` — file-level default target (e.g. `wasm.q32`, `rv32c.q32`).
 - `// @<kind>(<selector>)` — per-directive disposition; see
   [Dispositions](#dispositions-unsupported-unimplemented-broken-ignore).
@@ -458,31 +465,13 @@ list via `just test-filetests`; `wgpu.f32`, `xtn.q32`, `xtlpn.q32`, `xtn.f32`,
 `xtlpn.f32`, `rv32n.f32` and `rv32lpn.f32` are explicit-only (see Targets
 above).
 
-### Error tests (`// test error`) cover **both** frontends
+### Error tests (`// test error`)
 
-An error test compiles the file through the naga pipeline and matches its
-diagnostics against the inline `// expected-error {{…}}` expectations. It then
-also compiles the file through **`lps-glsl`** — the frontend `rv32lpn.q32` and
-`xtlpn.q32` use, i.e. the on-device one — and requires that to fail too.
-
-Only the *rejection* is asserted for the lp frontend, not the wording: the two
-frontends phrase diagnostics differently and the expectations above are written
-against naga's. `lps-glsl`'s own phrasing belongs in that crate's unit tests.
-
-Without this arm an error test says nothing about the device frontend, and
-invalid GLSL that only naga catches ships. `lps-glsl` accepting `bvec2 + bvec2`
-is exactly how that looked in practice.
-
-The lp arm is dispositioned like any other case, resolved against
-`rv32lpn.q32`, so a check `lps-glsl` has not grown yet is recorded rather than
-silently tolerated — and goes stale loudly once it grows one:
-
-```glsl
-// test error
-
-// lps-glsl does not yet enforce the const qualifier on assignment (naga does).
-// @unimplemented(frontend=lp)
-```
+An error test compiles the file the way the product does — **`lps-glsl`**, the
+texture-binding check, then codegen — and matches what refuses it against the
+inline `// expected-error {{…}}` expectations, written in `lps-glsl`'s wording.
+A front-end diagnostic carries the line of its span and code `E0001`;
+`E0400` is LightPlayer's own validation (texture binding specs, codegen).
 
 ### Run directives
 

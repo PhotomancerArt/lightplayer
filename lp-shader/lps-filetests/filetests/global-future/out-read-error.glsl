@@ -4,6 +4,10 @@
 // Edge Out Read Error: Reading from output globals may be restricted
 // ============================================================================
 
+// Unsupported by design on the lps-glsl targets: LightPlayer shaders have no
+// pipeline stage and no storage, so lps-glsl rejects `in`/`out` globals,
+// `buffer` blocks and `shared` variables at global scope.
+
 out float fragment_depth;
 out int stencil_value;
 out vec2 screen_position;
@@ -22,11 +26,8 @@ void test_edge_out_read_error_write() {
     fragment_color = vec4(1.0, 0.0, 0.0, 1.0);
 }
 
-// @unsupported(rv32lpn.q32)
-// @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
-// @unsupported(rv32lpn.f32)
-// @unsupported(xtlpn.f32)
+// @unsupported(frontend=lp)
 // run: test_edge_out_read_error_write() == 0.0
 
 // These reads may or may not be allowed depending on GLSL version and shader stage:
@@ -46,11 +47,8 @@ float test_edge_out_read_error_indirect() {
     return 0.0;  // Placeholder
 }
 
-// @unsupported(rv32lpn.q32)
-// @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
-// @unsupported(rv32lpn.f32)
-// @unsupported(xtlpn.f32)
+// @unsupported(frontend=lp)
 // run: test_edge_out_read_error_indirect() ~= 0.0
 
 void test_edge_out_read_error_multiple_writes() {
@@ -60,11 +58,8 @@ void test_edge_out_read_error_multiple_writes() {
     fragment_color = vec4(0.0, 0.0, 1.0, 1.0);  // Final value
 }
 
-// @unsupported(rv32lpn.q32)
-// @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
-// @unsupported(rv32lpn.f32)
-// @unsupported(xtlpn.f32)
+// @unsupported(frontend=lp)
 // run: test_edge_out_read_error_multiple_writes() == 0.0
 
 void test_edge_out_read_error_fragment_output() {
@@ -77,9 +72,6 @@ void test_edge_out_read_error_fragment_output() {
 }
 
 // wgpu.f32: naga validator rejects the assembled unit (std430 uniform blocks / unsized array constructors are invalid on the GPU tier)
-// @unsupported(rv32lpn.q32)
-// @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
-// @unsupported(rv32lpn.f32)
-// @unsupported(xtlpn.f32)
+// @unsupported(frontend=lp)
 // run: test_edge_out_read_error_fragment_output() == 0.0
