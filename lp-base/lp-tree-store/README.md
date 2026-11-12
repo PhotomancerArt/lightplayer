@@ -110,8 +110,8 @@ change has to be readable, or cleanly refused, by the core before it.
   that is not blank). Nothing about the format changes; the window is the
   platform's (`fw-esp32c6`'s `tree_flash.rs`). `SimLineCache` models the
   C6's cache for the host (stale lines served until invalidated); the
-  mutant `reads_without_invalidate` drops the rule and `lp-store-bench`'s
-  drivers, run over the model, catch it.
+  mutant `reads_without_invalidate` drops the rule and the store bench's
+  drivers, run over the model, caught it (`lp-store-bench`, deleted 2026-11-12; in git at `0fa18f2b5`).
 - **Mount settles each head's tail** before anything trusts it. A program
   torn inside a 4-byte word can leave its one missing clear weak, so a
   record reads whole on some reads and fails its CRC on others; only the
@@ -256,7 +256,7 @@ hasher — a client's push, native and wasm), `host-deflate` (`host_deflate_chun
 host only), `nor-sim` (`Flash` for `lp_nor_sim::NorFlashSim`), `stats`
 (`TreeStore::stats`, `TreeStoreStats`, `reset_transient_peak`: the counters
 and the RAM-peak accounting, ~1.2 KB of RV32 code; off in firmware, on for
-the crate's tests and `lp-store-bench`), `mutants` (test-only: the mutation
+the crate's tests), `mutants` (test-only: the mutation
 switches below; no product build turns it on).
 
 ## API
@@ -519,12 +519,15 @@ forgetting a write head; idle steps keeping their mark (and victim) across
 writes; an idle step erasing its victim before every live record in it has
 a copy.
 `lp-store-bench
-mutants` runs each through a fixed driver set and requires every one caught
-and the unmutated store clean (its README has the table).
+mutants` ran each through a fixed driver set and required every one caught
+and the unmutated store clean. The bench was deleted on 2026-11-12 and is in
+git at `0fa18f2b5` (its README has the table); nothing turns the feature on
+since.
 
 ## Code size (RV32)
 
-`size-probe/` is a standalone `no_std`/`no_main` binary (its own workspace):
+`size-probe/` was a standalone `no_std`/`no_main` binary (its own workspace;
+deleted 2026-11-12, in git at `0fa18f2b5`):
 a RAM flash and every entry point the firmware calls, `default-features =
 false` (so no `stats`), `opt-level = "z"`, LTO, `codegen-units = 1`, a bump
 allocator, and a stand-in hasher (the C6's SHA is hardware; `--features
@@ -715,6 +718,9 @@ slack a sector). Pinned by `a_rerun_near_full_fits_where_the_step_fitted`
 and `a_refused_write_is_not_collected_for_again`.
 
 ## G1 figures (2026-10-08)
+
+The bench and probe named below (`lp-store-bench`, `size-probe/`) were
+deleted on 2026-11-12 and are in git at `0fa18f2b5`.
 
 Every number here is an **lp-nor-sim simulator** number — not emulator,
 not silicon. RAM and space from `lp-store-bench measure` on the spike's

@@ -3,8 +3,9 @@
 //! through GC, remounts on a cold cache, and power cuts at every sampled op
 //! of a GC-heavy workload — and its own invalidates keep it from ever
 //! seeing a stale line (no verify failure, no sector retired). The mutant
-//! that drops the invalidates (`reads_without_invalidate`) is the bench's to
-//! catch (`lp-store-bench mutants`, whose drivers run over this cache).
+//! that drops the invalidates (`reads_without_invalidate`) was the store
+//! bench's to catch (`lp-store-bench mutants`, deleted 2026-11-12; in git at
+//! `0fa18f2b5`).
 
 extern crate std;
 

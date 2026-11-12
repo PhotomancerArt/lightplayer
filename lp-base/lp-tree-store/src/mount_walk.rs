@@ -380,8 +380,9 @@ mod tests {
     /// fast mount adopts the newer copy, finds that multi's CRC wrong, and
     /// the whole reading (which closes the copy's sector at that record, as
     /// FORMAT.md step 2 reads it) mounts the committed state from the older
-    /// copy. What `lp-store-bench`'s `shadowed_copy` fuzz images hold the
-    /// store to.
+    /// copy. What the store bench's `shadowed_copy` fuzz images held the
+    /// store to (`lp-store-bench`, deleted 2026-11-12; in git at
+    /// `0fa18f2b5`).
     #[test]
     fn a_damaged_newer_copy_falls_back_to_reading_every_record() {
         let c = StoreConfig::default();

@@ -12,7 +12,7 @@ extern crate alloc;
 
 /// A statement that runs only with the `stats` feature: the counters and the
 /// RAM-peak accounting `TreeStore::stats` reports. Off in firmware (they are
-/// ~0.7 KB of RV32 code); the crate's tests and `lp-store-bench` turn it on.
+/// ~0.7 KB of RV32 code); the crate's tests turn it on.
 macro_rules! stat {
     ($($s:tt)*) => {
         #[cfg(feature = "stats")]

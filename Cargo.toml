@@ -55,7 +55,6 @@ members = [
     "tools/lpt-geodome",
     "tools/lp-app-version",
     "tools/lp-fw-split",
-    "tools/lp-store-bench",
     "tools/lpt-radiance-gen",
     "lp-fw/fw-esp32c6",
     "lp-fw/fw-esp32s3",
@@ -140,7 +139,6 @@ members = [
     "lp-shader/lps-builtins-emu-app",
     "lp-shader/lps-filetests-app",
     "lp-app/web-demo",
-    "spikes/naga-wasm-poc",
     "lp-shader/lps-q32",
 ]
 # Xtensa DEVICE-target crates (esp toolchain): lp-xt/fixtures is its own
@@ -149,7 +147,7 @@ members = [
 # (see lp-emu/README.md). fw-esp32c6-loader is a standalone bare-metal
 # RV32 crate with its own `[workspace]`, built from its own directory.
 # fw-esp32s3-loader is its Xtensa twin, the same way.
-exclude = ["lp-xt/fixtures", "lp-emu/lp-xt-emu-guest", "lp-fw/fw-esp32c6-loader", "lp-fw/fw-esp32s3-loader", "lp-base/lp-tree-store/size-probe"]
+exclude = ["lp-xt/fixtures", "lp-emu/lp-xt-emu-guest", "lp-fw/fw-esp32c6-loader", "lp-fw/fw-esp32s3-loader"]
 resolver = "2"
 
 # Exclude lps-builtins-emu-app, lps-builtins-wasm, and fw-esp32c6 from default workspace builds (cross-target only)
@@ -202,7 +200,6 @@ default-members = [
     "tools/lpt-geodome",
     "tools/lp-app-version",
     "tools/lp-fw-split",
-    "tools/lp-store-bench",
     "tools/lpt-radiance-gen",
     "lp-core/lpc-mapping",
     "lp-core/lpc-model",
@@ -341,13 +338,10 @@ opt-level = 3
 # test run (overflow checks stay on): 27 s at opt-level 0, a few at 2.
 [profile.dev.package.lp-link]
 opt-level = 2
-# The storage testbed's cut sweeps (lp-tree-store's own, and the store bench's
-# over lp-nor-sim) run thousands of mount/judge cycles in the default test run.
+# lp-tree-store's cut sweeps (over lp-nor-sim) run thousands of mount/judge cycles in the default test run.
 [profile.dev.package.lp-tree-store]
 opt-level = 2
 [profile.dev.package.lp-nor-sim]
-opt-level = 2
-[profile.dev.package.lp-store-bench]
 opt-level = 2
 [profile.dev.package.lp-riscv-emu]
 opt-level = 3
@@ -579,6 +573,9 @@ esp-alloc = { path = "third_party/esp-alloc" }
 # Android connection. See third_party/bt-hci/README-LP.md and
 # docs/defects/2026-10-17-an-android-phone-connecting-over-bluetooth-panics-the-c6.md.
 bt-hci = { path = "third_party/bt-hci" }
+# esp-storage fork (esp-hal main, May 2026): `panic-unaligned-buffer` panics
+# on an unaligned buffer instead of copying through a 4 KB stack buffer. See
+# third_party/esp-storage/README-LP.md.
 esp-storage = { path = "third_party/esp-storage" }
 # esp-hal 1.1.1 fork: `#[ram]` on the three helpers the `#[ram]` Xtensa
 # level-1/2/3 interrupt entries call on every peripheral interrupt

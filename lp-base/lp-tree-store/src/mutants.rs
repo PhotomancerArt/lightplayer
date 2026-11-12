@@ -1,6 +1,7 @@
 //! Mutation switches (feature `mutants`, off by default): each [`Mutant`]
-//! breaks one guarantee of the store on purpose, so the host testbed
-//! (`lp-store-bench mutants`) can prove its drivers and oracle notice — a
+//! breaks one guarantee of the store on purpose, so a host testbed can
+//! prove its drivers and oracle notice (`lp-store-bench mutants` did; the
+//! bench was deleted 2026-11-12 and is in git at `0fa18f2b5`) — a
 //! mutant no driver catches marks a place the tests are blind. Nothing here
 //! exists without the feature: every switch site is `mutant!(…)`, which is
 //! `false` then, and the mutant-only paths below are compiled out. No
