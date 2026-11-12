@@ -1,7 +1,7 @@
 ---
 status: fixed
 found: 2026-11-12      # how: Yona, mapping his LED skirt in Studio's Graph on a C6
-fixed: PENDING         # the Graph's board highlight PR
+fixed: c2550b48f       # PR #1341, with e834a7f93 (the engine)
 area: lpa-studio-core — the Graph's board highlight while drawing; lpc-engine — the output's `highlight` chase
 class: stand-in-divergence
 related:
