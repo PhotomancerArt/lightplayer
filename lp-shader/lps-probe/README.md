@@ -3,7 +3,7 @@
 Experiment/probe evaluation for GLSL shaders on the LPIR f32 interpreter.
 This is the pure core of the shader agent's `iterate` tool: given user GLSL
 and an `ExperimentSpec`, it compiles the shader plus per-probe wrapper
-functions (`lps-glsl` → LPIR) and evaluates them on the interpreter,
+functions (naga frontend → LPIR) and evaluates them on the interpreter,
 returning structured diagnostics, an always-on health report, and per-probe
 results.
 

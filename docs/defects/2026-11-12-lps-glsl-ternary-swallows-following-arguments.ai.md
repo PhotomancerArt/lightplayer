@@ -5,7 +5,7 @@ fixed: 2026-11-12
 area: lps-glsl (the device's GLSL front end) — expression parser
 class: untested-path
 related:
-  - 2026-11-12-lps-glsl-has-no-bitwise-operators.md
+  - 2026-11-12-lps-glsl-has-no-bitwise-operators.ai.md
 ---
 # lps-glsl's ternary swallows the arguments after it
 
