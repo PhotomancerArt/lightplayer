@@ -1,4 +1,3 @@
-use alloc::string::String;
 use alloc::vec::Vec;
 
 use crate::hir::{HirBuildJob, HirBuildStepResult, HirModule};
