@@ -45,8 +45,8 @@ directories are allowed to assume MMIO at all.
 
 - **`lp-nor-sim`** — a deterministic, sans-IO model of the C6's SPI NOR flash
   that can lose power after any program or erase (torn programs, weak
-  erases). The storage testbed (`tools/lp-store-bench`, `lp-tree-store`'s
-  tests) and the emulated C6's flash share this one model, so a tear model
+  erases). `lp-tree-store`'s tests and the emulated C6's flash share this
+  one model, so a tear model
   calibrated once holds in both. `no_std` + alloc. See its README.
 
 - **`lp-emu-validate`** — the hardware-validation system's host half:

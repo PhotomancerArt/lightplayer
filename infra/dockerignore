@@ -41,9 +41,8 @@ test_round
 
 # ⚠️ Deliberately short. Cargo needs EVERY workspace member's manifest to
 # resolve the lockfile, even for `cargo build -p lp-cloud-server`, and the
-# member list is not confined to the obvious directories — `spikes/
-# naga-wasm-poc` is a member, and `third_party/{naga,pp-rs,esp-storage,
-# ser-write-json}` are path dependencies. Excluding a directory that later
+# member list is not confined to the obvious directories, and
+# `third_party/{naga,pp-rs,esp-storage,ser-write-json}` are path dependencies. Excluding a directory that later
 # grows a member breaks the deploy with a "failed to load manifest" ten
 # minutes into a remote build. The source tree is tens of megabytes; `target/`
 # was the only thing worth excluding, so that is what this file excludes.

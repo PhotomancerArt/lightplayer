@@ -60,11 +60,6 @@ EXCLUDED = {
     "third_party/pp-rs": "upstream fork's own workspace; it is the patch target",
     "third_party/ser-write": "upstream fork's own workspace; it is the patch target",
     "third_party/ser-write-json": "upstream fork's own workspace; it is the patch target",
-    # One-off experiments. Not built by CI, and a spike's lockfile records
-    # what it measured on its day; a root fork added later should not force
-    # an edit to a finished experiment.
-    "spikes/classic-oom-allocator": "one-off spike, not built by CI",
-    "spikes/glsl-compile-working-set": "one-off spike, not built by CI",
 }
 
 PRUNE = {"target", "node_modules"}

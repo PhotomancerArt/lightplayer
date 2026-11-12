@@ -25,8 +25,7 @@
 //! readings agree on any flash a writer of this format leaves, power cuts
 //! included; they differ only over damage no cut makes (a newer copy that
 //! does not check over an older one that does: the fast pass gives up and
-//! the whole one mounts it, `mount_walk.rs`'s tests and `lp-store-bench`'s
-//! `shadowed_copy` fuzz images).
+//! the whole one mounts it, `mount_walk.rs`'s tests).
 
 use alloc::vec::Vec;
 

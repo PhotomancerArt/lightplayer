@@ -356,11 +356,6 @@ test_psram = []
 # it tests the emulator and not the product's encoder.
 #
 #   just build-fw-esp32s3 test_lcd_lanes
-# LED-channels spike (2026-10-22, never shipped): up to eight WS281x lanes from
-# LCD_CAM's i8080 mode + GDMA, checked by the CAM half of the same peripheral
-# sampling the pads. See src/tests/lcd_ws281x.rs. (The product image's own
-# check beside the radios is `ws281x_frame_check`.)
-test_lcd_ws281x = []
 test_lcd_lanes = []
 # Five uneven lanes through the PRODUCT LCD_CAM backend (`lcd-ws281x`'s
 # driver: registry, board endpoints, open, start/wait_complete), for the

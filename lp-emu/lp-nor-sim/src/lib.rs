@@ -6,8 +6,7 @@
 //! the in-flight operation per a [`TearModel`] and refuses everything after it
 //! with [`NorError::PowerLost`] until [`NorFlashSim::power_cycle`].
 //!
-//! It is the ground the storage testbed (`tools/lp-store-bench`) runs every
-//! candidate store on. Nothing here reads a clock or ambient randomness: every
+//! It is the ground `lp-tree-store`'s cut tests run on. Nothing here reads a clock or ambient randomness: every
 //! random choice comes from the plan's seed. See the README for what is and is
 //! not modelled.
 

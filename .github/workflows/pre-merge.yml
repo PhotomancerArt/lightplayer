@@ -308,7 +308,6 @@ jobs:
               - 'lp-app/lpa-link/**'
               - 'lp-app/lpa-studio-core/**'
               - 'lp-app/lpa-fs-opfs/**'
-              - 'spikes/naga-wasm-poc/**'
               - 'third_party/**'
               - 'Cargo.toml'
               - 'Cargo.lock'
@@ -3739,7 +3738,7 @@ jobs:
             grep -m 5 -E "$kinds" "$log" | cut -c1-400 || true
           fi
 
-  # The wgpu-tree workspace members (lp-gfx-wgpu, fw-browser, naga-wasm-poc)
+  # The wgpu-tree workspace members (lp-gfx-wgpu, fw-browser)
   # are validated here, separate from validate-x64: building `-p lp-gfx-wgpu`
   # unifies cargo features differently from the default-members build, so
   # folding it into `just test` recompiled ~25 crates at the tail of every
