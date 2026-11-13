@@ -283,6 +283,51 @@ fn a_selected_segments_chase_follows_its_count() {
     assert_ne!(after[12], Rgb::new(255, 0, 0), "lamp 12 is P's body now");
 }
 
+/// A second Studio on the board clears what an earlier one left showing:
+/// the first page selects a segment, so the board chases it, and goes away
+/// (a reload) without clearing it. The `selection` and `highlight` Debug
+/// slots live until the project unloads, so they are still in the board's
+/// overlay. The page that opens next has nothing selected, and the board
+/// shows its pattern again: Studio clears the Debug slots it did not write.
+#[test]
+fn a_reloaded_page_clears_the_chase_it_did_not_draw() {
+    let mut first = Graph::new("catalog/playful-choker");
+    first.go_to_graph();
+    let part = first.first_part();
+    first
+        .handle
+        .input(GraphInput::Select(vec![Target::Part(part)]));
+    first.batch();
+    let (head, tail) = first.first_segment_pixels();
+    let view = first.refresh();
+    let frame = view.graph.expect("the Graph").frame.0;
+    let pixels = frame.port(&NodeId::new("output"), "0").unwrap();
+    assert_eq!(pixels[head], Rgb::new(0, 0, 255), "the chase's blue head");
+    assert!(
+        first.board_debug_slots() > 0,
+        "the board holds the selection"
+    );
+
+    let mut second = Graph::on_shared(first.server.clone());
+    drop(first);
+    second.go_to_graph();
+    second.batch_if_queued();
+    assert!(second.handle.editor().borrow().selection.is_empty());
+    assert_eq!(
+        second.board_debug_slots(),
+        0,
+        "no `selection` or `highlight` left in the board's overlay"
+    );
+    let view = second.refresh();
+    let frame = view.graph.expect("the Graph").frame.0;
+    let pixels = frame.port(&NodeId::new("output"), "0").unwrap();
+    assert_ne!(
+        (pixels[head], pixels[tail]),
+        (Rgb::new(0, 0, 255), Rgb::new(255, 0, 0)),
+        "the board shows its pattern again"
+    );
+}
+
 /// Leaving the Graph stops the board's highlight, as leaving Patch did.
 #[test]
 fn leaving_the_graph_stops_the_highlight() {
@@ -624,7 +669,12 @@ impl Graph {
 
     /// On whatever project `server` runs.
     pub(super) fn on_server(server: lpa_server::LpServer) -> Self {
-        let server = Rc::new(RefCell::new(server));
+        Self::on_shared(Rc::new(RefCell::new(server)))
+    }
+
+    /// Another Studio on a board one already talks to (a reload, or a
+    /// second page).
+    pub(super) fn on_shared(server: Rc<RefCell<lpa_server::LpServer>>) -> Self {
         let io = InProcessServerIo {
             server: server.clone(),
             inbox: Rc::new(RefCell::new(VecDeque::new())),
@@ -745,6 +795,25 @@ impl Graph {
         }
         drop(server);
         self.board_saved_text(path)
+    }
+
+    /// How many `selection` and `highlight` Debug slot edits the board's
+    /// overlay holds: what it shows of a Graph's selection.
+    pub(super) fn board_debug_slots(&self) -> usize {
+        let server = self.server.borrow();
+        let project = server
+            .project_manager()
+            .first_loaded()
+            .expect("the board runs a project");
+        project
+            .registry()
+            .overlay()
+            .get()
+            .iter()
+            .filter_map(|(_, overlay)| overlay.as_slot())
+            .flat_map(|slot| slot.edits.iter().map(|(path, _)| path))
+            .filter(|path| matches!(path.to_string().as_str(), "selection" | "highlight"))
+            .count()
     }
 
     /// A project file as the board's disk holds it (what Save wrote),
