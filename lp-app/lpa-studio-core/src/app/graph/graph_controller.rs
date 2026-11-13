@@ -487,6 +487,11 @@ impl GraphController {
         pace: GraphPace,
     ) {
         use crate::app::graph::graph_highlight::{board_draft, board_selection, highlight_of};
+        // What another page left showing on the board is cleared first, and
+        // what this one shows is sent afresh.
+        if project.sweep_board_highlights(server).await {
+            self.shown = Shown::default();
+        }
         let none = || crate::PatchPulseOp {
             subjects: Vec::new(),
         };

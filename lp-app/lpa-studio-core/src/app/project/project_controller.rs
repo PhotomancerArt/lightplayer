@@ -6667,6 +6667,59 @@ impl ProjectController {
         Ok(())
     }
 
+    /// Clear the `selection` and `highlight` Debug slots the board holds
+    /// that this Studio did not write: what a page before a reload, or
+    /// another page, left showing. Debug slots live until the project
+    /// unloads, and the bookkeeping that would clear them
+    /// ([`Self::selected_fixtures`], [`Self::pulsed_outputs`]) went with
+    /// the page that wrote them. Runs once per connection, as soon as the
+    /// overlay mirror is the board's, and clears every one it finds (one
+    /// batch): the caller then sends what it shows afresh. Returns whether
+    /// it ran.
+    pub(crate) async fn sweep_board_highlights(&mut self, server: &mut StudioServerClient) -> bool {
+        let Some(sync) = self.sync.as_ref() else {
+            return false;
+        };
+        if sync.board_highlights_swept() || !sync.overlay_is_current() {
+            return false;
+        }
+        let Ok(handle_id) = self.ready_handle_id() else {
+            return false;
+        };
+        let left: Vec<MutationOp> = sync
+            .overlay_slot_edits()
+            .filter(|(_, path, _)| matches!(path.to_string().as_str(), "selection" | "highlight"))
+            .map(|(artifact, path, _)| MutationOp::RemoveSlotEdit {
+                artifact: artifact.clone(),
+                path: path.clone(),
+            })
+            .collect();
+        if !left.is_empty() {
+            let batch = MutationCmdBatch::new(
+                left.into_iter()
+                    .map(|mutation| MutationCmd {
+                        id: self.allocate_mutation_cmd_id(),
+                        mutation,
+                    })
+                    .collect(),
+            );
+            // Not cleared: tried again on the next settle.
+            let Ok(mutation) = server
+                .project_overlay_mutate(handle_id, batch.clone())
+                .await
+            else {
+                return false;
+            };
+            self.apply_mutation_acks(&batch, &mutation, &[]);
+        }
+        self.selected_fixtures.clear();
+        self.pulsed_outputs.clear();
+        if let Some(sync) = self.sync.as_mut() {
+            sync.mark_board_highlights_swept();
+        }
+        true
+    }
+
     /// The Debug writes whose node files can take a slot edit without
     /// losing a pending whole-file body: each file's body is said as slot
     /// edits first ([`Self::hold_body_as_slots`]). A node whose body can't

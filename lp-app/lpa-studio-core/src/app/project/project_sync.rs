@@ -91,6 +91,10 @@ pub struct ProjectSync {
     /// Revision at which `overlay` was last known to match the server
     /// (`Revision` zero means "never mirrored / no overlay mutation ever").
     overlay_revision: Revision,
+    /// Whether this connection has cleared the `selection` and `highlight`
+    /// Debug slots it found on the board
+    /// (`ProjectController::sweep_board_highlights`): once per sync.
+    board_highlights_swept: bool,
 }
 
 impl ProjectSync {
@@ -112,6 +116,7 @@ impl ProjectSync {
             overlay: ProjectOverlay::new(),
             base_values: BTreeMap::new(),
             overlay_revision: Revision::default(),
+            board_highlights_swept: false,
         }
     }
 
@@ -228,6 +233,21 @@ impl ProjectSync {
     /// Mirrored pending asset body edit for `artifact`, if any.
     pub fn overlay_asset_edit_at(&self, artifact: &ArtifactLocation) -> Option<&AssetBodyOverlay> {
         self.overlay.artifact(artifact)?.as_body()
+    }
+
+    /// True once the overlay mirror is the board's: the project is read,
+    /// its runtime status says which overlay revision the board holds, and
+    /// the mirror has caught up with it.
+    pub fn overlay_is_current(&self) -> bool {
+        self.is_ready() && self.view.runtime.is_some() && !self.overlay_fetch_needed()
+    }
+
+    pub fn board_highlights_swept(&self) -> bool {
+        self.board_highlights_swept
+    }
+
+    pub fn mark_board_highlights_swept(&mut self) {
+        self.board_highlights_swept = true;
     }
 
     /// True when the last applied runtime status reports an overlay revision
