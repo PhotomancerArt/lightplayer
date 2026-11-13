@@ -7,7 +7,7 @@
 //! // @unsupported(*)                          every target
 //! // @broken(wasm.q32)                        one target, by canonical name
 //! // @unimplemented(float_mode=f32)           an axis family
-//! // @unsupported(frontend!=lp, backend!=wgpu)  a conjunction
+//! // @unsupported(isa=xtensa, float_mode=f32)  a conjunction
 //! ```
 //!
 //! An unknown axis key or an unknown axis value is a **hard error with a line
@@ -212,10 +212,10 @@ mod tests {
 
     #[test]
     fn test_parse_negated_and_conjunction() {
-        let ann = parse("// @unsupported(frontend!=lp, backend!=wgpu)")
+        let ann = parse("// @unsupported(isa!=xtensa, backend!=wgpu)")
             .unwrap()
             .unwrap();
-        assert_eq!(ann.selector.to_string(), "frontend!=lp, backend!=wgpu");
+        assert_eq!(ann.selector.to_string(), "isa!=xtensa, backend!=wgpu");
         assert_eq!(ann.selector.specificity(), 2);
     }
 
@@ -228,7 +228,6 @@ mod tests {
     #[test]
     fn test_parse_every_axis_key_is_accepted() {
         for line in [
-            "// @unsupported(frontend=naga)",
             "// @unsupported(backend=interp)",
             "// @unsupported(float_mode=q32)",
             "// @unsupported(isa=xtensa)",
@@ -287,12 +286,10 @@ mod tests {
             vec![
                 "wasm.f32".to_string(),
                 "rv32n.f32".to_string(),
-                "rv32lpn.f32".to_string(),
-                // M8 registered the hardware-FPU pair; the comment above
+                // M8 registered the hardware-FPU target; the comment above
                 // anticipated exactly this — each new backend that gains an
                 // f32 mode joins the list here.
-                "xtn.f32".to_string(),
-                "xtlpn.f32".to_string()
+                "xtn.f32".to_string()
             ],
             "{matched:?}"
         );

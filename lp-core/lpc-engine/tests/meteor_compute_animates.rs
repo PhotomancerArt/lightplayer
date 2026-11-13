@@ -41,9 +41,7 @@ fn load_meteor() -> LoadedProjectRuntime {
     let mut rt =
         ProjectLoader::load_from_root(&fs, services).expect("load catalog/patterns/meteor");
     rt.engine_mut()
-        .set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new(
-            lp_shader::ShaderFrontend::LpsGlsl,
-        ))));
+        .set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new())));
     rt
 }
 

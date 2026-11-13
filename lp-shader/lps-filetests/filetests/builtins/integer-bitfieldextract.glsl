@@ -12,8 +12,6 @@ int test_bitfieldextract_int_simple() {
     return bitfieldExtract(240, 4, 4);
 }
 
-// naga lowers bitfieldExtract to the wrong value; the lps-glsl frontend is correct
-// @broken(frontend!=lp, backend!=wgpu)
 // @unsupported(wgpu.f32)
 // run: test_bitfieldextract_int_simple() == 15
 
@@ -22,8 +20,6 @@ int test_bitfieldextract_int_lsb() {
     return bitfieldExtract(170, 0, 4);
 }
 
-// naga lowers bitfieldExtract to the wrong value; the lps-glsl frontend is correct
-// @broken(frontend!=lp, backend!=wgpu)
 // @unsupported(wgpu.f32)
 // run: test_bitfieldextract_int_lsb() == 10
 
@@ -32,8 +28,6 @@ int test_bitfieldextract_int_msb() {
     return bitfieldExtract(170, 4, 4);
 }
 
-// naga lowers bitfieldExtract to the wrong value; the lps-glsl frontend is correct
-// @broken(frontend!=lp, backend!=wgpu)
 // @unsupported(wgpu.f32)
 // run: test_bitfieldextract_int_msb() == 10
 
@@ -42,8 +36,6 @@ uint test_bitfieldextract_uint_simple() {
     return bitfieldExtract(240u, 4, 4);
 }
 
-// naga lowers bitfieldExtract to the wrong value; the lps-glsl frontend is correct
-// @broken(frontend!=lp, backend!=wgpu)
 // @unsupported(wgpu.f32)
 // run: test_bitfieldextract_uint_simple() == 15u
 
@@ -52,8 +44,6 @@ uint test_bitfieldextract_uint_single_bit() {
     return bitfieldExtract(4u, 2, 1);
 }
 
-// naga lowers bitfieldExtract to the wrong value; the lps-glsl frontend is correct
-// @broken(frontend!=lp, backend!=wgpu)
 // @unsupported(wgpu.f32)
 // run: test_bitfieldextract_uint_single_bit() == 1u
 
@@ -63,7 +53,6 @@ ivec2 test_bitfieldextract_ivec2() {
 }
 
 // wgpu.f32: file does not compile through naga glsl-in (mirrors the interp.f32 frontend gap)
-// @broken(frontend!=lp, backend!=wgpu)
 // @unsupported(wgpu.f32)
 // run: test_bitfieldextract_ivec2() == ivec2(15, 10)
 

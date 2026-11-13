@@ -543,9 +543,7 @@ mod tests {
     }
 
     fn graphics() -> Arc<dyn LpGraphics> {
-        Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new(
-            lp_shader::ShaderFrontend::LpsGlsl,
-        ))
+        Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new())
     }
 
     fn solid(c: [f32; 3]) -> Gradient {

@@ -579,9 +579,7 @@ void tick() {
 
         let services = EngineServices::new(TreePath::parse("/fluid.show").unwrap());
         let mut engine = ProjectLoader::load_from_root(&fs, services).expect("load");
-        engine.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new(
-            lp_shader::ShaderFrontend::LpsGlsl,
-        ))));
+        engine.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new())));
         let root = engine.tree().root();
         let fluid = engine
             .tree()

@@ -6,7 +6,7 @@
 //! `lp-shader/lps-builtins/glsl/`). This module:
 //!
 //! - builds a **float oracle** by compiling the canonical sources through
-//!   `lps-frontend` and interpreting the LPIR natively in f32
+//!   `lps-glsl` and interpreting the LPIR natively in f32
 //!   ([`oracle`]);
 //! - invokes the **Q32 builtins the way shaders do**: a probe GLSL module
 //!   calling `lpfn_*` is compiled through the normal Q32 pipeline and run

@@ -114,9 +114,7 @@ fn denied_shader_compile_is_a_fault() {
         });
     }
 
-    let graphics = Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new(
-        lp_shader::ShaderFrontend::LpsGlsl,
-    ));
+    let graphics = Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new());
     let node_id = NodeId::new(1);
     let mut node = ShaderNode::new(
         node_id,

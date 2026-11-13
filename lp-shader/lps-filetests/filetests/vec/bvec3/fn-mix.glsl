@@ -15,7 +15,7 @@ bvec3 test_bvec3_mix_all_false_selector() {
     return mix(a, b, selector);
 }
 
-// @unsupported(frontend!=lp)
+// @unsupported(backend=wgpu)
 // run: test_bvec3_mix_all_false_selector() == bvec3(true, false, true)
 
 bvec3 test_bvec3_mix_all_true_selector() {
@@ -25,7 +25,7 @@ bvec3 test_bvec3_mix_all_true_selector() {
     return mix(a, b, selector);
 }
 
-// @unsupported(frontend!=lp)
+// @unsupported(backend=wgpu)
 // run: test_bvec3_mix_all_true_selector() == bvec3(false, true, false)
 
 bvec3 test_bvec3_mix_mixed_selector() {
@@ -35,7 +35,7 @@ bvec3 test_bvec3_mix_mixed_selector() {
     return mix(a, b, selector);
 }
 
-// @unsupported(frontend!=lp)
+// @unsupported(backend=wgpu)
 // run: test_bvec3_mix_mixed_selector() == bvec3(true, true, true)
 
 bvec3 test_bvec3_mix_other_mixed_selector() {
@@ -45,7 +45,7 @@ bvec3 test_bvec3_mix_other_mixed_selector() {
     return mix(a, b, selector);
 }
 
-// @unsupported(frontend!=lp)
+// @unsupported(backend=wgpu)
 // run: test_bvec3_mix_other_mixed_selector() == bvec3(true, true, true)
 
 bvec3 test_bvec3_mix_same_vectors() {
@@ -54,7 +54,7 @@ bvec3 test_bvec3_mix_same_vectors() {
     return mix(a, a, selector);
 }
 
-// @unsupported(frontend!=lp)
+// @unsupported(backend=wgpu)
 // run: test_bvec3_mix_same_vectors() == bvec3(true, true, true)
 
 bvec3 test_bvec3_mix_in_expression() {
@@ -68,5 +68,5 @@ bvec3 test_bvec3_mix_in_expression() {
 }
 
 // wgpu.f32: file does not compile through naga glsl-in (mirrors the interp.f32 frontend gap)
-// @unsupported(frontend!=lp)
+// @unsupported(backend=wgpu)
 // run: test_bvec3_mix_in_expression() == bvec3(true, true, true)

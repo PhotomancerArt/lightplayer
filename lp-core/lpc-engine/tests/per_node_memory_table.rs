@@ -363,9 +363,7 @@ fn measure(fixture: &Fixture) -> Vec<Phase> {
 
     run(PHASES[1], &mut || {
         rt.engine_mut()
-            .set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new(
-                lp_shader::ShaderFrontend::LpsGlsl,
-            ))));
+            .set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new())));
         rt.engine_mut()
             .services_mut()
             .set_output_provider(Some(Box::new(MemoryOutputProvider::new_permissive())));

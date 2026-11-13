@@ -34,10 +34,6 @@ impl TimingGraphics {
 }
 
 impl LpGraphics for TimingGraphics {
-    fn glsl_frontend(&self) -> lp_shader::ShaderFrontend {
-        self.inner.glsl_frontend()
-    }
-
     fn compile_shader(
         &self,
         source: &str,

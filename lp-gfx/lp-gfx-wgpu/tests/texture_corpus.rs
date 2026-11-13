@@ -26,7 +26,7 @@ mod util;
 use std::path::PathBuf;
 
 use lp_gfx::{LpGraphics, ShaderCompileOptions, ShaderSemantics};
-use lp_shader::{CompilePxDesc, LpsEngine, ShaderFrontend, TextureBuffer};
+use lp_shader::{CompilePxDesc, LpsEngine, TextureBuffer};
 use lps_filetests::parse::parse_test_file;
 use lps_filetests::parse::test_type::{TestFile, TestType};
 use lps_filetests::test_run::texture_fixture::encode_texture_fixture;
@@ -169,7 +169,6 @@ fn cpu_channels(
         wrapped,
         TextureStorageFormat::Rgba16Unorm,
         lpir::CompilerConfig::default(),
-        ShaderFrontend::LpsGlsl,
     );
     desc.textures = test_file.texture_specs.clone();
     let shader = engine
@@ -217,8 +216,7 @@ fn gpu_channels(
     test_file: &TestFile,
     wrapped: &str,
 ) -> Result<[u16; 4], String> {
-    let mut options =
-        ShaderCompileOptions::new(ShaderSemantics::F32Gpu, lp_shader::ShaderFrontend::LpsGlsl);
+    let mut options = ShaderCompileOptions::new(ShaderSemantics::F32Gpu);
     options.textures = test_file.texture_specs.clone();
     let mut shader = graphics
         .compile_shader(wrapped, &options)

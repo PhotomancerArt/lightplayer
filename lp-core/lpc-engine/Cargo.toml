@@ -22,8 +22,6 @@ default = [
     "resolver-payload-cache",
     "scrub-log",
 ]
-# Panic recovery via catch_unwind (embedded targets)
-naga = ["lp-shader/naga"]
 std = [
     "lpc-hardware/std",
     "lpc-shared/std",

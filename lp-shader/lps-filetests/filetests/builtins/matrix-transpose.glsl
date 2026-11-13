@@ -29,8 +29,8 @@ mat4 test_transpose_mat4() {
 
 // run: test_transpose_mat4() ~= mat4(1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0)
 
-// Non-square mat2x3 / mat3x2 transpose: deferred — rectangular matrix types are not mapped in
-// `lps-frontend` `naga_types` yet (`matrix {columns}×{rows}` only allows square mat2/3/4).
+// Non-square mat2x3 / mat3x2 transpose: deferred — rectangular matrix types are not supported
+// yet (only square mat2/3/4).
 
 mat2 test_transpose_mat2_identity() {
     mat2 m = mat2(1.0, 0.0, 0.0, 1.0);

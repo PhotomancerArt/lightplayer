@@ -110,8 +110,7 @@ fn a_wire_loaded_project_wears_the_links_engine_state() {
     let project_name = "test-project";
     let output_provider: Rc<RefCell<dyn lpc_shared::output::OutputProvider>> =
         Rc::new(RefCell::new(MemoryOutputProvider::new()));
-    let graphics: Arc<dyn LpGraphics> =
-        Arc::new(TargetLpvmGraphics::new(lpa_server::DEVICE_SHADER_FRONTEND));
+    let graphics: Arc<dyn LpGraphics> = Arc::new(TargetLpvmGraphics::new());
     let mut server = LpServer::new(
         output_provider.clone(),
         seeded_base_fs(project_name),

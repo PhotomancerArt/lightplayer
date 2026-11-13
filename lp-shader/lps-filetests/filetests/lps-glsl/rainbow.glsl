@@ -1,7 +1,7 @@
 // test compile
 //
 // Compile-only gate for the basic rainbow demo shader. This intentionally avoids numeric
-// expectations so rv32lpn can prove frontend coverage before render-accuracy work catches up.
+// expectations so rv32n can prove frontend coverage before render-accuracy work catches up.
 //
 // wasm.f32 was @unimplemented here until M5: the `@lpfn` builtins this shader
 // calls had no f32 implementation, so only Q32 ids resolved and the imports

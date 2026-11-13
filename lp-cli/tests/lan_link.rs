@@ -161,9 +161,8 @@ fn wifi_status_and_add_work_over_the_link() {
 
 #[test]
 fn an_upload_over_the_link_loads_and_runs_the_project() {
-    let graphics: Arc<dyn lpa_server::LpGraphics> = Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new(
-        lpa_server::DEVICE_SHADER_FRONTEND,
-    ));
+    let graphics: Arc<dyn lpa_server::LpGraphics> =
+        Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new());
     let harness = start(HarnessAccess::open(OpenTo::Edit), Some(graphics));
     handle_upload(UploadArgs {
         dir: workspace_dir().join("projects/test/basic"),

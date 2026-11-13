@@ -101,8 +101,7 @@ fn overlay_commit_does_not_echo_as_external_fs_change() {
 
 fn server_with_clock_project(name: &str) -> (LpServer, LpPathBuf) {
     let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::new()));
-    let graphics: Arc<dyn LpGraphics> =
-        Arc::new(TargetLpvmGraphics::new(lpa_server::DEVICE_SHADER_FRONTEND));
+    let graphics: Arc<dyn LpGraphics> = Arc::new(TargetLpvmGraphics::new());
     let mut server = LpServer::new(
         output_provider,
         Box::new(LpFsMemory::new()),

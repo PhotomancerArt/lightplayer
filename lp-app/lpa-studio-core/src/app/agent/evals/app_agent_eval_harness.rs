@@ -438,8 +438,7 @@ pub(crate) fn board_server(board: &str) -> LpServer {
     let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::with_hardware_manifest(
         manifest,
     )));
-    let graphics: Arc<dyn LpGraphics> =
-        Arc::new(TargetLpvmGraphics::new(lpa_server::DEVICE_SHADER_FRONTEND));
+    let graphics: Arc<dyn LpGraphics> = Arc::new(TargetLpvmGraphics::new());
     LpServer::new(
         output_provider,
         Box::new(LpFsMemory::new()),

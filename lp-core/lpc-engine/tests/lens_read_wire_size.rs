@@ -693,9 +693,7 @@ fn load_catalog_project(slug: &str, root: &str) -> (Engine, ProjectRegistry) {
     let mut rt = ProjectLoader::load_from_root(&fs, services)
         .unwrap_or_else(|e| panic!("load catalog/projects/{slug}: {e:?}"));
     rt.engine_mut()
-        .set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new(
-            lp_shader::ShaderFrontend::LpsGlsl,
-        ))));
+        .set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new())));
     let (mut engine, registry) = rt.into_parts();
     tick(&mut engine, &registry, 3);
     (engine, registry)

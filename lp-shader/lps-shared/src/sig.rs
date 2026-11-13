@@ -9,7 +9,7 @@ use crate::{LayoutRules, LpsType, TextureBindingSpec, VMCTX_HEADER_SIZE};
 /// or synthesised by the toolchain.
 ///
 /// Today the toolchain emits two synthetic families: `__shader_init` (constant
-/// global initialisation from the `lps-frontend` lower pass) and
+/// global initialisation from the `lps-glsl` lowering) and
 /// `__render_texture_<format>` (pixel loop + Q32→unorm16 stores from
 /// `lp-shader`'s synthesis — see `lp-shader/lp-shader/src/synth/render_texture.rs`).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

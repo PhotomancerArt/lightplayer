@@ -5,7 +5,6 @@
 
 use lp_gfx::{LpGraphics, ShaderCompileOptions, ShaderSemantics};
 use lp_gfx_lpvm::{CPU_SAMPLE_BATCH_POINTS, TargetLpvmGraphics};
-use lp_shader::ShaderFrontend;
 use lps_shared::LpsValueF32;
 
 const SHADER: &str = "\
@@ -26,9 +25,9 @@ fn uniforms(gain: f32) -> LpsValueF32 {
 
 #[test]
 fn a_bound_prefix_leaves_the_tail_and_keeps_the_binding() {
-    let graphics = TargetLpvmGraphics::new(ShaderFrontend::LpsGlsl);
+    let graphics = TargetLpvmGraphics::new();
     assert_eq!(graphics.sample_batch_capacity(), CPU_SAMPLE_BATCH_POINTS);
-    let options = ShaderCompileOptions::new(ShaderSemantics::Q32, ShaderFrontend::LpsGlsl);
+    let options = ShaderCompileOptions::new(ShaderSemantics::Q32);
     let mut shader = graphics.compile_shader(SHADER, &options).expect("compiles");
 
     // A 10-point window; the tail (points 7..10) is poisoned so an overrun shows.

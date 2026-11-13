@@ -2,14 +2,14 @@
 
 use alloc::format;
 
-use lpir::{CompilerConfig, LpirModule};
+use lpir::CompilerConfig;
 use lps_shared::{LpsModuleSig, LpsType, TextureBuffer, TextureStorageFormat};
 use lpvm::AllocError;
 use lpvm::LpvmEngine;
 
 use crate::compile_compute_desc::CompileComputeDesc;
 use crate::compile_job::{ShaderCompileBudget, ShaderCompileJob, ShaderCompileStepResult};
-use crate::compile_px_desc::{CompilePxDesc, TextureBindingSpecs};
+use crate::compile_px_desc::CompilePxDesc;
 use crate::compute_abi::{validate_compute_abi, validate_compute_tick_sig};
 use crate::compute_shader::LpsComputeShader;
 use crate::entry_space::{RenderEntry, ShaderEntrySpace};
@@ -47,12 +47,11 @@ impl<E: LpvmEngine> LpsEngine<E> {
         glsl: &str,
         output_format: TextureStorageFormat,
         config: &CompilerConfig,
-        frontend: crate::ShaderFrontend,
     ) -> Result<LpsPxShader, LpsError>
     where
         E::Module: 'static,
     {
-        let desc = CompilePxDesc::new(glsl, output_format, config.clone(), frontend);
+        let desc = CompilePxDesc::new(glsl, output_format, config.clone());
         self.compile_px_desc(desc)
     }
 
@@ -194,32 +193,6 @@ impl<E: LpvmEngine> LpsEngine<E> {
     pub fn inner(&self) -> &E {
         &self.engine
     }
-}
-
-#[cfg(feature = "naga")]
-pub(crate) fn lower_glsl_with_naga(
-    glsl: &str,
-    textures: &TextureBindingSpecs,
-    compiler_config: &CompilerConfig,
-) -> Result<(LpirModule, LpsModuleSig), LpsError> {
-    let naga = lps_frontend::compile(glsl).map_err(|e| LpsError::Parse(format!("{e}")))?;
-    let lower_options = lps_frontend::LowerOptions {
-        texture_specs: textures.clone(),
-        texel_fetch_bounds: compiler_config.texture.texel_fetch_bounds,
-    };
-    lps_frontend::lower_with_options(&naga, &lower_options)
-        .map_err(|e| LpsError::Lower(format!("{e}")))
-}
-
-#[cfg(not(feature = "naga"))]
-pub(crate) fn lower_glsl_with_naga(
-    _glsl: &str,
-    _textures: &TextureBindingSpecs,
-    _compiler_config: &CompilerConfig,
-) -> Result<(LpirModule, LpsModuleSig), LpsError> {
-    Err(LpsError::Validation(alloc::string::String::from(
-        "naga frontend was not built into this binary",
-    )))
 }
 
 /// Validate the declared entry against the source and the output format.

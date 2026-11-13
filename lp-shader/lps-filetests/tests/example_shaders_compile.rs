@@ -64,7 +64,7 @@ use lpc_engine::{EngineServices, ProjectLoader};
 use lpc_model::TreePath;
 use lpfs::LpFsStd;
 use lpir::CompilerConfig;
-use lps_filetests::targets::{ALL_TARGETS, Backend, FloatMode, Frontend, Isa, Target};
+use lps_filetests::targets::{ALL_TARGETS, Backend, FloatMode, Isa, Target};
 use lps_filetests::test_run::compile::compile_for_target;
 
 /// Known failures the gate lets through: `(shader, target, defect)`.
@@ -110,7 +110,7 @@ fn shipped_example_shaders_compile_on_every_target() {
     let xt_image = lps_builtins_xt_image::is_available();
     if !xt_image {
         eprintln!(
-            "NOTE: the Xtensa builtins image is not built; the xtn/xtlpn targets run \
+            "NOTE: the Xtensa builtins image is not built; the xtn targets run \
              codegen only and skip the link. Run `{}` (needs the esp toolchain) to link too.",
             lps_builtins_xt_image::BUILD_COMMAND
         );
@@ -247,25 +247,12 @@ fn xtensa_codegen_only(
     textures: &lp_shader::TextureBindingSpecs,
     config: &CompilerConfig,
 ) -> Result<(), String> {
-    let (ir, meta) = match target.frontend {
-        Frontend::Naga => {
-            let naga = lps_frontend::compile(glsl).map_err(|e| format!("{e}"))?;
-            let options = lps_frontend::LowerOptions {
-                texture_specs: textures.clone(),
-                texel_fetch_bounds: config.texture.texel_fetch_bounds,
-            };
-            lps_frontend::lower_with_options(&naga, &options).map_err(|e| format!("{e}"))?
-        }
-        Frontend::Lp => {
-            let options = lps_glsl::CompileOptions {
-                texture_specs: textures.clone(),
-                texel_fetch_bounds: config.texture.texel_fetch_bounds,
-            };
-            let output =
-                lps_glsl::compile(glsl, &options).map_err(|e| e.render(glsl).to_string())?;
-            (output.ir, output.meta)
-        }
+    let options = lps_glsl::CompileOptions {
+        texture_specs: textures.clone(),
+        texel_fetch_bounds: config.texture.texel_fetch_bounds,
     };
+    let output = lps_glsl::compile(glsl, &options).map_err(|e| e.render(glsl).to_string())?;
+    let (ir, meta) = (output.ir, output.meta);
     let float_mode = match target.float_mode {
         FloatMode::Q32 => lpir::FloatMode::Q32,
         FloatMode::F32 => lpir::FloatMode::F32,

@@ -255,23 +255,10 @@ fn palette_fs(bind_palette: bool, second_shader: bool) -> LpFsMemory {
 }
 
 fn load(fs: LpFsMemory) -> Project {
-    load_with_frontend(fs, lp_shader::ShaderFrontend::LpsGlsl)
-}
-
-/// The frontend is a parameter because the palette contract has to hold on
-/// both of them: devices and native servers compile through `LpsGlsl`, while
-/// the browser CPU tier pins `Naga` (`fw-browser`'s
-/// `BROWSER_SHADER_FRONTEND`). Everything above the `LpGraphics` seam —
-/// including the `TextureBindingSpec` the shader node supplies per palette
-/// slot — is shared, so the same project must render the same strip either
-/// way.
-fn load_with_frontend(fs: LpFsMemory, frontend: lp_shader::ShaderFrontend) -> Project {
     let services = EngineServices::new(TreePath::parse("/shader_palette.show").expect("root"));
     let loaded = ProjectLoader::load_from_root(&fs, services).expect("load project");
     let (mut engine, registry) = loaded.into_parts();
-    engine.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new(
-        frontend,
-    ))));
+    engine.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new())));
     Project {
         engine,
         registry,

@@ -217,9 +217,7 @@ fn measure(shape: Shape6) -> Vec<Phase> {
     let mut rt = loaded.expect("loaded");
     run(PHASES[1], &mut || {
         rt.engine_mut()
-            .set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new(
-                lp_shader::ShaderFrontend::LpsGlsl,
-            ))));
+            .set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new())));
     });
     for label in &PHASES[2..] {
         run(label, &mut || {

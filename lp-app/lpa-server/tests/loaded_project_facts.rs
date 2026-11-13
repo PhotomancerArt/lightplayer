@@ -125,8 +125,7 @@ fn the_basic_project_after_a_few_ticks_has_lamps_and_a_picture_of_them() {
 }
 
 fn server() -> LpServer {
-    let graphics: Arc<dyn LpGraphics> =
-        Arc::new(TargetLpvmGraphics::new(lpa_server::DEVICE_SHADER_FRONTEND));
+    let graphics: Arc<dyn LpGraphics> = Arc::new(TargetLpvmGraphics::new());
     LpServer::new(
         Rc::new(RefCell::new(MemoryOutputProvider::new_permissive())),
         Box::new(lpfs::LpFsMemory::new()),

@@ -217,9 +217,7 @@ mod tests {
         let graphics = GpuGraphics::new(
             device.clone(),
             queue.clone(),
-            Box::new(lp_gfx_lpvm::TargetLpvmGraphics::new(
-                lp_shader::ShaderFrontend::LpsGlsl,
-            )),
+            Box::new(lp_gfx_lpvm::TargetLpvmGraphics::new()),
         );
 
         // 2×1 RGBA16 product with values across the transfer curve.
@@ -324,9 +322,7 @@ mod tests {
         let graphics = GpuGraphics::new(
             device.clone(),
             queue,
-            Box::new(lp_gfx_lpvm::TargetLpvmGraphics::new(
-                lp_shader::ShaderFrontend::LpsGlsl,
-            )),
+            Box::new(lp_gfx_lpvm::TargetLpvmGraphics::new()),
         );
         let product = graphics.create_render_target(1, 1).expect("target");
         let stand_in = device.create_texture(&wgpu::TextureDescriptor {

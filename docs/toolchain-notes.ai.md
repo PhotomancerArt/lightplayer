@@ -14,7 +14,7 @@ install`). Two directory trees select it locally: `lp-fw/fw-esp32s3` and
 the `firmware-xtensa` and `validate-xtensa` jobs).
 
 **It is needed for a *host* test path, not only firmware.** The Xtensa filetest
-targets (`xtn.q32` / `xtlpn.q32`) and `just test-xt-host` execute Xtensa code on
+targets (`xtn.q32`) and `just test-xt-host` execute Xtensa code on
 the host emulator, linked against a cross-compiled builtins image built by
 `scripts/build-builtins-xt.sh`.
 

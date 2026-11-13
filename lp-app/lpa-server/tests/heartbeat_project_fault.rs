@@ -42,8 +42,7 @@ fn server_over(
 ) {
     let output_provider: Rc<RefCell<dyn lpc_shared::output::OutputProvider>> =
         Rc::new(RefCell::new(MemoryOutputProvider::new()));
-    let graphics: Arc<dyn LpGraphics> =
-        Arc::new(TargetLpvmGraphics::new(lpa_server::DEVICE_SHADER_FRONTEND));
+    let graphics: Arc<dyn LpGraphics> = Arc::new(TargetLpvmGraphics::new());
     let base_fs = Box::new(LpFsStd::new(workspace_dir().join(root)));
     let server = LpServer::new(
         output_provider.clone(),
@@ -61,8 +60,7 @@ fn load(
     output: Rc<RefCell<dyn lpc_shared::output::OutputProvider>>,
     name: &str,
 ) {
-    let graphics: Arc<dyn LpGraphics> =
-        Arc::new(TargetLpvmGraphics::new(lpa_server::DEVICE_SHADER_FRONTEND));
+    let graphics: Arc<dyn LpGraphics> = Arc::new(TargetLpvmGraphics::new());
     let server_ptr: *mut LpServer = server;
     unsafe {
         let pm = (*server_ptr).project_manager_mut();

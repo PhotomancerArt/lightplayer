@@ -1,8 +1,8 @@
 //! Run one preview project on the host engine and record its frames.
 //!
 //! The graphics backend is the one every device-emulating host uses:
-//! `lp_gfx_lpvm::TargetLpvmGraphics` with the device's GLSL frontend
-//! (`lpa_server::DEVICE_SHADER_FRONTEND`). On the host that is `lpvm-wasm`
+//! `lp_gfx_lpvm::TargetLpvmGraphics`, which compiles with the device's
+//! one GLSL frontend (`lps-glsl`). On the host that is `lpvm-wasm`
 //! under wasmtime, compiling each shader in its authored float mode — Q32
 //! unless the def pins `float_mode` — so the numbers are the device's
 //! fixed-point numbers, not a float approximation of them.
@@ -71,9 +71,7 @@ pub fn record(
     let mut rt = ProjectLoader::load_from_root(fs, services)
         .map_err(|e| anyhow::anyhow!("load the preview project: {e:?}"))?;
     rt.engine_mut()
-        .set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new(
-            lpa_server::DEVICE_SHADER_FRONTEND,
-        ))));
+        .set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new())));
 
     let frame_count = ((seconds * fps as f32).round() as usize).max(1);
     let step_ms = |frame: u64| -> u32 {

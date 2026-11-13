@@ -178,10 +178,6 @@ impl LpGraphics for CountingGraphics {
         self.inner.float_semantics()
     }
 
-    fn glsl_frontend(&self) -> lp_shader::ShaderFrontend {
-        self.inner.glsl_frontend()
-    }
-
     fn create_render_target(&self, width: u32, height: u32) -> Result<TextureHandle, GfxError> {
         self.inner.create_render_target(width, height)
     }
@@ -407,7 +403,7 @@ impl Run {
             .unwrap_or_else(|e| panic!("load {}: {e}", dir.display()));
         let counters = Arc::new(SampleOutCounters::default());
         let graphics: Arc<dyn LpGraphics> = Arc::new(CountingGraphics {
-            inner: lp_gfx_lpvm::TargetLpvmGraphics::new(lp_shader::ShaderFrontend::LpsGlsl),
+            inner: lp_gfx_lpvm::TargetLpvmGraphics::new(),
             counters: counters.clone(),
         });
         rt.engine_mut().set_graphics(Some(graphics));

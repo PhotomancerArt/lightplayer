@@ -117,8 +117,8 @@ OPTIONS:
     -l, --list          List all available test files
     -g                  Regenerate .gen.glsl files before running tests
     -t, --target SPEC   Run target(s): comma-separated, backend shorthand
-                        (wasm,rv32c,rv32n,rv32lpn,xtn,xtlpn,interp), or full
-                        names (wasm.q32). xtn/xtlpn are Xtensa (ESP32-S3) and
+                        (wasm,rv32c,rv32n,xtn,interp), or full
+                        names (wasm.q32). xtn is Xtensa (ESP32-S3) and
                         are NOT in the default set; they need the Xtensa
                         builtins image, which this script builds for you when
                         you select them (requires the esp toolchain).
@@ -262,7 +262,7 @@ echo "Building lps-builtins-emu-app..."
   exit 1
 }
 
-# The Xtensa targets (xtn/xtlpn) execute against their own builtins image, which
+# The Xtensa targets (xtn) execute against their own builtins image, which
 # needs the esp toolchain. Build it only when an Xtensa target is actually
 # selected: unconditionally cross-building it would add an esp build to every
 # `just test-filetests`, and requiring the toolchain would break plain runs on a
@@ -274,13 +274,13 @@ echo "Building lps-builtins-emu-app..."
 XT_REQUESTED=false
 if [ "${#TARGET_ARG[@]}" -gt 0 ]; then
   case "${TARGET_ARG[1]}" in
-  *xtn* | *xtlpn*) XT_REQUESTED=true ;;
+  *xtn*) XT_REQUESTED=true ;;
   esac
 fi
 if [ "$XT_REQUESTED" = true ]; then
   echo "Building lps-builtins-xt-app (Xtensa target requested)..."
   "$SCRIPT_DIR/build-builtins-xt.sh" || {
-    echo "Error: Failed to build the Xtensa builtins image. The xtn/xtlpn targets" >&2
+    echo "Error: Failed to build the Xtensa builtins image. The xtn targets" >&2
     echo "       cannot run without it; install the esp toolchain (espup install)." >&2
     exit 1
   }

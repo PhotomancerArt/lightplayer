@@ -41,9 +41,7 @@ const FRAMES: u32 = 4;
 /// wasmtime.
 #[test]
 fn the_twins_frame_is_the_oracles_through_wasmtime() {
-    let graphics = || -> Arc<dyn LpGraphics> {
-        Arc::new(TargetLpvmGraphics::new(lpa_server::DEVICE_SHADER_FRONTEND))
-    };
+    let graphics = || -> Arc<dyn LpGraphics> { Arc::new(TargetLpvmGraphics::new()) };
     assert_same_frame(
         render_project(ORACLE, graphics()),
         render_project(TWIN, graphics()),
@@ -58,7 +56,6 @@ fn the_twins_frame_is_the_oracles_through_rv32_emulation() {
         Arc::new(LpvmGraphics::from_engine(
             NativeEmuEngine::new(NativeCompileOptions::default()),
             "lpvm-native::rt_emu(rv32)",
-            lpa_server::DEVICE_SHADER_FRONTEND,
         ))
     };
     assert_same_frame(

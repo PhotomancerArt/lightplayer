@@ -6,7 +6,7 @@
 //! @unsupported(*)                         every target
 //! @broken(wasm.q32)                       one target, by canonical name
 //! @unimplemented(float_mode=f32)          every f32 target
-//! @unsupported(frontend!=lp, isa=xtensa)  conjunction; `!=` negates one term
+//! @unsupported(backend!=wgpu, isa=xtensa)  conjunction; `!=` negates one term
 //! ```
 //!
 //! When several annotations match a target, the **most specific** one decides —
@@ -97,7 +97,7 @@ impl std::fmt::Display for TargetSelector {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::targets::{ALL_TARGETS, Backend, FloatMode, Frontend};
+    use crate::targets::{ALL_TARGETS, Backend, FloatMode, Isa};
 
     fn t(name: &str) -> &'static Target {
         Target::from_name(name).expect("registered target")
@@ -140,18 +140,17 @@ mod tests {
 
     #[test]
     fn negated_predicate_is_the_complement() {
-        let sel = pred(AxisValue::Frontend(Frontend::Lp), true);
+        let sel = pred(AxisValue::Backend(Backend::Wgpu), true);
         assert!(sel.matches(t("rv32n.q32")));
-        assert!(sel.matches(t("wgpu.f32")));
-        assert!(!sel.matches(t("rv32lpn.q32")));
-        assert!(!sel.matches(t("xtlpn.q32")));
+        assert!(sel.matches(t("xtn.q32")));
+        assert!(!sel.matches(t("wgpu.f32")));
     }
 
     #[test]
     fn conjunction_requires_every_term() {
         let sel = TargetSelector::Predicate(vec![
             AxisPredicate {
-                value: AxisValue::Frontend(Frontend::Lp),
+                value: AxisValue::Isa(Isa::Xtensa),
                 negated: true,
             },
             AxisPredicate {
@@ -160,9 +159,8 @@ mod tests {
             },
         ]);
         assert!(sel.matches(t("rv32n.q32")));
-        assert!(sel.matches(t("xtn.f32")));
+        assert!(!sel.matches(t("xtn.f32")), "xtensa excluded by first term");
         assert!(!sel.matches(t("wgpu.f32")), "wgpu excluded by second term");
-        assert!(!sel.matches(t("rv32lpn.q32")), "lp excluded by first term");
     }
 
     #[test]
@@ -170,7 +168,7 @@ mod tests {
         let name = TargetSelector::Name("wasm.q32".to_string());
         let two = TargetSelector::Predicate(vec![
             AxisPredicate {
-                value: AxisValue::Frontend(Frontend::Lp),
+                value: AxisValue::Isa(Isa::Xtensa),
                 negated: true,
             },
             AxisPredicate {

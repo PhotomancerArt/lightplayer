@@ -10,7 +10,7 @@
 //!
 //! The sources define functions with the real user-facing `lpfn_*` names so
 //! they can be spliced verbatim as a GPU shader prelude (M3 of the GPU
-//! preview roadmap). Note that `lps-frontend` reserves the `lpfn_` prefix
+//! preview roadmap). Note that `lps-glsl` reserves the `lpfn_` prefix
 //! for builtin imports, so a harness compiling these sources through the
 //! normal frontend must first rename the prefix (see the conformance
 //! harness's `oracle` module).

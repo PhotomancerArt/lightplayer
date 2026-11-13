@@ -23,7 +23,7 @@
 //! clamped, Guaranteed-class in `docs/design/float.ai.md` §3/§7 — so a tolerance
 //! here would hide exactly the class of bug this file was written to catch.
 
-use lp_shader::{CompilePxDesc, LpsEngine, LpsPxShader, ShaderFrontend, TextureBuffer};
+use lp_shader::{CompilePxDesc, LpsEngine, LpsPxShader, TextureBuffer};
 use lpir::{CompilerConfig, FloatMode};
 use lps_shared::{LpsValueF32, TextureStorageFormat};
 use lpvm_wasm::WasmOptions;
@@ -44,7 +44,6 @@ fn compile(engine: &LpsEngine<WasmLpvmEngine>, glsl: &str, float_mode: FloatMode
                 glsl,
                 TextureStorageFormat::Rgba16Unorm,
                 CompilerConfig::default(),
-                ShaderFrontend::LpsGlsl,
             )
             .with_float_mode(float_mode),
         )

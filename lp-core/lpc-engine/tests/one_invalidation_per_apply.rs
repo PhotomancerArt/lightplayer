@@ -109,9 +109,7 @@ fn basic_project_fs() -> LpFsMemory {
 fn load(fs: &LpFsMemory) -> (Engine, ProjectRegistry) {
     let services = EngineServices::new(TreePath::parse("/basic.show").expect("root path"));
     let mut rt = ProjectLoader::load_from_root(fs, services).expect("load projects/test/basic");
-    rt.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new(
-        lp_shader::ShaderFrontend::LpsGlsl,
-    ))));
+    rt.set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new())));
     rt.into_parts()
 }
 

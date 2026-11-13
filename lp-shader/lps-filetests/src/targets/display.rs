@@ -1,6 +1,6 @@
 //! Target name formatting and CLI parsing.
 
-use super::{ALL_TARGETS, Backend, ExecMode, FloatMode, Frontend, Isa, Target};
+use super::{ALL_TARGETS, Backend, ExecMode, FloatMode, Isa, Target};
 use std::collections::BTreeSet;
 use std::fmt;
 
@@ -20,11 +20,6 @@ impl Backend {
         Backend::Interp,
         Backend::Wgpu,
     ];
-}
-
-impl Frontend {
-    /// Every frontend.
-    pub const ALL: &'static [Frontend] = &[Frontend::Naga, Frontend::Lp];
 }
 
 impl FloatMode {
@@ -65,15 +60,6 @@ impl fmt::Display for FloatMode {
     }
 }
 
-impl fmt::Display for Frontend {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Frontend::Naga => write!(f, "naga"),
-            Frontend::Lp => write!(f, "lp"),
-        }
-    }
-}
-
 impl fmt::Display for Isa {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -102,15 +88,13 @@ impl Target {
     }
 
     fn backend_name(&self) -> &'static str {
-        match (self.frontend, self.backend) {
-            (Frontend::Lp, Backend::Rv32fa) => "rv32lpn",
-            (Frontend::Lp, Backend::Xtfa) => "xtlpn",
-            (_, Backend::Rv32) => "rv32c",
-            (_, Backend::Rv32fa) => "rv32n",
-            (_, Backend::Xtfa) => "xtn",
-            (_, Backend::Wasm) => "wasm",
-            (_, Backend::Interp) => "interp",
-            (_, Backend::Wgpu) => "wgpu",
+        match self.backend {
+            Backend::Rv32 => "rv32c",
+            Backend::Rv32fa => "rv32n",
+            Backend::Xtfa => "xtn",
+            Backend::Wasm => "wasm",
+            Backend::Interp => "interp",
+            Backend::Wgpu => "wgpu",
         }
     }
 
@@ -161,8 +145,8 @@ pub fn parse_target_filters(spec: &str) -> Result<Vec<&'static Target>, String> 
         }
         if !any {
             let valid: Vec<String> = ALL_TARGETS.iter().map(|t| t.name()).collect();
-            let backends = "wasm, rv32c, rv32n, rv32lpn, xtn, xtlpn, interp, wgpu (shorthand) or full \
-                 names like wasm.q32";
+            let backends =
+                "wasm, rv32c, rv32n, xtn, interp, wgpu (shorthand) or full names like wasm.q32";
             return Err(format!(
                 "unknown target '{token}'. Try {backends}. Known targets: {}",
                 valid.join(", ")
@@ -200,28 +184,10 @@ mod tests {
     }
 
     #[test]
-    fn test_target_name_rv32lpn_q32() {
-        let target = &ALL_TARGETS[3];
-        assert_eq!(target.name(), "rv32lpn.q32");
-    }
-
-    #[test]
     fn test_target_name_xtn_q32() {
         let t = Target::from_name("xtn.q32").expect("xtn.q32 registered");
         assert_eq!(t.name(), "xtn.q32");
-        assert_eq!(t.frontend, Frontend::Naga);
         assert_eq!(t.isa, super::super::Isa::Xtensa);
-    }
-
-    /// `xtlpn` is the Xtensa **device pipeline** (lps-glsl frontend), the mirror
-    /// of `rv32lpn` — the target whose greens say something about what runs on an
-    /// ESP32-S3. Its name must not collide with `xtn`'s.
-    #[test]
-    fn test_target_name_xtlpn_q32() {
-        let t = Target::from_name("xtlpn.q32").expect("xtlpn.q32 registered");
-        assert_eq!(t.name(), "xtlpn.q32");
-        assert_eq!(t.frontend, Frontend::Lp);
-        assert_ne!(t.name(), Target::from_name("xtn.q32").unwrap().name());
     }
 
     #[test]
@@ -232,12 +198,8 @@ mod tests {
         assert_eq!(t.name(), "rv32c.q32");
         let t = Target::from_name("rv32n.q32").unwrap();
         assert_eq!(t.name(), "rv32n.q32");
-        let t = Target::from_name("rv32lpn.q32").unwrap();
-        assert_eq!(t.name(), "rv32lpn.q32");
         let t = Target::from_name("xtn.q32").unwrap();
         assert_eq!(t.name(), "xtn.q32");
-        let t = Target::from_name("xtlpn.q32").unwrap();
-        assert_eq!(t.name(), "xtlpn.q32");
     }
 
     /// Every name in `ALL_TARGETS` round-trips and is unique. A new backend whose
@@ -258,7 +220,7 @@ mod tests {
         assert_eq!(seen.len(), ALL_TARGETS.len());
     }
 
-    /// A bare `xtn` / `xtlpn` selects **both** float modes, in `ALL_TARGETS`
+    /// A bare `xtn` selects **both** float modes, in `ALL_TARGETS`
     /// order — the same rule `wasm` follows, and the reason M8 registering
     /// `xtn.f32` changed what an existing shorthand means. A caller that wants
     /// only the Q32 target must spell it out; `just` recipes and CI do.
@@ -270,30 +232,19 @@ mod tests {
             ["xtn.q32", "xtn.f32"]
         );
 
-        let v = parse_target_filters("xtlpn").expect("parse");
-        assert_eq!(
-            v.iter().map(|t| t.name()).collect::<Vec<_>>(),
-            ["xtlpn.q32", "xtlpn.f32"]
-        );
-
-        let v = parse_target_filters("xtn.q32,xtlpn.q32").expect("parse");
+        let v = parse_target_filters("xtn.q32,xtn.f32").expect("parse");
         assert_eq!(v.len(), 2);
     }
 
-    /// The f32 pair round-trips by name, and does not collide with the Q32
-    /// pair — `xtlpn` is the device pipeline (lps-glsl frontend), `xtn` is
-    /// Naga, and the float mode is a separate axis from both.
+    /// The f32 target round-trips by name, and does not collide with the Q32
+    /// one: the float mode is a separate axis from the backend.
     #[test]
     fn test_target_name_xt_f32_pair() {
         let t = Target::from_name("xtn.f32").expect("xtn.f32 registered");
         assert_eq!(t.name(), "xtn.f32");
         assert_eq!(t.float_mode, FloatMode::F32);
         assert_eq!(t.isa, Isa::Xtensa);
-
-        let t = Target::from_name("xtlpn.f32").expect("xtlpn.f32 registered");
-        assert_eq!(t.name(), "xtlpn.f32");
-        assert_eq!(t.frontend, Frontend::Lp);
-        assert_ne!(t.name(), Target::from_name("xtn.f32").unwrap().name());
+        assert_ne!(t.name(), Target::from_name("xtn.q32").unwrap().name());
     }
 
     #[test]
@@ -303,9 +254,7 @@ mod tests {
         assert!(err.contains("wasm.q32"));
         assert!(err.contains("rv32c.q32"));
         assert!(err.contains("rv32n.q32"));
-        assert!(err.contains("rv32lpn.q32"));
         assert!(err.contains("xtn.q32"));
-        assert!(err.contains("xtlpn.q32"));
     }
 
     /// A bare backend token selects **every** float mode that backend has, in
@@ -356,26 +305,16 @@ mod tests {
         assert_eq!(names, vec!["rv32n.q32", "rv32n.f32"]);
     }
 
-    #[test]
-    fn test_parse_target_filters_rv32lpn_shorthand() {
-        let v = parse_target_filters("rv32lpn").expect("parse");
-        let names: Vec<String> = v.iter().map(|t| t.name()).collect();
-        assert_eq!(names, vec!["rv32lpn.q32", "rv32lpn.f32"]);
-    }
-
     /// The soft-float rv32 targets exist and name the same backend as their
     /// Q32 siblings — only `float_mode` differs, which is what makes an
     /// `@unimplemented(float_mode=f32)` predicate cover them.
     #[test]
     fn test_target_name_rv32_f32_pair() {
-        for (name, frontend) in [("rv32n.f32", Frontend::Naga), ("rv32lpn.f32", Frontend::Lp)] {
-            let t = Target::from_name(name).expect("registered");
-            assert_eq!(t.name(), name);
-            assert_eq!(t.float_mode, FloatMode::F32);
-            assert_eq!(t.backend, Backend::Rv32fa);
-            assert_eq!(t.frontend, frontend);
-            assert_eq!(t.isa, super::super::Isa::Riscv32);
-        }
+        let t = Target::from_name("rv32n.f32").expect("registered");
+        assert_eq!(t.name(), "rv32n.f32");
+        assert_eq!(t.float_mode, FloatMode::F32);
+        assert_eq!(t.backend, Backend::Rv32fa);
+        assert_eq!(t.isa, super::super::Isa::Riscv32);
     }
 
     #[test]

@@ -1,10 +1,9 @@
 // test run
 
 // Constructor-typed coordinates: `ivec2(vec2)` / `vec2(ivec2)` conversion
-// constructors are valid GLSL and must be accepted by both frontends
-// (rv32lpn exercises lps-glsl; the other targets exercise naga/lps-frontend).
-// Regression: lps-frontend used to type naga `As` casts as scalar and reject
-// `texelFetch(tex, ivec2(pos), 0)` with "coordinate must be ivec2".
+// constructors are valid GLSL and must be accepted.
+// Regression: a conversion constructor used to be typed as a scalar and
+// `texelFetch(tex, ivec2(pos), 0)` was rejected with "coordinate must be ivec2".
 
 // texture-spec: inputColor format=rgba16unorm filter=nearest wrap=clamp shape=2d
 

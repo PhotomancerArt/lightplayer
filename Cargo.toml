@@ -101,7 +101,6 @@ members = [
     "lp-shader/lps-diagnostics",
     "lp-shader/lpvm",
     "lp-shader/lpvm-wasm",
-    "lp-shader/lps-frontend",
     "lp-shader/lps-glsl",
     "lp-shader/lps-probe",
     "lp-shader/lpvm-cranelift",
@@ -225,7 +224,6 @@ default-members = [
     "lp-shader/lps-diagnostics",
     "lp-shader/lpvm",
     "lp-shader/lpvm-wasm",
-    "lp-shader/lps-frontend",
     "lp-shader/lps-glsl",
     "lp-shader/lps-probe",
     "lp-shader/lpir",
@@ -325,7 +323,7 @@ unicode-normalization = { version = "0.1.25", default-features = false }
 # goes 79s -> 33s.
 #
 # Only the execution engines are lifted, not the compiler frontend
-# (lps-glsl/lps-frontend/lpir stay at opt-level 0): the engines are rarely
+# (lps-glsl/lpir stay at opt-level 0): the engines are rarely
 # edited, so the extra codegen is paid once and cached, while shader-frontend
 # work keeps its fast edit-build cycle. Lifting the frontend too was measured
 # and bought only 2.3s -> 2.0s, which does not pay for the rebuild cost.

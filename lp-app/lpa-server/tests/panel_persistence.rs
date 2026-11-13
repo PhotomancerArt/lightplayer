@@ -523,8 +523,7 @@ impl Harness {
 
 fn build_server(base_fs: Rc<RefCell<dyn LpFs>>) -> LpServer {
     let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::new()));
-    let graphics: Arc<dyn LpGraphics> =
-        Arc::new(TargetLpvmGraphics::new(lpa_server::DEVICE_SHADER_FRONTEND));
+    let graphics: Arc<dyn LpGraphics> = Arc::new(TargetLpvmGraphics::new());
     // The server owns its filesystem, but these tests need to read the
     // same bytes afterwards and hand them to a second server — so each
     // one gets a transparent shared VIEW rather than its own storage.

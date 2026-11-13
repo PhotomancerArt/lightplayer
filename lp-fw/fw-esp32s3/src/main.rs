@@ -1076,13 +1076,7 @@ pub(crate) fn lp_engine_entry(core: CoreBoot) {
     // The on-device JIT. `TargetLpvmGraphics` resolves to `lpvm-native`'s
     // `NativeJitEngine` on Xtensa, so a shader pushed to this board is compiled
     // to Xtensa machine code here and executed from RAM — no host step.
-    //
-    // ⚠️ The frontend is passed, never defaulted. `LpGraphics::glsl_frontend`
-    // deliberately has no default impl so that every host states its choice;
-    // the device ships `LpsGlsl`, and silently taking Naga would change what
-    // the shader means without changing a line of it.
-    let graphics: Arc<dyn LpGraphics> =
-        Arc::new(TargetLpvmGraphics::new(lpa_server::DEVICE_SHADER_FRONTEND));
+    let graphics: Arc<dyn LpGraphics> = Arc::new(TargetLpvmGraphics::new());
 
     let time_provider_rc = Rc::new(Esp32TimeProvider::new());
     let button_service: Rc<dyn ButtonService> = hardware_system.clone();

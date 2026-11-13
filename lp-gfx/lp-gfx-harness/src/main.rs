@@ -24,7 +24,6 @@ use std::time::{Duration, Instant};
 
 use lp_gfx_lpvm::TargetLpvmGraphics;
 use lp_gfx_wgpu::GpuGraphics;
-use lp_shader::ShaderFrontend;
 use lpa_server::{LpGraphics, LpServer, handlers::handle_client_message};
 use lpc_model::AsLpPath;
 use lpc_shared::output::MemoryOutputProvider;
@@ -277,7 +276,7 @@ fn run(args: &Args) -> Result<(), String> {
 /// Construct the selected engine, honor-or-fail (no silent substitution).
 fn create_engine(engine: Engine) -> Result<Box<dyn LpGraphics>, String> {
     match engine {
-        Engine::CpuQ32 => Ok(Box::new(TargetLpvmGraphics::new(ShaderFrontend::LpsGlsl))),
+        Engine::CpuQ32 => Ok(Box::new(TargetLpvmGraphics::new())),
         Engine::GpuF32 => {
             let instance =
                 wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
@@ -307,7 +306,7 @@ fn create_engine(engine: Engine) -> Result<Box<dyn LpGraphics>, String> {
             Ok(Box::new(GpuGraphics::new(
                 device,
                 queue,
-                Box::new(TargetLpvmGraphics::new(ShaderFrontend::LpsGlsl)),
+                Box::new(TargetLpvmGraphics::new()),
             )))
         }
     }

@@ -6,8 +6,7 @@
 //! `┌─ glsl:LINE:COL` marker is in **authored** coordinates: spans are
 //! shifted out of the assembled unit ([`AssembledGlsl::to_authored`]) before
 //! rendering, so the Studio editor (`ui_shader_error.rs`) highlights the line
-//! the author wrote, exactly as it does for the LPVM tiers (whose naga
-//! frontend remaps over its own prefix in `lps-frontend/src/parse.rs`). A
+//! the author wrote, exactly as it does for the LPVM tiers. A
 //! diagnostic whose span lies outside the authored text — the lpfn prelude,
 //! a hoisted declaration's copy, a texture helper, the wrapper `main` —
 //! renders as a message with no location rather than a misleading line.

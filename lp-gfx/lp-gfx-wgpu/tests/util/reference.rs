@@ -5,7 +5,7 @@
 use std::time::{Duration, Instant};
 
 use lp_gfx_wgpu::assembly::{authored_prototypes, hoist_declarations};
-use lp_shader::{CompilePxDesc, LpsEngine, LpsPxShader, ShaderFrontend, TextureBuffer};
+use lp_shader::{CompilePxDesc, LpsEngine, LpsPxShader, TextureBuffer};
 use lps_shared::{LpsValueF32, TextureStorageFormat};
 use lpvm_wasm::WasmOptions;
 use lpvm_wasm::rt_wasmtime::WasmLpvmEngine;
@@ -50,7 +50,6 @@ impl ReferenceRenderer {
             &source,
             TextureStorageFormat::Rgba16Unorm,
             lpir::CompilerConfig::default(),
-            ShaderFrontend::LpsGlsl,
         );
         desc.textures = palette::texture_specs(shader);
         let compiled = self

@@ -5,7 +5,7 @@ use lpir::LpirModule;
 use lps_shared::{LpsModuleSig, TextureStorageFormat};
 use lpvm::{LpvmCompileBudget, LpvmCompileParams, LpvmCompileStepResult, LpvmEngine};
 
-use crate::compile_px_desc::{CompilePxDesc, ShaderFrontend, TextureBindingSpecs};
+use crate::compile_px_desc::{CompilePxDesc, TextureBindingSpecs};
 use crate::compile_stats::LpirModuleStats;
 use crate::entry_space::ShaderEntrySpace;
 use crate::error::LpsError;
@@ -46,7 +46,6 @@ pub enum ShaderCompileStage {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ShaderCompileStageDetail {
     Frontend(lps_glsl::CompileStage),
-    FrontendNaga,
     Prepare,
     Backend,
     Done,
@@ -58,17 +57,12 @@ pub enum ShaderCompileStepResult {
     Failed(LpsError),
 }
 
-enum FrontendState<'src> {
-    LpsGlsl(lps_glsl::CompileJob<'src>),
-    Naga,
-}
-
 enum ShaderCompileState<'src, 'engine, E: LpvmEngine> {
     /// The engine cannot compile the requested numeric mode. Rejected at
     /// construction so the frontend never runs for a compile that cannot
     /// finish, and reported on the first `step` because `new` returns `Self`.
     Rejected(String),
-    Frontend(FrontendState<'src>),
+    Frontend(lps_glsl::CompileJob<'src>),
     Prepare {
         ir: LpirModule,
         meta: LpsModuleSig,
@@ -113,18 +107,11 @@ where
                 desc.float_mode.as_str()
             ))
         } else {
-            match desc.frontend {
-                ShaderFrontend::LpsGlsl => {
-                    let options = lps_glsl::CompileOptions {
-                        texture_specs: desc.textures.clone(),
-                        texel_fetch_bounds: desc.compiler_config.texture.texel_fetch_bounds,
-                    };
-                    ShaderCompileState::Frontend(FrontendState::LpsGlsl(lps_glsl::CompileJob::new(
-                        desc.glsl, options,
-                    )))
-                }
-                ShaderFrontend::Naga => ShaderCompileState::Frontend(FrontendState::Naga),
-            }
+            let options = lps_glsl::CompileOptions {
+                texture_specs: desc.textures.clone(),
+                texel_fetch_bounds: desc.compiler_config.texture.texel_fetch_bounds,
+            };
+            ShaderCompileState::Frontend(lps_glsl::CompileJob::new(desc.glsl, options))
         };
         Self {
             engine,
@@ -153,12 +140,7 @@ where
     pub fn stage_detail(&self) -> ShaderCompileStageDetail {
         match &self.state {
             ShaderCompileState::Rejected(_) => ShaderCompileStageDetail::Done,
-            ShaderCompileState::Frontend(FrontendState::LpsGlsl(job)) => {
-                ShaderCompileStageDetail::Frontend(job.stage())
-            }
-            ShaderCompileState::Frontend(FrontendState::Naga) => {
-                ShaderCompileStageDetail::FrontendNaga
-            }
+            ShaderCompileState::Frontend(job) => ShaderCompileStageDetail::Frontend(job.stage()),
             ShaderCompileState::Prepare { .. } => ShaderCompileStageDetail::Prepare,
             ShaderCompileState::Backend { .. } => ShaderCompileStageDetail::Backend,
             ShaderCompileState::Done => ShaderCompileStageDetail::Done,
@@ -171,37 +153,24 @@ where
             ShaderCompileState::Rejected(message) => {
                 ShaderCompileStepResult::Failed(LpsError::Validation(message))
             }
-            ShaderCompileState::Frontend(mut frontend) => match &mut frontend {
-                FrontendState::LpsGlsl(job) => {
-                    match job.step(lps_glsl::CompileBudget::steps(budget.frontend_steps)) {
-                        lps_glsl::CompileStepResult::Pending => {
-                            self.state = ShaderCompileState::Frontend(frontend);
-                            ShaderCompileStepResult::Pending
-                        }
-                        lps_glsl::CompileStepResult::Failed(err) => {
-                            ShaderCompileStepResult::Failed(LpsError::Parse(err.render(self.glsl)))
-                        }
-                        lps_glsl::CompileStepResult::Finished(output) => {
-                            self.state = ShaderCompileState::Prepare {
-                                ir: output.ir,
-                                meta: output.meta,
-                            };
-                            ShaderCompileStepResult::Pending
-                        }
-                    }
-                }
-                FrontendState::Naga => match crate::engine::lower_glsl_with_naga(
-                    self.glsl,
-                    &self.textures,
-                    &self.params.config,
-                ) {
-                    Ok((ir, meta)) => {
-                        self.state = ShaderCompileState::Prepare { ir, meta };
+            ShaderCompileState::Frontend(mut job) => {
+                match job.step(lps_glsl::CompileBudget::steps(budget.frontend_steps)) {
+                    lps_glsl::CompileStepResult::Pending => {
+                        self.state = ShaderCompileState::Frontend(job);
                         ShaderCompileStepResult::Pending
                     }
-                    Err(err) => ShaderCompileStepResult::Failed(err),
-                },
-            },
+                    lps_glsl::CompileStepResult::Failed(err) => {
+                        ShaderCompileStepResult::Failed(LpsError::Parse(err.render(self.glsl)))
+                    }
+                    lps_glsl::CompileStepResult::Finished(output) => {
+                        self.state = ShaderCompileState::Prepare {
+                            ir: output.ir,
+                            meta: output.meta,
+                        };
+                        ShaderCompileStepResult::Pending
+                    }
+                }
+            }
             ShaderCompileState::Prepare { mut ir, mut meta } => {
                 if let Err(err) =
                     crate::texture_interface::validate_texture_interface(&meta, &self.textures)

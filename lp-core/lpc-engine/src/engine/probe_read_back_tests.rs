@@ -45,7 +45,7 @@ use crate::products::visual::VisualProduct;
 #[test]
 fn gpu_resident_probe_serves_the_previous_frame_one_probe_late() {
     let graphics = Arc::new(LatentGraphics {
-        inner: lp_gfx_lpvm::TargetLpvmGraphics::new(lp_shader::ShaderFrontend::LpsGlsl),
+        inner: lp_gfx_lpvm::TargetLpvmGraphics::new(),
     });
     let (rt, product) = load_warmed_basic(graphics.clone(), Some(graphics));
     let (mut engine, registry) = rt.into_parts();
@@ -133,7 +133,7 @@ fn gpu_resident_probe_serves_the_previous_frame_one_probe_late() {
 #[test]
 fn gpu_resident_probe_without_an_injected_source_stays_gpu_resident() {
     let graphics = Arc::new(LatentGraphics {
-        inner: lp_gfx_lpvm::TargetLpvmGraphics::new(lp_shader::ShaderFrontend::LpsGlsl),
+        inner: lp_gfx_lpvm::TargetLpvmGraphics::new(),
     });
     let (mut rt, product) = load_warmed_basic(graphics, None);
     for _ in 0..3 {
@@ -151,9 +151,7 @@ fn gpu_resident_probe_without_an_injected_source_stays_gpu_resident() {
 /// engine's current revision.
 #[test]
 fn cpu_tier_probe_answers_texture_on_the_first_call() {
-    let graphics: Arc<dyn LpGraphics> = Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new(
-        lp_shader::ShaderFrontend::LpsGlsl,
-    ));
+    let graphics: Arc<dyn LpGraphics> = Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new());
     let (rt, product) = load_warmed_basic(graphics, None);
     let (mut engine, registry) = rt.into_parts();
 
@@ -222,10 +220,6 @@ impl LpGraphics for LatentGraphics {
 
     fn float_semantics(&self) -> ShaderSemantics {
         self.inner.float_semantics()
-    }
-
-    fn glsl_frontend(&self) -> lp_shader::ShaderFrontend {
-        self.inner.glsl_frontend()
     }
 
     fn create_render_target(&self, width: u32, height: u32) -> Result<TextureHandle, GfxError> {

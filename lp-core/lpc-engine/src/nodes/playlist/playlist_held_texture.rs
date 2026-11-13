@@ -154,7 +154,7 @@ mod tests {
 
     #[test]
     fn a_captured_texture_is_shown_exactly_and_released_with_the_switch() {
-        let graphics = lp_gfx_lpvm::TargetLpvmGraphics::new(lp_shader::ShaderFrontend::LpsGlsl);
+        let graphics = lp_gfx_lpvm::TargetLpvmGraphics::new();
         let mut shown = graphics.create_render_target(2, 1).expect("target");
         let texels: [u8; 16] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
         graphics.write_texture(&mut shown, &texels).expect("write");
@@ -176,7 +176,7 @@ mod tests {
     /// size) keeps the first copy: one held target per switch.
     #[test]
     fn capture_is_once_per_switch() {
-        let graphics = lp_gfx_lpvm::TargetLpvmGraphics::new(lp_shader::ShaderFrontend::LpsGlsl);
+        let graphics = lp_gfx_lpvm::TargetLpvmGraphics::new();
         let mut first = graphics.create_render_target(1, 1).expect("target");
         graphics
             .write_texture(&mut first, &[1, 0, 2, 0, 3, 0, 4, 0])
@@ -200,7 +200,7 @@ mod tests {
 
     #[test]
     fn a_target_of_another_size_is_not_held() {
-        let graphics = lp_gfx_lpvm::TargetLpvmGraphics::new(lp_shader::ShaderFrontend::LpsGlsl);
+        let graphics = lp_gfx_lpvm::TargetLpvmGraphics::new();
         let shown = graphics.create_render_target(2, 1).expect("target");
         let mut preview = graphics.create_render_target(4, 4).expect("preview");
         let mut held = PlaylistHeldTexture::default();

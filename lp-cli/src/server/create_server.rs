@@ -83,8 +83,7 @@ pub fn create_server_on(
     // For now, return a new filesystem instance (caller may not need it)
     // Desktop dev server emulates the device: same GLSL frontend product
     // constant (the GPU tier, when it arrives, is a separate backend).
-    let graphics: Arc<dyn LpGraphics> =
-        Arc::new(TargetLpvmGraphics::new(lpa_server::DEVICE_SHADER_FRONTEND));
+    let graphics: Arc<dyn LpGraphics> = Arc::new(TargetLpvmGraphics::new());
     let mut server = LpServer::new_with_hardware_services(
         output_provider,
         base_fs,

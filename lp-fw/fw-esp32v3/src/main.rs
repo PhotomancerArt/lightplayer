@@ -1155,9 +1155,6 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     //     heap's second region, added at boot by `add_sram1_heap_region` from
     //     `reclaimable_heap_span()`, which `codemem_esp32` const-asserts —
     //     a fact the compiler keeps rather than a rule a reader remembers.
-    //   * The frontend is passed, never defaulted: `LpGraphics::glsl_frontend`
-    //     has no default impl so every host states its choice, and the device
-    //     ships `LpsGlsl`.
     let jit_region = lpvm_native::codemem_esp32::CodeRegion::ESP32_DEFAULT;
     assert_jit_region_clear_of_rwtext(&jit_region);
     lpvm_native::codemem_esp32::global::install(jit_region);
@@ -1174,8 +1171,7 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
         jit_region.len_bytes / 1024,
         linker_rwtext_end(),
     );
-    let graphics: Arc<dyn LpGraphics> =
-        Arc::new(TargetLpvmGraphics::new(lpa_server::DEVICE_SHADER_FRONTEND));
+    let graphics: Arc<dyn LpGraphics> = Arc::new(TargetLpvmGraphics::new());
 
     let time_provider_rc = Rc::new(Esp32TimeProvider::new());
     let mut server = LpServer::new_with_hardware_services(

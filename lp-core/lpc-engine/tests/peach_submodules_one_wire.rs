@@ -161,9 +161,7 @@ fn load(project: &str) -> LoadedProjectRuntime {
     let mut rt = ProjectLoader::load_from_root(&fs, services)
         .unwrap_or_else(|e| panic!("load {project}: {e:?}"));
     rt.engine_mut()
-        .set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new(
-            lp_shader::ShaderFrontend::LpsGlsl,
-        ))));
+        .set_graphics(Some(Arc::new(lp_gfx_lpvm::TargetLpvmGraphics::new())));
     rt
 }
 

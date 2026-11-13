@@ -5,11 +5,10 @@
 
 use lp_gfx::LpGraphics;
 use lp_gfx_lpvm::TargetLpvmGraphics;
-use lp_shader::ShaderFrontend;
 
 #[test]
 fn sample_out_data_borrows_what_write_sample_out_wrote() {
-    let graphics = TargetLpvmGraphics::new(ShaderFrontend::LpsGlsl);
+    let graphics = TargetLpvmGraphics::new();
     let mut out = graphics.create_sample_out(2).expect("sample out");
     graphics
         .write_sample_out(&mut out, &[1, 2, 3, 4, 5, 6, 7, 8])

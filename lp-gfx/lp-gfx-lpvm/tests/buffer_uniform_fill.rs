@@ -10,7 +10,6 @@
 
 use lp_gfx::{LpGraphics, ShaderCompileOptions};
 use lp_gfx_lpvm::TargetLpvmGraphics;
-use lp_shader::ShaderFrontend;
 use lps_shared::{LpsBuffer, LpsBufferElem, LpsValueF32};
 
 const SHADER: &str = r#"
@@ -25,8 +24,8 @@ vec4 render_2d(vec2 pos) {
 
 #[test]
 fn buffer_words_fill_a_visual_uniform_array_runtime_indexed() {
-    let graphics = TargetLpvmGraphics::new(ShaderFrontend::LpsGlsl);
-    let options = ShaderCompileOptions::new(graphics.native_semantics(), ShaderFrontend::LpsGlsl);
+    let graphics = TargetLpvmGraphics::new();
+    let options = ShaderCompileOptions::new(graphics.native_semantics());
     let mut shader = graphics
         .compile_shader(SHADER, &options)
         .expect("uniform float[4] compiles on the CPU tier");

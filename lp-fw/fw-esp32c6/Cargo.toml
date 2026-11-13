@@ -63,7 +63,6 @@ ble = [
     "fw-esp32-common/radio-link",
     "fw-esp32-radio/ble",
 ]
-naga = ["lpa-server/naga"]
 # The USB link task on a preemptive esp-rtos thread of its own (priority 1,
 # 3 KB stack, its own embassy executor), and the server answering a tick's
 # requests before it renders (`LpServer::set_messages_first`). On by default;

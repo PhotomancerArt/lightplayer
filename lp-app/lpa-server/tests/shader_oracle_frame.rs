@@ -69,15 +69,12 @@ const MAX_DUMP_LEDS: usize = 64;
 
 #[test]
 fn shader_oracle_frame_matches_across_frames() {
-    let wasmtime = render_project(Arc::new(TargetLpvmGraphics::new(
-        lpa_server::DEVICE_SHADER_FRONTEND,
-    )));
+    let wasmtime = render_project(Arc::new(TargetLpvmGraphics::new()));
     print_transcript("ORACLE", &wasmtime);
 
     let rv32_emu = render_project(Arc::new(LpvmGraphics::from_engine(
         NativeEmuEngine::new(NativeCompileOptions::default()),
         "lpvm-native::rt_emu(rv32)",
-        lpa_server::DEVICE_SHADER_FRONTEND,
     )));
     print_transcript("ORACLE-RV32", &rv32_emu);
 

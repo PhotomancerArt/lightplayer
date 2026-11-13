@@ -85,7 +85,7 @@ export CARGO_TARGET_DIR="$PWD/target"
 #      docs/defects/2026-08-01-xt-f32-builtins-exhaust-the-emulator-code-region.ai.md
 #
 # This is load-bearing beyond the f32 path: scripts/filetests.sh builds this
-# image before running the xtn/xtlpn targets, so anything wrong here takes the
+# image before running the xtn targets, so anything wrong here takes the
 # whole Xtensa filetest suite down with it.
 if ! cargo build --release -p lps-builtins-xt-app --features float-f32; then
   echo >&2

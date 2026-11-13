@@ -6363,7 +6363,6 @@ version = "40.0.0"
 dependencies = [
  "lp-collection 1.0.0",
  "lpir",
- "lps-frontend",
  "lps-glsl",
  "lps-shared",
  "lpvm",
@@ -7143,7 +7142,6 @@ dependencies = [
  "lps-builtins",
  "lps-builtins-xt-image",
  "lps-diagnostics",
- "lps-frontend",
  "lps-glsl",
  "lps-shared",
  "lpvm",
@@ -7178,19 +7176,6 @@ dependencies = [
  "anyhow",
  "clap",
  "walkdir",
-]
-
-[[package]]
-name = "lps-frontend"
-version = "40.0.0"
-dependencies = [
- "libm",
- "lp-collection 1.0.0",
- "lpir",
- "lps-builtin-ids",
- "lps-shared",
- "naga 29.0.0",
- "smallvec",
 ]
 
 [[package]]

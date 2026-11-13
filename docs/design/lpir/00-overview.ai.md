@@ -6,13 +6,13 @@ the main design choices behind it, and alternatives that were rejected or deferr
 ## What LPIR is
 
 LPIR (LightPlayer Intermediate Representation) is a flat, scalarized, non-SSA intermediate
-representation with structured control flow and virtual registers. It sits between the Naga-based
+representation with structured control flow and virtual registers. It sits between the `lps-glsl`
 GLSL frontend and target-specific backends (Cranelift for native RISC-V / host JIT, WebAssembly for
 browser preview, and an in-crate interpreter for testing).
 
 ## Source language
 
-The input to Naga → LPIR lowering is **GLSL 4.50 core** (`#version 450 core`).
+The input to GLSL → LPIR lowering (`lps-glsl`) is **GLSL 4.50 core** (`#version 450 core`).
 
 ## Rationale
 
@@ -28,7 +28,7 @@ LPIR addresses two concrete issues in the prior pipeline:
 
 LPIR mitigates (1) by binding every intermediate to a distinct virtual register, which maps
 one-to-one to a target local or value at emission time. It mitigates (2) by centralizing
-scalarization and builtin decomposition in a single Naga → LPIR lowering step shared by all
+scalarization and builtin decomposition in a single GLSL → LPIR lowering step shared by all
 backends.
 
 ## Pipeline
@@ -37,13 +37,10 @@ backends.
 GLSL source
   │
   ▼
-Naga frontend (parse + type check)
+lps-glsl (parse + type check + lower)
   │
-  ▼
-naga::Module (expression arena + statements)
-  │
-  ▼  Naga → LPIR lowering (mode-unaware, shared middle-end)
-  │   • walks Naga expression arena + statements
+  ▼  GLSL → LPIR lowering (mode-unaware, shared middle-end)
+  │   • walks the typed syntax tree
   │   • scalarizes vectors: vec3 add → 3× fadd
   │   • decomposes builtins: smoothstep → scalar math
   │   • handles LPFX calls and out-pointer ABI
@@ -152,7 +149,7 @@ A single IR rewrite for fixed-point would force one strategy on all backends. In
 WebAssembly and Cranelift benefit from different Q32 lowering tactics; keeping Q32 in emitters
 avoids an ill-fitting common transform.
 
-### Q32 in Naga → LPIR lowering
+### Q32 in GLSL → LPIR lowering
 
 Making lowering mode-aware would duplicate IR shapes or branch the entire middle-end on numeric
 mode, increasing complexity and test surface without a clear benefit over mode-aware emission.
@@ -176,7 +173,7 @@ The LightPlayer GLSL stack is organized as follows:
 ```
 lp-shader/
 ├── lpir/                    # LPIR core library (types, ops, builder, parser, printer, interpreter, validator)
-├── lps-frontend/            # Naga → LPIR lowering (GLSL frontend)
+├── lps-glsl/                # GLSL → LPIR (the GLSL frontend)
 ├── lpvm-cranelift/          # LPIR → Cranelift → native machine code (RISC-V / host JIT)
 └── lps-wasm/            # LPIR → WebAssembly emission (browser preview)
 ```

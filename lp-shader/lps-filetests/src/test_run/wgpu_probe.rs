@@ -73,7 +73,7 @@ fn build_graphics() -> Option<GpuGraphics> {
     Some(GpuGraphics::new(
         device,
         queue,
-        Box::new(TargetLpvmGraphics::new(lp_shader::ShaderFrontend::Naga)),
+        Box::new(TargetLpvmGraphics::new()),
     ))
 }
 

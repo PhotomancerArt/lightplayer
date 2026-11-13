@@ -2914,10 +2914,10 @@ build-app-release:
 # ============================================================================
 
 build-glsl:
-    cargo build --package lps-builtins --package lps-filetests-gen-app --package lpvm-cranelift --package lps-filetests --package lp-emu-abi --package lps-builtins-gen-app --package lps-filetests-app --package lps-frontend --package lps-exec --package lpvm --package lps-diagnostics --package lps-shared --package lpir --package lps-builtin-ids --package lps-wasm
+    cargo build --package lps-builtins --package lps-filetests-gen-app --package lpvm-cranelift --package lps-filetests --package lp-emu-abi --package lps-builtins-gen-app --package lps-filetests-app --package lps-exec --package lpvm --package lps-diagnostics --package lps-shared --package lpir --package lps-builtin-ids --package lps-wasm
 
 build-glsl-release:
-    cargo build --release --package lps-builtins --package lps-filetests-gen-app --package lpvm-cranelift --package lps-filetests --package lp-emu-abi --package lps-builtins-gen-app --package lps-filetests-app --package lps-frontend --package lps-exec --package lpvm --package lps-diagnostics --package lps-shared --package lpir --package lps-builtin-ids --package lps-wasm
+    cargo build --release --package lps-builtins --package lps-filetests-gen-app --package lpvm-cranelift --package lps-filetests --package lp-emu-abi --package lps-builtins-gen-app --package lps-filetests-app --package lps-exec --package lpvm --package lps-diagnostics --package lps-shared --package lpir --package lps-builtin-ids --package lps-wasm
 
 # ============================================================================
 # Formatting
@@ -3185,10 +3185,10 @@ clippy-app-fix:
 # ============================================================================
 
 clippy-glsl:
-    cargo clippy --package lps-builtins --package lps-filetests-gen-app --package lpvm-cranelift --package lps-filetests --package lp-emu-abi --package lps-builtins-gen-app --package lps-filetests-app --package lps-frontend --package lps-exec --package lpvm --package lps-diagnostics --package lps-shared --package lpir --package lps-builtin-ids --package lps-wasm -- --no-deps -D warnings
+    cargo clippy --package lps-builtins --package lps-filetests-gen-app --package lpvm-cranelift --package lps-filetests --package lp-emu-abi --package lps-builtins-gen-app --package lps-filetests-app --package lps-exec --package lpvm --package lps-diagnostics --package lps-shared --package lpir --package lps-builtin-ids --package lps-wasm -- --no-deps -D warnings
 
 clippy-glsl-fix:
-    cargo clippy --fix --allow-dirty --allow-staged --package lps-builtins --package lps-filetests-gen-app --package lpvm-cranelift --package lps-filetests --package lp-emu-abi --package lps-builtins-gen-app --package lps-filetests-app --package lps-frontend --package lps-exec --package lpvm --package lps-diagnostics --package lps-shared --package lpir --package lps-builtin-ids --package lps-wasm
+    cargo clippy --fix --allow-dirty --allow-staged --package lps-builtins --package lps-filetests-gen-app --package lpvm-cranelift --package lps-filetests --package lp-emu-abi --package lps-builtins-gen-app --package lps-filetests-app --package lps-exec --package lpvm --package lps-diagnostics --package lps-shared --package lpir --package lps-builtin-ids --package lps-wasm
 
 # ============================================================================
 # Testing - Workspace-wide
@@ -3471,7 +3471,7 @@ test-app:
 # ============================================================================
 
 test-glsl:
-    cargo test --package lps-builtins --package lps-filetests-gen-app --package lpvm-cranelift --package lps-filetests --package lp-emu-abi --package lps-builtins-gen-app --package lps-filetests-app --package lps-frontend --package lps-exec --package lpvm --package lps-diagnostics --package lps-shared --package lpir --package lps-builtin-ids --package lps-wasm
+    cargo test --package lps-builtins --package lps-filetests-gen-app --package lpvm-cranelift --package lps-filetests --package lp-emu-abi --package lps-builtins-gen-app --package lps-filetests-app --package lps-exec --package lpvm --package lps-diagnostics --package lps-shared --package lpir --package lps-builtin-ids --package lps-wasm
 
 test-glsl-filetests:
     scripts/filetests.sh
@@ -5957,20 +5957,7 @@ demo-esp32c6-check example="basic": install-rv32-target
 
 # Fast compile-only gate for the native frontend demo shader.
 test-native-rainbow: build-rv32-builtins
-    cargo run -p lps-filetests-app -- test --target rv32lpn.q32 --concise lps-glsl/rainbow.glsl
-
-# Requires: ESP32-C6 device connected via USB. Builds the explicit Naga reference frontend.
-# Usage: just demo-esp32c6-host-naga [project-dir]
-demo-esp32c6-host-naga project="projects/test/basic": install-rv32-target
-    cd lp-fw/fw-esp32c6 && cargo build --target {{ rv32_target }} --profile {{ fw_esp32c6_profile }} --features esp32c6,server,naga
-    PORT="$(cargo run -q -p lp-cli -- fwcheck port --chip esp32c6)"; \
-    echo "Using ESPFLASH_PORT=$PORT"; \
-    ESPFLASH_PORT="$PORT" espflash flash --chip esp32c6 --bootloader {{ c6_bootloader }} --partition-table lp-fw/fw-esp32c6/partitions.csv --flash-size {{ c6_flash_size }} {{ fw_esp32c6_elf }}; \
-    cargo run --package lp-cli -- dev {{ project }} --push "serial:$PORT"
-
-# Same as demo-esp32c6-check, but builds the explicit Naga frontend.
-demo-esp32c6-check-naga example="basic": install-rv32-target
-    cargo run --package lp-cli -- fwcheck demo esp32c6 {{ example }} --features server,naga
+    cargo run -p lps-filetests-app -- test --target rv32n.q32 --concise lps-glsl/rainbow.glsl
 
 # Run firmware on ESP32-C6 device (empty fs; use demo-esp32c6-host to flash + upload a project first)
 demo-esp32c6-standalone: build-fw-esp32c6

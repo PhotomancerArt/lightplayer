@@ -13,7 +13,7 @@ vec2 test_modf_positive() {
     return vec2(f, i);
 }
 
-// @unsupported(frontend!=lp)
+// @unsupported(backend=wgpu)
 // run: test_modf_positive() ~= vec2(0.7, 3.0)
 
 vec2 test_modf_negative() {
@@ -23,7 +23,7 @@ vec2 test_modf_negative() {
     return vec2(f, i);
 }
 
-// @unsupported(frontend!=lp)
+// @unsupported(backend=wgpu)
 // run: test_modf_negative() ~= vec2(-0.3, -2.0)
 
 vec2 test_modf_integer() {
@@ -33,7 +33,7 @@ vec2 test_modf_integer() {
     return vec2(f, i);
 }
 
-// @unsupported(frontend!=lp)
+// @unsupported(backend=wgpu)
 // run: test_modf_integer() ~= vec2(0.0, 5.0)
 
 vec2 test_modf_zero() {
@@ -43,7 +43,7 @@ vec2 test_modf_zero() {
     return vec2(f, i);
 }
 
-// @unsupported(frontend!=lp)
+// @unsupported(backend=wgpu)
 // run: test_modf_zero() ~= vec2(0.0, 0.0)
 
 vec2 test_modf_small() {
@@ -53,7 +53,7 @@ vec2 test_modf_small() {
     return vec2(f, i);
 }
 
-// @unsupported(frontend!=lp)
+// @unsupported(backend=wgpu)
 // run: test_modf_small() ~= vec2(0.1, 0.0)
 
 vec4 test_modf_vec2() {
@@ -63,7 +63,7 @@ vec4 test_modf_vec2() {
     return vec4(f.x, f.y, i.x, i.y);
 }
 
-// @unsupported(frontend!=lp)
+// @unsupported(backend=wgpu)
 // run: test_modf_vec2() ~= vec4(0.7, -0.3, 3.0, -2.0)
 
 vec4 test_modf_vec3() {
@@ -74,7 +74,7 @@ vec4 test_modf_vec3() {
 }
 
 // wgpu.f32: file does not compile through naga glsl-in (mirrors the interp.f32 frontend gap)
-// @unsupported(frontend!=lp)
+// @unsupported(backend=wgpu)
 // run: test_modf_vec3() ~= vec4(0.5, -0.8, 0.0, 1.0)
 
 

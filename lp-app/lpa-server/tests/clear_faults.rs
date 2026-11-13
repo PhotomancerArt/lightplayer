@@ -43,7 +43,7 @@ fn workspace_dir() -> PathBuf {
 }
 
 fn graphics() -> Arc<dyn LpGraphics> {
-    Arc::new(TargetLpvmGraphics::new(lpa_server::DEVICE_SHADER_FRONTEND))
+    Arc::new(TargetLpvmGraphics::new())
 }
 
 /// A server whose project store IS one checked-in project root (`projects/test/` for the fault-demo rig, `catalog/patterns/` for pulse).
