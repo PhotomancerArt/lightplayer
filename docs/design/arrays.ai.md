@@ -1,5 +1,11 @@
 # Array Support in LPIR
 
+> **Note (2026-11):** the lowering sections below were written against the Naga-based
+> `lps-frontend`, which was deleted when `lps-glsl` became the only GLSL frontend
+> ([ADR](../adr/2026-11-12-one-glsl-frontend.ai.md)). The LPIR representation of arrays described
+> here is unchanged; the Naga names (`TypeInner::Array`, `naga_util.rs`, ...) and the file layout
+> under "File Structure" are the original design, not today's code (see `lp-shader/lps-glsl`).
+
 ## Overview
 
 This document describes how GLSL arrays are represented, stored, and accessed in LPIR (LightPlayer

@@ -166,7 +166,7 @@ Do NOT disable the compiler. The compiler is the product.
 - **`std`** means "host-only conveniences": `libstd`, `cranelift-native` (host
   ISA autodetect), `anyhow`, etc.
 - **`std` does NOT mean "has a compiler."** The compiler works without `libstd`.
-- **`glsl`** (or equivalent) enables the GLSL front-end (`lps-frontend`). This
+- **`glsl`** (or equivalent) enables the GLSL front-end (`lps-glsl`). This
   is independent of `std`.
 - **Default server/engine builds include the full compiler pipeline.** Optional
   features are for *removing* pieces (e.g. `no-shader-compile` for stripped
@@ -621,7 +621,7 @@ are four ADRs, which cross-link each other:
 GLSL source (on-flash filesystem)
         │
         ▼
-lps-frontend (no_std + alloc) ── parses GLSL via naga
+lps-glsl (no_std + alloc) ── LightPlayer's GLSL frontend
         │
         ▼
 LPIR (LightPlayer IR)
@@ -645,7 +645,7 @@ runtime.
 
 | Crate            | Role                                   | `no_std`         |
 |------------------|----------------------------------------|------------------|
-| `lps-frontend`   | GLSL → LPIR (via naga)                 | yes              |
+| `lps-glsl`       | GLSL → LPIR (the only frontend)        | yes              |
 | `lpvm-native`    | LPIR → custom RV32 machine code        | yes              |
 | `lpvm-cranelift` | LPIR → Cranelift → machine code        | yes              |
 | `lp-engine`      | Shader runtime, node graph             | yes              |
@@ -690,14 +690,14 @@ crates and stay outside that fence, AGPL like the rest of the product.
 **`lpvm-native`** lowers LPIR to custom machine code outside Cranelift
 (pool-based register allocation, `rt_jit` / `rt_emu`). It is the default
 on-device codegen path and is exercised by **`native-jit`** on `fw-esp32c6`/`fw-emu`
-and the **`rv32n.q32`** / **`rv32lpn.q32`** filetest targets.
+and the **`rv32n.q32`** filetest target.
 
 **Two ISAs**: RV32 (ESP32-C6) and Xtensa (ESP32-S3 / classic ESP32), each behind
 an `isa-*` Cargo feature so firmware pays only for the one it runs. `rt_emu` is
 **one engine parameterized by `IsaTarget`**, not one per ISA — see
 `docs/adr/2026-07-30-isa-parameterized-host-emu-engine.ai.md`. The Xtensa host path
-is the additive `emu-xt` feature behind the `xtn.q32` / `xtlpn.q32` filetest
-targets; it needs a cross-compiled builtins image
+is the additive `emu-xt` feature behind the `xtn.q32` filetest
+target; it needs a cross-compiled builtins image
 (`scripts/build-builtins-xt.sh`, esp toolchain) and skips loudly without one.
 
 **Xtensa floating point is proven equal to real ESP32-S3 silicon (M6, G2

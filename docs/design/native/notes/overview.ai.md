@@ -33,7 +33,7 @@ constraints.
 ## Pipeline
 
 ```
-IrModule (from lps-frontend or lpir parser)
+IrModule (from lps-glsl or lpir parser)
   │
   ├─ per function:
   │    │
@@ -60,7 +60,7 @@ walk the instruction sequence once).
 ## Input: LPIR
 
 `lpvm-native` consumes `IrModule` / `IrFunction` from the `lpir` crate. It does not parse GLSL or
-interact with Naga. The GLSL→LPIR path is handled by `lps-frontend` and is shared across all
+interact with a GLSL frontend. The GLSL→LPIR path is handled by `lps-glsl` and is shared across all
 backends.
 
 Relevant LPIR properties (see `docs/design/lpir/`):

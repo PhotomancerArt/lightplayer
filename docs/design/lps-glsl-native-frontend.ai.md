@@ -2,7 +2,7 @@
 
 Date: 2026-05-13
 
-Status: accepted, parity work in progress
+Status: accepted, parity complete (2026-11)
 
 ## Summary
 
@@ -108,7 +108,8 @@ The frontend intentionally avoids starting with:
 
 ## Prior Art And Reference Path
 
-The previous LightPlayer GLSL frontend used Naga through `lps-frontend`. Naga is
+The previous LightPlayer GLSL frontend used Naga through `lps-frontend` (deleted 2026-11; see
+[the ADR](../adr/2026-11-12-one-glsl-frontend.ai.md)). Naga is
 a Rust shader translation and validation library for broad GPU shader compiler
 use cases: parsing shader languages, validating shader modules, representing
 GPU-oriented shader IR, and supporting multiple downstream graphics tooling
@@ -120,9 +121,9 @@ being built. It remains useful to `lps-glsl` as prior art and as a behavior
 reference:
 
 - its supported behavior is captured by the existing filetests
-- `rv32n.q32` keeps the old frontend visible beside `rv32lpn.q32`
-- divergences can be classified against a known implementation
-- the old firmware path gives a concrete size and compile-time baseline
+- during parity work, `rv32n.q32` kept the old frontend visible beside `rv32lpn.q32`
+- divergences could be classified against a known implementation
+- the old firmware path gave a concrete size and compile-time baseline
 
 The native frontend is not a rejection of that work. It is the next
 specialization step: once the product compiler target is known, the frontend can
@@ -149,13 +150,13 @@ Full report:
 
 ## Compatibility Strategy
 
-Filetests drive parity.
+Filetests drove parity.
 
-- `rv32n.q32` tests the older Naga-backed frontend with `lpvm-native`.
-- `rv32lpn.q32` tests `lps-glsl` with `lpvm-native`.
+- `rv32n.q32` tested the older Naga-backed frontend with `lpvm-native`.
+- `rv32lpn.q32` tested `lps-glsl` with `lpvm-native`.
 
-Running both targets side by side keeps behavior differences visible. Each
-difference should be classified as one of:
+Parity is complete: the Naga targets are gone and `lps-glsl` took over the `rv32n.*` / `xtn.*`
+names. While both ran side by side, each difference was classified as one of:
 
 - an `lps-glsl` bug
 - an older-path bug exposed by improved tests
@@ -173,9 +174,10 @@ compiler from firmware. The on-device compiler is the product path.
 
 ### Keep Naga Out Of The Default Firmware Path
 
-The Naga-backed path can remain a reference target during parity work. The
-default firmware path should stay independent so the size and compile-time
-benefits remain measurable.
+The Naga-backed path remained a reference target during parity work and was deleted once parity
+was complete (2026-11, [ADR](../adr/2026-11-12-one-glsl-frontend.ai.md), which supersedes this
+section's "can remain a reference target"). `lps-glsl` is now the only GLSL → LPIR frontend; Naga
+survives only in the GPU tier (`glsl-in` → `wgsl-out`) and stays out of the firmware path.
 
 ### Model Places Explicitly
 

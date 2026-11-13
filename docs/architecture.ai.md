@@ -126,7 +126,7 @@ See [`lp-shader/README.md`](../lp-shader/README.md) for the full crate index and
 GLSL source (#version 450 core)
   │
   ▼
-lps-frontend           Naga glsl-in → IrModule
+lps-glsl               GLSL → IrModule
   │
   ▼
 LPIR                    flat, scalarized, mode-agnostic IR
@@ -137,8 +137,8 @@ LPIR                    flat, scalarized, mode-agnostic IR
   └──► lpir::interp       → in-process interpreter (testing)
 ```
 
-**Naga** (`glsl-in`) parses GLSL 4.50 and type-checks it. **`lps-frontend`** walks Naga's
-expression arena and lowers to **LPIR** — a flat, scalarized IR with structured control flow and
+**`lps-glsl`** (LightPlayer's own GLSL frontend, the only one) parses GLSL 4.50, type-checks it
+and lowers to **LPIR** — a flat, scalarized IR with structured control flow and
 virtual registers. Lowering is mode-agnostic: Q32 vs float is a backend decision.
 
 **LPIR** is LightPlayer's own intermediate representation. It acts as an anti-corruption layer so
@@ -155,7 +155,6 @@ and stable compiler internals across Cranelift version bumps.
 
 - **`lpvm-cranelift`** — LPIR → Cranelift → machine code; the reference backend. Supports any
   ISA Cranelift supports; host JIT uses `cranelift-native` for development and testing.
-  Optional `glsl` feature pulls in `lps-frontend` for string-to-machine-code entry points.
 
 - **`lpvm-wasm`** — LPIR → WASM via `wasm-encoder`. Browser preview backend; produces correct
   WASM for the web demo and `wasm.q32` filetests without requiring Cranelift.
@@ -182,7 +181,7 @@ expected results; the harness compiles and executes on several backends:
 
 - **wasm.q32** — WASM via `lpvm-wasm` + Wasmtime (the host execution target)
 - **rv32c.q32** — RV32 via `lpvm-cranelift` object mode + `lp-riscv-emu`
-- **rv32n.q32 / rv32lpn.q32** — RV32 via the hand-built `lpvm-native` backend + `lp-riscv-emu`
+- **rv32n.q32** — RV32 via the hand-built `lpvm-native` backend + `lp-riscv-emu`
 - **xtn.q32** — Xtensa via `lpvm-native`'s `isa/xt` backend + `lp-xt-emu`
 
 Run with `./scripts/filetests.sh` or `just test-filetests`.
