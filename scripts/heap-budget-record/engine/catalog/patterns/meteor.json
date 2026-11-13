@@ -1,16 +1,16 @@
 {
   "comment": "What this project costs TODAY on the RV32 ENGINE emulator (`lp-cli profile --collect alloc`), per profile mode; steady-render records only the frame window. A ratchet, not a target. The file's path under scripts/heap-budget-record/engine/ IS the project path. Regenerate with `just heap-budget-baseline` (every project) or `just heap-budget-baseline <project>`; see docs/heap-budget-gate.ai.md.",
-  "recorded": "2026-11-12",
-  "commit": "d96703831",
+  "recorded": "2026-11-13",
+  "commit": "a428cc9f6",
   "modes": {
     "startup": {
       "windows": {
         "server-boot": {
-          "transient": 47863,
-          "retained": 47852,
+          "transient": 47859,
+          "retained": 47848,
           "largest_alloc": 36864,
           "alloc_count": 932,
-          "alloc_bytes": 86759,
+          "alloc_bytes": 86755,
           "largest_free_at_close": 253920,
           "holes_at_close": 3
         },
@@ -20,7 +20,7 @@
           "largest_alloc": 4136,
           "alloc_count": 2548,
           "alloc_bytes": 131035,
-          "largest_free_at_close": 210672,
+          "largest_free_at_close": 210696,
           "holes_at_close": 52
         },
         "frame": {
@@ -36,7 +36,7 @@
           "largest_alloc": 8148,
           "alloc_count": 3686,
           "alloc_bytes": 188589,
-          "largest_free_at_close": 141800,
+          "largest_free_at_close": 141816,
           "holes_at_close": 21
         },
         "shader-link": {
@@ -45,7 +45,7 @@
           "largest_alloc": 3192,
           "alloc_count": 7,
           "alloc_bytes": 3337,
-          "largest_free_at_close": 141800,
+          "largest_free_at_close": 141816,
           "holes_at_close": 32
         }
       }
@@ -58,8 +58,8 @@
           "largest_alloc": 560,
           "alloc_count": 498,
           "alloc_bytes": 26548,
-          "largest_free_at_close": 139560,
-          "holes_at_close": 41
+          "largest_free_at_close": 139576,
+          "holes_at_close": 40
         }
       }
     }
