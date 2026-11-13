@@ -13,7 +13,7 @@ use wasm_bindgen::JsCast;
 
 use crate::aggregate_abi::{
     aggregate_flat_q32_words_to_std430_bytes, encode_aggregate_std430_bytes,
-    q32_sret_bytes_to_flat_return_words, type_passed_as_aggregate_ptr,
+    q32_sret_bytes_to_flat_return_words,
 };
 use crate::error::WasmError;
 use crate::module::{SHADOW_STACK_GLOBAL_EXPORT, WasmExport, glsl_type_to_wasm_components};
@@ -697,8 +697,12 @@ pub(crate) fn build_js_args_for_call(
         sret = Some(BrowserSretPlan { ptr, size: size_u });
         arr.push(&JsValue::from_f64(f64::from(ptr)));
     }
-    for (v, ty) in args.iter().zip(export.param_types.iter()) {
-        if type_passed_as_aggregate_ptr(ty) {
+    for ((v, ty), by_ptr) in args
+        .iter()
+        .zip(export.param_types.iter())
+        .zip(export.param_by_ptr.iter())
+    {
+        if *by_ptr {
             let bytes = encode_aggregate_std430_bytes(ty, v, fm)?;
             let size =
                 u32::try_from(bytes.len()).map_err(|_| WasmError::runtime("aggregate arg size"))?;
@@ -745,8 +749,8 @@ pub(crate) fn build_js_args_q32_for_call(
         arr.push(&JsValue::from_f64(f64::from(ptr)));
     }
     let mut woff = 0usize;
-    for ty in &export.param_types {
-        if type_passed_as_aggregate_ptr(ty) {
+    for (ty, by_ptr) in export.param_types.iter().zip(export.param_by_ptr.iter()) {
+        if *by_ptr {
             let n = glsl_component_count(ty);
             if woff + n > words.len() {
                 return Err(WasmError::runtime(format!(

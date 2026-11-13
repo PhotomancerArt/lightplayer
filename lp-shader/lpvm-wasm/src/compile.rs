@@ -116,7 +116,32 @@ fn collect_exports(
                 return_type: sig.return_type.clone(),
                 param_types: sig.parameters.iter().map(|p| p.ty.clone()).collect(),
                 uses_sret,
+                param_by_ptr: params_passed_by_ptr(ir_f, sig),
             }
+        })
+        .collect()
+}
+
+/// Which GLSL parameters the IR function takes as one pointer: walk the
+/// user parameter vregs in order; a parameter whose first vreg is `ptr`
+/// takes one slot, any other takes one slot per scalar lane.
+fn params_passed_by_ptr(ir_f: &lpir::IrFunction, sig: &lps_shared::LpsFnSig) -> Vec<bool> {
+    let mut slot: u16 = 0;
+    sig.parameters
+        .iter()
+        .map(|p| {
+            let by_ptr = slot < ir_f.param_count
+                && ir_f
+                    .vreg_types
+                    .get(ir_f.user_param_vreg(slot).0 as usize)
+                    .is_some_and(|t| *t == lpir::IrType::Pointer);
+            let lanes = if by_ptr {
+                1
+            } else {
+                lpvm::glsl_component_count(&p.ty).max(1)
+            };
+            slot = slot.saturating_add(u16::try_from(lanes).unwrap_or(u16::MAX));
+            by_ptr
         })
         .collect()
 }

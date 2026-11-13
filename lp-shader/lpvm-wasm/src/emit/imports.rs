@@ -39,7 +39,7 @@ fn collect_used_import_indices(ir: &LpirModule, mode: FloatMode) -> BTreeSet<u32
 
     // Add imports for LPIR ops that call builtins **in Q32 mode only**.
     //
-    // `Fsqrt`/`Fnearest` lower to `@lpir::sqrt`/`@glsl::round` calls under Q32,
+    // `Fsqrt`/`Fnearest` lower to `@lpir::sqrt`/`@lpir::fnearest` calls under Q32,
     // but under F32 `ops.rs` emits the native `f32.sqrt`/`f32.nearest`
     // instructions and never calls anything. Marking the helper imports used
     // anyway declared a Q32 import no call site referenced — dead weight that
@@ -48,14 +48,14 @@ fn collect_used_import_indices(ir: &LpirModule, mode: FloatMode) -> BTreeSet<u32
     // already had this `mode != Q32` guard; this scan did not, and the two must
     // agree or the import section and the code section disagree.
     if mode == FloatMode::Q32 {
-        let (needs_lpir_sqrt, needs_glsl_round) = scan_helper_op_needs(ir);
+        let (needs_lpir_sqrt, needs_lpir_fnearest) = scan_helper_op_needs(ir);
         if needs_lpir_sqrt {
             if let Some(idx) = find_import_index(ir, "lpir", "sqrt") {
                 used.insert(idx);
             }
         }
-        if needs_glsl_round {
-            if let Some(idx) = find_import_index(ir, "glsl", "round") {
+        if needs_lpir_fnearest {
+            if let Some(idx) = find_import_index(ir, "lpir", "fnearest") {
                 used.insert(idx);
             }
         }
@@ -109,20 +109,22 @@ pub(crate) fn module_inlines_get_fuel(ir: &LpirModule, mode: FloatMode) -> bool 
 }
 
 /// LPIR ops whose Q32 lowering resolves to a builtin import call at emit time:
-/// `Fsqrt` → `@lpir::sqrt`, `Fnearest` → `@glsl::round`.
+/// `Fsqrt` → `@lpir::sqrt`, `Fnearest` → `@lpir::fnearest` (ties to even, the
+/// builtin the native and Cranelift backends call; `@glsl::round` rounds ties
+/// away from zero, so `roundEven(4.5)` was 5 here and 4 on a board).
 fn scan_helper_op_needs(ir: &LpirModule) -> (bool, bool) {
     let mut needs_lpir_sqrt = false;
-    let mut needs_glsl_round = false;
+    let mut needs_lpir_fnearest = false;
     for f in ir.functions.values() {
         for op in &f.body {
             match op {
                 LpirOp::Fsqrt { .. } => needs_lpir_sqrt = true,
-                LpirOp::Fnearest { .. } => needs_glsl_round = true,
+                LpirOp::Fnearest { .. } => needs_lpir_fnearest = true,
                 _ => {}
             }
         }
     }
-    (needs_lpir_sqrt, needs_glsl_round)
+    (needs_lpir_sqrt, needs_lpir_fnearest)
 }
 
 /// The naga-based `lps-frontend` pre-registers the helper imports Q32 op
@@ -133,13 +135,13 @@ pub(crate) fn with_missing_helper_imports(ir: &LpirModule, mode: FloatMode) -> O
     if mode != FloatMode::Q32 {
         return None;
     }
-    let (needs_lpir_sqrt, needs_glsl_round) = scan_helper_op_needs(ir);
+    let (needs_lpir_sqrt, needs_lpir_fnearest) = scan_helper_op_needs(ir);
     let mut missing = Vec::new();
     if needs_lpir_sqrt && find_import_index(ir, "lpir", "sqrt").is_none() {
         missing.push(helper_import_decl("lpir", "sqrt"));
     }
-    if needs_glsl_round && find_import_index(ir, "glsl", "round").is_none() {
-        missing.push(helper_import_decl("glsl", "round"));
+    if needs_lpir_fnearest && find_import_index(ir, "lpir", "fnearest").is_none() {
+        missing.push(helper_import_decl("lpir", "fnearest"));
     }
     if missing.is_empty() {
         return None;

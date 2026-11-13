@@ -1,6 +1,5 @@
 //! M1 aggregate `in` + sret return through [`lpvm_emu::EmuInstance`].
 
-use lps_frontend::{compile, lower};
 use lps_shared::lps_value_f32::LpsValueF32;
 use lpvm::{LpvmEngine, LpvmInstance, LpvmModule};
 use lpvm_emu::{CompileOptions, EmuEngine};
@@ -17,8 +16,9 @@ float[4] mul2_float4(in float[4] a) {
     return o;
 }
 "#;
-    let naga = compile(glsl).expect("parse glsl");
-    let (ir, meta) = lower(&naga).expect("lower");
+    let output =
+        lps_glsl::compile(glsl, &lps_glsl::CompileOptions::default()).expect("compile glsl");
+    let (ir, meta) = (output.ir, output.meta);
 
     let engine = EmuEngine::new(CompileOptions::default());
     let module = engine.compile(&ir, &meta).expect("compile+link");

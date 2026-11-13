@@ -96,6 +96,18 @@ impl<'src> Lexer<'src> {
     }
 
     fn lex_number(&mut self, start: usize) -> TokenKind {
+        if self.peek() == Some(b'0') && matches!(self.peek_next(), Some(b'x' | b'X')) {
+            self.bump();
+            self.bump();
+            while self.peek().is_some_and(|b| b.is_ascii_hexdigit()) {
+                self.bump();
+            }
+            if matches!(self.peek(), Some(b'u' | b'U')) {
+                self.bump();
+                return TokenKind::UintLiteral;
+            }
+            return TokenKind::IntLiteral;
+        }
         let mut is_float = false;
         if self.peek() == Some(b'.') {
             is_float = true;
@@ -136,11 +148,22 @@ impl<'src> Lexer<'src> {
     fn lex_punct(&mut self) -> Result<TokenKind, Diagnostic> {
         let start = self.pos;
         let b = self.bump().expect("punct byte");
+        // Shifts first: `<<` / `>>`, then an optional `=` for `<<=` / `>>=`.
+        if matches!(b, b'<' | b'>') && self.peek() == Some(b) {
+            self.bump();
+            if self.peek() == Some(b'=') {
+                self.bump();
+            }
+            return Ok(TokenKind::Punct);
+        }
         let two_char = matches!(
             (b, self.peek()),
             (b'+', Some(b'+' | b'='))
                 | (b'-', Some(b'-' | b'='))
-                | (b'*' | b'/' | b'%' | b'=' | b'!' | b'<' | b'>', Some(b'='))
+                | (
+                    b'*' | b'/' | b'%' | b'=' | b'!' | b'<' | b'>' | b'&' | b'|' | b'^',
+                    Some(b'=')
+                )
                 | (b'&', Some(b'&'))
                 | (b'|', Some(b'|'))
                 | (b'^', Some(b'^'))
@@ -169,6 +192,9 @@ impl<'src> Lexer<'src> {
                 | b'='
                 | b'!'
                 | b'^'
+                | b'&'
+                | b'|'
+                | b'~'
                 | b'<'
                 | b'>'
         ) {

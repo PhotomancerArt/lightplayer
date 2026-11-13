@@ -145,12 +145,7 @@ impl ImportRegistry {
             key: key.clone(),
             module_name: String::from("texture"),
             func_name: String::from(name),
-            param_types: {
-                let mut tys = Vec::with_capacity(argc);
-                tys.push(lpir::IrType::Pointer);
-                tys.extend((1..argc).map(|_| lpir::IrType::I32));
-                tys
-            },
+            param_types: texture_import_params(argc),
             return_types: Vec::new(),
             lpfn_glsl_params: None,
             sret: true,
@@ -160,5 +155,25 @@ impl ImportRegistry {
 
     pub(super) fn into_vec(self) -> Vec<ImportInfo> {
         self.imports
+    }
+}
+
+/// The texture sampler builtins' ABI: the sret pointer, then the texture
+/// descriptor (`ptr`, `width`, and for 2D `height`, `row_stride`; for 1D just
+/// `row_stride`), the coordinates as **floats**, then the filter and wrap
+/// words. The coordinates must be `f32`: under `FloatMode::F32` the builtin
+/// takes real floats, and an `i32` declaration made wasm reject the call.
+fn texture_import_params(argc: usize) -> Vec<lpir::IrType> {
+    use lpir::IrType::{F32, I32, Pointer};
+    debug_assert!(
+        argc == 7 || argc == 10,
+        "texture builtins take 7 or 10 args"
+    );
+    if argc == 7 {
+        // texture1d_*: sret, ptr, width, stride, u, filter, wrap_x
+        alloc::vec![Pointer, I32, I32, I32, F32, I32, I32]
+    } else {
+        // texture2d_*: sret, ptr, width, height, stride, u, v, filter, wrap_x, wrap_y
+        alloc::vec![Pointer, I32, I32, I32, I32, F32, F32, I32, I32, I32]
     }
 }

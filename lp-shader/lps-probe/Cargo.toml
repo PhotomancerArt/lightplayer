@@ -13,7 +13,7 @@ lp-collection = { workspace = true, features = ["serde"] }
 libm = "0.2"
 lpir = { path = "../lpir" }
 lps-builtins = { path = "../lps-builtins" }
-lps-frontend = { path = "../lps-frontend" }
+lps-glsl = { path = "../lps-glsl" }
 lps-shared = { path = "../lps-shared" }
 lpvm = { path = "../lpvm" }
 serde = { workspace = true, features = ["derive"] }

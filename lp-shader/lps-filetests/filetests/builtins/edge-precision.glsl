@@ -10,15 +10,11 @@ float test_round_half_up() {
     return round(2.5);
 }
 
-// @unsupported(rv32c.q32)
-// @unsupported(rv32n.q32)
-// @unsupported(xtn.q32)
-// @unsupported(rv32lpn.q32)
-// @unsupported(wasm.q32)
-// run[q32]: test_round_half_up() ~= 3.0
-// @unsupported(rv32lpn.f32)
-// @unsupported(xtlpn.f32)
-// run[f32]: test_round_half_up() ~= 2.0
+// GLSL leaves the direction of an exact .5 implementation-defined. lps-glsl
+// rounds half away from zero in both float modes, as the Q32 builtin a board
+// runs does; naga rounded half to even, so its targets still see 2.0.
+// @unsupported(frontend!=lp)
+// run: test_round_half_up() ~= 3.0
 
 float test_round_half_down() {
     // round(3.5) - implementation-defined behavior

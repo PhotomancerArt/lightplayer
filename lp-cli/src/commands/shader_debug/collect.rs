@@ -2,7 +2,7 @@
 
 use anyhow::Result;
 use lpir::{CompilerConfig, FloatMode, LpirModule};
-use lps_frontend::LpsModuleSig;
+use lps_shared::LpsModuleSig;
 
 use super::types::{BackendDebugData, FunctionDebugData};
 
@@ -23,7 +23,7 @@ pub fn collect_fa_data(
 
     let module_abi = ModuleAbi::from_ir_and_sig(IsaTarget::Rv32imac, ir, sig);
 
-    let sig_map: std::collections::BTreeMap<&str, &lps_frontend::LpsFnSig> =
+    let sig_map: std::collections::BTreeMap<&str, &lps_shared::LpsFnSig> =
         sig.functions.iter().map(|s| (s.name.as_str(), s)).collect();
 
     let mut backend_data = BackendDebugData::new("rv32n");
@@ -38,11 +38,11 @@ pub fn collect_fa_data(
 
         let lpir_count = func.body.len();
 
-        let default_sig = lps_frontend::LpsFnSig {
+        let default_sig = lps_shared::LpsFnSig {
             name: func.name.clone(),
-            return_type: lps_frontend::LpsType::Void,
+            return_type: lps_shared::LpsType::Void,
             parameters: Vec::new(),
-            kind: lps_frontend::LpsFnKind::UserDefined,
+            kind: lps_shared::LpsFnKind::UserDefined,
         };
         let fn_sig = sig_map
             .get(func.name.as_str())

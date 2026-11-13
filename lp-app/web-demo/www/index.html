@@ -209,7 +209,7 @@
                 <button id="btn-copy-link">Copy link</button>
             </div>
             <p>
-                GLSL is lowered through <a href="https://github.com/gfx-rs/naga">Naga</a> to LPIR,
+                GLSL is compiled by <code>lps-glsl</code> to LPIR,
                 then <code>lpvm-wasm</code> emits shader WASM. Builtins are native Rust from
                 <code>lps-builtins</code> (same module as the demo). All math uses Q16.16 fixed-point.
             </p>

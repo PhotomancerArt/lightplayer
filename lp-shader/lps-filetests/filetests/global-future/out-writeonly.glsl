@@ -4,6 +4,10 @@
 // Out Write-Only: Output global variables are write-only (may be read-write depending on stage)
 // ============================================================================
 
+// Unsupported by design on the lps-glsl targets: LightPlayer shaders have no
+// pipeline stage and no storage, so lps-glsl rejects `in`/`out` globals,
+// `buffer` blocks and `shared` variables at global scope.
+
 out float fragment_depth;
 out int stencil_value;
 out uint object_id;
@@ -17,11 +21,8 @@ void test_out_writeonly_float() {
     fragment_depth = 0.5;
 }
 
-// @unsupported(rv32lpn.q32)
-// @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
-// @unsupported(rv32lpn.f32)
-// @unsupported(xtlpn.f32)
+// @unsupported(frontend=lp)
 // run: test_out_writeonly_float() == 0.0
 
 void test_out_writeonly_int() {
@@ -29,11 +30,8 @@ void test_out_writeonly_int() {
     stencil_value = 128;
 }
 
-// @unsupported(rv32lpn.q32)
-// @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
-// @unsupported(rv32lpn.f32)
-// @unsupported(xtlpn.f32)
+// @unsupported(frontend=lp)
 // run: test_out_writeonly_int() == 0.0
 
 void test_out_writeonly_uint() {
@@ -41,11 +39,8 @@ void test_out_writeonly_uint() {
     object_id = 42u;
 }
 
-// @unsupported(rv32lpn.q32)
-// @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
-// @unsupported(rv32lpn.f32)
-// @unsupported(xtlpn.f32)
+// @unsupported(frontend=lp)
 // run: test_out_writeonly_uint() == 0.0
 
 void test_out_writeonly_bool() {
@@ -53,11 +48,8 @@ void test_out_writeonly_bool() {
     visible = true;
 }
 
-// @unsupported(rv32lpn.q32)
-// @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
-// @unsupported(rv32lpn.f32)
-// @unsupported(xtlpn.f32)
+// @unsupported(frontend=lp)
 // run: test_out_writeonly_bool() == 0.0
 
 void test_out_writeonly_vec2() {
@@ -65,11 +57,8 @@ void test_out_writeonly_vec2() {
     screen_position = vec2(0.5, 0.5);
 }
 
-// @unsupported(rv32lpn.q32)
-// @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
-// @unsupported(rv32lpn.f32)
-// @unsupported(xtlpn.f32)
+// @unsupported(frontend=lp)
 // run: test_out_writeonly_vec2() == 0.0
 
 void test_out_writeonly_vec3() {
@@ -77,11 +66,8 @@ void test_out_writeonly_vec3() {
     normal_vector = vec3(0.0, 1.0, 0.0);
 }
 
-// @unsupported(rv32lpn.q32)
-// @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
-// @unsupported(rv32lpn.f32)
-// @unsupported(xtlpn.f32)
+// @unsupported(frontend=lp)
 // run: test_out_writeonly_vec3() == 0.0
 
 void test_out_writeonly_vec4() {
@@ -89,11 +75,8 @@ void test_out_writeonly_vec4() {
     fragment_color = vec4(1.0, 0.0, 0.0, 1.0);
 }
 
-// @unsupported(rv32lpn.q32)
-// @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
-// @unsupported(rv32lpn.f32)
-// @unsupported(xtlpn.f32)
+// @unsupported(frontend=lp)
 // run: test_out_writeonly_vec4() == 0.0
 
 void test_out_writeonly_calculations() {
@@ -106,11 +89,8 @@ void test_out_writeonly_calculations() {
     object_id = 100u;
 }
 
-// @unsupported(rv32lpn.q32)
-// @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
-// @unsupported(rv32lpn.f32)
-// @unsupported(xtlpn.f32)
+// @unsupported(frontend=lp)
 // run: test_out_writeonly_calculations() == 0.0
 
 void test_out_writeonly_fragment_output() {
@@ -124,9 +104,6 @@ void test_out_writeonly_fragment_output() {
 }
 
 // wgpu.f32: naga validator rejects the assembled unit (std430 uniform blocks / unsized array constructors are invalid on the GPU tier)
-// @unsupported(rv32lpn.q32)
-// @unsupported(xtlpn.q32)
 // @unsupported(wgpu.f32)
-// @unsupported(rv32lpn.f32)
-// @unsupported(xtlpn.f32)
+// @unsupported(frontend=lp)
 // run: test_out_writeonly_fragment_output() == 0.0

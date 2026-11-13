@@ -4,8 +4,7 @@ use anyhow::{Context, Result};
 use lp_shader::ShaderEntrySpace;
 use lp_shader::synth::{SynthError, synthesise_render_texture};
 use lpir::{CompilerConfig, FloatMode, LpirModule, validate_module};
-use lps_frontend::LpsModuleSig;
-use lps_shared::TextureStorageFormat;
+use lps_shared::{LpsModuleSig, TextureStorageFormat};
 
 use super::args::Args;
 use super::collect::{collect_cranelift_data, collect_fa_data};
@@ -46,8 +45,10 @@ pub fn handle_shader_debug(args: Args) -> Result<()> {
     let src = std::fs::read_to_string(&args.input)
         .with_context(|| format!("read {}", args.input.display()))?;
 
-    let naga = lps_frontend::compile(&src).context("GLSL parse (Naga)")?;
-    let (mut ir, mut sig) = lps_frontend::lower(&naga).context("lower to LPIR")?;
+    let output = lps_glsl::compile(&src, &lps_glsl::CompileOptions::default())
+        .map_err(|diag| anyhow::anyhow!("{}", diag.render(&src)))
+        .context("GLSL compile")?;
+    let (mut ir, mut sig) = (output.ir, output.meta);
 
     // Parsed before the synth, not after: the synthesised entry decodes its
     // Q16.16 coordinates differently per mode, so it has to know the mode.

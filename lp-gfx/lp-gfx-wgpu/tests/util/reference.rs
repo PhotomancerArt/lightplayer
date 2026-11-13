@@ -33,9 +33,9 @@ impl ReferenceRenderer {
         })
     }
 
-    /// Compile an authored source with the Naga frontend (`lps-frontend`,
-    /// the device compile path: `lpfn_*` calls resolve to the Q32 builtin
-    /// impls) at the default device Q32 config.
+    /// Compile an authored source with `lps-glsl` (the device compile path:
+    /// `lpfn_*` calls resolve to the Q32 builtin impls) at the default
+    /// device Q32 config.
     ///
     /// Struct/const declarations are hoisted and prototypes spliced ahead
     /// of the source for the same reason as on the GPU path: naga glsl-in
@@ -50,7 +50,7 @@ impl ReferenceRenderer {
             &source,
             TextureStorageFormat::Rgba16Unorm,
             lpir::CompilerConfig::default(),
-            ShaderFrontend::Naga,
+            ShaderFrontend::LpsGlsl,
         );
         desc.textures = palette::texture_specs(shader);
         let compiled = self

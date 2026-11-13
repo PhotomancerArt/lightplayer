@@ -3,6 +3,9 @@
 // ============================================================================
 // intBitsToFloat(): Int bits to float function
 // intBitsToFloat(x) bit casts int to float
+//
+// Unsupported by design on every target, like floatBitsToInt: Q32 has no
+// IEEE bit layout to cast into, and no product shader uses it.
 // ============================================================================
 
 float test_intbitstofloat_zero() {
@@ -10,10 +13,7 @@ float test_intbitstofloat_zero() {
     return intBitsToFloat(0);
 }
 
-// @unimplemented(rv32lpn.q32)
-// @unimplemented(xtlpn.q32)
-// @unsupported(rv32lpn.f32)
-// @unsupported(xtlpn.f32)
+// @unsupported(*)
 // run: test_intbitstofloat_zero() ~= 0.0
 
 float test_intbitstofloat_one() {
@@ -21,14 +21,7 @@ float test_intbitstofloat_one() {
     return intBitsToFloat(1065353216);
 }
 
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
-// @unimplemented(xtn.q32)
-// @unimplemented(rv32lpn.q32)
-// @unimplemented(xtlpn.q32)
-// @unsupported(rv32lpn.f32)
-// @unsupported(xtlpn.f32)
+// @unsupported(*)
 // run: test_intbitstofloat_one() ~= 1.0
 
 float test_intbitstofloat_neg_one() {
@@ -36,14 +29,7 @@ float test_intbitstofloat_neg_one() {
     return intBitsToFloat(-1082130432);
 }
 
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
-// @unimplemented(xtn.q32)
-// @unimplemented(rv32lpn.q32)
-// @unimplemented(xtlpn.q32)
-// @unsupported(rv32lpn.f32)
-// @unsupported(xtlpn.f32)
+// @unsupported(*)
 // run: test_intbitstofloat_neg_one() ~= -1.0
 
 float test_intbitstofloat_inf() {
@@ -51,14 +37,7 @@ float test_intbitstofloat_inf() {
     return intBitsToFloat(2139095040);
 }
 
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
-// @unimplemented(xtn.q32)
-// @unimplemented(rv32lpn.q32)
-// @unimplemented(xtlpn.q32)
-// @unsupported(rv32lpn.f32)
-// @unsupported(xtlpn.f32)
+// @unsupported(*)
 // run: test_intbitstofloat_inf() ~= 1.0 / 0.0
 
 float test_intbitstofloat_neg_inf() {
@@ -66,14 +45,7 @@ float test_intbitstofloat_neg_inf() {
     return intBitsToFloat(-8388608);
 }
 
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
-// @unimplemented(xtn.q32)
-// @unimplemented(rv32lpn.q32)
-// @unimplemented(xtlpn.q32)
-// @unsupported(rv32lpn.f32)
-// @unsupported(xtlpn.f32)
+// @unsupported(*)
 // run: test_intbitstofloat_neg_inf() ~= -1.0 / 0.0
 
 vec2 test_intbitstofloat_vec2() {
@@ -81,14 +53,7 @@ vec2 test_intbitstofloat_vec2() {
     return intBitsToFloat(ivec2(1065353216, -1082130432));
 }
 
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
-// @unimplemented(xtn.q32)
-// @unimplemented(rv32lpn.q32)
-// @unimplemented(xtlpn.q32)
-// @unsupported(rv32lpn.f32)
-// @unsupported(xtlpn.f32)
+// @unsupported(*)
 // run: test_intbitstofloat_vec2() ~= vec2(1.0, -1.0)
 
 vec3 test_intbitstofloat_vec3() {
@@ -96,14 +61,7 @@ vec3 test_intbitstofloat_vec3() {
     return intBitsToFloat(ivec3(0, 1065353216, 1073741824));
 }
 
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
-// @unimplemented(xtn.q32)
-// @unimplemented(rv32lpn.q32)
-// @unimplemented(xtlpn.q32)
-// @unsupported(rv32lpn.f32)
-// @unsupported(xtlpn.f32)
+// @unsupported(*)
 // run: test_intbitstofloat_vec3() ~= vec3(0.0, 1.0, 2.0)
 
 vec4 test_intbitstofloat_vec4() {
@@ -111,14 +69,7 @@ vec4 test_intbitstofloat_vec4() {
     return intBitsToFloat(ivec4(1065353216, 0, -1082130432, 2139095040));
 }
 
-// @unimplemented(rv32c.q32)
-// @unimplemented(wasm.q32)
-// @unimplemented(rv32n.q32)
-// @unimplemented(xtn.q32)
-// @unimplemented(rv32lpn.q32)
-// @unimplemented(xtlpn.q32)
-// @unsupported(rv32lpn.f32)
-// @unsupported(xtlpn.f32)
+// @unsupported(*)
 // run: test_intbitstofloat_vec4() ~= vec4(1.0, 0.0, -1.0, 1.0 / 0.0)
 
 

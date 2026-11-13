@@ -124,6 +124,12 @@ pub struct WasmExport {
     pub param_types: Vec<LpsType>,
     /// `IrFunction::sret_arg` — aggregate (etc.) return via hidden pointer param; wasm has no results.
     pub uses_sret: bool,
+    /// Per GLSL parameter: passed as one pointer to std430 bytes (true) or
+    /// as its scalar lanes (false). Read from the IR function's own
+    /// parameter vregs, like [`Self::uses_sret`]: an aggregate parameter is a
+    /// `ptr` vreg when the front end lowered it by reference and lanes when
+    /// it lowered it by value (lps-glsl does the latter).
+    pub param_by_ptr: Vec<bool>,
 }
 
 impl WasmModule {

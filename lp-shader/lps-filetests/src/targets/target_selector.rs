@@ -141,7 +141,7 @@ mod tests {
     #[test]
     fn negated_predicate_is_the_complement() {
         let sel = pred(AxisValue::Frontend(Frontend::Lp), true);
-        assert!(sel.matches(t("wasm.q32")));
+        assert!(sel.matches(t("rv32n.q32")));
         assert!(sel.matches(t("wgpu.f32")));
         assert!(!sel.matches(t("rv32lpn.q32")));
         assert!(!sel.matches(t("xtlpn.q32")));
@@ -159,8 +159,8 @@ mod tests {
                 negated: true,
             },
         ]);
-        assert!(sel.matches(t("wasm.q32")));
-        assert!(sel.matches(t("interp.f32")));
+        assert!(sel.matches(t("rv32n.q32")));
+        assert!(sel.matches(t("xtn.f32")));
         assert!(!sel.matches(t("wgpu.f32")), "wgpu excluded by second term");
         assert!(!sel.matches(t("rv32lpn.q32")), "lp excluded by first term");
     }

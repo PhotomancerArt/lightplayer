@@ -16,7 +16,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 lpvm-wasm = { path = "../../lp-shader/lpvm-wasm" }
-lps-frontend = { path = "../../lp-shader/lps-frontend" }
+lps-glsl = { path = "../../lp-shader/lps-glsl" }
 lpvm = { path = "../../lp-shader/lpvm" }
 wasm-bindgen = "0.2"
 js-sys = "0.3"

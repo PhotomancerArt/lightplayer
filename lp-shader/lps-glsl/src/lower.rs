@@ -133,7 +133,10 @@ fn lower_function(
         texel_fetch_bounds: module.texel_fetch_bounds,
     };
     lower_statements(&mut ctx, &function.body.statements)?;
-    if *return_ty == LpsType::Void {
+    // A void body falls off its end into an implicit `return` — unless it
+    // already ended in one: a second `return` after the first is dead code
+    // the Cranelift backend refuses (its block is already terminated).
+    if *return_ty == LpsType::Void && !statements_terminate_block(&function.body.statements) {
         ctx.fb.push_return(&[]);
     }
     Ok(ctx.fb.finish())
@@ -595,6 +598,20 @@ fn lower_expr(ctx: &mut LowerCtx<'_>, expr: ExprId) -> Result<LowerValue, Diagno
                         .map(|src| {
                             let dst = ctx.fb.alloc_vreg(IrType::I32);
                             ctx.fb.push(LpirOp::Ineg { dst, src: *src });
+                            dst
+                        })
+                        .collect::<Lanes>();
+                    Ok(LowerValue { ty, lanes })
+                }
+                (UnaryOp::BitNot, ty)
+                    if matches!(scalar_base_type(&ty), Some(LpsType::Int | LpsType::UInt)) =>
+                {
+                    let lanes = inner
+                        .lanes
+                        .iter()
+                        .map(|src| {
+                            let dst = ctx.fb.alloc_vreg(IrType::I32);
+                            ctx.fb.push(LpirOp::Ibnot { dst, src: *src });
                             dst
                         })
                         .collect::<Lanes>();

@@ -322,8 +322,8 @@ vec3 broken(vec3 c) { this is ( not ) valid glsl ; ; ; }
 
     #[test]
     fn aborts_on_stray_lexer_rejected_char() {
-        assert!(analyze_symbols("int x = 1 & 2;").is_err());
         assert!(analyze_symbols("float y = 0.0; @").is_err());
+        assert!(analyze_symbols("int x = 1 # 2;").is_err());
     }
 
     #[test]

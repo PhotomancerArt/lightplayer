@@ -218,7 +218,7 @@ mod tests {
             device.clone(),
             queue.clone(),
             Box::new(lp_gfx_lpvm::TargetLpvmGraphics::new(
-                lp_shader::ShaderFrontend::Naga,
+                lp_shader::ShaderFrontend::LpsGlsl,
             )),
         );
 
@@ -325,7 +325,7 @@ mod tests {
             device.clone(),
             queue,
             Box::new(lp_gfx_lpvm::TargetLpvmGraphics::new(
-                lp_shader::ShaderFrontend::Naga,
+                lp_shader::ShaderFrontend::LpsGlsl,
             )),
         );
         let product = graphics.create_render_target(1, 1).expect("target");

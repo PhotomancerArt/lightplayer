@@ -26,9 +26,9 @@ use super::types::{
 use super::typing::builtin_has_out_args;
 use super::typing::{
     access_lanes, binary_op_token, builtin_kind, coerce_arithmetic_pair, coerce_comparison_pair,
-    coerce_constructor_args, coerce_expr, glsl_param_token, has_bool_lanes, is_comparison,
-    is_glsl_import, is_logical, scalar_base_type, scalar_ir_types, scalar_lane_count,
-    type_builtin_args, type_glsl_import_args, vector_dominant_type, zero_expr,
+    coerce_constructor_args, coerce_expr, glsl_param_token, has_bool_lanes, is_bitwise,
+    is_comparison, is_glsl_import, is_logical, scalar_base_type, scalar_ir_types,
+    scalar_lane_count, type_builtin_args, type_glsl_import_args, vector_dominant_type, zero_expr,
 };
 use super::{
     fixed_array_from_base, infer_array_constructor_type, infer_array_decl_type,
@@ -53,6 +53,8 @@ pub(super) struct TypeCtx<'a> {
     imports: &'a mut ImportRegistry,
     texture_specs: &'a VecMap<String, TextureBindingSpec>,
     pub(super) locals: Vec<HirLocal>,
+    /// Indices into `locals` declared `const`: a write to one is an error.
+    const_locals: Vec<usize>,
     pub(super) arena: TypedArena<'a>,
     scopes: Vec<VecMap<String, usize>>,
     loop_depth: usize,
@@ -82,6 +84,7 @@ impl<'a> TypeCtx<'a> {
             imports,
             texture_specs,
             locals: Vec::new(),
+            const_locals: Vec::new(),
             arena: TypedArena::new(types),
             scopes: alloc::vec![VecMap::new()],
             loop_depth: 0,
@@ -110,6 +113,7 @@ impl<'a> TypeCtx<'a> {
             imports,
             texture_specs,
             locals: Vec::new(),
+            const_locals: Vec::new(),
             arena: TypedArena::new(types),
             scopes: alloc::vec![VecMap::new()],
             loop_depth: 0,
@@ -148,11 +152,11 @@ impl<'a> TypeCtx<'a> {
     ) -> Result<Vec<HirStmt>, Diagnostic> {
         match stmt {
             ParsedStmt::Let {
+                is_const,
                 ty,
                 name,
                 init,
                 span,
-                ..
             } => {
                 let init = if let Some(init) = init {
                     self.type_decl_init(ty, *span, init)?
@@ -166,13 +170,20 @@ impl<'a> TypeCtx<'a> {
                     name: String::from(*name),
                     ty,
                 });
+                if *is_const {
+                    self.const_locals.push(local);
+                }
                 self.scopes
                     .last_mut()
                     .expect("type scope")
                     .insert(String::from(*name), local);
                 Ok(alloc::vec![HirStmt::Let { local, init }])
             }
-            ParsedStmt::LetGroup { declarations, .. } => {
+            ParsedStmt::LetGroup {
+                is_const,
+                declarations,
+                ..
+            } => {
                 let mut statements = Vec::new();
                 for declaration in declarations {
                     let init = if let Some(init) = &declaration.init {
@@ -187,6 +198,9 @@ impl<'a> TypeCtx<'a> {
                         name: String::from(declaration.name),
                         ty,
                     });
+                    if *is_const {
+                        self.const_locals.push(local);
+                    }
                     self.scopes
                         .last_mut()
                         .expect("type scope")
@@ -442,6 +456,13 @@ impl<'a> TypeCtx<'a> {
                         inner_ty
                     }
                     UnaryOp::Not => LpsType::Bool,
+                    UnaryOp::BitNot if is_integer_lanes(&inner_ty) => inner_ty,
+                    UnaryOp::BitNot => {
+                        return Err(Diagnostic::error(
+                            expr.span,
+                            format!("'~' expects int or uint lanes, got {inner_ty:?}"),
+                        ));
+                    }
                     _ => {
                         return Err(Diagnostic::error(
                             expr.span,
@@ -581,12 +602,8 @@ impl<'a> TypeCtx<'a> {
         name: &str,
         args: &[ParsedExpr<'_>],
     ) -> Result<ExprId, Diagnostic> {
-        if let Some((function, sig)) = self
-            .functions
-            .iter()
-            .enumerate()
-            .find(|(_, f)| f.name == name)
-        {
+        if let Some(function) = self.resolve_user_function(span, name, args)? {
+            let sig = &self.functions[function];
             if sig.params.len() != args.len() {
                 return Err(Diagnostic::error(
                     span,
@@ -959,6 +976,72 @@ impl<'a> TypeCtx<'a> {
         ))
     }
 
+    /// The user function a call to `name` resolves to (GLSL 4.60 §6.1.1).
+    ///
+    /// A name with one definition resolves to it, and the call reports its
+    /// own arity and argument errors. Among overloads, the arguments are
+    /// typed once to choose: the definition whose parameters match them
+    /// exactly, else the only one every argument converts to implicitly
+    /// (`int` → `uint` → `float`, lane for lane). The chosen call types its
+    /// arguments again against that signature; the first typing's nodes are
+    /// never lowered.
+    fn resolve_user_function(
+        &mut self,
+        span: Span,
+        name: &str,
+        args: &[ParsedExpr<'_>],
+    ) -> Result<Option<usize>, Diagnostic> {
+        let mut candidates = self
+            .functions
+            .iter()
+            .enumerate()
+            .filter(|(_, f)| f.name == name)
+            .map(|(i, _)| i);
+        let Some(first) = candidates.next() else {
+            return Ok(None);
+        };
+        let Some(second) = candidates.next() else {
+            return Ok(Some(first));
+        };
+        let overloads: Vec<usize> = [first, second].into_iter().chain(candidates).collect();
+        let mut arg_tys = Vec::with_capacity(args.len());
+        for arg in args {
+            let id = self.type_expr(arg)?;
+            arg_tys.push(self.arena.expr_ty(id).clone());
+        }
+        let arity = |i: &usize| self.functions[*i].params.len() == arg_tys.len();
+        if let Some(exact) = overloads.iter().copied().filter(arity).find(|i| {
+            self.functions[*i]
+                .params
+                .iter()
+                .zip(&arg_tys)
+                .all(|(p, ty)| p.ty == *ty)
+        }) {
+            return Ok(Some(exact));
+        }
+        let mut converting = overloads.iter().copied().filter(arity).filter(|i| {
+            self.functions[*i]
+                .params
+                .iter()
+                .zip(&arg_tys)
+                .all(|(p, ty)| match p.qualifier {
+                    ParamQualifier::In => converts_implicitly(ty, &p.ty),
+                    ParamQualifier::Out | ParamQualifier::InOut => p.ty == *ty,
+                })
+        });
+        match (converting.next(), converting.next()) {
+            (Some(only), None) => Ok(Some(only)),
+            (Some(_), Some(_)) => Err(Diagnostic::error(
+                span,
+                format!("ambiguous call to overloaded function `{name}`"),
+            )),
+            (None, _) => Err(Diagnostic::error(
+                span,
+                format!("no overload of `{name}` takes arguments {arg_tys:?}"),
+            )),
+        }
+    }
+
     fn type_binary(
         &mut self,
         span: Span,
@@ -1022,6 +1105,9 @@ impl<'a> TypeCtx<'a> {
                 .arena
                 .push_expr(span, ty, HirExprKind::Binary { op, lhs, rhs }));
         }
+        if is_bitwise(op) {
+            return self.type_bitwise(span, op, lhs, rhs);
+        }
         if op == BinaryOp::Mul
             && let Some(ty) =
                 matrix_vector_multiply_type(self.arena.expr_ty(lhs), self.arena.expr_ty(rhs))
@@ -1050,6 +1136,51 @@ impl<'a> TypeCtx<'a> {
         if op == BinaryOp::Mod && scalar_base_type(&ty) == Some(LpsType::Float) {
             return Err(Diagnostic::error(span, "modulo requires integer operands"));
         }
+        Ok(self
+            .arena
+            .push_expr(span, ty, HirExprKind::Binary { op, lhs, rhs }))
+    }
+
+    /// `& | ^ << >>` (GLSL ES 3.00 §5.9): integer lanes only, no matrices.
+    ///
+    /// `& | ^` take a common type like arithmetic (a scalar broadcasts over a
+    /// vector). A shift's result is its left operand's type; the shift count
+    /// may differ in signedness, and is a scalar or a vector of the same
+    /// width, so the lowering reads it lane by lane without a coercion.
+    fn type_bitwise(
+        &mut self,
+        span: Span,
+        op: BinaryOp,
+        lhs: ExprId,
+        rhs: ExprId,
+    ) -> Result<ExprId, Diagnostic> {
+        let lhs_ty = self.arena.expr_ty(lhs).clone();
+        let rhs_ty = self.arena.expr_ty(rhs).clone();
+        if !is_integer_lanes(&lhs_ty) || !is_integer_lanes(&rhs_ty) {
+            return Err(Diagnostic::error(
+                span,
+                format!(
+                    "'{}' expects int or uint lanes, got {lhs_ty:?} and {rhs_ty:?}",
+                    binary_op_token(op)
+                ),
+            ));
+        }
+        if matches!(op, BinaryOp::Shl | BinaryOp::Shr) {
+            let rhs_lanes = scalar_lane_count(&rhs_ty);
+            if rhs_lanes != 1 && rhs_lanes != scalar_lane_count(&lhs_ty) {
+                return Err(Diagnostic::error(
+                    span,
+                    format!(
+                        "'{}' shift count must be a scalar or match {lhs_ty:?}, got {rhs_ty:?}",
+                        binary_op_token(op)
+                    ),
+                ));
+            }
+            return Ok(self
+                .arena
+                .push_expr(span, lhs_ty, HirExprKind::Binary { op, lhs, rhs }));
+        }
+        let (lhs, rhs, ty) = coerce_arithmetic_pair(&mut self.arena, span, lhs, rhs)?;
         Ok(self
             .arena
             .push_expr(span, ty, HirExprKind::Binary { op, lhs, rhs }))
@@ -1106,6 +1237,11 @@ impl<'a> TypeCtx<'a> {
             AssignOp::Mul => BinaryOp::Mul,
             AssignOp::Div => BinaryOp::Div,
             AssignOp::Mod => BinaryOp::Mod,
+            AssignOp::BitAnd => BinaryOp::BitAnd,
+            AssignOp::BitOr => BinaryOp::BitOr,
+            AssignOp::BitXor => BinaryOp::BitXor,
+            AssignOp::Shl => BinaryOp::Shl,
+            AssignOp::Shr => BinaryOp::Shr,
         };
         let lhs = self
             .arena
@@ -1153,6 +1289,14 @@ impl<'a> TypeCtx<'a> {
                     return Err(Diagnostic::error(
                         expr.span,
                         "cannot write to uniform variable",
+                    ));
+                }
+                if mode != AccessMode::Read
+                    && matches!(place.root, PlaceRoot::Local { local } if self.const_locals.contains(&local))
+                {
+                    return Err(Diagnostic::error(
+                        expr.span,
+                        format!("cannot assign to const variable `{name}`"),
                     ));
                 }
                 Ok(place)
@@ -1675,4 +1819,27 @@ fn matrix_vector_multiply_type(lhs: &LpsType, rhs: &LpsType) -> Option<LpsType> 
         return LpsType::vector_type(&LpsType::Float, cols);
     }
     None
+}
+
+/// GLSL's implicit conversions (4.60 §4.1.10) between same-width scalars
+/// and vectors: `int` → `uint`, `int`/`uint` → `float`.
+fn converts_implicitly(from: &LpsType, to: &LpsType) -> bool {
+    if from == to {
+        return true;
+    }
+    if from.is_matrix() || to.is_matrix() || scalar_lane_count(from) != scalar_lane_count(to) {
+        return false;
+    }
+    matches!(
+        (scalar_base_type(from), scalar_base_type(to)),
+        (Some(LpsType::Int), Some(LpsType::UInt | LpsType::Float))
+            | (Some(LpsType::UInt), Some(LpsType::Float))
+    )
+}
+
+/// `int`/`uint` scalars and vectors: the operands of `~ & | ^ << >>`.
+fn is_integer_lanes(ty: &LpsType) -> bool {
+    !ty.is_matrix()
+        && !matches!(ty, LpsType::Array { .. })
+        && matches!(scalar_base_type(ty), Some(LpsType::Int | LpsType::UInt))
 }

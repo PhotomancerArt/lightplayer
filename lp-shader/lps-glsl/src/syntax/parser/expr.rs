@@ -3,10 +3,15 @@ use alloc::vec::Vec;
 
 use crate::index::StructDecl;
 use crate::syntax::{AssignOp, BinaryOp, IncDecOp, ParsedExpr, ParsedExprKind, UnaryOp};
+use crate::token::int_literal_value;
 use crate::{Diagnostic, Span, TokenKind};
 
 use super::BodyParser;
 use super::ty::token_text_is_type_name;
+
+/// Binding power of a prefix operator's operand: tighter than every binary
+/// operator in [`BodyParser::current_binary_op`].
+const UNARY_BINDING_POWER: u8 = 23;
 
 impl<'src, 'tok> BodyParser<'src, 'tok> {
     pub(super) fn parse_expr(
@@ -40,9 +45,12 @@ impl<'src, 'tok> BodyParser<'src, 'tok> {
                     break;
                 }
                 self.bump();
+                // GLSL ES 3.00 §5.8 / grammar: `logical-or ? expression :
+                // assignment-expression` — the middle may hold a comma, the
+                // last may not, so `f(c ? a : b, d)` passes two arguments.
                 let accept = self.parse_expr(0)?;
                 self.expect_punct(":")?;
-                let reject = self.parse_expr(0)?;
+                let reject = self.parse_expr(1)?;
                 let span = Span::new(lhs.span.start, reject.span.end);
                 lhs = ParsedExpr {
                     span,
@@ -103,10 +111,9 @@ impl<'src, 'tok> BodyParser<'src, 'tok> {
                 .is_some_and(|t| matches!(t.kind, TokenKind::IntLiteral))
             {
                 let tok = self.bump();
-                let value = tok
-                    .lexeme(self.source)
-                    .parse::<i64>()
-                    .map_err(|_| Diagnostic::error(tok.span, "failed to parse int literal"))?;
+                let value = int_literal_value(tok.lexeme(self.source))
+                    .and_then(|value| i64::try_from(value).ok())
+                    .ok_or_else(|| Diagnostic::error(tok.span, "failed to parse int literal"))?;
                 let value = i32::try_from(-value)
                     .map_err(|_| Diagnostic::error(tok.span, "int literal is out of range"))?;
                 return Ok(ParsedExpr {
@@ -114,7 +121,7 @@ impl<'src, 'tok> BodyParser<'src, 'tok> {
                     kind: ParsedExprKind::IntLiteral(value),
                 });
             }
-            let expr = self.parse_expr(15)?;
+            let expr = self.parse_expr(UNARY_BINDING_POWER)?;
             return Ok(ParsedExpr {
                 span: Span::new(start, expr.span.end),
                 kind: ParsedExprKind::Unary {
@@ -125,15 +132,20 @@ impl<'src, 'tok> BodyParser<'src, 'tok> {
         }
         if self.at_punct("+") {
             self.bump();
-            return self.parse_expr(15);
+            return self.parse_expr(UNARY_BINDING_POWER);
         }
-        if self.at_punct("!") {
-            let start = self.bump().span.start;
-            let expr = self.parse_expr(15)?;
+        if self.at_punct("!") || self.at_punct("~") {
+            let op_tok = self.bump();
+            let op = if op_tok.lexeme(self.source) == "!" {
+                UnaryOp::Not
+            } else {
+                UnaryOp::BitNot
+            };
+            let expr = self.parse_expr(UNARY_BINDING_POWER)?;
             return Ok(ParsedExpr {
-                span: Span::new(start, expr.span.end),
+                span: Span::new(op_tok.span.start, expr.span.end),
                 kind: ParsedExprKind::Unary {
-                    op: UnaryOp::Not,
+                    op,
                     expr: alloc::boxed::Box::new(expr),
                 },
             });
@@ -249,6 +261,16 @@ impl<'src, 'tok> BodyParser<'src, 'tok> {
     }
 
     pub(super) fn parse_primary(&mut self) -> Result<ParsedExpr<'src>, Diagnostic> {
+        // An expression slice can run out before its operand does — a global
+        // `float x = ;` hands the parser an empty initializer span — so the
+        // end of input is a diagnostic here, not a bump past the last token.
+        if self.at_end() {
+            return Err(Diagnostic::expected(
+                self.current_span(),
+                "expression",
+                self.current_text(),
+            ));
+        }
         let tok = self.bump();
         match tok.kind {
             TokenKind::FloatLiteral => {
@@ -263,8 +285,12 @@ impl<'src, 'tok> BodyParser<'src, 'tok> {
             }
             TokenKind::IntLiteral => {
                 let text = tok.lexeme(self.source);
-                let value = parse_i32_literal(text)
-                    .map_err(|_| Diagnostic::error(tok.span, "failed to parse int literal"))?;
+                // Above `i32::MAX` up to `u32::MAX` wraps, as `4294967295`
+                // always has here: the bits are what a shader means.
+                let value = int_literal_value(text)
+                    .and_then(|value| u32::try_from(value).ok())
+                    .map(|value| value as i32)
+                    .ok_or_else(|| Diagnostic::error(tok.span, "failed to parse int literal"))?;
                 Ok(ParsedExpr {
                     span: tok.span,
                     kind: ParsedExprKind::IntLiteral(value),
@@ -272,10 +298,9 @@ impl<'src, 'tok> BodyParser<'src, 'tok> {
             }
             TokenKind::UintLiteral => {
                 let text = tok.lexeme(self.source);
-                let trimmed = text.trim_end_matches(['u', 'U']);
-                let value = trimmed
-                    .parse::<u32>()
-                    .map_err(|_| Diagnostic::error(tok.span, "failed to parse uint literal"))?;
+                let value = int_literal_value(text)
+                    .and_then(|value| u32::try_from(value).ok())
+                    .ok_or_else(|| Diagnostic::error(tok.span, "failed to parse uint literal"))?;
                 Ok(ParsedExpr {
                     span: tok.span,
                     kind: ParsedExprKind::UIntLiteral(value),
@@ -403,18 +428,28 @@ impl<'src, 'tok> BodyParser<'src, 'tok> {
             "&&" => BinaryOp::LogicalAnd,
             "||" => BinaryOp::LogicalOr,
             "^^" => BinaryOp::LogicalXor,
+            "&" => BinaryOp::BitAnd,
+            "|" => BinaryOp::BitOr,
+            "^" => BinaryOp::BitXor,
+            "<<" => BinaryOp::Shl,
+            ">>" => BinaryOp::Shr,
             "," => BinaryOp::Comma,
             _ => return None,
         };
+        // GLSL ES 3.00 §5.1 precedence, loosest first.
         let bp = match op {
             BinaryOp::Comma => (0, 1),
             BinaryOp::LogicalOr => (1, 2),
             BinaryOp::LogicalXor => (3, 4),
             BinaryOp::LogicalAnd => (5, 6),
-            BinaryOp::Eq | BinaryOp::Ne => (7, 8),
-            BinaryOp::Lt | BinaryOp::Le | BinaryOp::Gt | BinaryOp::Ge => (9, 10),
-            BinaryOp::Add | BinaryOp::Sub => (11, 12),
-            BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => (13, 14),
+            BinaryOp::BitOr => (7, 8),
+            BinaryOp::BitXor => (9, 10),
+            BinaryOp::BitAnd => (11, 12),
+            BinaryOp::Eq | BinaryOp::Ne => (13, 14),
+            BinaryOp::Lt | BinaryOp::Le | BinaryOp::Gt | BinaryOp::Ge => (15, 16),
+            BinaryOp::Shl | BinaryOp::Shr => (17, 18),
+            BinaryOp::Add | BinaryOp::Sub => (19, 20),
+            BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => (21, 22),
         };
         Some((op, bp.0, bp.1))
     }
@@ -427,6 +462,11 @@ impl<'src, 'tok> BodyParser<'src, 'tok> {
             "*=" => AssignOp::Mul,
             "/=" => AssignOp::Div,
             "%=" => AssignOp::Mod,
+            "&=" => AssignOp::BitAnd,
+            "|=" => AssignOp::BitOr,
+            "^=" => AssignOp::BitXor,
+            "<<=" => AssignOp::Shl,
+            ">>=" => AssignOp::Shr,
             _ => return None,
         };
         Some(op)
@@ -438,11 +478,6 @@ pub(super) fn is_assignment_target(expr: &ParsedExpr<'_>) -> bool {
         expr.kind,
         ParsedExprKind::Name(_) | ParsedExprKind::Swizzle { .. } | ParsedExprKind::Index { .. }
     )
-}
-
-fn parse_i32_literal(text: &str) -> Result<i32, core::num::ParseIntError> {
-    text.parse::<i32>()
-        .or_else(|_| text.parse::<u32>().map(|value| value as i32))
 }
 
 pub(super) fn array_constructor_name<'src>(

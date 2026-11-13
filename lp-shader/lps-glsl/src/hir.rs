@@ -16,6 +16,7 @@ mod array_size;
 mod builtin;
 mod builtin_out;
 mod coerce;
+mod const_expr;
 mod const_fold;
 mod function;
 mod place;
@@ -90,7 +91,9 @@ struct HirBuildFunctionState<'src> {
     /// interns into it (see `type_table`).
     types: TypeTable,
     globals: VecMap<String, GlobalConst>,
-    body_map: VecMap<String, ParsedFunctionBody<'src>>,
+    /// Parsed bodies by function index (aligned with `functions_sigs`):
+    /// overloads share a name, so a name cannot key them.
+    body_map: Vec<(String, Option<ParsedFunctionBody<'src>>)>,
     functions: Vec<HirFunction>,
     /// Set when [`synthesize_shader_init`] produced the trailing synthetic
     /// function; the module signature is built from the sig table in
@@ -220,7 +223,13 @@ impl<'src> HirBuildJob<'src> {
         let decl = &self.index.functions[function_index];
         let parsed_body = state
             .body_map
-            .remove(sig.name.as_str())
+            .get_mut(function_index)
+            .and_then(|(name, body)| {
+                // Free the name with its body, as typing each function
+                // always has: the device heap's shape depends on it.
+                drop(core::mem::take(name));
+                body.take()
+            })
             .ok_or_else(|| Diagnostic::error(decl.body_span, "missing parsed function body"))?;
         let mut ctx = TypeCtx::new(
             sig,
@@ -247,7 +256,8 @@ impl<'src> HirBuildJob<'src> {
 }
 
 impl HirBuildFunctionState<'_> {
-    fn finish(self, options: &CompileOptions) -> HirModule {
+    fn finish(mut self, options: &CompileOptions) -> HirModule {
+        name_overloads(&mut self.functions_sigs, &mut self.functions);
         HirModule {
             functions: self.functions,
             types: self.types,
@@ -303,6 +313,43 @@ fn module_function_sigs(sigs: Vec<FunctionSig>, has_shader_init: bool) -> Vec<Lp
     meta
 }
 
+/// Give each overloaded definition a name of its own, `pick(vec3)`.
+///
+/// GLSL resolves overloads by signature (in `typeck`, by function index),
+/// but LPIR keys functions by name and rejects a duplicate, and every
+/// backend names its symbols and exports from the module signature. So once
+/// every body is typed, each member of an overload set takes its GLSL
+/// signature as its name, in the IR and the signature alike — the same
+/// spelling the wasm backend once gave overloaded exports. A function whose
+/// name is unique keeps it, so entry points never change.
+fn name_overloads(sigs: &mut [FunctionSig], functions: &mut [HirFunction]) {
+    // No side table: this runs on every compile while the module's largest
+    // structures are live, so even a small transient allocation leaves a
+    // hole in the device heap. A renamed sig keeps its GLSL name as the
+    // prefix before `(`, which is what later members compare against.
+    for i in 0..sigs.len() {
+        let base = sigs[i].name.as_str();
+        let overloaded = sigs
+            .iter()
+            .enumerate()
+            .any(|(j, other)| j != i && other.name.split('(').next() == Some(base));
+        if !overloaded {
+            continue;
+        }
+        let mut name = sigs[i].name.clone();
+        name.push('(');
+        for (k, p) in sigs[i].params.iter().enumerate() {
+            if k > 0 {
+                name.push(',');
+            }
+            name.push_str(&lps_shared::glsl_type_name(&p.ty));
+        }
+        name.push(')');
+        functions[i].name.clone_from(&name);
+        sigs[i].name = name;
+    }
+}
+
 /// A function's signature types as ids into the module's type table.
 fn intern_signature(types: &mut TypeTable, sig: &FunctionSig) -> (TypeId, Vec<HirFunctionParam>) {
     let return_ty = types.intern(sig.return_ty.clone());
@@ -340,7 +387,7 @@ pub fn build_hir<'src>(
         &array_size_consts,
         uniforms_size,
     )?;
-    let functions_sigs = build_function_sigs(index, &structs, &array_size_consts)?;
+    let mut functions_sigs = build_function_sigs(index, &structs, &array_size_consts)?;
     let mut imports = ImportRegistry::default();
     let mut types = TypeTable::default();
     let globals = build_global_consts(
@@ -379,7 +426,8 @@ pub fn build_hir<'src>(
 
         let decl = &index.functions[function_index];
         let parsed_body = body_map
-            .get(sig.name.as_str())
+            .get(function_index)
+            .and_then(|(_, body)| body.as_ref())
             .ok_or_else(|| Diagnostic::error(decl.body_span, "missing parsed function body"))?;
         let mut ctx = TypeCtx::new(
             sig,
@@ -401,6 +449,11 @@ pub fn build_hir<'src>(
             params,
             body,
         });
+    }
+
+    name_overloads(&mut functions_sigs, &mut functions);
+    for (meta, sig) in function_meta.iter_mut().zip(&functions_sigs) {
+        meta.name.clone_from(&sig.name);
     }
 
     if let Some(init) = synthesize_shader_init(
@@ -752,6 +805,11 @@ fn eval_parsed_const_int(expr: &ParsedExpr<'_>, consts: &ArraySizeConsts) -> Opt
                 BinaryOp::Mul => lhs.checked_mul(rhs),
                 BinaryOp::Div => lhs.checked_div(rhs),
                 BinaryOp::Mod => lhs.checked_rem(rhs),
+                BinaryOp::BitAnd => Some(lhs & rhs),
+                BinaryOp::BitOr => Some(lhs | rhs),
+                BinaryOp::BitXor => Some(lhs ^ rhs),
+                BinaryOp::Shl => lhs.checked_shl(u32::try_from(rhs).ok()?),
+                BinaryOp::Shr => lhs.checked_shr(u32::try_from(rhs).ok()?),
                 _ => None,
             }
         }
@@ -861,12 +919,18 @@ struct GlobalInit<'src> {
     init: ParsedExpr<'src>,
 }
 
+/// The parsed bodies in function-index order, each taken once as its
+/// function is typed. The body stage parses them in `index.functions` order,
+/// the same order the signature table is built in, so position is the key
+/// (overloads share a name). Grown entry by entry and freed name by name,
+/// which is the allocation pattern the device heap budget was recorded
+/// against; collecting into a fresh list shifted the compile window's holes.
 fn function_body_map<'src>(
     bodies: Vec<(String, ParsedFunctionBody<'src>)>,
-) -> VecMap<String, ParsedFunctionBody<'src>> {
-    let mut body_map = VecMap::new();
+) -> Vec<(String, Option<ParsedFunctionBody<'src>>)> {
+    let mut body_map = Vec::new();
     for (name, body) in bodies {
-        body_map.insert(name, body);
+        body_map.push((name, Some(body)));
     }
     body_map
 }
@@ -988,6 +1052,7 @@ fn build_global_consts<'src>(
             types,
         );
         let expr = ctx.type_expr(&parsed)?;
+        const_expr::check_constant_expr(ctx.arena.view(), expr)?;
         let expr = ctx.coerce_expr(expr, &ty)?;
         globals.insert(
             konst.name.clone(),

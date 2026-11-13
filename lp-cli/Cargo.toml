@@ -159,7 +159,7 @@ lp-emu-esp-common = { path = "../lp-emu/esp/lp-emu-esp-common" }
 # the emulator crates already use.
 toml = "0.8"
 lpir = { path = "../lp-shader/lpir" }
-lps-frontend = { path = "../lp-shader/lps-frontend" }
+lps-glsl = { path = "../lp-shader/lps-glsl" }
 lps-shared = { path = "../lp-shader/lps-shared" }
 lp-shader = { path = "../lp-shader/lp-shader" }
 # `debug` enables interleaved alloc rendering for `shader-debug` and related tooling.

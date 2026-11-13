@@ -277,7 +277,7 @@ fn run(args: &Args) -> Result<(), String> {
 /// Construct the selected engine, honor-or-fail (no silent substitution).
 fn create_engine(engine: Engine) -> Result<Box<dyn LpGraphics>, String> {
     match engine {
-        Engine::CpuQ32 => Ok(Box::new(TargetLpvmGraphics::new(ShaderFrontend::Naga))),
+        Engine::CpuQ32 => Ok(Box::new(TargetLpvmGraphics::new(ShaderFrontend::LpsGlsl))),
         Engine::GpuF32 => {
             let instance =
                 wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
@@ -307,7 +307,7 @@ fn create_engine(engine: Engine) -> Result<Box<dyn LpGraphics>, String> {
             Ok(Box::new(GpuGraphics::new(
                 device,
                 queue,
-                Box::new(TargetLpvmGraphics::new(ShaderFrontend::Naga)),
+                Box::new(TargetLpvmGraphics::new(ShaderFrontend::LpsGlsl)),
             )))
         }
     }

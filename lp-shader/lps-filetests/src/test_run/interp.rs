@@ -2,10 +2,10 @@
 // diagnostics instead of anyhow, no texture specs, persistent VMContext
 // across calls. Not re-imported here because those signatures diverge.
 
-//! `interp.f32` filetest backend: GLSL → `lps-frontend` (naga) → LPIR →
+//! `interp.f32` filetest backend: GLSL → `lps-glsl` → LPIR →
 //! `lpir::interpret` in native f32, reusing the M2 conformance-oracle path.
 //!
-//! `lps-frontend` reserves the `lpfn_` prefix (calls lower to `@lpfn::`
+//! `lps-glsl` reserves the `lpfn_` prefix (calls lower to `@lpfn::`
 //! imports the interpreter cannot evaluate), so when the test source
 //! references `lpfn_*` the canonical GLSL builtin sources are prepended and
 //! the whole unit gets the oracle's `lpfn_` → `lpo_` rename — the canonical
@@ -23,15 +23,14 @@
 use std::sync::Arc;
 
 use lp_collection::VecMap;
-use lpir::{CompilerConfig, FloatMode, LpirModule, Value, interpret_entry};
-use lps_frontend::std_math_handler::StdMathHandler;
+use lpir::{CompilerConfig, FloatMode, LpirModule, StdMathHandler, Value, interpret_entry};
 use lps_shared::layout::type_size;
 use lps_shared::{LayoutRules, LpsModuleSig, LpsType, LpsValueF32, TextureBindingSpec};
 use lpvm::{encode_uniform_write, glsl_component_count};
 
 use crate::conformance::oracle::{canonical_unit_source, rename_lpfn_prefix};
 
-/// Synthesized by `lps-frontend` when globals/uniforms carry declaration
+/// Synthesized by `lps-glsl` when globals/uniforms carry declaration
 /// initializers; writes them into the VMContext.
 const SHADER_INIT_FN: &str = "__shader_init";
 
@@ -82,15 +81,13 @@ pub fn lower_for_interp(
     } else {
         source.to_string()
     };
-    let naga =
-        lps_frontend::compile(&unit).map_err(|e| anyhow::anyhow!("interp GLSL compile: {e:?}"))?;
-    let options = lps_frontend::LowerOptions {
+    let options = lps_glsl::CompileOptions {
         texture_specs: texture_specs.clone(),
         texel_fetch_bounds: compiler_config.texture.texel_fetch_bounds,
     };
-    let (ir, meta) = lps_frontend::lower_with_options(&naga, &options)
-        .map_err(|e| anyhow::anyhow!("interp lower: {e}"))?;
-    Ok((ir, meta))
+    let output = lps_glsl::compile(&unit, &options)
+        .map_err(|e| anyhow::anyhow!("interp GLSL compile: {}", e.render(&unit)))?;
+    Ok((output.ir, output.meta))
 }
 
 impl InterpShader {
@@ -190,11 +187,18 @@ impl InterpInstance {
                 .map_err(|e| format!("interp: {name} arg '{}': {e}", p.name))?;
         }
 
-        // Aggregate (struct/array) returns use the sret convention: the
+        // An aggregate (struct/array) return may use the sret convention: the
         // callee writes std430 bytes through a hidden destination pointer and
-        // returns no scalars. Size the destination from the return type; the
-        // entry point validates the choice against the function's actual ABI.
-        let sret_size = if type_returns_via_sret(&gfn.return_type) {
+        // returns no scalars. Whether it does is the LPIR function's own ABI
+        // (`sret_arg`), not the GLSL return type: naga's lowering takes sret
+        // for every aggregate, lps-glsl returns aggregates as scalar lanes.
+        let uses_sret = self
+            .ir
+            .functions
+            .values()
+            .find(|f| f.name == gfn.name)
+            .is_some_and(|f| f.sret_arg.is_some());
+        let sret_size = if uses_sret {
             sret_dense_size(&gfn.return_type)?
         } else {
             0
@@ -324,10 +328,6 @@ fn flatten_arg(ty: &LpsType, v: &LpsValueF32, out: &mut Vec<Value>) -> Result<()
 }
 
 /// Aggregate returns (struct/array) go through the sret convention.
-fn type_returns_via_sret(ty: &LpsType) -> bool {
-    matches!(ty, LpsType::Array { .. } | LpsType::Struct { .. })
-}
-
 /// std430 byte size of an sret aggregate, requiring the dense layout the
 /// scalar-walk decode assumes (every scalar at a 4-byte stride, no padding).
 /// Mirrors the wasm host marshalling's restriction (`aggregate_abi.rs`).
